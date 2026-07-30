@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Noni",
+    "slug": "noni",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "noni",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.noni.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Noni uses the camera so you can record content for your assigned tasks.",
+        "NSMicrophoneUsageDescription": "Noni uses the mic so your recorded takes include audio."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B0F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "ai.noni.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Noni uses the camera so you can record content for your assigned tasks.",
+          "microphonePermission": "Noni uses the mic so your recorded takes include audio.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

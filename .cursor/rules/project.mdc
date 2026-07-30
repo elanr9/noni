@@ -1,0 +1,16 @@
+---
+description: Noni project conventions
+alwaysApply: true
+---
+
+This is Noni, an Expo (React Native, TypeScript) app. Spec: NONI_SPEC.md, read it first.
+Backend is Supabase: auth, Postgres with RLS, storage, edge functions.
+Posting goes through Upload-Post only, never platform APIs directly.
+The loop: scrape trends + Claude fill creator queues automatically; creators record; admins only approve; after Approve everything (edit, post, track) is automatic. Humans appear exactly twice.
+Every table and query is scoped by company_id. No exceptions.
+Two roles, admin and creator, gating both routes and RLS.
+Task status changes only through lib/tasks.ts transition functions.
+Schema lives in supabase/migrations, read before writing queries.
+All third party keys live in edge function env, never in the app.
+Match designs in /design. TypeScript strict, no any, small components.
+Content formats: video AND static photo/carousel (see NONI_SPEC Content formats). Do not hardcode video-only product assumptions.

@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# env
+.env
+.env.local
+.env*.local
+
+# native / OS
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.DS_Store
+
+# typescript
+*.tsbuildinfo
+
+# supabase local
+.supabase/
+supabase/.temp/
