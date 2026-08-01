@@ -21,6 +21,11 @@ type TrendRow = {
   transcript: string | null;
   why_it_works: string | null;
   views: number | null;
+  format: string | null;
+  caption: string | null;
+  slide_texts: unknown;
+  remake_mode: string | null;
+  remake_reason: string | null;
 };
 
 function isoDaysFromNow(days: number): string {
@@ -47,11 +52,17 @@ async function fillCompany(admin: SupabaseClient, companyId: string): Promise<nu
 
   const since = new Date();
   since.setDate(since.getDate() - TREND_MAX_AGE_DAYS);
+  // Relevance-first: gate-passing trends only, best scores first. Ungated
+  // items (scraped before the gate existed) stay eligible.
   const { data: trends } = await admin
     .from('trend_items')
-    .select('id, platform, hook, transcript, why_it_works, views')
+    .select(
+      'id, platform, hook, transcript, why_it_works, views, format, caption, slide_texts, remake_mode, remake_reason',
+    )
     .eq('company_id', companyId)
     .gte('scraped_at', since.toISOString())
+    .or('relevance_score.is.null,relevance_score.gte.6')
+    .order('relevance_score', { ascending: false, nullsFirst: false })
     .order('views', { ascending: false })
     .limit(50);
   if (!trends?.length) return 0;
@@ -97,6 +108,9 @@ async function fillCompany(admin: SupabaseClient, companyId: string): Promise<nu
           company_id: companyId,
           assigned_to: creator.id,
           created_by: null,
+          // Legacy pipeline, replaced by the weekly batch flow. Explicitly
+          // released so the release gate constraint holds until it is torn out.
+          planning_status: 'scheduled',
           title: draft.title,
           script: draft.script,
           caption: draft.caption,
@@ -106,6 +120,19 @@ async function fillCompany(admin: SupabaseClient, companyId: string): Promise<nu
           inspiration_trend_id: trend.id,
           due_date: isoDaysFromNow(i + 1),
           status: 'assigned',
+          // Snapshot for approval-time edit diffs and win attribution.
+          original_draft: {
+            title: draft.title,
+            script: draft.script,
+            caption: draft.caption,
+            brief: draft.brief,
+          },
+          generation_meta: {
+            source: 'auto_fill',
+            archetype: 'trend_adaptation',
+            source_trend_id: trend.id,
+            remake_mode: trend.remake_mode,
+          },
         });
         if (error) throw error;
         created += 1;

@@ -13,14 +13,21 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { LoadingScreen, Screen, colors } from '../../../components/Screen';
 import { StatusChip } from '../../../components/StatusChip';
+import { ReviewThread } from '../../../components/ReviewThread';
 import { useAuth } from '../../../lib/auth';
 import { getTask } from '../../../lib/tasks-api';
 import {
   latestSubmission,
   reviewTask,
+  setTaskFeedback,
   signedVideoUrl,
   type Submission,
 } from '../../../lib/admin-api';
+import {
+  insertComment,
+  listTaskReviewEvents,
+  type ReviewEvent,
+} from '../../../lib/review-events';
 import type { ContentTask } from '../../../lib/tasks';
 
 export default function ReviewScreen() {
@@ -31,9 +38,25 @@ export default function ReviewScreen() {
   const [task, setTask] = useState<ContentTask | null>(null);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [events, setEvents] = useState<ReviewEvent[]>([]);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [feedbackReason, setFeedbackReason] = useState('');
+
+  // Thumbs on the generated draft itself, separate from approving the video.
+  // Rejected drafts are retained as training data for generation.
+  async function rateDraft(value: 1 | -1) {
+    if (!task) return;
+    const next = task.feedback === value ? null : value;
+    setTask({ ...task, feedback: next });
+    try {
+      await setTaskFeedback(task.id, next, feedbackReason.trim() || null);
+    } catch (e) {
+      setTask(task);
+      Alert.alert('Failed', e instanceof Error ? e.message : 'Try again');
+    }
+  }
 
   const player = useVideoPlayer(videoUrl ?? null, (p) => {
     p.loop = true;
@@ -46,8 +69,12 @@ export default function ReviewScreen() {
       const t = await getTask(id);
       setTask(t);
       if (t) {
-        const sub = await latestSubmission(t.id);
+        const [sub, thread] = await Promise.all([
+          latestSubmission(t.id),
+          listTaskReviewEvents(t.id),
+        ]);
         setSubmission(sub);
+        setEvents(thread);
         if (sub) setVideoUrl(await signedVideoUrl(sub.video_path));
       }
     } finally {
@@ -88,6 +115,19 @@ export default function ReviewScreen() {
     }
   }
 
+  async function sendComment(text: string) {
+    if (!task || !profile || !submission) {
+      throw new Error('No submission to comment on');
+    }
+    await insertComment({
+      submissionId: submission.id,
+      authorId: profile.id,
+      note: text,
+      taskId: task.id,
+    });
+    setEvents(await listTaskReviewEvents(task.id));
+  }
+
   if (loading) return <LoadingScreen />;
   if (!task) {
     return (
@@ -96,6 +136,8 @@ export default function ReviewScreen() {
       </Screen>
     );
   }
+
+  const canDecide = task.status === 'submitted' && !!submission;
 
   return (
     <Screen style={styles.screen}>
@@ -125,31 +167,89 @@ export default function ReviewScreen() {
           <Text style={styles.blockBody}>{task.caption ?? '—'}</Text>
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Note for changes (required to request changes)"
-          placeholderTextColor="#9A9AA3"
-          value={note}
-          onChangeText={setNote}
-          multiline
+        <View style={styles.block}>
+          <Text style={styles.blockLabel}>Rate this draft</Text>
+          <View style={styles.feedbackRow}>
+            <Pressable
+              style={[styles.feedbackBtn, task.feedback === 1 && styles.feedbackGood]}
+              onPress={() => void rateDraft(1)}
+            >
+              <Text
+                style={[
+                  styles.feedbackText,
+                  task.feedback === 1 && styles.feedbackTextOn,
+                ]}
+              >
+                Good draft
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.feedbackBtn, task.feedback === -1 && styles.feedbackBad]}
+              onPress={() => void rateDraft(-1)}
+            >
+              <Text
+                style={[
+                  styles.feedbackText,
+                  task.feedback === -1 && styles.feedbackTextOn,
+                ]}
+              >
+                Bad draft
+              </Text>
+            </Pressable>
+          </View>
+          {task.feedback !== null && task.feedback !== undefined ? (
+            <TextInput
+              style={styles.feedbackInput}
+              placeholder="Why? One line trains generation."
+              placeholderTextColor="#9A9AA3"
+              value={feedbackReason}
+              onChangeText={setFeedbackReason}
+              onEndEditing={() =>
+                void setTaskFeedback(
+                  task.id,
+                  task.feedback as 1 | -1,
+                  feedbackReason.trim() || null,
+                ).catch(() => undefined)
+              }
+            />
+          ) : null}
+        </View>
+
+        <ReviewThread
+          events={events}
+          onSendComment={sendComment}
+          composerEnabled={!!submission}
         />
 
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.reject, busy && styles.disabled]}
-            disabled={busy}
-            onPress={() => void decide('changes_requested')}
-          >
-            <Text style={styles.btnText}>Request changes</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.approve, busy && styles.disabled]}
-            disabled={busy}
-            onPress={() => void decide('approved')}
-          >
-            <Text style={styles.btnText}>Approve</Text>
-          </Pressable>
-        </View>
+        {canDecide ? (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Note for changes (required to request changes)"
+              placeholderTextColor="#9A9AA3"
+              value={note}
+              onChangeText={setNote}
+              multiline
+            />
+
+            <View style={styles.row}>
+              <Pressable
+                style={[styles.reject, busy && styles.disabled]}
+                disabled={busy}
+                onPress={() => void decide('changes_requested')}
+              >
+                <Text style={styles.btnText}>Request changes</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.approve, busy && styles.disabled]}
+                disabled={busy}
+                onPress={() => void decide('approved')}
+              >
+                <Text style={styles.btnText}>Approve</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
       </ScrollView>
     </Screen>
   );
@@ -182,6 +282,28 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   blockBody: { fontSize: 15, lineHeight: 22, color: colors.ink },
+  feedbackRow: { flexDirection: 'row', gap: 8 },
+  feedbackBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: '#D9D6D0',
+  },
+  feedbackGood: { backgroundColor: '#2D6A4F', borderColor: '#2D6A4F' },
+  feedbackBad: { backgroundColor: '#C1121F', borderColor: '#C1121F' },
+  feedbackText: { color: colors.ink, fontWeight: '600', fontSize: 14 },
+  feedbackTextOn: { color: '#fff' },
+  feedbackInput: {
+    backgroundColor: '#F7F5F2',
+    borderWidth: 1.5,
+    borderColor: '#D9D6D0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.ink,
+  },
   input: {
     backgroundColor: '#fff',
     borderWidth: 1.5,

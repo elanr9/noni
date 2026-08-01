@@ -11,17 +11,17 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { LoadingScreen, Screen, colors } from '../../components/Screen';
-import { StatusChip } from '../../components/StatusChip';
-import { useAuth } from '../../lib/auth';
+import { LoadingScreen, Screen, colors } from '../../../components/Screen';
+import { StatusChip } from '../../../components/StatusChip';
+import { useAuth } from '../../../lib/auth';
 import {
   createTask,
   generateTaskDraft,
   listAllTasks,
   listCreators,
   type QueueItem,
-} from '../../lib/admin-api';
-import type { Profile } from '../../lib/profile';
+} from '../../../lib/admin-api';
+import type { Profile } from '../../../lib/profile';
 
 export default function CalendarScreen() {
   const { profile } = useAuth();

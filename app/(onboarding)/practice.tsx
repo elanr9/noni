@@ -145,7 +145,7 @@ export default function PracticeScreen() {
     try {
       await completeOnboarding(profile.id);
       await refreshProfile();
-      router.replace('/(creator)');
+      router.replace('/(creator)/(tabs)');
     } catch (e) {
       setFinishing(false);
       Alert.alert('Could not finish', e instanceof Error ? e.message : 'Try again');

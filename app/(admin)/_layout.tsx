@@ -2,6 +2,7 @@ import { Redirect, Stack } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
+import { color } from '../../theme/tokens';
 
 export default function AdminLayout() {
   const { session, profile, loading } = useAuth();
@@ -12,7 +13,7 @@ export default function AdminLayout() {
     return <Redirect href="/(onboarding)" />;
   }
   if (profile.role !== 'admin') {
-    return <Redirect href="/(creator)" />;
+    return <Redirect href="/(creator)/(tabs)" />;
   }
 
   return (
@@ -20,16 +21,14 @@ export default function AdminLayout() {
       screenOptions={{
         headerShown: true,
         headerShadowVisible: false,
-        headerStyle: { backgroundColor: '#F7F5F2' },
-        headerTintColor: '#0B0B0F',
-        contentStyle: { backgroundColor: '#F7F5F2' },
+        headerStyle: { backgroundColor: color.offWhite },
+        headerTintColor: color.ink,
+        contentStyle: { backgroundColor: color.offWhite },
       }}
     >
-      <Stack.Screen name="index" options={{ title: 'Queue', headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
-      <Stack.Screen name="calendar" options={{ title: 'Calendar' }} />
-      <Stack.Screen name="trends" options={{ title: 'Trends' }} />
-      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+      <Stack.Screen name="brain" options={{ title: 'Brand Brain' }} />
     </Stack>
   );
 }

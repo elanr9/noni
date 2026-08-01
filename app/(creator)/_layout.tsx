@@ -2,6 +2,7 @@ import { Redirect, Stack } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
+import { color } from '../../theme/tokens';
 
 export default function CreatorLayout() {
   const { session, profile, loading } = useAuth();
@@ -12,28 +13,29 @@ export default function CreatorLayout() {
     return <Redirect href="/(onboarding)" />;
   }
   if (profile.role !== 'creator') {
-    return <Redirect href="/(admin)" />;
+    return <Redirect href="/(admin)/(tabs)" />;
   }
 
   return (
     <Stack
       screenOptions={{
-        headerShown: true,
-        headerShadowVisible: false,
-        headerStyle: { backgroundColor: '#F7F5F2' },
-        headerTintColor: '#0B0B0F',
-        headerTitleStyle: { fontWeight: '700' },
-        contentStyle: { backgroundColor: '#F7F5F2' },
+        headerShown: false,
+        contentStyle: { backgroundColor: color.offWhite },
       }}
     >
-      <Stack.Screen name="index" options={{ title: 'Today', headerShown: false }} />
-      <Stack.Screen name="my-posts" options={{ title: 'My posts' }} />
-      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-      <Stack.Screen name="task/[id]" options={{ title: 'Task' }} />
+      <Stack.Screen name="(tabs)" />
       <Stack.Screen
-        name="record/[id]"
-        options={{ headerShown: false, presentation: 'fullScreenModal' }}
+        name="balance"
+        options={{
+          headerShown: true,
+          title: 'Balance',
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: color.offWhite },
+          headerTintColor: color.ink,
+        }}
       />
+      <Stack.Screen name="task/[id]" />
+      <Stack.Screen name="record/[id]" options={{ presentation: 'fullScreenModal' }} />
     </Stack>
   );
 }

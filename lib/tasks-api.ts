@@ -1,9 +1,13 @@
+import { RELEVANCE_THRESHOLD } from '../supabase/functions/_shared/relevance';
 import { supabase } from './supabase';
 import {
   assertTransition,
   type ContentTask,
   type TaskStatus,
 } from './tasks';
+import type { Database } from './types';
+
+export type TrendItem = Database['public']['Tables']['trend_items']['Row'];
 
 export type InspirationTrend = {
   id: string;
@@ -69,6 +73,57 @@ export async function listMyPosts(userId: string): Promise<TaskWithPosts[]> {
 
   if (error) throw error;
   return (data ?? []) as TaskWithPosts[];
+}
+
+// Creator inspiration feed: gate-passing items ordered by relevance, not raw
+// views. Ungated items (scored null, scraped before the gate) stay visible.
+export async function listTrends(companyId: string): Promise<TrendItem[]> {
+  const { data, error } = await supabase
+    .from('trend_items')
+    .select('*')
+    .eq('company_id', companyId)
+    .or(`relevance_score.is.null,relevance_score.gte.${RELEVANCE_THRESHOLD}`)
+    .order('relevance_score', { ascending: false, nullsFirst: false })
+    .order('views', { ascending: false, nullsFirst: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Thumbs on a trend. Admin labels also join the golden set (see RPC). */
+export async function labelTrend(
+  trendId: string,
+  label: 'keep' | 'kill' | null,
+  reason?: string | null,
+): Promise<void> {
+  const { error } = await supabase.rpc('label_trend', {
+    p_trend_id: trendId,
+    p_label: label ?? undefined,
+    p_reason: reason ?? undefined,
+  });
+  if (error) throw error;
+}
+
+/** Swap the task's content for a chosen trend. Status is untouched. */
+export async function swapTaskTrend(
+  taskId: string,
+  trend: TrendItem,
+): Promise<TaskWithTrend> {
+  const patch: { brief: string | null; inspiration_trend_id: string; title?: string } = {
+    brief: trend.why_it_works,
+    inspiration_trend_id: trend.id,
+  };
+  if (trend.hook !== null) patch.title = trend.hook;
+
+  const { data, error } = await supabase
+    .from('content_tasks')
+    .update(patch)
+    .eq('id', taskId)
+    .select(`*, ${TREND_JOIN}`)
+    .single();
+
+  if (error) throw error;
+  return data as TaskWithTrend;
 }
 
 export async function transitionTask(

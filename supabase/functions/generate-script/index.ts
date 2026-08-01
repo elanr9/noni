@@ -24,7 +24,9 @@ Deno.serve(async (req) => {
     if (body.trend_id) {
       const { data } = await admin
         .from('trend_items')
-        .select('platform, hook, transcript, why_it_works, views, company_id')
+        .select(
+          'platform, hook, transcript, why_it_works, views, company_id, format, caption, slide_texts, remake_mode, remake_reason',
+        )
         .eq('id', body.trend_id)
         .eq('company_id', caller.companyId)
         .maybeSingle();

@@ -178,7 +178,7 @@ export default function CompanyOnboarding() {
       });
       await completeOnboarding(profile.id);
       await refreshProfile();
-      router.replace('/(admin)/calendar');
+      router.replace('/(admin)/(tabs)/calendar');
     } catch (e) {
       setBusy(false);
       Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');

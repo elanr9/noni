@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
-import { colors } from './Screen';
+import { color } from '../theme/tokens';
 
 type Props = {
   text: string;
@@ -10,9 +17,11 @@ type Props = {
   speed: number;
   resetKey: number;
   onTap?: () => void;
+  speedLabel?: string;
 };
 
-const BASE_WORDS_PER_MINUTE = 150;
+/** One word advances every 250/speed ms (README §5). */
+const MS_PER_WORD = 250;
 
 export function Teleprompter({
   text,
@@ -21,7 +30,9 @@ export function Teleprompter({
   speed,
   resetKey,
   onTap,
+  speedLabel,
 }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
   const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
@@ -35,10 +46,9 @@ export function Teleprompter({
 
   useEffect(() => {
     if (!running) return;
-    const msPerWord = 60000 / (BASE_WORDS_PER_MINUTE * speed);
     const timer = setInterval(() => {
       setIndex((i) => Math.min(i + 1, words.length - 1));
-    }, msPerWord);
+    }, MS_PER_WORD / speed);
     return () => clearInterval(timer);
   }, [running, speed, words.length]);
 
@@ -51,7 +61,10 @@ export function Teleprompter({
   }, [index, words.length]);
 
   return (
-    <Pressable style={styles.wrap} onPress={onTap}>
+    <Pressable
+      style={[styles.wrap, { height: Math.max(windowHeight * 0.34, 160) }]}
+      onPress={onTap}
+    >
       <ScrollView
         ref={scrollRef}
         scrollEnabled={false}
@@ -70,9 +83,9 @@ export function Teleprompter({
               key={`${i}-${word}`}
               style={
                 i < index
-                  ? styles.done
+                  ? styles.spoken
                   : i === index
-                    ? styles.active
+                    ? styles.current
                     : styles.upcoming
               }
             >
@@ -82,6 +95,11 @@ export function Teleprompter({
           ))}
         </Text>
       </ScrollView>
+      {speedLabel ? (
+        <View style={styles.speedChip}>
+          <Text style={styles.speedText}>{speedLabel}</Text>
+        </View>
+      ) : null}
       {paused ? (
         <View style={styles.pausedChip}>
           <Text style={styles.pausedText}>Script paused. Tap to resume.</Text>
@@ -93,11 +111,10 @@ export function Teleprompter({
 
 const styles = StyleSheet.create({
   wrap: {
-    height: '34%',
     overflow: 'hidden',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: color.scrim,
   },
   line: {
     fontSize: 26,
@@ -108,17 +125,27 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  done: { color: 'rgba(255,255,255,0.45)' },
-  active: { color: colors.accent, fontWeight: '800' },
+  spoken: { color: 'rgba(255,255,255,0.45)' },
+  current: { color: color.accentTint, fontWeight: '800' },
   upcoming: { color: '#FFFFFF' },
+  speedChip: {
+    position: 'absolute',
+    top: 12,
+    right: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,32,0.55)',
+  },
+  speedText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   pausedChip: {
     position: 'absolute',
-    bottom: 10,
+    bottom: 12,
     alignSelf: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  pausedText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  pausedText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
 });

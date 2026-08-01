@@ -1,13 +1,18 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-type NotifyEvent = 'submitted' | 'approved' | 'changes_requested';
+type NotifyEvent = 'submitted' | 'approved' | 'changes_requested' | 'comment';
 
 type NotifyBody = {
   task_id: string;
   event: NotifyEvent;
 };
 
-const EVENTS: NotifyEvent[] = ['submitted', 'approved', 'changes_requested'];
+const EVENTS: NotifyEvent[] = [
+  'submitted',
+  'approved',
+  'changes_requested',
+  'comment',
+];
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -47,7 +52,7 @@ Deno.serve(async (req) => {
 
   const { data: caller } = await admin
     .from('profiles')
-    .select('company_id')
+    .select('company_id, role')
     .eq('id', userData.user.id)
     .maybeSingle();
   if (caller?.company_id !== task.company_id) {
@@ -58,7 +63,7 @@ Deno.serve(async (req) => {
   let title = '';
   let message = '';
 
-  if (body.event === 'submitted') {
+  if (body.event === 'submitted' || (body.event === 'comment' && caller.role !== 'admin')) {
     const { data: admins } = await admin
       .from('profiles')
       .select('expo_push_token')
@@ -68,8 +73,13 @@ Deno.serve(async (req) => {
     tokens = (admins ?? [])
       .map((p) => p.expo_push_token)
       .filter((t): t is string => Boolean(t));
-    title = 'New submission';
-    message = `"${task.title}" is ready for review`;
+    if (body.event === 'submitted') {
+      title = 'New submission';
+      message = `"${task.title}" is ready for review`;
+    } else {
+      title = 'New comment';
+      message = `"${task.title}" has a new comment`;
+    }
   } else if (task.assigned_to) {
     const { data: creator } = await admin
       .from('profiles')
@@ -80,9 +90,12 @@ Deno.serve(async (req) => {
     if (body.event === 'approved') {
       title = 'Approved';
       message = `"${task.title}" was approved`;
-    } else {
+    } else if (body.event === 'changes_requested') {
       title = 'Changes requested';
       message = `"${task.title}" needs another take`;
+    } else {
+      title = 'New comment';
+      message = `"${task.title}" has a new comment`;
     }
   }
 

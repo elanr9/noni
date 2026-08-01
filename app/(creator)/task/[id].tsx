@@ -1,33 +1,74 @@
 import { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Linking,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
-import { LoadingScreen, Screen, colors } from '../../../components/Screen';
+import { Button } from '../../../components/ui/Button';
+import { Icon } from '../../../components/ui/Icon';
+import { PressableScale } from '../../../components/ui/PressableScale';
+import { ReviewThread } from '../../../components/ReviewThread';
 import { StatusChip } from '../../../components/StatusChip';
+import { color, shadow } from '../../../theme/tokens';
+import { useAuth } from '../../../lib/auth';
+import { latestSubmission, setTaskFeedback } from '../../../lib/admin-api';
+import {
+  insertComment,
+  latestChangesNote,
+  listTaskReviewEvents,
+  type ReviewEvent,
+} from '../../../lib/review-events';
 import { getTask, transitionTask, type TaskWithTrend } from '../../../lib/tasks-api';
-import { bountyLabel, recordTimeLabel } from '../../../lib/bounty';
 import { nextCreatorAction } from '../../../lib/tasks';
+
+/** linear-gradient(160deg, #E7F4FD 0%, #DCE7F0 100%) placeholder frame. */
+function PlaceholderGradient() {
+  return (
+    <Svg style={StyleSheet.absoluteFill}>
+      <Defs>
+        <LinearGradient id="taskPlayerPh" x1="0%" y1="0%" x2="34%" y2="94%">
+          <Stop offset="0" stopColor="#E7F4FD" />
+          <Stop offset="1" stopColor="#DCE7F0" />
+        </LinearGradient>
+      </Defs>
+      <Rect x="0" y="0" width="100%" height="100%" fill="url(#taskPlayerPh)" />
+    </Svg>
+  );
+}
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { profile } = useAuth();
   const [task, setTask] = useState<TaskWithTrend | null>(null);
+  const [events, setEvents] = useState<ReviewEvent[]>([]);
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      setTask(await getTask(id));
+      const t = await getTask(id);
+      setTask(t);
+      if (t) {
+        const [thread, sub] = await Promise.all([
+          listTaskReviewEvents(t.id),
+          latestSubmission(t.id),
+        ]);
+        setEvents(thread);
+        setSubmissionId(sub?.id ?? null);
+      }
     } finally {
       setLoading(false);
     }
@@ -39,26 +80,43 @@ export default function TaskDetailScreen() {
     }, [load]),
   );
 
-  if (loading) return <LoadingScreen />;
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ActivityIndicator size="large" color={color.accent} />
+      </View>
+    );
+  }
   if (!task) {
     return (
-      <Screen>
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.nav}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            onPress={() => router.back()}
+            style={styles.backBtn}
+          >
+            <Icon name="chevron-left" size={20} color={color.ink} />
+          </PressableScale>
+        </View>
         <Text style={styles.missing}>Task not found.</Text>
-      </Screen>
+      </View>
     );
   }
 
   const action = nextCreatorAction(task.status);
+  const sendAction = action && action.to === 'submitted' ? action : null;
 
   async function runAction() {
-    if (!action || !task) return;
+    if (!sendAction || !task) return;
     setBusy(true);
     try {
-      const updated = await transitionTask(task.id, task.status, action.to);
+      const updated = await transitionTask(task.id, task.status, sendAction.to);
       setTask({ ...updated, trend_items: task.trend_items });
-      if (action.to === 'submitted') {
-        Alert.alert('Sent for review', 'Admins will take a look.');
-      }
+      Alert.alert('Sent for review', 'Admins will take a look.');
     } catch (e) {
       Alert.alert(
         'Could not update',
@@ -69,209 +127,336 @@ export default function TaskDetailScreen() {
     }
   }
 
-  const hookLine = task.script?.split('\n').find((l) => l.trim().length > 0);
   const trend = task.trend_items;
   const cover = trend?.cover_url ?? null;
-  const time = recordTimeLabel(task.estimated_seconds);
   const isVideo = task.format !== 'photo_carousel';
   const canRecord =
     task.status === 'assigned' ||
     task.status === 'changes_requested' ||
     task.status === 'recorded';
+  const changesNote = latestChangesNote(events);
+  const loopOpen = task.status !== 'approved' && task.status !== 'posted';
+  const hasScript = Boolean(task.script?.trim());
+
+  // Creator thumbs on the generated idea; training signal for generation.
+  async function rateDraft(value: 1 | -1) {
+    if (!task) return;
+    const next = task.feedback === value ? null : value;
+    setTask({ ...task, feedback: next });
+    try {
+      await setTaskFeedback(task.id, next);
+    } catch {
+      setTask(task);
+    }
+  }
+
+  async function sendComment(text: string) {
+    if (!task || !profile || !submissionId) {
+      throw new Error('No submission to comment on');
+    }
+    await insertComment({
+      submissionId,
+      authorId: profile.id,
+      note: text,
+      taskId: task.id,
+    });
+    setEvents(await listTaskReviewEvents(task.id));
+  }
+
+  function onPrimary() {
+    if (!task) return;
+    if (isVideo) {
+      router.push(`/(creator)/record/${task.id}`);
+      return;
+    }
+    Alert.alert(
+      'Create slides',
+      'Photo carousel posting is coming soon. For now, open the inspiration above and shoot the slides to match.',
+    );
+  }
 
   return (
-    <Screen style={styles.screen}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        {cover ? (
-          <Pressable
-            style={styles.hero}
-            disabled={!trend?.source_url}
-            onPress={() =>
-              trend?.source_url ? void Linking.openURL(trend.source_url) : null
-            }
-          >
-            <Image source={{ uri: cover }} style={styles.heroImg} resizeMode="cover" />
-            <View style={styles.heroTab}>
-              <Text style={styles.heroTabText}>
-                {isVideo ? 'Video' : 'Slideshow'}
-              </Text>
-            </View>
-            {trend?.source_url ? (
-              <View style={styles.watchPill}>
-                <Text style={styles.watchText}>Watch inspiration</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : null}
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ headerShown: false }} />
 
+      <View style={styles.nav}>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          onPress={() => router.back()}
+          style={styles.backBtn}
+        >
+          <Icon name="chevron-left" size={20} color={color.ink} />
+        </PressableScale>
         <StatusChip status={task.status} />
-        <Text style={styles.title}>{task.title}</Text>
+      </View>
 
-        <View style={styles.metaRow}>
-          {time ? <Text style={styles.metaStrong}>{time}</Text> : null}
-          {time ? <Text style={styles.metaDot}>·</Text> : null}
-          <Text style={styles.bounty}>{bountyLabel()}</Text>
-          {task.due_date ? <Text style={styles.metaDot}>·</Text> : null}
-          {task.due_date ? (
-            <Text style={styles.meta}>Due {task.due_date}</Text>
+      <View style={styles.playerWrap}>
+        <View style={[styles.player, shadow.shadowMedia]}>
+          <View style={styles.playerClip}>
+            {cover ? (
+              <Image
+                source={{ uri: cover }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+              />
+            ) : (
+              <PlaceholderGradient />
+            )}
+            <View style={styles.playWrap} pointerEvents="box-none">
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={isVideo ? 'Watch inspiration' : 'Open inspiration'}
+                disabled={!trend?.source_url}
+                onPress={() =>
+                  trend?.source_url ? void Linking.openURL(trend.source_url) : null
+                }
+                style={[styles.play, shadow.shadowMedia]}
+              >
+                <Icon
+                  name={isVideo ? 'play' : 'images'}
+                  size={26}
+                  color={color.ink}
+                />
+              </PressableScale>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.copy}>
+        <Text style={styles.title}>{task.title}</Text>
+        {task.brief ? <Text style={styles.description}>{task.brief}</Text> : null}
+        <View style={styles.rateRow}>
+          <Text style={styles.rateLabel}>This idea:</Text>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Good idea"
+            style={[styles.rateBtn, task.feedback === 1 && styles.rateBtnOn]}
+            onPress={() => void rateDraft(1)}
+          >
+            <Icon
+              name="thumbs-up"
+              size={15}
+              color={task.feedback === 1 ? color.white : color.ink}
+            />
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Bad idea"
+            style={[styles.rateBtn, task.feedback === -1 && styles.rateBtnOn]}
+            onPress={() => void rateDraft(-1)}
+          >
+            <Icon
+              name="thumbs-down"
+              size={15}
+              color={task.feedback === -1 ? color.white : color.ink}
+            />
+          </PressableScale>
+        </View>
+      </View>
+
+      {task.status === 'changes_requested' ? (
+        <ScrollView
+          style={styles.thread}
+          contentContainerStyle={styles.threadContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {changesNote ? (
+            <View style={styles.changesBanner}>
+              <Text style={styles.changesLabel}>Changes requested</Text>
+              <Text style={styles.changesBody}>{changesNote}</Text>
+            </View>
+          ) : null}
+          <ReviewThread
+            events={events}
+            onSendComment={sendComment}
+            composerEnabled={loopOpen && !!submissionId}
+          />
+        </ScrollView>
+      ) : (
+        <View style={styles.spacer} />
+      )}
+
+      {canRecord || sendAction ? (
+        <View style={[styles.cta, { paddingBottom: Math.max(30, insets.bottom + 12) }]}>
+          {sendAction ? (
+            <Button
+              variant="secondary"
+              size="md"
+              block
+              disabled={busy}
+              onPress={() => void runAction()}
+            >
+              {busy ? 'Updating…' : sendAction.label}
+            </Button>
+          ) : null}
+          {canRecord ? (
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              icon={isVideo ? 'video' : 'images'}
+              onPress={onPrimary}
+            >
+              {isVideo ? 'Record' : 'Create'}
+            </Button>
+          ) : null}
+          {canRecord ? (
+            <Text style={styles.caption}>
+              {hasScript
+                ? 'Your script runs in the teleprompter.'
+                : 'No script — say it your way.'}
+            </Text>
           ) : null}
         </View>
-
-        {task.brief ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>The brief</Text>
-            <Text style={styles.blockBody}>{task.brief}</Text>
-          </View>
-        ) : null}
-
-        {hookLine ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Hook</Text>
-            <Text style={styles.blockBody}>{hookLine}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>
-            {isVideo ? 'Script' : 'Slide copy'}
-          </Text>
-          <Text style={styles.blockBody}>{task.script ?? 'No script yet.'}</Text>
-        </View>
-
-        <View style={styles.block}>
-          <Text style={styles.blockLabel}>Caption</Text>
-          <Text style={styles.blockBody}>{task.caption ?? 'No caption yet.'}</Text>
-        </View>
-
-        {canRecord && isVideo ? (
-          <Pressable
-            style={styles.record}
-            onPress={() => router.push(`/(creator)/record/${task.id}`)}
-          >
-            <Text style={styles.recordText}>Record</Text>
-          </Pressable>
-        ) : null}
-
-        {canRecord && !isVideo ? (
-          <View style={styles.stub}>
-            <Text style={styles.stubText}>
-              Photo carousel posting is coming soon. For now, open the
-              inspiration above and shoot the slides to match.
-            </Text>
-          </View>
-        ) : null}
-
-        {action && action.to === 'submitted' ? (
-          <Pressable
-            style={[styles.secondary, busy && styles.disabled]}
-            disabled={busy}
-            onPress={() => void runAction()}
-          >
-            <Text style={styles.secondaryText}>
-              {busy ? 'Updating…' : action.label}
-            </Text>
-          </Pressable>
-        ) : null}
-
-        <Pressable style={styles.back} onPress={() => router.back()}>
-          <Text style={styles.backText}>Back to Today</Text>
-        </Pressable>
-      </ScrollView>
-    </Screen>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { paddingHorizontal: 0 },
-  content: { paddingHorizontal: 24, paddingBottom: 40, gap: 14 },
-  missing: { fontSize: 17, color: colors.muted },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: colors.ink,
-    letterSpacing: -0.5,
+  root: {
+    flex: 1,
+    backgroundColor: color.surface,
   },
-  meta: { fontSize: 15, color: colors.muted },
-  hero: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: '#0B0B0F',
+  loading: {
+    flex: 1,
+    backgroundColor: color.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  heroImg: { width: '100%', height: '100%' },
-  heroTab: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    backgroundColor: 'rgba(11,11,15,0.78)',
-    borderRadius: 999,
-    paddingHorizontal: 12,
+  missing: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    fontSize: 15,
+    color: color.textMuted,
+  },
+  nav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
     paddingVertical: 6,
+    minHeight: 46,
   },
-  heroTabText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
-  watchPill: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+  backBtn: {
+    width: 34,
+    height: 34,
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  watchText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  metaStrong: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  metaDot: { fontSize: 15, color: colors.muted },
-  bounty: { fontSize: 15, fontWeight: '800', color: colors.accent },
-  stub: {
-    backgroundColor: '#FFF3E9',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#F2D3B8',
+  playerWrap: {
+    paddingHorizontal: 24,
+    paddingTop: 4,
   },
-  stubText: { fontSize: 15, lineHeight: 22, color: colors.ink },
-  block: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E6E2DA',
+  player: {
+    height: 292,
+    borderRadius: 24,
+    backgroundColor: color.white,
+  },
+  playerClip: {
+    flex: 1,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  playWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  play: {
+    width: 62,
+    height: 62,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  copy: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
     gap: 8,
   },
-  blockLabel: {
+  title: {
+    fontSize: 26,
+    lineHeight: 30.7,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+    color: color.ink,
+  },
+  description: {
+    fontSize: 15,
+    lineHeight: 22.5,
+    fontWeight: '400',
+    color: color.slate500,
+  },
+  rateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  rateLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: color.slate500,
+  },
+  rateBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
+  },
+  rateBtnOn: {
+    backgroundColor: color.ink,
+    borderColor: color.ink,
+  },
+  spacer: {
+    flex: 1,
+  },
+  thread: {
+    flex: 1,
+    marginTop: 12,
+  },
+  threadContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  changesBanner: {
+    backgroundColor: color.amberSoft,
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
+  },
+  changesLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.muted,
+    color: color.amber,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },
-  blockBody: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: colors.ink,
+  changesBody: {
+    fontSize: 15,
+    lineHeight: 22.5,
+    color: color.ink,
   },
-  record: {
-    marginTop: 8,
-    backgroundColor: colors.accent,
-    borderRadius: 18,
-    paddingVertical: 20,
-    alignItems: 'center',
+  cta: {
+    paddingTop: 14,
+    paddingHorizontal: 24,
+    gap: 12,
   },
-  recordText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '800',
+  caption: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: color.slate400,
+    textAlign: 'center',
   },
-  secondary: {
-    backgroundColor: colors.ink,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  secondaryText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  disabled: { opacity: 0.5 },
-  back: { alignItems: 'center', paddingVertical: 12 },
-  backText: { color: colors.muted, fontWeight: '600', fontSize: 15 },
 });

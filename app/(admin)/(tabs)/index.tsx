@@ -9,10 +9,10 @@ import {
 } from 'react-native';
 import { Link, useFocusEffect, type Href } from 'expo-router';
 
-import { BrandTitle, LoadingScreen, Screen, colors } from '../../components/Screen';
-import { StatusChip } from '../../components/StatusChip';
-import { useAuth } from '../../lib/auth';
-import { listQueue, type QueueItem } from '../../lib/admin-api';
+import { BrandTitle, LoadingScreen, Screen, colors } from '../../../components/Screen';
+import { StatusChip } from '../../../components/StatusChip';
+import { useAuth } from '../../../lib/auth';
+import { listQueue, type QueueItem } from '../../../lib/admin-api';
 
 export default function QueueScreen() {
   const { signOut } = useAuth();
@@ -57,17 +57,27 @@ export default function QueueScreen() {
         />
 
         <View style={styles.navRow}>
-          <Link href="/(admin)/calendar" asChild>
+          <Link href="/(admin)/(tabs)/calendar" asChild>
             <Pressable style={styles.navBtn}>
               <Text style={styles.navText}>Calendar</Text>
             </Pressable>
           </Link>
-          <Link href={'/(admin)/trends' as Href} asChild>
+          <Link href={'/(admin)/(tabs)/trends' as Href} asChild>
             <Pressable style={styles.navBtn}>
               <Text style={styles.navText}>Trends</Text>
             </Pressable>
           </Link>
-          <Link href={'/(admin)/settings' as Href} asChild>
+          <Link href={'/(admin)/brain' as Href} asChild>
+            <Pressable style={styles.navBtn}>
+              <Text style={styles.navText}>Brain</Text>
+            </Pressable>
+          </Link>
+          <Link href={'/(admin)/(tabs)/analytics' as Href} asChild>
+            <Pressable style={styles.navBtn}>
+              <Text style={styles.navText}>Analytics</Text>
+            </Pressable>
+          </Link>
+          <Link href={'/(admin)/(tabs)/settings' as Href} asChild>
             <Pressable style={styles.navBtn}>
               <Text style={styles.navText}>Settings</Text>
             </Pressable>

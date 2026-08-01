@@ -79,15 +79,42 @@ Question heavy flow: one question per screen, a progress bar, big tap targets. I
 3. **Camera and mic permissions.** Honest one line explanations for each.
 4. **Connect socials.** Link the creator's own TikTok and Instagram (hosted linking flow). Explain plainly: approved content posts to these accounts.
 5. **Teleprompter tutorial.** Record a 15 second throwaway practice clip against sample text. Teach by doing.
-6. **Lands on Today** with their first real task waiting.
+6. **Lands on Home** with their first real task waiting.
 
-### 4.4 Creator side
-- **Today.** The whole product for creators. Tasks due today and this week, filled automatically by the AI. Videos owed count at the top, big cards per task with status chips, format indicator (video vs photo carousel), and a clear primary action per card.
-- **Task Detail.** Title, hook, script preview, embedded inspiration trend (thumbnail plus why it works), caption, due date, and a giant Record button (or Create button for static tasks).
-- **Record — the screen to obsess over.** Full screen front camera. Teleprompter: semi transparent scrolling script over the top third, adjustable scroll speed, 3 second countdown, pause, retake. Controls must be operable one handed at arm's length. Dark, immersive, zero chrome beyond what's needed.
-- **Review and Submit.** Playback of the take, retake, and "Send for review".
-- **My Posts.** History list with per task status chips and live post links once published.
-- **Creator Settings.** Connect / manage own TikTok and Instagram (required before approved content can go live, so show connection status prominently), profile, notifications.
+### 4.4 Creator side — three tabs (design these first)
+
+Creator tab bar: **Home · Posts · Profile**. Home is the product. Design polished, not generic list UI.
+
+#### Home
+Top segment / nav on Home only (not the tab bar): **Calendar** | **Inspiration**.
+
+**Calendar mode (default):**
+- Greeting: "Welcome" or "Welcome back, {first name}." Warm, personal, not dashboard chrome.
+- **Today's three posts** as the hero: the next actionable post is a large prominent card; the other two for the rest of the day sit below or beside it as secondary cards. Max ~3 posts per day, spread across up to three scheduled post times after approval.
+- Each card: format chip (Reel / video vs Slideshow / photo carousel), title, short brief, status, primary action (Record / Create / View). Not every task has a transcript or script — video with teleprompter when present; static / no-script tasks still feel complete.
+- **Swap:** on each of today's three cards, a Swap control opens Inspiration filtered to the **same format** (reel vs slideshow) and **same tags / pillars** (e.g. training / outdoor, homemade yapping). Creator picks a replacement from that filtered feed; the slot updates. Inspiration is a scrollable FYP of makeable posts, not a dump of every trend.
+- **Week strip (Apple Calendar energy):** seven days. Tap a day to see that day's posts and when they can be made. Completed / approved work shows as scheduled for its post window. Scroll or expand to peek adjacent weeks if needed, but the default frame is this week.
+
+**Inspiration mode:**
+- Endless scroll of post ideas the creator can make. Cards show cover, format, tags, why it works. Tapping can open detail or use as swap target. Same filter rules apply when entered via Swap from a today slot.
+
+#### Posts
+- **Account switcher** at the very top: small control with Instagram + TikTok icons. Swap between linked accounts. If only one is linked, show that one. If none: empty state — "Link your accounts to see your posts" with a clear path to Profile / connect.
+- **Filters and sorts:** virality, likes, views, time (and similar performance dims). Keep controls simple enough for a non-technical creator.
+- **Vertical day calendar:** past seven days of what they posted and how it did; expand or scroll to load the seven days before that (and so on). Each day clearly shows the posts made that day plus performance at a glance.
+- **Analytics:** a third, extremely simple section — graphs / summary for likes, views, following (and related), how everything did. Donkey-simple. No dashboard bloat.
+
+#### Profile
+- Avatar (add / change profile picture), name, basic settings.
+- Connect / manage TikTok and Instagram (Upload-Post). Connection status prominent.
+- Anything required for App Store compliance (account deletion, privacy, support, terms) lives here cleanly.
+- Wallet / Balance entry can live here or as a Profile sub-screen (available / pending, cash out) — do not clutter Home.
+
+#### Supporting creator screens (still design, after the three tabs)
+- **Task Detail.** Title, hook, script preview when present (omit or soft-empty when no transcript), embedded inspiration, caption, due date, giant Record / Create. Review thread when in changes-requested loop.
+- **Record.** Full screen front camera + teleprompter (when script exists). One handed, dark, obsess over this.
+- **Review and Submit.** Playback, retake, Send for review.
+- **Create (static / carousel).** Match slides / brief without fake video UI.
 
 ### 4.5 Admin side
 - **Queue.** Submissions awaiting review, newest first, badge count. Fast triage layout.
@@ -108,7 +135,8 @@ Question heavy flow: one question per screen, a progress bar, big tap targets. I
 - **Progress bar** for onboarding.
 - **Teleprompter overlay** (text treatment, transparency, speed control).
 - **Empty states** for Today, My Posts, Queue, Trends, Analytics.
-- **Tab bars:** creator (Today, My Posts, Settings) and admin (Queue, Calendar, Trends, Analytics, Settings).
+- **Tab bars:** creator (**Home, Posts, Profile**) and admin (Queue, Calendar, Trends, Analytics, Settings).
+- **Today hero cards** (next post large + two secondary), **week strip**, **Inspiration FYP card**, **Swap sheet** (filtered by format + tags), **account switcher** (IG / TikTok icons), **Posts vertical calendar**, **simple analytics charts**.
 
 ---
 
@@ -117,11 +145,12 @@ Question heavy flow: one question per screen, a progress bar, big tap targets. I
 Design in this order, most important first:
 
 1. Logo, app icon, splash
-2. Record screen
-3. Company onboarding flow (all 13 steps, with extra care on the brand study and tone slider screens)
-4. Today
-5. Review
-6. Everything else
+2. **Creator three tabs: Home (Calendar + Inspiration + Swap), Posts (account switcher, filters, vertical calendar, analytics), Profile**
+3. Record screen
+4. Company onboarding flow (all 13 steps, with extra care on the brand study and tone slider screens)
+5. Task Detail + Review and Submit
+6. Admin Review
+7. Everything else
 
 ---
 

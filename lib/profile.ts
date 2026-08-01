@@ -6,8 +6,8 @@ export type Role = Profile['role'];
 export type AppDestination =
   | '/(auth)/login'
   | '/(onboarding)'
-  | '/(admin)'
-  | '/(creator)';
+  | '/(admin)/(tabs)'
+  | '/(creator)/(tabs)';
 
 export function destinationForProfile(
   profile: Profile | null,
@@ -15,6 +15,6 @@ export function destinationForProfile(
 ): AppDestination {
   if (!hasSession) return '/(auth)/login';
   if (!profile || !profile.onboarded) return '/(onboarding)';
-  if (profile.role === 'admin') return '/(admin)';
-  return '/(creator)';
+  if (profile.role === 'admin') return '/(admin)/(tabs)';
+  return '/(creator)/(tabs)';
 }

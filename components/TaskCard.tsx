@@ -13,12 +13,15 @@ function formatTab(format: string): string {
 export function TaskCard({
   task,
   onPress,
+  bountyText,
 }: {
   task: TaskWithTrend;
   onPress: () => void;
+  bountyText?: string;
 }) {
   const cover = task.trend_items?.cover_url ?? null;
   const time = recordTimeLabel(task.estimated_seconds);
+  const bounty = bountyText ?? bountyLabel();
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -62,7 +65,7 @@ export function TaskCard({
         <View style={styles.footer}>
           {time ? <Text style={styles.metaStrong}>{time}</Text> : null}
           {time ? <Text style={styles.dot}>·</Text> : null}
-          <Text style={styles.bounty}>{bountyLabel()}</Text>
+          <Text style={styles.bounty}>{bounty}</Text>
         </View>
       </View>
     </Pressable>

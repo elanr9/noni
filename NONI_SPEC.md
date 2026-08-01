@@ -297,16 +297,17 @@ The question heavy flow. One question per screen, progress bar, big tap targets,
 3. Camera and mic permissions with honest one line explanations.
 4. Connect socials: Upload-Post hosted linking for the creator's own TikTok/Instagram (`profiles.upload_post_profile`). Approved content posts to these accounts.
 5. Teleprompter tutorial: record a 15 second throwaway practice clip against sample text.
-6. Lands on Today with their first real task waiting.
+6. Lands on Home with their first real task waiting.
 
-### Creator side
-- **Today.** Tasks due today and this week, filled automatically by the UGC brain (WP8), big status chips, videos owed count at top. The whole product for creators.
-- **Task Detail.** Title, hook, script preview, embedded inspiration trend, caption, due date, giant Record button. **Review thread** (chronological `review_events` for the latest submission): admin Request Changes notes, both sides' `comment` replies, Approve. When `changes_requested`, show the latest note prominently and Record / re-record.
-- **Record.** Full screen front camera. Teleprompter: semi transparent scrolling script over the top third, adjustable speed, 3 second countdown, pause, retake. The screen to obsess over.
-- **Review and Submit.** Playback, retake, submit. Submit flips status and pushes admins.
-- **My Posts.** History with per task status and live post links.
-- **Balance.** Wallet: available / pending, ledger (bounty credits + payouts), Connect onboarding + Cash out.
-- **Settings.** Connect own TikTok/Instagram (Upload-Post). Required before approved content can go live.
+### Creator side (three tabs: Home · Posts · Profile)
+
+Full UX for Claude Design + build: see `design/CLAUDE_DESIGN_BRIEF.md` §4.4. Summary:
+
+- **Home.** Greeting (Welcome / Welcome back, {name}). Top segment: **Calendar** | **Inspiration**. Calendar shows today's queue as **three cards** (next post large, then two for the rest of the day); week strip for seven days with posts and make-windows; after Approve, posts schedule across up to three times/day. **Swap** on a today slot opens Inspiration filtered to the same **format** (reel / slideshow) and **tags / pillars**; not every task has a transcript. Inspiration is a scrollable FYP of makeable posts.
+- **Posts.** IG / TikTok account switcher at top (empty state if none linked). Filter / sort by virality, likes, views, time, etc. Vertical calendar of past days (7, expand / scroll for older) showing what posted and how it did. Simple analytics (likes, views, following, graphs) — must be obvious.
+- **Profile.** Avatar, basic settings, social connect, App Store compliance (delete account, privacy, support), Balance / wallet entry.
+- **Task Detail.** Title, hook, script when present, inspiration, caption, due, Record / Create. **Review thread** (`review_events`): admin notes, comments, Approve. When `changes_requested`, latest note + re-record.
+- **Record / Review and Submit.** Teleprompter when script exists; playback → send for review.
 
 ### Admin side
 - **Queue.** Submissions awaiting review, newest first, badge count.
@@ -333,7 +334,7 @@ The question heavy flow. One question per screen, progress bar, big tap targets,
 
 ## 9. Claude Design workflow
 
-Design in Claude Design before building, in this order: Record screen, company onboarding flow, Today, Review. Export code to `design/` and screenshots to `design/screens/`. Every UI work package must reference its design files.
+Design in Claude Design before building. **Creator three tabs first** (Home with Calendar + Inspiration + Swap, Posts, Profile), then Record, company onboarding, Task Detail / Review. Full brief: `design/CLAUDE_DESIGN_BRIEF.md`. Export code to `design/` and screenshots to `design/screens/`. Every UI work package must reference its design files.
 
 ## 10. `.cursor/rules/project.mdc`
 

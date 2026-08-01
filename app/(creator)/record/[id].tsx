@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   CameraView,
   useCameraPermissions,
@@ -11,8 +18,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { LoadingScreen, colors } from '../../../components/Screen';
 import { Teleprompter } from '../../../components/Teleprompter';
+import { color, shadow } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import { getTask } from '../../../lib/tasks-api';
 import {
@@ -21,7 +28,12 @@ import {
 } from '../../../lib/submissions';
 import type { ContentTask } from '../../../lib/tasks';
 
-type Phase = 'idle' | 'countdown' | 'recording' | 'review' | 'uploading';
+type Phase = 'idle' | 'countdown' | 'recording' | 'review' | 'uploading' | 'sent';
+
+/** 3-2-1 countdown steps at 800ms each (README §5). */
+const COUNTDOWN_STEP_MS = 800;
+/** Post-submit toast duration before returning Home (README §5). */
+const TOAST_MS = 2600;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
 const MAX_TOTAL_MS = 90_000;
@@ -116,7 +128,7 @@ export default function RecordScreen() {
       void startSegment();
       return;
     }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    const t = setTimeout(() => setCountdown((c) => c - 1), COUNTDOWN_STEP_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, countdown]);
@@ -271,9 +283,8 @@ export default function RecordScreen() {
         creatorId: profile.id,
         segments,
       });
-      Alert.alert('Sent for review', 'Your take is up for admin review.', [
-        { text: 'OK', onPress: () => router.replace('/(creator)') },
-      ]);
+      setPhase('sent');
+      setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
       setPhase('review');
       Alert.alert('Upload failed', e instanceof Error ? e.message : 'Try again');
@@ -281,6 +292,7 @@ export default function RecordScreen() {
   }
 
   function onClose() {
+    if (phase === 'sent') return;
     if (phase === 'review') {
       setReviewIndex(0);
       setPhase('idle');
@@ -289,7 +301,13 @@ export default function RecordScreen() {
     router.back();
   }
 
-  if (loading) return <LoadingScreen label="Opening record" />;
+  if (loading) {
+    return (
+      <View style={styles.fallback}>
+        <ActivityIndicator size="large" color={color.accent} />
+      </View>
+    );
+  }
   if (!task) {
     return (
       <View style={styles.fallback}>
@@ -364,6 +382,7 @@ export default function RecordScreen() {
             running={phase === 'recording' && !scriptPaused}
             paused={phase === 'recording' && scriptPaused}
             speed={speed}
+            speedLabel={`${speed}x`}
             resetKey={takeCount}
             onTap={() => {
               if (phase === 'recording') setScriptPaused((p) => !p);
@@ -379,17 +398,19 @@ export default function RecordScreen() {
         </Pressable>
       ) : null}
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 14 }]}>
-        <Pressable onPress={onClose} hitSlop={12}>
-          <Text style={styles.topBtn}>
-            {phase === 'review' ? 'Back' : 'Close'}
+      {phase !== 'sent' ? (
+        <View style={[styles.topBar, { paddingTop: insets.top + 14 }]}>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <Text style={styles.topBtn}>
+              {phase === 'review' ? 'Back' : 'Close'}
+            </Text>
+          </Pressable>
+          <Text style={styles.topTitle} numberOfLines={1}>
+            {task.title}
           </Text>
-        </Pressable>
-        <Text style={styles.topTitle} numberOfLines={1}>
-          {task.title}
-        </Text>
-        <View style={{ width: 48 }} />
-      </View>
+          <View style={{ width: 48 }} />
+        </View>
+      ) : null}
 
       {showCamera ? (
         <View style={[styles.rail, { top: insets.top + 56 }]}>
@@ -398,7 +419,6 @@ export default function RecordScreen() {
             onPress={() => setFlashOn((f) => !f)}
             hitSlop={8}
           >
-            <Text style={styles.railGlyph}>{flashOn ? 'ON' : 'OFF'}</Text>
             <Text style={styles.railText}>Flash</Text>
           </Pressable>
           {phase !== 'recording' ? (
@@ -407,9 +427,6 @@ export default function RecordScreen() {
               onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
               hitSlop={8}
             >
-              <Text style={styles.railGlyph}>
-                {facing === 'front' ? 'Front' : 'Back'}
-              </Text>
               <Text style={styles.railText}>Flip</Text>
             </Pressable>
           ) : null}
@@ -543,19 +560,27 @@ export default function RecordScreen() {
           </Text>
         ) : null}
       </View>
+
+      {phase === 'sent' ? (
+        <View style={[styles.toast, shadow.shadowFloat]} pointerEvents="none">
+          <Text style={styles.toastText}>
+            Sent for review. Approve lands it in your queue.
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000' },
+  root: { flex: 1, backgroundColor: color.ink900 },
   fallback: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.bg,
+    backgroundColor: color.ink900,
   },
-  fallbackText: { color: colors.muted, fontSize: 16 },
+  fallbackText: { color: 'rgba(255,255,255,0.7)', fontSize: 16 },
   frontGlow: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 26,
@@ -571,7 +596,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   progressSeg: {
-    backgroundColor: colors.accent,
+    backgroundColor: color.accent,
     borderRadius: 3,
   },
   progressLive: { backgroundColor: '#FFFFFF' },
@@ -612,22 +637,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 12,
     gap: 10,
+    alignItems: 'flex-end',
     zIndex: 15,
   },
   railBtn: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,32,0.55)',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
   },
-  railBtnOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  railGlyph: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  railText: { color: '#fff', fontWeight: '600', fontSize: 10, letterSpacing: 0.3 },
+  railBtnOn: { backgroundColor: color.accent },
+  railText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   bottom: {
     position: 'absolute',
     left: 0,
@@ -668,7 +689,7 @@ const styles = StyleSheet.create({
     gap: 6,
     alignItems: 'center',
   },
-  partTitle: { color: colors.accent, fontWeight: '800', fontSize: 15 },
+  partTitle: { color: color.accentTint, fontWeight: '800', fontSize: 15 },
   partPreview: {
     color: '#fff',
     fontSize: 14,
@@ -691,7 +712,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  speedOn: { backgroundColor: colors.accent },
+  speedOn: { backgroundColor: color.accent },
   speedText: { color: '#fff', fontWeight: '700' },
   shutterRow: {
     flexDirection: 'row',
@@ -715,7 +736,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.accent,
+    backgroundColor: color.accent,
   },
   doneBtn: {
     paddingHorizontal: 18,
@@ -740,31 +761,51 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: colors.accent,
+    backgroundColor: color.accent,
   },
   reviewCol: { width: '100%', alignItems: 'center', gap: 10 },
   reviewRow: { flexDirection: 'row', gap: 12, width: '100%' },
   secondaryBtn: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 16,
+    height: 48,
+    borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  secondaryText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  secondaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   primaryBtn: {
     flex: 1.4,
-    paddingVertical: 16,
-    borderRadius: 16,
-    backgroundColor: colors.accent,
+    height: 48,
+    borderRadius: 999,
+    backgroundColor: color.accent,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  primaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   hint: { color: '#fff', fontSize: 16, fontWeight: '600' },
   hintSmall: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  toast: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 104,
+    borderRadius: 16,
+    backgroundColor: color.ink,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    zIndex: 30,
+  },
+  toastText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
     textAlign: 'center',
   },
 });

@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
+import { summarizeItem, type GoldenExample } from './relevance.ts';
+
 export function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -78,6 +80,49 @@ export async function askClaude(
     .join('');
 }
 
+// Vision variant used for carousel slide OCR: image URLs plus a text prompt.
+export async function askClaudeVision(
+  system: string,
+  imageUrls: string[],
+  user: string,
+  maxTokens = 2048,
+): Promise<string> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+  const model = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-5';
+  const content = [
+    ...imageUrls.map((url) => ({
+      type: 'image' as const,
+      source: { type: 'url' as const, url },
+    })),
+    { type: 'text' as const, text: user },
+  ];
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content }],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Claude ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    content: Array<{ type: string; text?: string }>;
+  };
+  return data.content
+    .filter((b) => b.type === 'text' && b.text)
+    .map((b) => b.text)
+    .join('');
+}
+
 export function parseClaudeJson<T>(text: string): T {
   const stripped = text
     .trim()
@@ -87,6 +132,20 @@ export function parseClaudeJson<T>(text: string): T {
   if (start === -1) throw new Error('No JSON in Claude response');
   return JSON.parse(stripped.slice(start)) as T;
 }
+
+export type BrandDocs = {
+  productTruth: string;
+  audienceNiche: string;
+  voice: string;
+  learnings: string;
+};
+
+export type SourcingTerm = {
+  term: string;
+  kind: 'query' | 'hashtag';
+  keepers: number;
+  scrapes: number;
+};
 
 export type BrandContext = {
   companyName: string;
@@ -98,19 +157,32 @@ export type BrandContext = {
   handles: { instagram?: string; tiktok?: string };
   vertical: string | null;
   referenceHandles: string[];
+  docs: BrandDocs;
+  sourcingTerms: SourcingTerm[];
+};
+
+const DOC_KIND_TO_KEY: Record<string, keyof BrandDocs> = {
+  product_truth: 'productTruth',
+  audience_niche: 'audienceNiche',
+  voice: 'voice',
+  learnings: 'learnings',
 };
 
 export async function loadBrandContext(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<BrandContext> {
-  const [{ data: company }, { data: brand }] = await Promise.all([
+  const [{ data: company }, { data: brand }, { data: docs }] = await Promise.all([
     admin.from('companies').select('name, settings').eq('id', companyId).single(),
     admin
       .from('brand_profiles')
-      .select('tone, audience, products, content_pillars, buying_path')
+      .select('tone, audience, products, content_pillars, buying_path, sourcing')
       .eq('company_id', companyId)
       .maybeSingle(),
+    admin
+      .from('brand_docs')
+      .select('kind, content')
+      .eq('company_id', companyId),
   ]);
   const settings = (company?.settings ?? {}) as {
     handles?: { instagram?: string; tiktok?: string };
@@ -118,6 +190,17 @@ export async function loadBrandContext(
     ugc_reference_handles?: string[];
   };
   const products = brand?.products as { description?: string } | null;
+  const brandDocs: BrandDocs = {
+    productTruth: '',
+    audienceNiche: '',
+    voice: '',
+    learnings: '',
+  };
+  for (const row of docs ?? []) {
+    const key = DOC_KIND_TO_KEY[row.kind as string];
+    if (key) brandDocs[key] = (row.content as string) ?? '';
+  }
+  const sourcing = (brand?.sourcing ?? {}) as { terms?: SourcingTerm[] };
   return {
     companyName: company?.name ?? 'the brand',
     tone: brand?.tone ?? null,
@@ -132,7 +215,64 @@ export async function loadBrandContext(
     referenceHandles: Array.isArray(settings.ugc_reference_handles)
       ? settings.ugc_reference_handles
       : [],
+    docs: brandDocs,
+    sourcingTerms: Array.isArray(sourcing.terms) ? sourcing.terms : [],
   };
+}
+
+// Fallback context assembled from the legacy brand_profiles fields, used in
+// prompts whenever a brand doc has not been written yet.
+export function legacyBrandLines(brand: BrandContext): string {
+  return [
+    `Brand: ${brand.companyName}`,
+    brand.vertical ? `Vertical: ${brand.vertical.replace(/_/g, ' ')}` : null,
+    brand.tone ? `Voice/tone: ${brand.tone}` : null,
+    brand.audience ? `Audience: ${brand.audience}` : null,
+    brand.products ? `Product: ${brand.products}` : null,
+    brand.pillars.length ? `Content pillars: ${brand.pillars.join(', ')}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+// The audience document drives sourcing and the relevance gate.
+export function audienceDoc(brand: BrandContext): string {
+  if (brand.docs.audienceNiche.trim()) return brand.docs.audienceNiche;
+  return legacyBrandLines(brand);
+}
+
+// Few-shot examples for the relevance gate, balanced across keeps and kills.
+export async function loadGoldenExamples(
+  admin: SupabaseClient,
+  companyId: string,
+  limit = 16,
+): Promise<GoldenExample[]> {
+  const { data } = await admin
+    .from('trend_items')
+    .select('label, label_reason, format, caption, transcript, slide_texts, author_handle')
+    .eq('company_id', companyId)
+    .eq('is_golden', true)
+    .not('label', 'is', null)
+    .order('scraped_at', { ascending: false })
+    .limit(60);
+  const rows = data ?? [];
+  const perSide = Math.ceil(limit / 2);
+  const pick = (label: 'keep' | 'kill') =>
+    rows
+      .filter((r) => r.label === label)
+      .slice(0, perSide)
+      .map((r) => ({
+        label,
+        reason: (r.label_reason as string | null) ?? null,
+        summary: summarizeItem({
+          format: r.format as string | null,
+          caption: r.caption as string | null,
+          transcript: r.transcript as string | null,
+          slideTexts: Array.isArray(r.slide_texts) ? (r.slide_texts as string[]) : null,
+          authorHandle: r.author_handle as string | null,
+        }),
+      }));
+  return [...pick('keep'), ...pick('kill')];
 }
 
 export type TrendForPrompt = {
@@ -141,6 +281,11 @@ export type TrendForPrompt = {
   transcript: string | null;
   why_it_works: string | null;
   views: number | null;
+  format?: string | null;
+  caption?: string | null;
+  slide_texts?: unknown;
+  remake_mode?: string | null;
+  remake_reason?: string | null;
 };
 
 export type TaskFormat = 'video' | 'photo_carousel';
@@ -183,30 +328,54 @@ export async function generateTaskDraft(
 ): Promise<TaskDraft> {
   const system = `You write UGC content briefs for creators posting on TikTok and Instagram. You always answer with a single JSON object: {"title": string, "hook": string, "script": string, "caption": string, "brief": string, "format": "video" | "photo_carousel"}. The title is a short punchy task name a creator scans in a feed (under 8 words). The hook is the first spoken line, under 12 words, engineered to stop scrolling. The script is roughly 60 seconds spoken aloud, written in the brand voice, first person, no camera directions, split into 3 or 4 short paragraphs separated by blank lines, and the first paragraph starts with the hook. The caption is under 200 characters with a clear call to action. The brief is one or two plain sentences telling the creator what this post is and why they are making it, like a short job description (no script text). The format is "photo_carousel" only when the idea is clearly a text-on-image slideshow (lists, tips, before/after stills); otherwise "video". Plain language only, no hashtag spam (2 hashtags max).`;
 
-  const brandLines = [
-    `Brand: ${brand.companyName}`,
-    brand.vertical ? `Vertical: ${brand.vertical.replace(/_/g, ' ')}` : null,
-    brand.tone ? `Voice/tone: ${brand.tone}` : null,
-    brand.audience ? `Audience: ${brand.audience}` : null,
-    brand.products ? `Product: ${brand.products}` : null,
-    brand.pillars.length ? `Content pillars: ${brand.pillars.join(', ')}` : null,
-    brand.buyingPath
-      ? `CTA: ${BUYING_PATH_CTA[brand.buyingPath] ?? brand.buyingPath}`
-      : null,
-  ].filter(Boolean);
+  // Selective doc injection: drafts get Product Truth + Voice + Learnings.
+  // The audience doc belongs to sourcing and the gate, not here.
+  const docBlocks: string[] = [`Brand: ${brand.companyName}`];
+  if (brand.docs.productTruth.trim()) {
+    docBlocks.push(`Product truth:\n${brand.docs.productTruth.trim()}`);
+  }
+  if (brand.docs.voice.trim()) {
+    docBlocks.push(`Voice:\n${brand.docs.voice.trim()}`);
+  }
+  if (brand.docs.learnings.trim()) {
+    docBlocks.push(`What has worked so far:\n${brand.docs.learnings.trim()}`);
+  }
+  if (docBlocks.length === 1) docBlocks.push(legacyBrandLines(brand));
+  if (brand.buyingPath) {
+    docBlocks.push(`CTA: ${BUYING_PATH_CTA[brand.buyingPath] ?? brand.buyingPath}`);
+  }
+
+  const slideTexts =
+    trend && Array.isArray(trend.slide_texts)
+      ? (trend.slide_texts as string[]).filter((s) => typeof s === 'string')
+      : [];
+
+  const remakeLine =
+    trend?.remake_mode === 'beat_for_beat'
+      ? 'Remake mode: BEAT FOR BEAT. This post wins on format. Keep its structure, timing, and visual concept intact and swap in this brand and its people; deviating from the format kills it.'
+      : 'Remake mode: STRUCTURE ONLY. This post wins on the idea. Take the hook style and skeleton, then rewrite the body entirely in the brand voice. Copying it verbatim makes the brand look like a knockoff.';
 
   const trendLines = trend
     ? [
         '',
-        `Base the brief on this trending ${trend.platform ?? 'social'} post (${trend.views ?? 'unknown'} views):`,
+        `Base the brief on this trending ${trend.platform ?? 'social'} ${trend.format === 'carousel' ? 'photo slideshow' : 'post'} (${trend.views ?? 'unknown'} views):`,
         trend.hook ? `Its hook: ${trend.hook}` : null,
         trend.why_it_works ? `Why it works: ${trend.why_it_works}` : null,
+        trend.caption ? `Caption: ${trend.caption.slice(0, 400)}` : null,
+        slideTexts.length
+          ? `Slide texts: ${slideTexts.map((s, i) => `[${i + 1}] ${s}`).join(' ')}`
+          : null,
         trend.transcript ? `Transcript: ${trend.transcript.slice(0, 2000)}` : null,
-        'Adapt the format and energy to this brand. Do not copy it verbatim and do not mention the original creator.',
+        remakeLine,
+        trend.remake_reason ? `Mode reason: ${trend.remake_reason}` : null,
+        trend.format === 'carousel'
+          ? 'The source is a photo slideshow, so use format "photo_carousel" and write the script as slide-by-slide overlay text (one short paragraph per slide).'
+          : null,
+        'Do not mention the original creator.',
       ].filter((l): l is string => l !== null)
     : ['', 'No trend reference. Draft an original brief from one of the content pillars.'];
 
-  const raw = await askClaude(system, [...brandLines, ...trendLines].join('\n'));
+  const raw = await askClaude(system, [...docBlocks, ...trendLines].join('\n\n'));
   const draft = parseClaudeJson<RawDraft>(raw);
   if (!draft.title || !draft.script || !draft.caption) {
     throw new Error('Claude returned an incomplete task draft');
