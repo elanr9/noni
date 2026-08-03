@@ -25,6 +25,48 @@ Read `NONI_SPEC.md` first (it is law), then this file. This file tracks what is 
 | WS-C | Scraping + extraction rewrite of `scrape-trends` | DONE + deployed (zero live runs; Monday cron or backfill is the acceptance run) |
 | Pre-D | Handoff corrections: verdict persistence, donor keeper signal, rolling saturation, low_signal, backfill mode, donor seeds, coverage report | DONE (migration 017 applied, function redeployed 2026-07-31) |
 | F | EAS build, TestFlight | NOT STARTED |
+| DSv3 | Admin app redesign per `design_handoff_admin_app/README.md` (Queue 1a · Review 1f · Calendar) | IN PROGRESS — Stages 1–5 live-wired (Queue/Review/Calendar + Trends/Analytics/Settings); mock retained for kitchen-sink; contract in `HANDOFF_CONTRACT.md` |
+
+## MVP v2 milestone 6 — Money (2026-08-03)
+
+Spec: `NONI_MVP_V2.md` build order item 6: attribution, bounty thresholds, cash out. Migration 021 applied; `post-approved` + `poll-metrics` redeployed.
+
+- Migration 021 (`money_assignments`): `posts.task_id` nullable, `posts.assignment_id` + check (one of task/assignment) + index; `attribution_links.assignment_id` + index. Same additive pattern as 020. `lib/types.ts` regenerated via `supabase gen types typescript --linked`.
+- `post-approved` accepts `{ assignment_id }` or legacy `{ task_id }`. Assignment path: caption from the brief, platforms default tiktok+instagram (briefs have no platforms column), submission via `assignments.submission_id` with latest-by-assignment fallback, storage paths keyed by assignment id. Posts rows carry both `assignment_id` and `task_id` (backfilled rows get both). On success it flips the assignment to `posted` server-side (CAS on status `approved`) and stores the first live URL in `assignments.post_url`; a backfilled `content_task` is flipped too. `reviewAssignment` in `lib/admin-api.ts` now always invokes it with `assignment_id` — approve auto-posts for campaign-published assignments.
+- `poll-metrics` polls both post shapes (assignment-keyed, and task-keyed mapped to assignments via `assignments.task_id`), inserts `post_metrics` history as before, then rolls up per assignment: writes `assignments.metrics` `{views, likes, revenue_cents}` (views/likes summed across the assignment's posts, revenue from `revenue_events` via `attribution_links.assignment_id` or `task_id`), backfills `assignments.post_url` when a pending post later has a URL. Bounty is credited per assignment: CAS on `bounty_credited_at is null` sets `bounty_credited_at` + `bounty_amount_cents`, then `wallet_ledger` `bounty_credit` (post_id = crossing post; unique (post_id, kind) backstops legacy credits) + `available_cents` bump. Threshold checks max(fresh views, previous metrics.views) so an undercount never claws back. Posts with no assignment keep the old per-post bounty path.
+- Leaderboard/brief-analytics revenue rekeyed: `fetchRevenueMaps` keys by `attribution_links.assignment_id` first, `task_id` fallback; rollups sum both per assignment row. Nobody mints attribution_links in-app yet — rows are created by hand with `assignment_id` set (legacy ones keyed by task keep counting).
+- Creator post detail (`app/(creator)/assignment/[id].tsx`): bounty cell shows progress `views / threshold` with the bounty amount as label until credited, then the credited amount + "Bounty paid". Settings via `fetchBountySettings` (company settings, defaults on failure).
+- Cash out verified against the new flow: chain is unchanged (`bounty_credit` → `available_cents` → `creator-payout` hold+Transfer → `stripe-webhook` flips paid). Live boot checks 2026-08-03: `creator-payout` returns unauthorized past `stripeClient()` (STRIPE_SECRET_KEY set), `stripe-webhook` returns "missing signature" (webhook secret set), `stripe-connect` live. Real-money transfer not exercised; the WP10 seeded cash out acceptance still stands. CLI account cannot `functions list`/`secrets list` (403) — verify over HTTP as above.
+- npm test 9 green, tsc clean.
+
+## MVP v2 milestone 5 — Creators leaderboard + brief analytics (2026-08-02)
+
+Spec: `NONI_MVP_V2.md` Creators and Analytics sections. Client-only milestone; no schema or edge function changes.
+
+- New data layer in `lib/admin-api.ts`, all assignment-sourced: `fetchCreatorLeaderboard` (views from `assignments.metrics`, followers via `listCreatorSocialStatus` summed per platform and null on failure, posts completed = status `posted`, approval rate = approved+posted over approved+posted+changes_requested and null when nothing reviewed, revenue via `revenue_events`→`attribution_links.task_id`→`assignments.task_id`, paid = negated `wallet_ledger` `payout_paid`), `fetchBriefAnalytics` (totals + per-brief rollups joined to `briefs`, best hooks/formats/creators), `fetchCreatorDetail` (assignments+briefs, review_events across the creator's submissions, wallet ledger). Old task-keyed `fetchAdminAnalytics` and its types were deleted; analytics.tsx was its only consumer.
+- Admin shell is now Review/Create/Calendar/Creators/Analytics. Trends and Settings routes stay in `(tabs)` but are hidden (`href: null` + dropped from `ADMIN_ITEMS`); Settings opens from a gear on Analytics, Trends is unreachable from the UI per the v2 cut. Queue tab renamed Review.
+- `app/(admin)/(tabs)/creators.tsx`: sort chips (views/followers/posts/approval/revenue/paid) over creator cards, tap through to `app/(admin)/creator/[id].tsx` (registered in the admin Stack): posts with StatusChip + metrics + post link, chat history, earnings summary + ledger.
+- Revenue/metrics seam unchanged: assignments.metrics is still written by nobody and revenue is still task-keyed, so leaderboard views/revenue only show for backfilled rows until milestone 6.
+
+## MVP v2 milestone 4 — Fast Review (2026-08-02)
+
+Spec: `NONI_MVP_V2.md` Review section. Milestones 1-3 (schema/Create/creator app) were chat-handoff only; their facts live in the milestone 4 handoff prompt history.
+
+- Admin Queue + Review now read **assignments** (status `submitted`) joined to `briefs` and `profiles`, with latest submissions via `submissions.assignment_id`. New data layer in `lib/admin-api.ts`: `AssignmentQueueItem`, `listAssignmentQueue`, `latestSubmissionsByAssignment`, `countAssignmentsInFlight`, `reviewAssignment`. `Submission` is now the generated Row type. Legacy task-keyed functions (`listQueue`, `reviewTask`, ...) remain but nothing in the admin shell calls them.
+- `app/(admin)/review/[id].tsx` holds the whole filtered queue in memory: autoplay on load, Approve is one tap with **no confirmation screen** (`review/confirmation.tsx` deleted), the next item swaps in place (signed URL prefetched, player remounted via `key`). Queue tab filters by creator or brief (chips) and passes `?creator=` / `?brief=` so the review flow advances within the filtered set. Request changes requires a non-empty note (send button disabled otherwise).
+- All assignment status changes go through `transitionAssignment` (`reviewAssignment` wraps it). Approve still invokes `post-approved` but only when the assignment carries a backfilled `task_id` — post-approved is still task-keyed (milestone 6 seam).
+- `notify` edge function (deployed) accepts `assignment_id` for submitted/approved/changes_requested/comment; title comes from the brief, recipient from `assignments.creator_id`. Client callers now send `assignment_id`: `transitionAssignment` on submit, `reviewAssignment`, `insertComment` (new optional `assignmentId`, preferred over `taskId`).
+- Supabase MCP points at the WRONG project (FieldVision); use the linked CLI (`supabase functions deploy`, `supabase db push`).
+
+## DSv3 admin redesign facts
+
+- Ground truth: `design_handoff_admin_app/README.md` + screenshots; `HANDOFF_CONTRACT.md` is the frozen build contract (token map, component map, type/data contract, answered questions). Decisions: Queue = 1a row list, Review = 1f pinned player + Script/Caption/Thread tabs, Approve = blue-500 primary, Request changes = outline, red only for Remove from calendar and errors. When screenshots and other instructions conflict, screenshots win.
+- Admin shell: `app/(admin)/(tabs)/{index,calendar,trends,analytics,settings}.tsx`; `review/[id]` and `brain` stay pushed Stack routes. The old `'/(admin)'` href became `'/(admin)/(tabs)'` project-wide.
+- **Calendar (Stage 4, 2026-08-01):** week grid (creator × day), `CalendarCell` / `TaskEditSheet` / `GenerateSheet`, Generate + New task. Live-wired to `listAllTasks`/`createTask`/`updateTask`/`deleteTask`/`generateTaskDraft` so Expo Go shows real FieldVision data. `WEEK_LIGHT`/`WEEK_HEAVY` seeded from screenshots 10–11 (partial; full grids still wait on missing `admin-mock-data.ts`).
+- **Trends / Analytics / Settings (2026-08-01):** restored from pre-placeholder implementations, restyled to admin tokens. Trends = scrape + Turn into task; Analytics = `fetchAdminAnalytics` + Poll metrics now; Settings = creator socials + Brand Brain link + sign out. No dedicated handoff designs — match Queue/Calendar tokens only.
+- **Stage 5 live (2026-08-01):** Queue → `listQueue` + submissions map (`lib/admin-queue-map.ts`); tab badge live; Review → `getTask`/`latestSubmission`/`signedVideoUrl`/`listTaskReviewEvents`/`reviewTask` (Approve + Request changes); confirmation → next live queue item; PinnedPlayer plays real `expo-video`. Mock module kept for kitchen-sink only.
+- **Web verification caveat**: react-dom/react-native-web/@expo/metro-runtime were added ONLY so gates can be screenshotted in a browser at 390×844. Web rendering differs from iOS on fonts, shadows and safe areas — treat browser captures as a layout check, not a pixel check, and spot check on device before shipping.
+- **Unspecced values to re-check in the Stage 6 pixel pass** (eyeballed, not spec): Queue header spacing (H1 marginTop 16, subtitle marginTop 6 / marginBottom 18 from the "16-20" range), queue-row avatar line gap 6, NextUpCard label→body gap 8, queue simulated-load delay 900ms, SheetShell grabber 40×4 (SwapSheet precedent renders 40×5). Scratch screen `app/(admin)/kitchen-sink.tsx` gets deleted at the end of the build.
 
 ## WS-A inspiration engine foundation facts
 
@@ -60,6 +102,12 @@ Plan docs: `files/ugc-bible.md` (universal doctrine, never tenant edited) + `fil
 - **Donor accounts seeded** (item 4): 10 TikTok `format_donor` accounts for FieldVision via `scripts/seed-donor-accounts.ts` (idempotent). Shape: small app/product-driven UGC accounts (skits, screen demos, keyword CTAs), all handle-verified live: lukascooksat, employed.nickolai, calai.app, quittr.app, opal, alarmy_official, meetcleo, cluely, umaxapp, blitzitapp.
 - **Coverage report**: `npx tsx scripts/coverage-report.ts` (service role env) — % classified of classifiable items split by corpus, per-format distribution, top null reasons, topic share distribution + `SATURATION_FULL_SHARE` calibration hint. Run it after the backfill.
 - **Item A (claims status enum drift) was a non-issue**: prod constraint verified live as `candidate | active | retired` (the plan naming), 0 rows in `claims`. No migration needed.
+
+## Backfill attempt facts (2026-07-31 / 2026-08-01)
+
+- **Temporary admin for backfill**: `admin@gmail.com` already existed in Auth; password was reset and a FieldVision `profiles` row was upserted (`role='admin'`, `onboarded=true`, company `fieldvision`). Password is temporary (`noniadmin`) and **must be rotated before this goes anywhere real**. Do not commit the password; rotate in Supabase Auth / Dashboard.
+- **Backfill fire**: POST `{"mode":"backfill","target":500}` returned `202 {"started":true,...}` via admin JWT. Background `EdgeRuntime.waitUntil` work produced **zero new `trend_items`** (still 16 rows from 2026-07-30 WP8 run). Function logs showed only isolate `shutdown`, no chunk progress. Smoke redeploy with early logs + smaller target still pending.
+- **Coverage after failed backfill**: `npx tsx scripts/coverage-report.ts` → niche classified **0/16 (0.0%)**, all null reasons `"no reason recorded"`, topic sample 0 (saturation null). Not a library verdict — these rows never passed through the new classifier. Re-run coverage after a successful backfill.
 
 ## Backfill prep facts (2026-07-31, before the backfill run)
 

@@ -12,6 +12,10 @@ export type ContentTask = Database['public']['Tables']['content_tasks']['Row'] &
   status: TaskStatus;
 };
 
+export type Assignment = Database['public']['Tables']['assignments']['Row'] & {
+  status: TaskStatus;
+};
+
 const ALLOWED: Record<TaskStatus, TaskStatus[]> = {
   assigned: ['recorded'],
   recorded: ['submitted'],

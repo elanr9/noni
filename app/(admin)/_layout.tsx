@@ -28,6 +28,7 @@ export default function AdminLayout() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
+      <Stack.Screen name="creator/[id]" options={{ title: 'Creator' }} />
       <Stack.Screen name="brain" options={{ title: 'Brand Brain' }} />
     </Stack>
   );

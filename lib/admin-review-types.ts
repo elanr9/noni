@@ -17,6 +17,8 @@ export type MockQueueItem = {
   ageLabel: string;
   status: TaskStatus;
   resubmitted: boolean;
+  /** Set on assignment-backed rows; drives the brief filter. */
+  brief?: { id: string; title: string };
 };
 
 /** One bubble in the changes-requested thread (README §5.4). `headerBold` is the 13/700 string, `headerMuted` the 13/400 slate-400 string. */

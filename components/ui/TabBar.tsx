@@ -8,8 +8,7 @@ import { PressableScale } from './PressableScale';
 
 const ITEMS: Record<string, { icon: IconName; label: string }> = {
   index: { icon: 'house', label: 'Home' },
-  posts: { icon: 'layout-list', label: 'Posts' },
-  analytics: { icon: 'chart-column', label: 'Analytics' },
+  calendar: { icon: 'calendar-days', label: 'Calendar' },
   profile: { icon: 'circle-user-round', label: 'Profile' },
 };
 

@@ -11,16 +11,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PostCard, formatViews } from '../../../components/creator/PostCard';
-import { PostPager, type PagerItem } from '../../../components/creator/PostPager';
 import { SwapSheet } from '../../../components/creator/SwapSheet';
-import { WeekStrip, type WeekDay } from '../../../components/creator/WeekStrip';
-import { Dropdown } from '../../../components/ui/Dropdown';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
-import { MediaCard } from '../../../components/ui/MediaCard';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/ui/Segmented';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
+import { StatusChip } from '../../../components/StatusChip';
 import { Wordmark } from '../../../components/ui/Wordmark';
 import { useAuth } from '../../../lib/auth';
 import { getCompany } from '../../../lib/onboarding';
@@ -32,26 +28,16 @@ import {
   type StreakMilestone,
 } from '../../../lib/streaks';
 import {
-  labelTrend,
-  listMyTasks,
-  listTrends,
-  swapTaskTrend,
-  type TaskWithTrend,
-  type TrendItem,
+  listMyAssignments,
+  listSwapPool,
+  parseAssignmentMetrics,
+  swapAssignmentBrief,
+  type AssignmentWithBrief,
+  type Brief,
 } from '../../../lib/tasks-api';
 import { color, motion, shadow } from '../../../theme/tokens';
 
-const DOW_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
-const TODO_STATUSES = new Set(['assigned', 'changes_requested']);
-const DONE_STATUSES = new Set(['posted', 'approved']);
-
-type TrendFilter = 'all' | 'reel' | 'slideshow';
-
-const FILTER_OPTIONS: { label: string; value: TrendFilter }[] = [
-  { label: 'Everything', value: 'all' },
-  { label: 'Reels', value: 'reel' },
-  { label: 'Slideshows', value: 'slideshow' },
-];
+const CLEARED = new Set(['approved', 'posted']);
 
 function dayKey(d: Date): string {
   const m = `${d.getMonth() + 1}`.padStart(2, '0');
@@ -59,45 +45,18 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${m}-${dd}`;
 }
 
-function mondayOf(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  const dow = out.getDay();
-  out.setDate(out.getDate() + (dow === 0 ? -6 : 1 - dow));
-  return out;
-}
-
-function firstTodoIndex(tasks: TaskWithTrend[]): number {
-  const index = tasks.findIndex((t) => TODO_STATUSES.has(t.status));
-  return index === -1 ? 0 : index;
-}
-
-function trendTitle(trend: TrendItem): string {
-  return trend.hook ?? trend.why_it_works ?? 'Trending post';
-}
-
-function trendMeta(trend: TrendItem): string | undefined {
-  const handle =
-    trend.author_handle !== null ? `@${trend.author_handle.replace(/^@/, '')}` : null;
-  const views = trend.views !== null ? `${formatViews(trend.views)} views` : null;
-  if (handle !== null && views !== null) return `${handle} · ${views}`;
-  return handle ?? views ?? undefined;
-}
-
 export default function HomeScreen() {
   const { profile } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [tasks, setTasks] = useState<TaskWithTrend[]>([]);
-  const [trends, setTrends] = useState<TrendItem[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentWithBrief[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [segment, setSegment] = useState(0);
-  const [selectedKey, setSelectedKey] = useState(dayKey(new Date()));
-  const [postIndex, setPostIndex] = useState(0);
-  const [trendFilter, setTrendFilter] = useState<TrendFilter>('all');
+  const [moreOpen, setMoreOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
+  const [swapPool, setSwapPool] = useState<Brief[]>([]);
+  const [swapLoading, setSwapLoading] = useState(false);
   const [streak, setStreak] = useState(0);
   const [milestones, setMilestones] = useState<StreakMilestone[]>(
     DEFAULT_STREAK_MILESTONES,
@@ -134,11 +93,8 @@ export default function HomeScreen() {
   const load = useCallback(async () => {
     if (!profile?.id) return;
     try {
-      const [nextTasks, nextTrends, streakRow, company] = await Promise.all([
-        listMyTasks(profile.id),
-        profile.company_id
-          ? listTrends(profile.company_id).catch(() => [] as TrendItem[])
-          : Promise.resolve([] as TrendItem[]),
+      const [next, streakRow, company] = await Promise.all([
+        listMyAssignments(profile.id),
         profile.company_id
           ? fetchMyStreak(profile.company_id, profile.id).catch(() => null)
           : Promise.resolve(null),
@@ -146,8 +102,7 @@ export default function HomeScreen() {
           ? getCompany(profile.company_id).catch(() => null)
           : Promise.resolve(null),
       ]);
-      setTasks(nextTasks);
-      setTrends(nextTrends);
+      setAssignments(next);
       setStreak(streakRow?.current_streak ?? 0);
       if (company) setMilestones(parseStreakMilestones(company.settings));
     } catch {
@@ -164,133 +119,72 @@ export default function HomeScreen() {
     }, [load]),
   );
 
-  const byDay = useMemo(() => {
-    const map = new Map<string, TaskWithTrend[]>();
-    for (const task of tasks) {
-      if (task.due_date === null) continue;
-      const list = map.get(task.due_date) ?? [];
-      list.push(task);
-      map.set(task.due_date, list);
-    }
-    return map;
-  }, [tasks]);
-
   const todayKey = dayKey(new Date());
+  const tomorrowKey = useMemo(() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    return dayKey(t);
+  }, []);
 
-  const weekDays = useMemo<WeekDay[]>(() => {
-    const monday = mondayOf(new Date());
-    return DOW_LETTERS.map((dow, i) => {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + i);
-      const key = dayKey(date);
-      const dayTasks = byDay.get(key) ?? [];
-      return {
-        key,
-        dow,
-        dayNumber: date.getDate(),
-        postCount: dayTasks.length,
-        done:
-          dayTasks.length > 0 && dayTasks.every((t) => DONE_STATUSES.has(t.status)),
-        isToday: key === todayKey,
-      };
-    });
-  }, [byDay, todayKey]);
-
-  const dayTasks = useMemo(
-    () => (byDay.get(selectedKey) ?? []).slice(0, 3),
-    [byDay, selectedKey],
+  const today = useMemo(
+    () => assignments.filter((a) => a.scheduled_date === todayKey),
+    [assignments, todayKey],
   );
-  const safeIndex = Math.min(postIndex, Math.max(0, dayTasks.length - 1));
-  const selectedTask = dayTasks.length > 0 ? dayTasks[safeIndex] : undefined;
-
-  const pagerItems = useMemo<PagerItem[]>(
-    () =>
-      dayTasks.map((task, i) => ({
-        id: task.id,
-        label: `Post ${i + 1}`,
-        status: task.status,
-      })),
-    [dayTasks],
+  const tomorrowFirst = useMemo(
+    () => assignments.find((a) => a.scheduled_date === tomorrowKey),
+    [assignments, tomorrowKey],
   );
 
-  const todayTodoCount = (byDay.get(todayKey) ?? []).filter((t) =>
-    TODO_STATUSES.has(t.status),
-  ).length;
+  // The hero never leaves Home until it clears (approved or posted).
+  const hero = today.find((a) => !CLEARED.has(a.status));
+  const rest = today.filter((a) => a !== hero && !CLEARED.has(a.status));
+  const allClear = today.length > 0 && hero === undefined;
+
   const firstName = profile?.full_name?.split(' ')[0] ?? 'creator';
-  const greetingSub =
-    todayTodoCount > 0 ? `${todayTodoCount} left to shoot today.` : 'Nothing queued yet.';
 
-  const selectDay = (key: string) => {
-    setSelectedKey(key);
-    setPostIndex(firstTodoIndex((byDay.get(key) ?? []).slice(0, 3)));
+  const openAssignment = (a: AssignmentWithBrief) => {
+    router.push(`/(creator)/assignment/${a.id}`);
   };
 
-  const openTask = (task: TaskWithTrend) => {
-    router.push(`/(creator)/task/${task.id}`);
-  };
-
-  const recordTask = (task: TaskWithTrend) => {
-    if (task.format === 'video') {
-      router.push(`/(creator)/record/${task.id}`);
+  const recordAssignment = (a: AssignmentWithBrief) => {
+    if (a.briefs.format === 'photo_carousel') {
+      openAssignment(a);
     } else {
-      router.push(`/(creator)/task/${task.id}`);
+      router.push(`/(creator)/record/${a.id}?assignment=1`);
     }
   };
 
-  const pickSwap = async (trend: TrendItem) => {
-    if (selectedTask === undefined) return;
+  const openSwap = async (a: AssignmentWithBrief) => {
+    setSwapOpen(true);
+    setSwapLoading(true);
+    try {
+      setSwapPool(await listSwapPool(a));
+    } catch {
+      setSwapPool([]);
+    } finally {
+      setSwapLoading(false);
+    }
+  };
+
+  const pickSwap = async (brief: Brief) => {
+    if (hero === undefined) return;
     setSwapOpen(false);
     try {
-      const updated = await swapTaskTrend(selectedTask.id, trend);
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      showToast(`Swapped in "${updated.title}".`);
+      const updated = await swapAssignmentBrief(hero.id, brief.id);
+      setAssignments((prev) =>
+        prev.map((a) => (a.id === updated.id ? updated : a)),
+      );
+      showToast(`Swapped in "${updated.briefs.title}".`);
     } catch {
       showToast('Could not swap that in. Try again.');
     }
   };
 
-  const filteredTrends = useMemo(() => {
-    if (trendFilter === 'reel') return trends.filter((t) => t.format !== 'carousel');
-    if (trendFilter === 'slideshow') {
-      return trends.filter((t) => t.format === 'carousel');
-    }
-    return trends;
-  }, [trends, trendFilter]);
-  const trendRows = useMemo(() => {
-    const rows: TrendItem[][] = [];
-    for (let i = 0; i < filteredTrends.length; i += 2) {
-      rows.push(filteredTrends.slice(i, i + 2));
-    }
-    return rows;
-  }, [filteredTrends]);
-
-  // Creator thumbs feed the same label store that trains the gate.
-  const rateTrend = async (trend: TrendItem, label: 'keep' | 'kill') => {
-    const next = trend.label === label ? null : label;
-    setTrends((prev) =>
-      prev.map((t) => (t.id === trend.id ? { ...t, label: next } : t)),
-    );
-    try {
-      await labelTrend(trend.id, next);
-      if (next !== null) {
-        showToast(next === 'keep' ? 'More like this coming.' : 'Got it, less of that.');
-      }
-    } catch {
-      setTrends((prev) =>
-        prev.map((t) => (t.id === trend.id ? { ...t, label: trend.label } : t)),
-      );
-    }
-  };
-
-  const refreshControl = (
-    <RefreshControl
-      refreshing={refreshing}
-      onRefresh={() => {
-        setRefreshing(true);
-        void load();
-      }}
-    />
-  );
+  const heroViews = useMemo(() => {
+    if (hero === undefined) return undefined;
+    const views = parseAssignmentMetrics(hero.metrics).views;
+    return views !== undefined ? `${formatViews(views)} views` : undefined;
+  }, [hero]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -302,168 +196,134 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <View style={styles.segmentedBlock}>
-        <Segmented
-          options={['Calendar', 'Inspiration']}
-          value={segment}
-          onChange={setSegment}
-        />
-      </View>
-
-      {segment === 0 ? (
-        <ScrollView
-          contentContainerStyle={styles.calendarGrow}
-          alwaysBounceVertical
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-        >
-          <View style={styles.calendarColumn}>
-            <View style={styles.greetingRow}>
-              <View style={styles.greeting}>
-                <Text style={styles.greetingTitle}>Welcome back, {firstName}.</Text>
-                <Text style={styles.greetingSub}>{greetingSub}</Text>
-              </View>
-              <PressableScale
-                style={styles.streakPill}
-                onPress={() => showToast(streakBonusText(streak, milestones))}
-              >
-                <Icon name="flame" size={16} color={color.amber} />
-                <Text style={styles.streakCount}>{streak}</Text>
-              </PressableScale>
-            </View>
-
-            <WeekStrip days={weekDays} selectedKey={selectedKey} onSelect={selectDay} />
-
-            {loading ? (
-              <>
-                <SkeletonCard height={34} radius={999} />
-                <SkeletonCard radius={24} style={styles.frame} />
-              </>
-            ) : (
-              <>
-                {pagerItems.length > 0 && (
-                  <PostPager
-                    items={pagerItems}
-                    selectedIndex={safeIndex}
-                    onSelect={setPostIndex}
-                  />
-                )}
-                <View style={styles.frame}>
-                  {selectedTask !== undefined ? (
-                    <PostCard
-                      task={selectedTask}
-                      showSwap={
-                        selectedKey === todayKey && TODO_STATUSES.has(selectedTask.status)
-                      }
-                      onOpen={() => openTask(selectedTask)}
-                      onRecord={() => recordTask(selectedTask)}
-                      onSwap={() => setSwapOpen(true)}
-                    />
-                  ) : (
-                    <View style={styles.emptyWrap}>
-                      <EmptyState
-                        icon="sparkles"
-                        title="Nothing queued today"
-                        body="Your next batch lands tonight. Pull one from Inspiration if you want to shoot now."
-                        actionLabel="Open Inspiration"
-                        onAction={() => setSegment(1)}
-                        compact
-                      />
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
-          </View>
-        </ScrollView>
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.inspirationColumn}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-        >
-          <Dropdown
-            options={FILTER_OPTIONS}
-            value={trendFilter}
-            onChange={setTrendFilter}
+      <ScrollView
+        contentContainerStyle={styles.column}
+        alwaysBounceVertical
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load();
+            }}
           />
-          {filteredTrends.length === 0 ? (
+        }
+      >
+        <View style={styles.greetingRow}>
+          <View style={styles.greeting}>
+            <Text style={styles.greetingTitle}>Welcome back, {firstName}.</Text>
+            <Text style={styles.greetingSub}>
+              {today.length === 0
+                ? 'Nothing queued today.'
+                : allClear
+                  ? 'All done for today.'
+                  : `${today.length - today.filter((a) => CLEARED.has(a.status)).length} to clear today.`}
+            </Text>
+          </View>
+          <PressableScale
+            style={styles.streakPill}
+            onPress={() => showToast(streakBonusText(streak, milestones))}
+          >
+            <Icon name="flame" size={16} color={color.amber} />
+            <Text style={styles.streakCount}>{streak}</Text>
+          </PressableScale>
+        </View>
+
+        {loading ? (
+          <SkeletonCard height={420} radius={24} />
+        ) : today.length === 0 ? (
+          <View style={styles.emptyWrap}>
             <EmptyState
               icon="sparkles"
-              title="No ideas yet"
-              body="New trends land here as they come in. Check back soon."
+              title="Nothing queued today"
+              body="Your next week of posts lands when the campaign drops."
             />
-          ) : (
-            trendRows.map((row) => (
-              <View key={row[0].id} style={styles.gridRow}>
-                {row.map((trend) => {
-                  const slides = Array.isArray(trend.image_urls)
-                    ? trend.image_urls.length
-                    : 0;
-                  return (
-                    <View key={trend.id} style={styles.gridCell}>
-                      <MediaCard
-                        variant="tile"
-                        mediaHeight={150}
-                        title={trendTitle(trend)}
-                        meta={trendMeta(trend)}
-                        format={trend.format === 'carousel' ? 'slideshow' : 'reel'}
-                        duration={
-                          trend.format === 'carousel' && slides > 0
-                            ? `${slides} slides`
-                            : undefined
-                        }
-                        thumbnail={trend.cover_url ?? undefined}
-                      />
-                      <View style={styles.rateRow}>
-                        <PressableScale
-                          accessibilityRole="button"
-                          accessibilityLabel="More like this"
-                          style={[
-                            styles.rateBtn,
-                            trend.label === 'keep' && styles.rateBtnKeep,
-                          ]}
-                          onPress={() => void rateTrend(trend, 'keep')}
-                        >
-                          <Icon
-                            name="thumbs-up"
-                            size={15}
-                            color={trend.label === 'keep' ? color.white : color.ink}
-                          />
-                        </PressableScale>
-                        <PressableScale
-                          accessibilityRole="button"
-                          accessibilityLabel="Less like this"
-                          style={[
-                            styles.rateBtn,
-                            trend.label === 'kill' && styles.rateBtnKill,
-                          ]}
-                          onPress={() => void rateTrend(trend, 'kill')}
-                        >
-                          <Icon
-                            name="thumbs-down"
-                            size={15}
-                            color={trend.label === 'kill' ? color.white : color.ink}
-                          />
-                        </PressableScale>
+          </View>
+        ) : hero !== undefined ? (
+          <>
+            <View style={styles.heroFrame}>
+              <PostCard
+                assignment={hero}
+                viewsLabel={heroViews}
+                showSwap={hero.status === 'assigned'}
+                onOpen={() => openAssignment(hero)}
+                onRecord={() => recordAssignment(hero)}
+                onSwap={() => void openSwap(hero)}
+              />
+            </View>
+
+            {rest.length > 0 && (
+              <View>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: moreOpen }}
+                  style={styles.moreRow}
+                  onPress={() => setMoreOpen((o) => !o)}
+                >
+                  <Text style={styles.moreText}>
+                    {rest.length} more today
+                  </Text>
+                  <Icon
+                    name={moreOpen ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={color.slate500}
+                  />
+                </PressableScale>
+                {moreOpen &&
+                  rest.map((a) => (
+                    <PressableScale
+                      key={a.id}
+                      accessibilityRole="button"
+                      style={styles.upNextRow}
+                      onPress={() => openAssignment(a)}
+                    >
+                      <View style={styles.upNextText}>
+                        <Text style={styles.upNextTitle} numberOfLines={1}>
+                          {a.briefs.title}
+                        </Text>
+                        {a.briefs.hook ? (
+                          <Text style={styles.upNextHook} numberOfLines={1}>
+                            {a.briefs.hook}
+                          </Text>
+                        ) : null}
                       </View>
-                    </View>
-                  );
-                })}
-                {row.length === 1 && <View style={styles.gridCell} />}
+                      <StatusChip status={a.status} />
+                    </PressableScale>
+                  ))}
               </View>
-            ))
-          )}
-        </ScrollView>
-      )}
+            )}
+          </>
+        ) : (
+          <View style={styles.doneCard}>
+            <Icon name="circle-check-big" size={30} color={color.green} />
+            <Text style={styles.doneTitle}>Done for today</Text>
+            <Text style={styles.doneSub}>All three posts are in. Nice.</Text>
+            {tomorrowFirst !== undefined && (
+              <PressableScale
+                accessibilityRole="button"
+                style={styles.peekRow}
+                onPress={() => openAssignment(tomorrowFirst)}
+              >
+                <View style={styles.upNextText}>
+                  <Text style={styles.peekLabel}>First up tomorrow</Text>
+                  <Text style={styles.upNextTitle} numberOfLines={1}>
+                    {tomorrowFirst.briefs.title}
+                  </Text>
+                </View>
+                <Icon name="chevron-right" size={16} color={color.slate500} />
+              </PressableScale>
+            )}
+          </View>
+        )}
+      </ScrollView>
 
       <SwapSheet
         visible={swapOpen}
-        slotLabel={`Post ${safeIndex + 1}`}
-        format={selectedTask?.format === 'photo_carousel' ? 'photo_carousel' : 'video'}
-        trends={trends}
-        onPick={(trend) => {
-          void pickSwap(trend);
+        briefs={swapPool}
+        loading={swapLoading}
+        onPick={(brief) => {
+          void pickSwap(brief);
         }}
         onClose={() => setSwapOpen(false)}
       />
@@ -503,28 +363,33 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: color.white,
   },
-  segmentedBlock: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  calendarGrow: {
+  column: {
     flexGrow: 1,
-  },
-  calendarColumn: {
-    flex: 1,
     paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 96,
-    gap: 10,
+    gap: 12,
   },
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 4,
   },
   greeting: {
     flex: 1,
     paddingRight: 12,
+  },
+  greetingTitle: {
+    fontSize: 24,
+    lineHeight: 27.6,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+    color: color.ink,
+  },
+  greetingSub: {
+    marginTop: 4,
+    fontSize: 14,
+    color: color.slate500,
   },
   streakPill: {
     flexDirection: 'row',
@@ -540,61 +405,89 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: color.ink,
   },
-  greetingTitle: {
-    fontSize: 24,
-    lineHeight: 27.6,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-    color: color.ink,
-  },
-  greetingSub: {
-    marginTop: 4,
-    fontSize: 14,
-    color: color.slate500,
-  },
-  frame: {
+  heroFrame: {
     flex: 1,
-    minHeight: 0,
+    minHeight: 420,
   },
   emptyWrap: {
     flex: 1,
     justifyContent: 'center',
   },
-  inspirationColumn: {
-    paddingHorizontal: 24,
-    paddingBottom: 110,
-    gap: 12,
-  },
-  gridRow: {
+  moreRow: {
     flexDirection: 'row',
-    gap: 10,
-  },
-  gridCell: {
-    flex: 1,
-    gap: 6,
-  },
-  rateRow: {
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-  },
-  rateBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+  },
+  moreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: color.slate500,
+  },
+  upNextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     backgroundColor: color.white,
     borderWidth: 1,
     borderColor: color.line,
+    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
-  rateBtnKeep: {
-    backgroundColor: color.ink,
-    borderColor: color.ink,
+  upNextText: {
+    flex: 1,
+    gap: 2,
   },
-  rateBtnKill: {
-    backgroundColor: color.slate500,
-    borderColor: color.slate500,
+  upNextTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: color.ink,
+  },
+  upNextHook: {
+    fontSize: 13,
+    color: color.slate500,
+  },
+  doneCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
+    borderRadius: 24,
+    padding: 24,
+  },
+  doneTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    color: color.ink,
+  },
+  doneSub: {
+    fontSize: 14,
+    color: color.slate500,
+  },
+  peekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    alignSelf: 'stretch',
+    marginTop: 16,
+    backgroundColor: color.offWhite,
+    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+  },
+  peekLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.slate400,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
   },
   toast: {
     position: 'absolute',

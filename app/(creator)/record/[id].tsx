@@ -21,8 +21,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Teleprompter } from '../../../components/Teleprompter';
 import { color, shadow } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
-import { getTask } from '../../../lib/tasks-api';
 import {
+  getAssignment,
+  getTask,
+  type AssignmentWithBrief,
+} from '../../../lib/tasks-api';
+import {
+  submitAssignmentRecording,
   submitRecording,
   type RecordedSegment,
 } from '../../../lib/submissions';
@@ -60,7 +65,13 @@ function formatMs(ms: number): string {
 }
 
 export default function RecordScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // Same screen serves both worlds: legacy tasks and campaign assignments
+  // (routed with ?assignment=1). The teleprompter flow is identical.
+  const { id, assignment: assignmentFlag } = useLocalSearchParams<{
+    id: string;
+    assignment?: string;
+  }>();
+  const isAssignment = assignmentFlag === '1';
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
@@ -70,6 +81,7 @@ export default function RecordScreen() {
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
 
   const [task, setTask] = useState<ContentTask | null>(null);
+  const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
   const [countdown, setCountdown] = useState(3);
@@ -88,7 +100,9 @@ export default function RecordScreen() {
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
 
-  const script = task?.script?.trim() || 'No script on this task. Speak freely.';
+  const rawScript = isAssignment ? assignment?.briefs.script : task?.script;
+  const title = (isAssignment ? assignment?.briefs.title : task?.title) ?? '';
+  const script = rawScript?.trim() || 'No script on this task. Speak freely.';
   const parts = useMemo(() => splitScriptParts(script), [script]);
   const partIndex = Math.min(segments.length, parts.length - 1);
   const totalRecordedMs = segments.reduce((sum, s) => sum + s.durationMs, 0);
@@ -109,10 +123,16 @@ export default function RecordScreen() {
 
   useEffect(() => {
     if (!id) return;
-    void getTask(id)
-      .then(setTask)
-      .finally(() => setLoading(false));
-  }, [id]);
+    if (isAssignment) {
+      void getAssignment(id)
+        .then(setAssignment)
+        .finally(() => setLoading(false));
+    } else {
+      void getTask(id)
+        .then(setTask)
+        .finally(() => setLoading(false));
+    }
+  }, [id, isAssignment]);
 
   useEffect(() => {
     if (phase !== 'review' || segments.length < 2) return;
@@ -274,15 +294,25 @@ export default function RecordScreen() {
   }
 
   async function sendForReview() {
-    if (!task || !profile || segments.length === 0) return;
+    if (!profile || segments.length === 0) return;
+    if (isAssignment ? !assignment : !task) return;
     setPhase('uploading');
     try {
-      await submitRecording({
-        task,
-        companyId: profile.company_id,
-        creatorId: profile.id,
-        segments,
-      });
+      if (assignment) {
+        await submitAssignmentRecording({
+          assignment,
+          companyId: profile.company_id,
+          creatorId: profile.id,
+          segments,
+        });
+      } else if (task) {
+        await submitRecording({
+          task,
+          companyId: profile.company_id,
+          creatorId: profile.id,
+          segments,
+        });
+      }
       setPhase('sent');
       setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
@@ -308,7 +338,7 @@ export default function RecordScreen() {
       </View>
     );
   }
-  if (!task) {
+  if (isAssignment ? !assignment : !task) {
     return (
       <View style={styles.fallback}>
         <Text style={styles.fallbackText}>Task not found.</Text>
@@ -406,7 +436,7 @@ export default function RecordScreen() {
             </Text>
           </Pressable>
           <Text style={styles.topTitle} numberOfLines={1}>
-            {task.title}
+            {title}
           </Text>
           <View style={{ width: 48 }} />
         </View>

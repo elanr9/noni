@@ -12,9 +12,9 @@ type PostRow = {
   id: string;
   platform: string | null;
   provider_post_id: string | null;
+  post_url: string | null;
   task_id: string;
   submissions: { creator_id: string } | { creator_id: string }[] | null;
-  content_tasks: { company_id: string } | { company_id: string }[] | null;
 };
 
 type PlatformMetrics = {
@@ -188,6 +188,116 @@ async function maybeCreditBounty(
   return true;
 }
 
+/**
+ * Assignment-level bounty. The CAS on bounty_credited_at is the idempotency
+ * guard; the ledger unique (post_id, kind) backstops legacy per-post credits.
+ */
+async function creditAssignmentBounty(
+  admin: SupabaseClient,
+  params: {
+    companyId: string;
+    creatorId: string;
+    assignmentId: string;
+    postId: string;
+    amountCents: number;
+    viewThreshold: number;
+  },
+): Promise<boolean> {
+  const { data: claimed, error: claimError } = await admin
+    .from('assignments')
+    .update({
+      bounty_credited_at: new Date().toISOString(),
+      bounty_amount_cents: params.amountCents,
+    })
+    .eq('id', params.assignmentId)
+    .is('bounty_credited_at', null)
+    .select('id');
+  if (claimError) throw claimError;
+  if (!claimed?.length) return false;
+
+  const wallet = await ensureWallet(admin, params.companyId, params.creatorId);
+
+  const { error: ledgerError } = await admin.from('wallet_ledger').insert({
+    company_id: params.companyId,
+    creator_id: params.creatorId,
+    kind: 'bounty_credit',
+    amount_cents: params.amountCents,
+    post_id: params.postId,
+    note: `Bounty at ${params.viewThreshold} views`,
+  });
+  if (ledgerError) {
+    if (ledgerError.code === '23505') return false;
+    throw ledgerError;
+  }
+
+  const { error: balError } = await admin
+    .from('creator_wallets')
+    .update({ available_cents: wallet.available_cents + params.amountCents })
+    .eq('id', wallet.id)
+    .eq('available_cents', wallet.available_cents);
+  if (balError) throw balError;
+
+  return true;
+}
+
+type AssignmentRow = {
+  id: string;
+  creator_id: string;
+  task_id: string | null;
+  post_url: string | null;
+  bounty_credited_at: string | null;
+  metrics: Record<string, unknown> | null;
+};
+
+type AssignmentRollup = {
+  creatorId: string;
+  views: number;
+  likes: number;
+  postId: string;
+  postUrl: string | null;
+};
+
+/** Revenue cents per assignment via attribution_links (assignment or task key). */
+async function revenueByAssignment(
+  admin: SupabaseClient,
+  companyId: string,
+  assignmentByTask: Map<string, AssignmentRow>,
+): Promise<Map<string, number>> {
+  const [{ data: links, error: linksError }, { data: events, error: eventsError }] =
+    await Promise.all([
+      admin
+        .from('attribution_links')
+        .select('id, task_id, assignment_id')
+        .eq('company_id', companyId),
+      admin
+        .from('revenue_events')
+        .select('amount_cents, attribution_link_id')
+        .eq('company_id', companyId),
+    ]);
+  if (linksError) throw linksError;
+  if (eventsError) throw eventsError;
+
+  const linkToAssignment = new Map<string, string>();
+  for (const link of links ?? []) {
+    const assignmentId =
+      (link.assignment_id as string | null) ??
+      (link.task_id ? assignmentByTask.get(link.task_id as string)?.id ?? null : null);
+    if (assignmentId) linkToAssignment.set(link.id as string, assignmentId);
+  }
+
+  const revenue = new Map<string, number>();
+  for (const event of events ?? []) {
+    if (!event.attribution_link_id) continue;
+    const assignmentId = linkToAssignment.get(event.attribution_link_id as string);
+    if (!assignmentId) continue;
+    revenue.set(
+      assignmentId,
+      (revenue.get(assignmentId) ?? 0) + asInt(event.amount_cents),
+    );
+  }
+  return revenue;
+}
+
 async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   polled: number;
   credited: number;
@@ -200,76 +310,201 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     .single();
   const bounty = parseBounty(company?.settings);
 
+  const { data: assignments, error: assignmentsError } = await admin
+    .from('assignments')
+    .select('id, creator_id, task_id, post_url, bounty_credited_at, metrics')
+    .eq('company_id', companyId);
+  if (assignmentsError) throw assignmentsError;
+  const assignmentById = new Map<string, AssignmentRow>();
+  const assignmentByTask = new Map<string, AssignmentRow>();
+  for (const raw of (assignments ?? []) as AssignmentRow[]) {
+    assignmentById.set(raw.id, raw);
+    if (raw.task_id) assignmentByTask.set(raw.task_id, raw);
+  }
+
   const { data: tasks, error: tasksError } = await admin
     .from('content_tasks')
     .select('id')
     .eq('company_id', companyId);
   if (tasksError) throw tasksError;
   const taskIds = (tasks ?? []).map((t) => t.id as string);
-  if (taskIds.length === 0) return { polled: 0, credited: 0, skipped: 0 };
 
-  const { data: posts, error } = await admin
-    .from('posts')
-    .select(
-      'id, platform, provider_post_id, task_id, submissions!inner(creator_id), content_tasks!inner(company_id)',
-    )
-    .in('task_id', taskIds)
-    .not('provider_post_id', 'is', null)
-    .in('status', ['posted', 'pending']);
-  if (error) throw error;
+  // Two shapes of posts: assignment-keyed (campaign publishes) and legacy
+  // task-keyed. A post never appears in both queries.
+  const assignmentIds = [...assignmentById.keys()];
+  const [assignmentPostsRes, taskPostsRes] = await Promise.all([
+    assignmentIds.length > 0
+      ? admin
+          .from('posts')
+          .select('id, platform, provider_post_id, post_url, assignment_id')
+          .in('assignment_id', assignmentIds)
+          .not('provider_post_id', 'is', null)
+          .in('status', ['posted', 'pending'])
+      : Promise.resolve({ data: [], error: null }),
+    taskIds.length > 0
+      ? admin
+          .from('posts')
+          .select(
+            'id, platform, provider_post_id, post_url, task_id, submissions!inner(creator_id)',
+          )
+          .in('task_id', taskIds)
+          .is('assignment_id', null)
+          .not('provider_post_id', 'is', null)
+          .in('status', ['posted', 'pending'])
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (assignmentPostsRes.error) throw assignmentPostsRes.error;
+  if (taskPostsRes.error) throw taskPostsRes.error;
+
+  type PendingPost = {
+    postId: string;
+    requestId: string;
+    platform: string | null;
+    postUrl: string | null;
+    assignment: AssignmentRow | null;
+    creatorId: string | null;
+  };
+  const pending: PendingPost[] = [];
+
+  for (const raw of assignmentPostsRes.data ?? []) {
+    const assignment = assignmentById.get(raw.assignment_id as string) ?? null;
+    pending.push({
+      postId: raw.id as string,
+      requestId: raw.provider_post_id as string,
+      platform: raw.platform as string | null,
+      postUrl: raw.post_url as string | null,
+      assignment,
+      creatorId: assignment?.creator_id ?? null,
+    });
+  }
+  for (const raw of (taskPostsRes.data ?? []) as unknown as PostRow[]) {
+    const submission = unwrapOne(raw.submissions);
+    if (!raw.provider_post_id || !submission) continue;
+    pending.push({
+      postId: raw.id,
+      requestId: raw.provider_post_id,
+      platform: raw.platform,
+      postUrl: raw.post_url,
+      assignment: assignmentByTask.get(raw.task_id) ?? null,
+      creatorId: submission.creator_id,
+    });
+  }
 
   let polled = 0;
   let credited = 0;
   let skipped = 0;
+  const rollups = new Map<string, AssignmentRollup>();
 
-  for (const raw of (posts ?? []) as PostRow[]) {
-    const requestId = raw.provider_post_id;
-    const submission = unwrapOne(raw.submissions);
-    const task = unwrapOne(raw.content_tasks);
-    if (!requestId || !submission || !task) {
-      skipped += 1;
-      continue;
-    }
-
-    const metrics = await fetchPostAnalytics(requestId, raw.platform);
+  for (const post of pending) {
+    const metrics = await fetchPostAnalytics(post.requestId, post.platform);
     if (!metrics) {
       skipped += 1;
       continue;
     }
 
     const { error: insertError } = await admin.from('post_metrics').insert({
-      post_id: raw.id,
+      post_id: post.postId,
       views: metrics.views,
       likes: metrics.likes,
       comments: metrics.comments,
       shares: metrics.shares,
     });
     if (insertError) {
-      console.error(`post_metrics insert ${raw.id}:`, insertError.message);
+      console.error(`post_metrics insert ${post.postId}:`, insertError.message);
       skipped += 1;
       continue;
     }
     polled += 1;
 
-    // Max views across history (spec: threshold on max views for the post).
+    if (post.assignment) {
+      // Roll up into the assignment; bounty is decided per assignment below.
+      const rollup = rollups.get(post.assignment.id) ?? {
+        creatorId: post.assignment.creator_id,
+        views: 0,
+        likes: 0,
+        postId: post.postId,
+        postUrl: null,
+      };
+      rollup.views += metrics.views;
+      rollup.likes += asInt(metrics.likes);
+      if (rollup.postUrl === null) rollup.postUrl = post.postUrl;
+      rollups.set(post.assignment.id, rollup);
+      continue;
+    }
+
+    if (!post.creatorId) {
+      skipped += 1;
+      continue;
+    }
+
+    // Legacy post with no assignment: per-post bounty on max views in history.
     const { data: history } = await admin
       .from('post_metrics')
       .select('views')
-      .eq('post_id', raw.id);
+      .eq('post_id', post.postId);
     const maxViews = Math.max(
       metrics.views,
       ...(history ?? []).map((r) => asInt(r.views)),
     );
-
     const didCredit = await maybeCreditBounty(admin, {
       companyId,
-      creatorId: submission.creator_id,
-      postId: raw.id,
+      creatorId: post.creatorId,
+      postId: post.postId,
       views: maxViews,
       amountCents: bounty.amountCents,
       viewThreshold: bounty.viewThreshold,
     });
     if (didCredit) credited += 1;
+  }
+
+  if (rollups.size === 0) return { polled, credited, skipped };
+
+  const revenue = await revenueByAssignment(admin, companyId, assignmentByTask);
+
+  for (const [assignmentId, rollup] of rollups) {
+    const assignment = assignmentById.get(assignmentId);
+    if (!assignment) continue;
+
+    const previous =
+      assignment.metrics && typeof assignment.metrics === 'object'
+        ? assignment.metrics
+        : {};
+    const patch: Record<string, unknown> = {
+      metrics: {
+        views: rollup.views,
+        likes: rollup.likes,
+        revenue_cents: revenue.get(assignmentId) ?? 0,
+      },
+    };
+    if (assignment.post_url === null && rollup.postUrl !== null) {
+      patch.post_url = rollup.postUrl;
+    }
+    const { error: metricsError } = await admin
+      .from('assignments')
+      .update(patch)
+      .eq('id', assignmentId);
+    if (metricsError) {
+      console.error(`assignment metrics ${assignmentId}:`, metricsError.message);
+      continue;
+    }
+
+    // Threshold on the best views ever seen, so a platform undercount on one
+    // poll never claws back an earned bounty.
+    const bountyViews = Math.max(
+      rollup.views,
+      asInt((previous as Record<string, unknown>).views),
+    );
+    if (assignment.bounty_credited_at === null && bountyViews >= bounty.viewThreshold) {
+      const didCredit = await creditAssignmentBounty(admin, {
+        companyId,
+        creatorId: rollup.creatorId,
+        assignmentId,
+        postId: rollup.postId,
+        amountCents: bounty.amountCents,
+        viewThreshold: bounty.viewThreshold,
+      });
+      if (didCredit) credited += 1;
+    }
   }
 
   return { polled, credited, skipped };

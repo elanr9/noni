@@ -1,6 +1,7 @@
 import { RELEVANCE_THRESHOLD } from '../supabase/functions/_shared/relevance';
 import { supabase } from './supabase';
 import {
+  type Assignment,
   assertTransition,
   type ContentTask,
   type TaskStatus,
@@ -8,6 +9,112 @@ import {
 import type { Database } from './types';
 
 export type TrendItem = Database['public']['Tables']['trend_items']['Row'];
+
+export type Brief = Database['public']['Tables']['briefs']['Row'];
+
+export type AssignmentWithBrief = Assignment & { briefs: Brief };
+
+/** Shape of assignments.metrics jsonb, written by the metrics poller. */
+export type AssignmentMetrics = {
+  views?: number;
+  likes?: number;
+  revenue_cents?: number;
+};
+
+export function parseAssignmentMetrics(
+  metrics: Assignment['metrics'],
+): AssignmentMetrics {
+  if (metrics === null || typeof metrics !== 'object' || Array.isArray(metrics)) {
+    return {};
+  }
+  const raw = metrics as Record<string, unknown>;
+  const out: AssignmentMetrics = {};
+  if (typeof raw.views === 'number') out.views = raw.views;
+  if (typeof raw.likes === 'number') out.likes = raw.likes;
+  if (typeof raw.revenue_cents === 'number') out.revenue_cents = raw.revenue_cents;
+  return out;
+}
+
+const ASSIGNMENT_SELECT = '*, briefs:brief_id (*)';
+
+export async function listMyAssignments(
+  creatorId: string,
+): Promise<AssignmentWithBrief[]> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select(ASSIGNMENT_SELECT)
+    .eq('creator_id', creatorId)
+    .order('scheduled_date', { ascending: true })
+    .order('slot_index', { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as AssignmentWithBrief[];
+}
+
+export async function getAssignment(
+  assignmentId: string,
+): Promise<AssignmentWithBrief | null> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select(ASSIGNMENT_SELECT)
+    .eq('id', assignmentId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as AssignmentWithBrief | null;
+}
+
+/**
+ * The creator's swap pool: briefs in the assignment's published campaign
+ * that are not laid out on this creator's week (the shuffle remainder).
+ * Never reaches into the backlog.
+ */
+export async function listSwapPool(
+  assignment: Assignment,
+): Promise<Brief[]> {
+  if (assignment.campaign_id === null) return [];
+
+  const [poolRes, mineRes] = await Promise.all([
+    supabase
+      .from('campaign_briefs')
+      .select('brief_id, briefs:brief_id (*)')
+      .eq('campaign_id', assignment.campaign_id),
+    supabase
+      .from('assignments')
+      .select('brief_id')
+      .eq('campaign_id', assignment.campaign_id)
+      .eq('creator_id', assignment.creator_id),
+  ]);
+
+  if (poolRes.error) throw poolRes.error;
+  if (mineRes.error) throw mineRes.error;
+
+  const taken = new Set((mineRes.data ?? []).map((a) => a.brief_id));
+  return (poolRes.data ?? [])
+    .filter((row) => !taken.has(row.brief_id))
+    .map((row) => row.briefs as unknown as Brief);
+}
+
+/**
+ * Swap the assignment's brief for one from the creator's pool. Content only;
+ * status is untouched and the compare on 'assigned' blocks swapping work
+ * that already started.
+ */
+export async function swapAssignmentBrief(
+  assignmentId: string,
+  briefId: string,
+): Promise<AssignmentWithBrief> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .update({ brief_id: briefId })
+    .eq('id', assignmentId)
+    .eq('status', 'assigned')
+    .select(ASSIGNMENT_SELECT)
+    .single();
+
+  if (error) throw error;
+  return data as AssignmentWithBrief;
+}
 
 export type InspirationTrend = {
   id: string;
@@ -150,4 +257,35 @@ export async function transitionTask(
   }
 
   return data as ContentTask;
+}
+
+/**
+ * The only status writer for assignments. All screens must go through this;
+ * the compare-and-swap on the current status makes concurrent writes safe.
+ */
+export async function transitionAssignment(
+  assignmentId: string,
+  from: TaskStatus,
+  to: TaskStatus,
+): Promise<Assignment> {
+  assertTransition(from, to);
+
+  const { data, error } = await supabase
+    .from('assignments')
+    .update({ status: to })
+    .eq('id', assignmentId)
+    .eq('status', from)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+
+  const assignment = data as Assignment;
+  if (to === 'submitted') {
+    void supabase.functions.invoke('notify', {
+      body: { assignment_id: assignment.id, event: 'submitted' },
+    });
+  }
+
+  return assignment;
 }

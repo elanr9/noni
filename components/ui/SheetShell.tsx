@@ -17,10 +17,18 @@ export interface SheetShellProps {
   children: ReactNode;
   /** Pins the panel top this far from the top of the screen (tall sheets); content scrolls. */
   pinnedTop?: number;
+  /** Pinned below the scroll area (e.g. Save / Remove footers). */
+  footer?: ReactNode;
 }
 
 /** Generic bottom sheet: scrim + slide-up panel with grabber, 240ms ease-out. */
-export function SheetShell({ visible, onClose, children, pinnedTop }: SheetShellProps) {
+export function SheetShell({
+  visible,
+  onClose,
+  children,
+  pinnedTop,
+  footer,
+}: SheetShellProps) {
   const { height } = useWindowDimensions();
   const [shown, setShown] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current;
@@ -76,11 +84,12 @@ export function SheetShell({ visible, onClose, children, pinnedTop }: SheetShell
             <View style={styles.grabber} />
           </View>
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
             showsVerticalScrollIndicator={false}
           >
             {children}
           </ScrollView>
+          {footer ? <View style={styles.footer}>{footer}</View> : null}
         </Animated.View>
       </View>
     </Modal>
@@ -115,5 +124,16 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingHorizontal: 24,
     paddingBottom: 30,
+  },
+  contentWithFooter: {
+    paddingBottom: 16,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 30,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.line,
+    gap: 8,
   },
 });

@@ -65,6 +65,15 @@ export const color = {
   scrimStrong: 'rgba(0,0,0,0.6)',
   sheetScrim: 'rgba(11,15,20,0.5)',
   glass: 'rgba(255,255,255,0.82)',
+
+  // Media-overlay whites (admin README §5 — chips, scrub, dots on ink-900 media)
+  whiteA92: 'rgba(255,255,255,0.92)',
+  whiteA90: 'rgba(255,255,255,0.90)',
+  whiteA75: 'rgba(255,255,255,0.75)',
+  whiteA60: 'rgba(255,255,255,0.60)',
+  whiteA45: 'rgba(255,255,255,0.45)',
+  whiteA28: 'rgba(255,255,255,0.28)',
+  whiteA16: 'rgba(255,255,255,0.16)',
 } as const;
 
 export const type = {
@@ -81,6 +90,7 @@ export const type = {
     meta: 14,
     chip: 13,
     label: 12,
+    micro11: 11,
     micro: 10,
   },
   // Unitless multipliers — multiply by font size for RN lineHeight

@@ -12,10 +12,133 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
+      assignments: {
+        Row: {
+          bounty_amount_cents: number | null
+          bounty_credited_at: string | null
+          brief_id: string
+          campaign_id: string | null
+          company_id: string
+          created_at: string | null
+          creator_id: string
+          id: string
+          metrics: Json | null
+          post_url: string | null
+          scheduled_date: string
+          slot_index: number
+          status: string
+          submission_id: string | null
+          task_id: string | null
+        }
+        Insert: {
+          bounty_amount_cents?: number | null
+          bounty_credited_at?: string | null
+          brief_id: string
+          campaign_id?: string | null
+          company_id: string
+          created_at?: string | null
+          creator_id: string
+          id?: string
+          metrics?: Json | null
+          post_url?: string | null
+          scheduled_date: string
+          slot_index?: number
+          status?: string
+          submission_id?: string | null
+          task_id?: string | null
+        }
+        Update: {
+          bounty_amount_cents?: number | null
+          bounty_credited_at?: string | null
+          brief_id?: string
+          campaign_id?: string | null
+          company_id?: string
+          created_at?: string | null
+          creator_id?: string
+          id?: string
+          metrics?: Json | null
+          post_url?: string | null
+          scheduled_date?: string
+          slot_index?: number
+          status?: string
+          submission_id?: string | null
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assignments_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "content_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attribution_links: {
         Row: {
+          assignment_id: string | null
           code: string
           company_id: string
           creator_id: string | null
@@ -24,6 +147,7 @@ export type Database = {
           url: string | null
         }
         Insert: {
+          assignment_id?: string | null
           code: string
           company_id: string
           creator_id?: string | null
@@ -32,6 +156,7 @@ export type Database = {
           url?: string | null
         }
         Update: {
+          assignment_id?: string | null
           code?: string
           company_id?: string
           creator_id?: string | null
@@ -40,6 +165,13 @@ export type Database = {
           url?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "attribution_links_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "attribution_links_company_id_fkey"
             columns: ["company_id"]
@@ -223,6 +355,69 @@ export type Database = {
           },
         ]
       }
+      briefs: {
+        Row: {
+          archived_at: string | null
+          caption: string | null
+          company_id: string
+          created_at: string | null
+          created_by: string | null
+          example_transcript: string | null
+          example_url: string | null
+          format: string
+          hook: string | null
+          id: string
+          script: string | null
+          title: string
+          why_it_works: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          caption?: string | null
+          company_id: string
+          created_at?: string | null
+          created_by?: string | null
+          example_transcript?: string | null
+          example_url?: string | null
+          format?: string
+          hook?: string | null
+          id?: string
+          script?: string | null
+          title: string
+          why_it_works?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          caption?: string | null
+          company_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          example_transcript?: string | null
+          example_url?: string | null
+          format?: string
+          hook?: string | null
+          id?: string
+          script?: string | null
+          title?: string
+          why_it_works?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "briefs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "briefs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calendar_events: {
         Row: {
           company_id: string
@@ -261,33 +456,91 @@ export type Database = {
           },
         ]
       }
+      campaign_briefs: {
+        Row: {
+          brief_id: string
+          campaign_id: string
+          company_id: string
+          created_at: string | null
+          pinned_day: number | null
+          position: number | null
+        }
+        Insert: {
+          brief_id: string
+          campaign_id: string
+          company_id: string
+          created_at?: string | null
+          pinned_day?: number | null
+          position?: number | null
+        }
+        Update: {
+          brief_id?: string
+          campaign_id?: string
+          company_id?: string
+          created_at?: string | null
+          pinned_day?: number | null
+          position?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_briefs_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_briefs_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_briefs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           company_id: string
           created_at: string | null
+          drop_date: string | null
           ends_on: string | null
           goal: string | null
           id: string
           name: string
+          published_at: string | null
           starts_on: string | null
+          status: string
         }
         Insert: {
           company_id: string
           created_at?: string | null
+          drop_date?: string | null
           ends_on?: string | null
           goal?: string | null
           id?: string
           name: string
+          published_at?: string | null
           starts_on?: string | null
+          status?: string
         }
         Update: {
           company_id?: string
           created_at?: string | null
+          drop_date?: string | null
           ends_on?: string | null
           goal?: string | null
           id?: string
           name?: string
+          published_at?: string | null
           starts_on?: string | null
+          status?: string
         }
         Relationships: [
           {
@@ -1081,6 +1334,7 @@ export type Database = {
       }
       posts: {
         Row: {
+          assignment_id: string | null
           id: string
           platform: string | null
           post_url: string | null
@@ -1088,9 +1342,10 @@ export type Database = {
           provider_post_id: string | null
           status: string | null
           submission_id: string
-          task_id: string
+          task_id: string | null
         }
         Insert: {
+          assignment_id?: string | null
           id?: string
           platform?: string | null
           post_url?: string | null
@@ -1098,9 +1353,10 @@ export type Database = {
           provider_post_id?: string | null
           status?: string | null
           submission_id: string
-          task_id: string
+          task_id?: string | null
         }
         Update: {
+          assignment_id?: string | null
           id?: string
           platform?: string | null
           post_url?: string | null
@@ -1108,9 +1364,16 @@ export type Database = {
           provider_post_id?: string | null
           status?: string | null
           submission_id?: string
-          task_id?: string
+          task_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "posts_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "posts_submission_id_fkey"
             columns: ["submission_id"]
@@ -1369,36 +1632,46 @@ export type Database = {
       }
       submissions: {
         Row: {
+          assignment_id: string | null
           created_at: string | null
           creator_id: string
           duration_seconds: number | null
           id: string
           segment_paths: string[] | null
-          task_id: string
+          task_id: string | null
           version: number | null
           video_path: string
         }
         Insert: {
+          assignment_id?: string | null
           created_at?: string | null
           creator_id: string
           duration_seconds?: number | null
           id?: string
           segment_paths?: string[] | null
-          task_id: string
+          task_id?: string | null
           version?: number | null
           video_path: string
         }
         Update: {
+          assignment_id?: string | null
           created_at?: string | null
           creator_id?: string
           duration_seconds?: number | null
           id?: string
           segment_paths?: string[] | null
-          task_id?: string
+          task_id?: string | null
           version?: number | null
           video_path?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "submissions_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "submissions_creator_id_fkey"
             columns: ["creator_id"]
@@ -1760,6 +2033,10 @@ export type Database = {
         Args: { p_label?: string; p_reason?: string; p_trend_id: string }
         Returns: undefined
       }
+      publish_campaign_assignments: {
+        Args: { p_assignments: Json; p_campaign_id: string }
+        Returns: number
+      }
       record_streak_approval: {
         Args: { p_company: string; p_creator: string }
         Returns: undefined
@@ -1897,6 +2174,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

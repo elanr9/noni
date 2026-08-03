@@ -10,10 +10,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ai.noni.app",
+      "usesAppleSignIn": true,
+      "bundleIdentifier": "com.fieldvision.noni",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Noni uses the camera so you can record content for your assigned tasks.",
-        "NSMicrophoneUsageDescription": "Noni uses the mic so your recorded takes include audio."
+        "NSMicrophoneUsageDescription": "Noni uses the mic so your recorded takes include audio.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -24,7 +27,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "ai.noni.app",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -33,6 +40,7 @@
     "plugins": [
       "expo-router",
       "expo-web-browser",
+      "expo-apple-authentication",
       [
         "expo-camera",
         {
@@ -45,6 +53,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "90199b13-2017-498e-a189-9657d81e4e9b"
+      }
+    },
+    "owner": "elanromo"
   }
 }

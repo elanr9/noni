@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -10,16 +10,28 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 import { BrandTitle, Screen, colors } from '../../components/Screen';
-import { destinationForProfile } from '../../lib/profile';
+import {
+  routeAfterSignIn,
+  signInWithApple,
+  signInWithGoogle,
+} from '../../lib/auth-session';
 import { supabase } from '../../lib/supabase';
-import type { Profile } from '../../lib/profile';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync()
+      .then(setAppleAvailable)
+      .catch(() => setAppleAvailable(false));
+  }, []);
 
   async function signInWithPassword() {
     const trimmed = email.trim().toLowerCase();
@@ -30,7 +42,7 @@ export default function LoginScreen() {
 
     setBusy(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: trimmed,
         password,
       });
@@ -39,17 +51,37 @@ export default function LoginScreen() {
         return;
       }
 
-      let profile: Profile | null = null;
-      if (data.user) {
-        const { data: row } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle();
-        profile = row;
-      }
+      await routeAfterSignIn();
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      router.replace(destinationForProfile(profile, true));
+  async function handleGoogle() {
+    setBusy(true);
+    try {
+      const signedIn = await signInWithGoogle();
+      if (signedIn) await routeAfterSignIn();
+    } catch (e) {
+      Alert.alert(
+        'Sign in failed',
+        e instanceof Error ? e.message : 'Could not sign in with Google',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleApple() {
+    setBusy(true);
+    try {
+      const signedIn = await signInWithApple();
+      if (signedIn) await routeAfterSignIn();
+    } catch (e) {
+      Alert.alert(
+        'Sign in failed',
+        e instanceof Error ? e.message : 'Could not sign in with Apple',
+      );
     } finally {
       setBusy(false);
     }
@@ -101,6 +133,42 @@ export default function LoginScreen() {
               {busy ? 'Signing in…' : 'Sign in'}
             </Text>
           </Pressable>
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {appleAvailable ? (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={
+                AppleAuthentication.AppleAuthenticationButtonType.CONTINUE
+              }
+              buttonStyle={
+                AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+              }
+              cornerRadius={16}
+              style={styles.appleButton}
+              onPress={() => void handleApple()}
+            />
+          ) : null}
+
+          <Pressable
+            style={[styles.altButton, busy && styles.buttonDisabled]}
+            onPress={() => void handleGoogle()}
+            disabled={busy}
+          >
+            <Text style={styles.altButtonText}>Continue with Google</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.altButton, busy && styles.buttonDisabled]}
+            onPress={() => router.push('/(auth)/phone')}
+            disabled={busy}
+          >
+            <Text style={styles.altButtonText}>Continue with phone</Text>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </Screen>
@@ -135,6 +203,37 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.5 },
   buttonText: {
     color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#D9D6D0',
+  },
+  dividerText: {
+    fontSize: 14,
+    color: colors.muted,
+  },
+  appleButton: {
+    height: 56,
+  },
+  altButton: {
+    borderWidth: 1.5,
+    borderColor: '#D9D6D0',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 17,
+    alignItems: 'center',
+  },
+  altButtonText: {
+    color: colors.ink,
     fontSize: 17,
     fontWeight: '700',
   },

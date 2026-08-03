@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { TaskWithTrend } from '../../lib/tasks-api';
+import type { AssignmentWithBrief } from '../../lib/tasks-api';
 import { color } from '../../theme/tokens';
 import { Button } from '../ui/Button';
 import { Icon, type IconName } from '../ui/Icon';
@@ -13,17 +13,11 @@ export function formatViews(views: number): string {
   return `${views}`;
 }
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 export interface PostCardProps {
-  task: TaskWithTrend;
+  assignment: AssignmentWithBrief;
   /** Post views string, when known (e.g. "41k views"). */
   viewsLabel?: string;
-  /** Swap is offered on today's assigned posts only. */
+  /** Swap is offered on untouched posts with a spare pool behind them. */
   showSwap: boolean;
   onOpen: () => void;
   onRecord: () => void;
@@ -50,30 +44,29 @@ function StatusPill({
 }
 
 export function PostCard({
-  task,
+  assignment,
   viewsLabel,
   showSwap,
   onOpen,
   onRecord,
   onSwap,
 }: PostCardProps) {
-  const slideshow = task.format === 'photo_carousel';
-  const todo = task.status === 'assigned' || task.status === 'changes_requested';
-  const pending = task.status === 'submitted' || task.status === 'recorded';
-  const done = task.status === 'posted' || task.status === 'approved';
+  const brief = assignment.briefs;
+  const slideshow = brief.format === 'photo_carousel';
+  const todo =
+    assignment.status === 'assigned' || assignment.status === 'changes_requested';
+  const pending =
+    assignment.status === 'submitted' || assignment.status === 'recorded';
+  const done =
+    assignment.status === 'posted' || assignment.status === 'approved';
 
   return (
     <MediaCard
       variant="hero"
       fill
-      title={task.title}
-      format={task.format === 'video' ? 'reel' : 'slideshow'}
-      thumbnail={task.trend_items?.cover_url ?? undefined}
-      duration={
-        !slideshow && task.estimated_seconds !== null
-          ? formatDuration(task.estimated_seconds)
-          : undefined
-      }
+      title={brief.title}
+      meta={brief.hook ?? undefined}
+      format={slideshow ? 'slideshow' : 'reel'}
       onPress={onOpen}
     >
       {todo && (

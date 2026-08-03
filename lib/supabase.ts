@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { fetch as expoFetch } from 'expo/fetch';
+import { Platform } from 'react-native';
 
 import type { Database } from './types';
 
@@ -18,7 +19,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   global: {
     // Expo Go / RN fetch can reject HTTPS with "Network request failed";
     // expo/fetch uses a WinterCG-compliant stack that works on device.
-    fetch: expoFetch as typeof fetch,
+    // On web (verification builds only) expo/fetch is unavailable — use the browser's.
+    fetch: (Platform.OS === 'web' ? fetch.bind(globalThis) : expoFetch) as typeof fetch,
   },
   auth: {
     storage: AsyncStorage,
