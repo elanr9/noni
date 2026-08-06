@@ -14,11 +14,18 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 
+import { CtaCard } from '../../../components/admin/editor/CtaCard';
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
+import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { StepDots } from '../../../components/admin/editor/StepDots';
+import { TitleCard } from '../../../components/admin/editor/TitleCard';
+import {
+  LibraryPickerSheet,
+  type LibraryPick,
+} from '../../../components/admin/LibraryPickerSheet';
 import { PushHeader } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -57,7 +64,6 @@ import { supabase } from '../../../lib/supabase';
 import { color, radius, ringFocus, type } from '../../../theme/tokens';
 
 const CAPTION_MAX = 200;
-const HOOK_MAX_WORDS = 9;
 
 const STEPS = [
   'title',
@@ -92,10 +98,6 @@ const STEP_INTENTS: Record<EditorStep, string> = {
   review:
     'Suggestions only. Apply what helps, ignore the rest, confirm when it reads right.',
 };
-
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
 
 /** The fields as they stood when review opened, for edit diffs and the ban list. */
 type ReviewSnapshot = {
@@ -171,6 +173,9 @@ export default function PostEditorScreen() {
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
 
   const [fillVisible, setFillVisible] = useState(false);
+  const [libraryVisible, setLibraryVisible] = useState(false);
+  /** Approved claim names by id, for the CTA trace chip. */
+  const [claimNames, setClaimNames] = useState<Record<string, string>>({});
   const [filling, setFilling] = useState(false);
   const [regenBusy, setRegenBusy] = useState<RegenField | null>(null);
   const [regenPointIndex, setRegenPointIndex] = useState<number | null>(null);
@@ -199,19 +204,27 @@ export default function PostEditorScreen() {
     if (!id) return;
     void (async () => {
       try {
-        const [brief, types, segs, { data: brand }, claimIds, { data: link }] =
-          await Promise.all([
-            getBrief(id),
-            listPostTypes(),
-            listBriefSegments(id),
-            supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
-            listApprovedClaimIds(),
-            supabase
-              .from('campaign_briefs')
-              .select('position, campaign_id')
-              .eq('brief_id', id)
-              .maybeSingle(),
-          ]);
+        const [
+          brief,
+          types,
+          segs,
+          { data: brand },
+          claimIds,
+          { data: link },
+          { data: claims },
+        ] = await Promise.all([
+          getBrief(id),
+          listPostTypes(),
+          listBriefSegments(id),
+          supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
+          listApprovedClaimIds(),
+          supabase
+            .from('campaign_briefs')
+            .select('position, campaign_id')
+            .eq('brief_id', id)
+            .maybeSingle(),
+          supabase.from('product_features').select('id, name').eq('approved', true),
+        ]);
         if (!brief) {
           setMissing(true);
           return;
@@ -221,6 +234,9 @@ export default function PostEditorScreen() {
         refreshScreenshotUrls(segs);
         setHashtagBank(brand?.hashtag_bank ?? []);
         setApprovedClaimIds(claimIds);
+        setClaimNames(
+          Object.fromEntries((claims ?? []).map((c) => [c.id, c.name])),
+        );
         setReviewedAt(brief.reviewed_at);
 
         const options = parseHookOptions(brief.hook_options);
@@ -903,8 +919,12 @@ export default function PostEditorScreen() {
     );
   }
 
-  const chosenHook = resolvedHook() ?? '';
-  const hookTooLong = wordCount(chosenHook) > HOOK_MAX_WORDS;
+  // The generation API returns one phrase, no alternates; the "Also
+  // searched" section renders only when some exist.
+  const alsoSearched: string[] = [];
+  const plugClaimId = points.find((p) => p.is_product)?.claim_id ?? null;
+  const traceClaimName =
+    plugClaimId !== null ? (claimNames[plugClaimId] ?? null) : null;
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
   const captionBody = caption.replace(/#\w+/g, ' ').replace(/\s+/g, ' ').trim();
   const currentStepIndex = stepIndex(step);
@@ -985,62 +1005,25 @@ export default function PostEditorScreen() {
 
         {step === 'title' ? (
           <View style={styles.section}>
-            <View style={styles.fillRow}>
-              <Button
-                size="md"
-                variant="tint"
-                icon="sparkles"
-                block
-                disabled={filling}
-                onPress={() => setFillVisible(true)}
-              >
-                {filling ? 'Generating…' : 'Fill with AI'}
-              </Button>
-            </View>
-            <Text style={styles.hint}>
-              What this post is about. Keep it short and concrete.
-            </Text>
-            <View style={[styles.fieldRing, focused === 'title' && ringFocus]}>
-              <TextInput
-                value={title}
-                onChangeText={setTitle}
-                onFocus={() => setFocused('title')}
-                onBlur={() => setFocused(null)}
-                placeholder="Post title"
-                placeholderTextColor={color.slate400}
-                style={styles.field}
-                autoFocus
-              />
-            </View>
+            <TitleCard
+              value={title}
+              onChange={setTitle}
+              filling={filling}
+              onFillWithAi={() => setFillVisible(true)}
+            />
           </View>
         ) : null}
 
         {step === 'search' ? (
           <View style={styles.section}>
-            <View style={styles.labelRow}>
-              <Text style={styles.hint}>TikTok search this post answers</Text>
-              <Button
-                size="sm"
-                variant="tint"
-                disabled={regenBusy !== null}
-                onPress={() => void regenerate('search_phrase')}
-              >
-                {regenBusy === 'search_phrase' ? '…' : 'Regenerate'}
-              </Button>
-            </View>
-            <View style={[styles.fieldRing, focused === 'phrase' && ringFocus]}>
-              <TextInput
-                value={searchPhrase}
-                onChangeText={setSearchPhrase}
-                onFocus={() => setFocused('phrase')}
-                onBlur={() => setFocused(null)}
-                placeholder="e.g. is NCSA worth it"
-                placeholderTextColor={color.slate400}
-                autoCapitalize="none"
-                style={styles.field}
-                autoFocus
-              />
-            </View>
+            <SearchPhraseCard
+              value={searchPhrase}
+              onChange={setSearchPhrase}
+              busy={regenBusy === 'search_phrase'}
+              onRegenerate={() => void regenerate('search_phrase')}
+              alternates={alsoSearched}
+              onPickAlternate={setSearchPhrase}
+            />
           </View>
         ) : null}
 
@@ -1055,10 +1038,8 @@ export default function PostEditorScreen() {
                 setUseCustomHook(false);
                 setChosenHookIndex(i);
               }}
-              onChangeOption={(i, text) =>
-                setHookOptions((prev) => prev.map((h, j) => (j === i ? text : h)))
-              }
               onRegenerate={() => void regenerate('hook')}
+              onOpenLibrary={() => setLibraryVisible(true)}
               useCustom={useCustomHook}
               customText={customHook}
               onChooseCustom={() => setUseCustomHook(true)}
@@ -1067,33 +1048,12 @@ export default function PostEditorScreen() {
                 setCustomHook(text);
               }}
             />
-            {hookTooLong ? (
-              <Text style={styles.inlineWarn}>
-                Hook is {wordCount(chosenHook)} words. Cap is {HOOK_MAX_WORDS}.
-              </Text>
-            ) : null}
           </View>
         ) : null}
 
         {step === 'cta' ? (
           <View style={styles.section}>
-            <Text style={styles.hint}>
-              The product plug sentence. It rides inside one talking point —
-              never its own card.
-            </Text>
-            <View style={[styles.fieldRing, focused === 'cta' && ringFocus]}>
-              <TextInput
-                multiline
-                value={cta}
-                onChangeText={setCta}
-                onFocus={() => setFocused('cta')}
-                onBlur={() => setFocused(null)}
-                placeholder="One sentence plug"
-                placeholderTextColor={color.slate400}
-                style={[styles.field, styles.multiline]}
-                autoFocus
-              />
-            </View>
+            <CtaCard value={cta} onChange={setCta} claimName={traceClaimName} />
           </View>
         ) : null}
 
@@ -1264,6 +1224,23 @@ export default function PostEditorScreen() {
         onFillFromPhrase={() => void fillFrom({ query: searchPhrase })}
         onFillFromLink={(url, context) => void fillFrom({ url, context })}
       />
+
+      <LibraryPickerSheet
+        visible={libraryVisible}
+        postTypeId={postTypeId}
+        onClose={() => setLibraryVisible(false)}
+        onPick={(pick: LibraryPick) => {
+          // From the hook step: a reference attaches as the example, a
+          // text idea becomes the written hook.
+          if (pick.kind === 'example') {
+            setExampleUrl(pick.url);
+          } else {
+            setUseCustomHook(true);
+            setCustomHook(pick.text);
+          }
+          setLibraryVisible(false);
+        }}
+      />
     </View>
   );
 }
@@ -1336,7 +1313,6 @@ const styles = StyleSheet.create({
     color: color.amber,
     fontWeight: '600',
   },
-  fillRow: { marginBottom: 12 },
   section: { gap: 10, marginBottom: 8 },
   labelRow: {
     flexDirection: 'row',
@@ -1356,11 +1332,6 @@ const styles = StyleSheet.create({
     fontSize: type.size.meta,
     color: color.slate400,
     lineHeight: type.size.meta * 1.4,
-  },
-  inlineWarn: {
-    fontSize: type.size.meta,
-    fontWeight: '600',
-    color: color.amber,
   },
   helper: {
     fontSize: type.size.meta,
