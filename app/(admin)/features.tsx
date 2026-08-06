@@ -12,9 +12,10 @@ import { useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FeatureEditSheet } from '../../components/admin/FeatureEditSheet';
+import { FeatureEditSheet, type ClaimStatus } from '../../components/admin/FeatureEditSheet';
+import { ClaimCard } from '../../components/admin/insights/ClaimCard';
+import { SectionLabel, Segmented, SkeletonCard } from '../../components/admin/shared';
 import { Button } from '../../components/ui/Button';
-import { Segmented } from '../../components/ui/Segmented';
 import { useAuth } from '../../lib/auth';
 import {
   FEATURE_INGEST_MAX_IMAGES,
@@ -32,9 +33,17 @@ import {
   type ProductFeatureInput,
   type ProductType,
 } from '../../lib/admin-api';
-import { borderWidth, color, radius, ringFocus, shadow, space, type } from '../../theme/tokens';
+import { supabase } from '../../lib/supabase';
+import {
+  borderWidth,
+  color,
+  radiusAdmin,
+  ringFocus,
+  space,
+  type,
+} from '../../theme/tokens';
 
-const PRODUCT_TYPE_OPTIONS = ['Software', 'Physical'] as const;
+const PRODUCT_TYPE_OPTIONS = [{ label: 'Software' }, { label: 'Physical' }];
 
 const EMPTY_FORM: ProductFeatureInput = {
   name: '',
@@ -45,12 +54,6 @@ const EMPTY_FORM: ProductFeatureInput = {
 type Progress =
   | { kind: 'upload'; done: number; total: number }
   | { kind: 'analyze' };
-
-function sourceMeta(row: ProductFeature): string {
-  const bits = [row.source];
-  if (row.source_ref) bits.push(row.source_ref);
-  return bits.join(' · ');
-}
 
 function formatIngestResult(r: IngestFeaturesResult): string {
   if (r.inserted === 0) {
@@ -83,6 +86,18 @@ function formatIngestResult(r: IngestFeaturesResult): string {
   return bits.join(' ');
 }
 
+/** Rejected rows stay client-readable for the quiet do-not-claim cards;
+ * listProductFeatures filters them out. */
+async function listRejectedFeatures(): Promise<ProductFeature[]> {
+  const { data, error } = await supabase
+    .from('product_features')
+    .select('*')
+    .eq('rejected', true)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export default function FeaturesScreen(): JSX.Element {
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
@@ -90,6 +105,7 @@ export default function FeaturesScreen(): JSX.Element {
   const pendingY = useRef(0);
 
   const [rows, setRows] = useState<ProductFeature[]>([]);
+  const [rejectedRows, setRejectedRows] = useState<ProductFeature[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -109,11 +125,13 @@ export default function FeaturesScreen(): JSX.Element {
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      const [features, type] = await Promise.all([
+      const [features, rejected, type] = await Promise.all([
         listProductFeatures(),
+        listRejectedFeatures(),
         getProductType(profile.company_id),
       ]);
       setRows(features);
+      setRejectedRows(rejected);
       setProductTypeState(type);
     } catch (e) {
       Alert.alert(
@@ -318,14 +336,21 @@ export default function FeaturesScreen(): JSX.Element {
     }
   }
 
-  async function onSave(values: ProductFeatureInput) {
+  async function onSave(values: ProductFeatureInput, status: ClaimStatus) {
     if (!profile) return;
     setSheetBusy(true);
     try {
       if (sheetMode === 'add') {
-        await addManualProductFeature(profile.company_id, values);
+        // Manual claims land approved; the toggle can park one as rejected.
+        const row = await addManualProductFeature(profile.company_id, values);
+        if (status === 'rejected') await rejectProductFeature(row.id);
       } else if (sheetMode === 'edit' && editing) {
         await updateProductFeature(editing.id, values);
+        if (status === 'approved' && !editing.approved) {
+          await approveProductFeature(editing.id);
+        } else if (status === 'rejected' && !editing.rejected) {
+          await rejectProductFeature(editing.id);
+        }
       }
       setSheetMode(null);
       setEditing(null);
@@ -376,47 +401,9 @@ export default function FeaturesScreen(): JSX.Element {
     void run();
   }
 
-  function renderRow(row: ProductFeature) {
-    const busy = busyId === row.id;
-    return (
-      <View key={row.id} style={[styles.card, shadow.shadowCard]}>
-        <Text style={styles.name}>{row.name}</Text>
-        <Text style={styles.what}>{row.what_it_does}</Text>
-        <Text style={styles.claim}>{`“${row.claim}”`}</Text>
-        <Text style={styles.meta}>{sourceMeta(row)}</Text>
-        <View style={styles.actions}>
-          {!row.approved ? (
-            <Button
-              size="sm"
-              variant="approve"
-              disabled={busy}
-              onPress={() => void onApprove(row.id)}
-            >
-              Approve
-            </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onPress={() => {
-              setEditing(row);
-              setSheetMode('edit');
-            }}
-          >
-            Edit
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onPress={() => onReject(row)}
-          >
-            Reject
-          </Button>
-        </View>
-      </View>
-    );
+  function openEdit(row: ProductFeature) {
+    setEditing(row);
+    setSheetMode('edit');
   }
 
   const progressLabel =
@@ -425,6 +412,8 @@ export default function FeaturesScreen(): JSX.Element {
       : progress?.kind === 'analyze'
         ? 'Analyzing…'
         : null;
+
+  const nothingYet = rows.length === 0 && rejectedRows.length === 0;
 
   return (
     <View style={styles.screen}>
@@ -447,13 +436,113 @@ export default function FeaturesScreen(): JSX.Element {
         }
       >
         <Text style={styles.subtitle}>
-          Approved claims are the only product points briefs may use. The model
-          phrases them; it does not invent capability.
+          Approved claims are the only product points the plug can trace to.
+          The model phrases them; it does not invent capability.
         </Text>
 
-        <Text style={[styles.label, styles.typeLabel]}>Product type</Text>
+        <Button
+          size="md"
+          variant="primary"
+          block
+          icon="plus"
+          disabled={running}
+          onPress={() => {
+            setEditing(null);
+            setSheetMode('add');
+          }}
+        >
+          Add a claim
+        </Button>
+
+        {loading ? (
+          <View style={styles.rows}>
+            <SkeletonCard height={120} radius={radiusAdmin.lg} />
+            <SkeletonCard height={120} radius={radiusAdmin.lg} />
+          </View>
+        ) : nothingYet ? (
+          <View style={styles.emptyBlock}>
+            <Text style={styles.emptyTitle}>No claims yet</Text>
+            <Text style={styles.emptyBody}>
+              A claim is one concrete thing a creator can say about the
+              product on camera. Name it, say what it does, then write the
+              line.
+            </Text>
+            <View style={styles.example}>
+              <Text style={styles.exampleLabel}>Example</Text>
+              <Text style={styles.exampleName}>Bulk coach emails</Text>
+              <Text style={styles.exampleWhat}>
+                Sends a separate personalized email to every coach on the
+                user's school list in one action
+              </Text>
+              <Text style={styles.exampleClaim}>
+                “You hit send once and it goes out to fifty coaches, all
+                different emails”
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <>
+            <View
+              onLayout={(e) => {
+                pendingY.current = e.nativeEvent.layout.y;
+              }}
+            >
+              {pending.length > 0 && (
+                <>
+                  <SectionLabel style={styles.section}>Pending</SectionLabel>
+                  <View style={styles.rows}>
+                    {pending.map((row) => (
+                      <ClaimCard
+                        key={row.id}
+                        row={row}
+                        state="pending"
+                        busy={busyId === row.id}
+                        onApprove={() => void onApprove(row.id)}
+                        onEdit={() => openEdit(row)}
+                        onReject={() => onReject(row)}
+                      />
+                    ))}
+                  </View>
+                </>
+              )}
+            </View>
+
+            <SectionLabel style={styles.section}>Approved</SectionLabel>
+            {approved.length === 0 ? (
+              <Text style={styles.empty}>None approved yet.</Text>
+            ) : (
+              <View style={styles.rows}>
+                {approved.map((row) => (
+                  <ClaimCard
+                    key={row.id}
+                    row={row}
+                    state="approved"
+                    busy={busyId === row.id}
+                    onEdit={() => openEdit(row)}
+                    onReject={() => onReject(row)}
+                  />
+                ))}
+              </View>
+            )}
+
+            {rejectedRows.length > 0 && (
+              <>
+                <SectionLabel style={styles.section}>Rejected</SectionLabel>
+                <View style={styles.rows}>
+                  {rejectedRows.map((row) => (
+                    <ClaimCard key={row.id} row={row} state="rejected" />
+                  ))}
+                </View>
+              </>
+            )}
+          </>
+        )}
+
+        <SectionLabel style={styles.section}>Import from your product</SectionLabel>
+
+        <Text style={styles.label}>Product type</Text>
         <Segmented
-          options={[...PRODUCT_TYPE_OPTIONS]}
+          options={PRODUCT_TYPE_OPTIONS}
           value={productType === 'physical' ? 1 : 0}
           onChange={onProductTypeChange}
         />
@@ -507,94 +596,40 @@ export default function FeaturesScreen(): JSX.Element {
             {`Retry analyze (${heldPaths.length} uploaded)`}
           </Button>
         ) : null}
-
-        <Button
-          size="md"
-          variant="primary"
-          block
-          disabled={running}
-          onPress={() => {
-            setEditing(null);
-            setSheetMode('add');
-          }}
-          style={styles.addBtn}
-        >
-          Add feature
-        </Button>
-
-        {loading ? (
-          <Text style={styles.empty}>Loading…</Text>
-        ) : rows.length === 0 ? (
-          <View style={styles.emptyBlock}>
-            <Text style={styles.emptyTitle}>No features yet</Text>
-            <Text style={styles.emptyBody}>
-              A feature is one concrete thing a creator can say about the
-              product on camera. Name it, say what it does, then write the
-              line.
-            </Text>
-            <View style={styles.example}>
-              <Text style={styles.exampleLabel}>Example</Text>
-              <Text style={styles.name}>Bulk coach emails</Text>
-              <Text style={styles.what}>
-                Sends a separate personalized email to every coach on the
-                user's school list in one action
-              </Text>
-              <Text style={styles.claim}>
-                “You hit send once and it goes out to fifty coaches, all
-                different emails”
-              </Text>
-            </View>
-          </View>
-        ) : (
-          <>
-            <View
-              onLayout={(e) => {
-                pendingY.current = e.nativeEvent.layout.y;
-              }}
-            >
-              {pending.length > 0 ? (
-                <>
-                  <Text style={styles.section}>Pending</Text>
-                  {pending.map(renderRow)}
-                </>
-              ) : (
-                <Text style={styles.section}>Pending</Text>
-              )}
-            </View>
-            <Text style={styles.section}>Approved</Text>
-            {approved.length === 0 ? (
-              <Text style={styles.empty}>None approved yet.</Text>
-            ) : (
-              approved.map(renderRow)
-            )}
-          </>
-        )}
       </ScrollView>
 
       <FeatureEditSheet
         visible={sheetMode !== null}
         mode={sheetMode === 'edit' ? 'edit' : 'add'}
         initial={sheetInitial}
+        initialStatus={editing !== null && editing.rejected ? 'rejected' : 'approved'}
         busy={sheetBusy}
         onClose={() => {
           if (sheetBusy) return;
           setSheetMode(null);
           setEditing(null);
         }}
-        onSave={(values) => void onSave(values)}
+        onSave={(values, status) => void onSave(values, status)}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, paddingTop: 8, gap: 10 },
+  screen: {
+    flex: 1,
+    backgroundColor: color.offWhite,
+  },
+  content: {
+    paddingHorizontal: space.gutterAdmin,
+    paddingTop: 12,
+    gap: 10,
+  },
   subtitle: {
     fontSize: type.size.bodySm,
     fontWeight: '600',
     color: color.slate500,
-    lineHeight: 21,
+    lineHeight: type.size.bodySm * type.leading.body,
     marginBottom: 4,
   },
   label: {
@@ -603,13 +638,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: color.slate500,
   },
-  typeLabel: { marginTop: 0, marginBottom: 8 },
-  uploadBtn: { marginTop: 12 },
-  urlRing: { borderRadius: radius.sm },
+  uploadBtn: {
+    marginTop: 8,
+  },
+  urlRing: {
+    borderRadius: radiusAdmin.md,
+  },
   urlField: {
     borderWidth: borderWidth.field,
     borderColor: color.lineStrong,
-    borderRadius: radius.sm,
+    borderRadius: radiusAdmin.md,
     paddingVertical: 12,
     paddingHorizontal: 14,
     fontSize: type.size.body,
@@ -623,63 +661,22 @@ const styles = StyleSheet.create({
     color: color.ink,
     paddingVertical: 4,
   },
-  addBtn: { marginBottom: 8, marginTop: 4 },
   section: {
-    marginTop: 12,
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
+    marginTop: 18,
+    marginBottom: 8,
   },
-  card: {
-    backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 16,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    gap: 6,
-  },
-  name: {
-    fontSize: type.size.body,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  what: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-    lineHeight: 20,
-  },
-  claim: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.ink,
-    lineHeight: 20,
-    fontStyle: 'italic',
-  },
-  meta: {
-    marginTop: 2,
-    fontSize: type.size.label,
-    fontWeight: '600',
-    color: color.slate400,
-  },
-  actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
+  rows: {
+    gap: 10,
   },
   empty: {
     fontSize: type.size.bodySm,
     color: color.slate500,
     fontWeight: '600',
-    paddingVertical: 8,
   },
   emptyBlock: {
     marginTop: 8,
     padding: 16,
-    borderRadius: radius.md,
+    borderRadius: radiusAdmin.lg,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
     backgroundColor: color.white,
@@ -687,28 +684,47 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: type.size.body,
-    fontWeight: '800',
+    fontWeight: '700',
+    letterSpacing: type.tracking.title,
     color: color.ink,
   },
   emptyBody: {
     fontSize: type.size.bodySm,
     fontWeight: '600',
     color: color.slate500,
-    lineHeight: 21,
+    lineHeight: type.size.bodySm * type.leading.body,
   },
   example: {
     marginTop: 4,
     padding: 12,
-    borderRadius: radius.sm,
+    borderRadius: radiusAdmin.md,
     backgroundColor: color.fillQuiet,
     gap: 4,
   },
   exampleLabel: {
     fontSize: type.size.label,
-    fontWeight: '800',
+    fontWeight: '700',
     color: color.slate400,
     letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
     marginBottom: 4,
+  },
+  exampleName: {
+    fontSize: type.size.body,
+    fontWeight: '700',
+    color: color.ink,
+  },
+  exampleWhat: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.slate500,
+    lineHeight: type.size.bodySm * type.leading.snug,
+  },
+  exampleClaim: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.ink,
+    lineHeight: type.size.bodySm * type.leading.snug,
+    fontStyle: 'italic',
   },
 });

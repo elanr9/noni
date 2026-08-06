@@ -2,22 +2,29 @@ import { useCallback, useState } from 'react';
 import {
   Alert,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  AdminHeader,
+  AdminScreen,
+  SectionLabel,
+  SkeletonCard,
+} from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
+import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
 import {
+  listBrandDocs,
   listCreatorSocialStatus,
+  listProductFeatures,
   type CreatorSocialStatus,
 } from '../../../lib/admin-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
+import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
 
 function connectedSummary(accounts: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -26,11 +33,42 @@ function connectedSummary(accounts: Record<string, unknown>): string {
   return parts.length > 0 ? parts.join(' · ') : 'Not connected';
 }
 
+function CompanyRow({
+  icon,
+  title,
+  value,
+  onPress,
+}: {
+  icon: IconName;
+  title: string;
+  value: string;
+  onPress?: () => void;
+}) {
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      disabled={onPress === undefined}
+      onPress={onPress}
+      style={[styles.row, shadow.shadowCard]}
+    >
+      <View style={styles.rowIcon}>
+        <Icon name={icon} size={16} color={color.blue600} />
+      </View>
+      <Text style={styles.rowTitle}>{title}</Text>
+      <Text style={styles.rowValue}>{value}</Text>
+      {onPress !== undefined && (
+        <Icon name="chevron-right" size={16} color={color.slate300} />
+      )}
+    </PressableScale>
+  );
+}
+
 export default function SettingsScreen() {
   const { profile, signOut } = useAuth();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [members, setMembers] = useState<CreatorSocialStatus[]>([]);
+  const [docCount, setDocCount] = useState<number | null>(null);
+  const [approvedCount, setApprovedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -46,6 +84,13 @@ export default function SettingsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+    // Row counts arrive after the roster; rows fall back to a quiet value.
+    void listBrandDocs()
+      .then((docs) => setDocCount(docs.filter((d) => d.content.trim().length > 0).length))
+      .catch(() => undefined);
+    void listProductFeatures()
+      .then((rows) => setApprovedCount(rows.filter((r) => r.approved).length))
+      .catch(() => undefined);
   }, []);
 
   useFocusEffect(
@@ -54,14 +99,15 @@ export default function SettingsScreen() {
     }, [load]),
   );
 
+  function onInvite() {
+    Alert.alert(
+      'Invite a creator',
+      'Creators sign up in the Noni app and land on your roster once their account is approved.',
+    );
+  }
+
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + 6, paddingBottom: 116 },
-      ]}
-      showsVerticalScrollIndicator={false}
+    <AdminScreen
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -72,136 +118,143 @@ export default function SettingsScreen() {
         />
       }
     >
-      <Text style={styles.h1}>Settings</Text>
-      <Text style={styles.subtitle}>
-        Creators, brand brain, and account.
-      </Text>
+      <AdminHeader title="Settings" />
 
-      <Text style={styles.section}>Creator socials</Text>
-      <Text style={styles.body}>
-        Creators connect their own TikTok and Instagram. Approved content posts to
-        those accounts.
-      </Text>
-
-      {loading ? (
-        <Text style={styles.empty}>Loading…</Text>
-      ) : members.length === 0 ? (
-        <Text style={styles.empty}>No creators yet.</Text>
-      ) : (
-        members.map((m) => (
-          <View key={m.id} style={[styles.card, shadow.shadowCard]}>
-            <Text style={styles.name}>{m.full_name ?? 'Creator'}</Text>
-            <Text style={styles.meta}>{connectedSummary(m.social_accounts)}</Text>
-          </View>
-        ))
-      )}
-
-      <Text style={styles.section}>Brand</Text>
-      <PressableScale
-        accessibilityRole="button"
-        onPress={() => router.push('/(admin)/brain')}
-        style={[styles.card, shadow.shadowCard]}
-      >
-        <Text style={styles.name}>Brand Brain</Text>
-        <Text style={styles.meta}>
-          Product truth, voice, audience, and source accounts.
-        </Text>
-      </PressableScale>
-      <PressableScale
-        accessibilityRole="button"
-        onPress={() => router.push('/(admin)/features')}
-        style={[styles.card, shadow.shadowCard]}
-      >
-        <Text style={styles.name}>Features</Text>
-        <Text style={styles.meta}>
-          Approved claims briefs may use. Add, edit, or reject.
-        </Text>
-      </PressableScale>
-      <PressableScale
-        accessibilityRole="button"
-        onPress={() => router.push('/(admin)/account-template')}
-        style={[styles.card, shadow.shadowCard]}
-      >
-        <Text style={styles.name}>Account template</Text>
-        <Text style={styles.meta}>
-          Instagram and TikTok bios, Instagram link, and example account.
-        </Text>
-      </PressableScale>
-
-      <Text style={styles.section}>Account</Text>
-      <View style={[styles.card, shadow.shadowCard]}>
-        <Text style={styles.name}>{profile?.full_name ?? 'Admin'}</Text>
-        <Text style={styles.meta}>Signed in as admin</Text>
+      <View style={styles.rosterHeader}>
+        <SectionLabel>Roster</SectionLabel>
+        <Button size="sm" variant="tint" icon="plus" onPress={onInvite}>
+          Invite
+        </Button>
       </View>
 
-      <Button
-        size="md"
-        variant="outline"
-        block
-        icon="log-out"
-        onPress={() => void signOut()}
-        style={styles.signOut}
-      >
-        Sign out
-      </Button>
-    </ScrollView>
+      <View style={styles.rows}>
+        {loading ? (
+          <>
+            <SkeletonCard height={56} radius={radiusAdmin.lg} />
+            <SkeletonCard height={56} radius={radiusAdmin.lg} />
+          </>
+        ) : members.length === 0 ? (
+          <Text style={styles.empty}>
+            No creators yet. Invite the first one and their account approval
+            starts here.
+          </Text>
+        ) : (
+          members.map((m) => (
+            <View key={m.id} style={[styles.row, shadow.shadowCard]}>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {m.full_name ?? 'Creator'}
+              </Text>
+              <Text style={styles.rowValue}>
+                {connectedSummary(m.social_accounts)}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+
+      <SectionLabel style={styles.section}>Company</SectionLabel>
+      <View style={styles.rows}>
+        <CompanyRow
+          icon="circle-user-round"
+          title="Account template"
+          value=""
+          onPress={() => router.push('/(admin)/account-template')}
+        />
+        <CompanyRow
+          icon="sparkles"
+          title="Brand Brain"
+          value={docCount !== null ? `${docCount} doc${docCount === 1 ? '' : 's'}` : ''}
+          onPress={() => router.push('/(admin)/brain')}
+        />
+        <CompanyRow
+          icon="zap"
+          title="Features"
+          value={approvedCount !== null ? `${approvedCount} approved` : ''}
+          onPress={() => router.push('/(admin)/features')}
+        />
+        <CompanyRow icon="clock" title="Publish time" value="Sun 8PM EST" />
+      </View>
+
+      <SectionLabel style={styles.section}>Account</SectionLabel>
+      <View style={styles.rows}>
+        <View style={[styles.row, shadow.shadowCard]}>
+          <Text style={styles.rowTitle}>{profile?.full_name ?? 'Admin'}</Text>
+          <Text style={styles.rowValue}>Signed in as admin</Text>
+        </View>
+
+        <PressableScale
+          accessibilityRole="button"
+          onPress={() => void signOut()}
+          style={[styles.row, styles.dangerRow]}
+        >
+          <Icon name="log-out" size={16} color={color.danger} />
+          <Text style={styles.dangerText}>Sign out</Text>
+        </PressableScale>
+      </View>
+    </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, gap: 10 },
-  h1: {
-    fontSize: type.size.titleXl,
-    lineHeight: type.size.titleXl * type.leading.title,
-    fontWeight: '800',
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-    marginTop: 10,
-  },
-  subtitle: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-    marginBottom: 8,
+  rosterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    marginBottom: 10,
   },
   section: {
-    marginTop: 12,
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
+    marginTop: 24,
+    marginBottom: 10,
   },
-  body: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-    lineHeight: 21,
-    marginBottom: 4,
+  rows: {
+    gap: 10,
   },
   empty: {
     fontSize: type.size.bodySm,
     color: color.slate500,
     fontWeight: '600',
+    lineHeight: type.size.bodySm * type.leading.body,
   },
-  card: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 16,
+    borderRadius: radiusAdmin.lg,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
-    gap: 4,
   },
-  name: {
-    fontSize: type.size.body,
+  rowIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowTitle: {
+    flex: 1,
+    fontSize: type.size.bodySm,
     fontWeight: '700',
     color: color.ink,
   },
-  meta: {
-    fontSize: type.size.meta,
+  rowValue: {
+    fontSize: type.size.chip,
     fontWeight: '600',
     color: color.slate500,
   },
-  signOut: { marginTop: 16 },
+  dangerRow: {
+    backgroundColor: color.dangerSoft,
+    borderColor: color.dangerSoft,
+  },
+  dangerText: {
+    flex: 1,
+    fontSize: type.size.bodySm,
+    fontWeight: '700',
+    color: color.danger,
+  },
 });

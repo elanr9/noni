@@ -1,17 +1,29 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, {
+  Circle,
+  ClipPath,
+  Defs,
+  G,
+  Line,
+  LinearGradient,
+  Path,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 
-import type { CompanyDay, SeriesMetricKey } from '../../lib/analytics-api';
+import { SERIES_METRICS, type CompanyDay, type SeriesMetricKey } from '../../lib/analytics-api';
 import { formatMetric } from '../../lib/analytics';
 import { formatCents } from '../../lib/wallet-api';
-import { color, radius, type } from '../../theme/tokens';
+import { color, motion, radiusAdmin, type } from '../../theme/tokens';
 
 const CHART_HEIGHT = 220;
 const LINE_TOP = 12;
 const LINE_BOTTOM = 64;
 const BAR_BAND = 40;
 const BAR_BOTTOM = 18;
+
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 export interface TimeSeriesChartProps {
   days: CompanyDay[];
@@ -27,8 +39,9 @@ function shortDay(day: string): string {
 }
 
 /**
- * The primary analytics view: the selected metric as a line, posting activity
- * as bars along the bottom of the same axis. Tap a day to inspect it.
+ * Admin handoff §11 — the one chart: posting activity as blue-200 bars and
+ * the metric as a blue-500 2.5px line with a 22%→0 area gradient, one axis,
+ * last point dotted, 420ms draw. Tap a day to inspect it.
  */
 export function TimeSeriesChart({
   days,
@@ -38,6 +51,21 @@ export function TimeSeriesChart({
   onSelectDay,
 }: TimeSeriesChartProps) {
   const [width, setWidth] = useState(0);
+  const draw = useRef(new Animated.Value(0)).current;
+
+  const metricLabel =
+    SERIES_METRICS.find((m) => m.key === metric)?.label ?? 'Metric';
+
+  useEffect(() => {
+    if (width === 0) return;
+    draw.setValue(0);
+    Animated.timing(draw, {
+      toValue: 1,
+      duration: motion.slow,
+      easing: motion.easeOut,
+      useNativeDriver: false,
+    }).start();
+  }, [width, metric, days, draw]);
 
   const values = days.map((d) => d.metrics[metric]);
   const maxValue = Math.max(1, ...values);
@@ -59,6 +87,11 @@ export function TimeSeriesChart({
     `${linePath} L ${xFor(n - 1).toFixed(1)} ${CHART_HEIGHT - LINE_BOTTOM} ` +
     `L 0 ${CHART_HEIGHT - LINE_BOTTOM} Z`;
 
+  const drawWidth = draw.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, Math.max(1, width)],
+  });
+
   const formatValue = (v: number): string =>
     money ? formatCents(v) : formatMetric(v);
 
@@ -66,7 +99,6 @@ export function TimeSeriesChart({
     <View>
       <View style={styles.axisRow}>
         <Text style={styles.axisLabel}>{formatValue(maxValue)}</Text>
-        <Text style={styles.axisLabel}>posts / day</Text>
       </View>
       <View
         style={styles.canvas}
@@ -74,6 +106,17 @@ export function TimeSeriesChart({
       >
         {width > 0 && n > 0 ? (
           <Svg width={width} height={CHART_HEIGHT}>
+            <Defs>
+              {/* 22% -> 0 area gradient under the metric line. */}
+              <LinearGradient id="noniSeriesArea" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={color.blue500} stopOpacity="0.22" />
+                <Stop offset="1" stopColor={color.blue500} stopOpacity="0" />
+              </LinearGradient>
+              <ClipPath id="noniSeriesDraw">
+                <AnimatedRect x={0} y={0} width={drawWidth} height={CHART_HEIGHT} />
+              </ClipPath>
+            </Defs>
+
             <Line
               x1={0}
               y1={CHART_HEIGHT - LINE_BOTTOM}
@@ -82,6 +125,7 @@ export function TimeSeriesChart({
               stroke={color.line}
               strokeWidth={1}
             />
+
             {days.map((d, i) =>
               d.posted > 0 ? (
                 <Rect
@@ -95,12 +139,24 @@ export function TimeSeriesChart({
                   }
                   height={(d.posted / maxPosted) * BAR_BAND}
                   rx={Math.min(3, slot * 0.2)}
-                  fill={i === selectedIndex ? color.accent : color.accentTint}
+                  fill={i === selectedIndex ? color.blue500 : color.blue200}
                 />
               ) : null,
             )}
-            <Path d={areaPath} fill={color.blue100} />
-            <Path d={linePath} stroke={color.accent} strokeWidth={2.5} fill="none" />
+
+            <G clipPath="url(#noniSeriesDraw)">
+              <Path d={areaPath} fill="url(#noniSeriesArea)" />
+              <Path d={linePath} stroke={color.blue500} strokeWidth={2.5} fill="none" />
+              <Circle
+                cx={xFor(n - 1)}
+                cy={yFor(values[n - 1])}
+                r={4}
+                fill={color.blue500}
+                stroke={color.white}
+                strokeWidth={2}
+              />
+            </G>
+
             {selectedIndex !== null ? (
               <>
                 <Line
@@ -116,7 +172,7 @@ export function TimeSeriesChart({
                   cx={xFor(selectedIndex)}
                   cy={yFor(values[selectedIndex])}
                   r={5}
-                  fill={color.accent}
+                  fill={color.blue500}
                   stroke={color.white}
                   strokeWidth={2}
                 />
@@ -143,6 +199,18 @@ export function TimeSeriesChart({
           {n > 0 ? shortDay(days[n - 1].day) : ''}
         </Text>
       </View>
+
+      {/* Legend names both series. */}
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendLine, { backgroundColor: color.blue500 }]} />
+          <Text style={styles.legendText}>{metricLabel}</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendBar, { backgroundColor: color.blue200 }]} />
+          <Text style={styles.legendText}>Posts per day</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -150,7 +218,7 @@ export function TimeSeriesChart({
 const styles = StyleSheet.create({
   canvas: {
     height: CHART_HEIGHT,
-    borderRadius: radius.md,
+    borderRadius: radiusAdmin.md,
     backgroundColor: color.white,
   },
   axisRow: {
@@ -164,5 +232,30 @@ const styles = StyleSheet.create({
     color: color.slate400,
     letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
+  },
+  legend: {
+    flexDirection: 'row',
+    gap: 16,
+    paddingTop: 6,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendLine: {
+    width: 14,
+    height: 2.5,
+    borderRadius: radiusAdmin.pill,
+  },
+  legendBar: {
+    width: 8,
+    height: 10,
+    borderRadius: 2,
+  },
+  legendText: {
+    fontSize: type.size.micro11,
+    fontWeight: '600',
+    color: color.slate500,
   },
 });

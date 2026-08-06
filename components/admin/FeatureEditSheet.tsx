@@ -2,22 +2,40 @@ import { useEffect, useState, type JSX } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { ProductFeatureInput } from '../../lib/admin-api';
-import { borderWidth, color, radius, ringFocus, type } from '../../theme/tokens';
+import { borderWidth, color, radiusAdmin, ringFocus, type } from '../../theme/tokens';
+import { Segmented, Sheet } from './shared';
 import { Button } from '../ui/Button';
-import { SheetShell } from '../ui/SheetShell';
 
-export function FeatureEditSheet(props: {
+export type ClaimStatus = 'approved' | 'rejected';
+
+export interface FeatureEditSheetProps {
   visible: boolean;
   mode: 'add' | 'edit';
   initial: ProductFeatureInput;
+  initialStatus: ClaimStatus;
   busy?: boolean;
   onClose: () => void;
-  onSave: (values: ProductFeatureInput) => void;
-}): JSX.Element {
-  const { visible, mode, initial, busy = false, onClose, onSave } = props;
+  onSave: (values: ProductFeatureInput, status: ClaimStatus) => void;
+}
+
+/**
+ * Admin handoff §11 — Add a claim: name, body and an Approved / Rejected
+ * toggle. The claim body stays two fields (what it does + the on-camera
+ * line) because that is the data shape briefs trace to.
+ */
+export function FeatureEditSheet({
+  visible,
+  mode,
+  initial,
+  initialStatus,
+  busy = false,
+  onClose,
+  onSave,
+}: FeatureEditSheetProps): JSX.Element {
   const [name, setName] = useState(initial.name);
   const [whatItDoes, setWhatItDoes] = useState(initial.what_it_does);
   const [claim, setClaim] = useState(initial.claim);
+  const [status, setStatus] = useState<ClaimStatus>(initialStatus);
   const [focused, setFocused] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,8 +43,9 @@ export function FeatureEditSheet(props: {
     setName(initial.name);
     setWhatItDoes(initial.what_it_does);
     setClaim(initial.claim);
+    setStatus(initialStatus);
     setFocused(null);
-  }, [visible, initial]);
+  }, [visible, initial, initialStatus]);
 
   const canSave =
     name.trim().length > 0 &&
@@ -35,7 +54,7 @@ export function FeatureEditSheet(props: {
     !busy;
 
   return (
-    <SheetShell
+    <Sheet
       visible={visible}
       onClose={onClose}
       pinnedTop={100}
@@ -46,18 +65,21 @@ export function FeatureEditSheet(props: {
           block
           disabled={!canSave}
           onPress={() =>
-            onSave({
-              name: name.trim(),
-              what_it_does: whatItDoes.trim(),
-              claim: claim.trim(),
-            })
+            onSave(
+              {
+                name: name.trim(),
+                what_it_does: whatItDoes.trim(),
+                claim: claim.trim(),
+              },
+              status,
+            )
           }
         >
-          {busy ? 'Saving…' : mode === 'add' ? 'Add feature' : 'Save'}
+          {busy ? 'Saving…' : mode === 'add' ? 'Add claim' : 'Save'}
         </Button>
       }
     >
-      <Text style={styles.h2}>{mode === 'add' ? 'Add feature' : 'Edit feature'}</Text>
+      <Text style={styles.h2}>{mode === 'add' ? 'Add a claim' : 'Edit claim'}</Text>
       <Text style={styles.subtitle}>
         Name it, say what it does, then write the line a creator says on camera.
       </Text>
@@ -102,28 +124,42 @@ export function FeatureEditSheet(props: {
           style={[styles.field, styles.multiline]}
         />
       </View>
-    </SheetShell>
+
+      <Text style={styles.label}>Status</Text>
+      <Segmented
+        options={[{ label: 'Approved' }, { label: 'Rejected' }]}
+        value={status === 'approved' ? 0 : 1}
+        onChange={(index) => setStatus(index === 0 ? 'approved' : 'rejected')}
+      />
+      <Text style={styles.statusHint}>
+        {status === 'approved'
+          ? 'Briefs can trace their plug to this claim.'
+          : 'Stays on the list so rescans skip it. Creators never say it.'}
+      </Text>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
   h2: {
     fontSize: type.size.titleSm,
-    fontWeight: '800',
+    fontWeight: '700',
     color: color.ink,
     letterSpacing: type.tracking.title,
   },
   subtitle: {
     marginTop: 4,
-    marginBottom: 16,
+    marginBottom: 12,
     fontSize: type.size.bodySm,
+    fontWeight: '600',
     color: color.slate400,
+    lineHeight: type.size.bodySm * type.leading.snug,
   },
   label: {
-    marginTop: 12,
+    marginTop: 14,
     marginBottom: 6,
     fontSize: type.size.label,
-    fontWeight: '800',
+    fontWeight: '700',
     color: color.slate400,
     letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
@@ -131,7 +167,7 @@ const styles = StyleSheet.create({
   fieldRing: {
     borderWidth: borderWidth.hair,
     borderColor: color.line,
-    borderRadius: radius.md,
+    borderRadius: radiusAdmin.md,
     backgroundColor: color.white,
   },
   field: {
@@ -144,5 +180,12 @@ const styles = StyleSheet.create({
   multiline: {
     minHeight: 72,
     textAlignVertical: 'top',
+  },
+  statusHint: {
+    marginTop: 8,
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.slate500,
+    lineHeight: type.size.label * type.leading.body,
   },
 });

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,7 +10,10 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { LoadingScreen, Screen, colors } from '../../components/Screen';
+import { SectionLabel, SkeletonCard } from '../../components/admin/shared';
+import { Button } from '../../components/ui/Button';
+import { Icon } from '../../components/ui/Icon';
+import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuth } from '../../lib/auth';
 import {
   addSourceAccount,
@@ -23,13 +25,23 @@ import {
   saveBrandDoc,
   setSourceAccountStatus,
   type BrandDoc,
+  type BrandDocKind,
   type SourceAccount,
   type SourcingTerm,
 } from '../../lib/admin-api';
+import {
+  borderWidth,
+  color,
+  radiusAdmin,
+  shadow,
+  space,
+  type,
+} from '../../theme/tokens';
 
-type BrainDocKind = 'product_truth' | 'audience_niche';
+/** Only Product and Audience have a cleanup path in brand-ingest. */
+type CleanableKind = 'product_truth' | 'audience_niche';
 
-const DOC_TABS: Array<{ kind: BrainDocKind; label: string; hint: string }> = [
+const DOCS: Array<{ kind: BrandDocKind; label: string; hint: string }> = [
   {
     kind: 'product_truth',
     label: 'Product',
@@ -40,14 +52,34 @@ const DOC_TABS: Array<{ kind: BrainDocKind; label: string; hint: string }> = [
     label: 'Audience',
     hint: 'Who the audience is, their pains and dreams, niche boundaries, accounts they follow, their language.',
   },
+  {
+    kind: 'voice',
+    label: 'Voice',
+    hint: 'How posts sound: pacing, phrases the brand leans on, phrases it never says.',
+  },
+  {
+    kind: 'learnings',
+    label: 'Learnings',
+    hint: 'What performed and why. The generator reads this before writing anything new.',
+  },
 ];
+
+function wordCount(content: string): number {
+  const trimmed = content.trim();
+  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+function updatedLabel(doc: BrandDoc | undefined): string {
+  if (!doc?.updated_at) return 'Not written yet';
+  return `Updated ${new Date(doc.updated_at).toLocaleDateString()}`;
+}
 
 export default function BrainScreen() {
   const { profile } = useAuth();
   const [docs, setDocs] = useState<BrandDoc[]>([]);
   const [accounts, setAccounts] = useState<SourceAccount[]>([]);
   const [terms, setTerms] = useState<SourcingTerm[]>([]);
-  const [tab, setTab] = useState<BrainDocKind>('product_truth');
+  const [editingKind, setEditingKind] = useState<BrandDocKind | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,21 +111,23 @@ export default function BrainScreen() {
     }, [load]),
   );
 
-  const activeTab = DOC_TABS.find((t) => t.kind === tab) ?? DOC_TABS[0];
+  const editingDoc = DOCS.find((d) => d.kind === editingKind) ?? null;
   const savedContent = useMemo(
-    () => docs.find((d) => d.kind === tab)?.content ?? '',
-    [docs, tab],
+    () => (editingKind !== null ? (docs.find((d) => d.kind === editingKind)?.content ?? '') : ''),
+    [docs, editingKind],
   );
-  const content = draft[tab] ?? savedContent;
+  const content = editingKind !== null ? (draft[editingKind] ?? savedContent) : '';
   const dirty = content !== savedContent;
+  const canCleanUp =
+    editingKind === 'product_truth' || editingKind === 'audience_niche';
 
   async function save() {
-    if (!profile) return;
+    if (!profile || editingKind === null) return;
     setSaving(true);
     try {
-      await saveBrandDoc(profile.company_id, tab, content);
+      await saveBrandDoc(profile.company_id, editingKind, content);
       await load();
-      setDraft((prev) => ({ ...prev, [tab]: content }));
+      setDraft((prev) => ({ ...prev, [editingKind]: content }));
       Alert.alert('Saved', 'Every future scrape and draft reads this.');
     } catch (e) {
       Alert.alert('Failed', e instanceof Error ? e.message : 'Try again');
@@ -103,14 +137,15 @@ export default function BrainScreen() {
   }
 
   async function cleanUpWithAI() {
+    if (editingKind === null || !canCleanUp) return;
     if (!content.trim()) {
       Alert.alert('Nothing to clean', 'Write the doc first, then clean it up.');
       return;
     }
     setCleaning(true);
     try {
-      const cleaned = await cleanupBrandDoc(tab, content);
-      setDraft((prev) => ({ ...prev, [tab]: cleaned }));
+      const cleaned = await cleanupBrandDoc(editingKind as CleanableKind, content);
+      setDraft((prev) => ({ ...prev, [editingKind]: cleaned }));
     } catch (e) {
       Alert.alert('Failed', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -150,12 +185,78 @@ export default function BrainScreen() {
     }
   }
 
-  if (loading) return <LoadingScreen label="Loading Brand Brain" />;
+  // Editing state: one doc, the editor, Clean up and Save.
+  if (editingDoc !== null && editingKind !== null) {
+    return (
+      <View style={styles.screen}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.editorHead}>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Back to docs"
+              onPress={() => setEditingKind(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.backBtn}
+            >
+              <Icon name="chevron-left" size={20} color={color.ink} />
+            </PressableScale>
+            <View style={styles.editorTitles}>
+              <Text style={styles.editorTitle}>{editingDoc.label}</Text>
+              <Text style={styles.editorMeta}>
+                {`${wordCount(content)} words`}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.hint}>{editingDoc.hint}</Text>
+
+          <TextInput
+            style={styles.editor}
+            multiline
+            value={content}
+            onChangeText={(text) =>
+              setDraft((prev) => ({ ...prev, [editingKind]: text }))
+            }
+            placeholder="Write the doc, then clean it up with AI if you want."
+            placeholderTextColor={color.slate400}
+            textAlignVertical="top"
+          />
+
+          <View style={styles.editorActions}>
+            {canCleanUp && (
+              <Button
+                size="md"
+                variant="outline"
+                icon="sparkles"
+                disabled={cleaning || !content.trim()}
+                onPress={() => void cleanUpWithAI()}
+              >
+                {cleaning ? 'Cleaning…' : 'Clean up'}
+              </Button>
+            )}
+            <Button
+              size="md"
+              variant="primary"
+              disabled={!dirty || saving}
+              onPress={() => void save()}
+              style={styles.saveBtn}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
-    <Screen style={styles.screen}>
+    <View style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -167,58 +268,42 @@ export default function BrainScreen() {
         }
       >
         <Text style={styles.intro}>
-          This is the engine's knowledge of your brand. Anything you write here
-          changes what gets scraped, what passes the gate, and how drafts are
-          written.
+          The doctrine the generator writes against. Anything here changes what
+          gets scraped, what passes the gate, and how drafts are written.
         </Text>
 
-        <View style={styles.tabRow}>
-          {DOC_TABS.map((t) => (
-            <Pressable
-              key={t.kind}
-              style={[styles.tab, tab === t.kind && styles.tabOn]}
-              onPress={() => setTab(t.kind)}
-            >
-              <Text style={[styles.tabText, tab === t.kind && styles.tabTextOn]}>
-                {t.label}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={styles.rows}>
+          {loading ? (
+            DOCS.map((d) => (
+              <SkeletonCard key={d.kind} height={64} radius={radiusAdmin.lg} />
+            ))
+          ) : (
+            DOCS.map((d) => {
+              const doc = docs.find((row) => row.kind === d.kind);
+              const words = wordCount(doc?.content ?? '');
+              return (
+                <PressableScale
+                  key={d.kind}
+                  accessibilityRole="button"
+                  onPress={() => setEditingKind(d.kind)}
+                  style={[styles.docRow, shadow.shadowCard]}
+                >
+                  <View style={styles.docBody}>
+                    <Text style={styles.docTitle}>{d.label}</Text>
+                    <Text style={styles.docMeta}>
+                      {words > 0
+                        ? `${words} words · ${updatedLabel(doc)}`
+                        : updatedLabel(doc)}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={16} color={color.slate300} />
+                </PressableScale>
+              );
+            })
+          )}
         </View>
 
-        <Text style={styles.hint}>{activeTab.hint}</Text>
-
-        <TextInput
-          style={styles.editor}
-          multiline
-          value={content}
-          onChangeText={(text) => setDraft((prev) => ({ ...prev, [tab]: text }))}
-          editable
-          placeholder="Write the doc, then clean it up with AI if you want."
-          placeholderTextColor="#9A9AA3"
-          textAlignVertical="top"
-        />
-
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.secondaryBtn, (cleaning || !content.trim()) && styles.disabled]}
-            disabled={cleaning || !content.trim()}
-            onPress={() => void cleanUpWithAI()}
-          >
-            <Text style={styles.secondaryText}>
-              {cleaning ? 'Cleaning…' : 'Clean up with AI'}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.primaryBtn, (!dirty || saving) && styles.disabled]}
-            disabled={!dirty || saving}
-            onPress={() => void save()}
-          >
-            <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save'}</Text>
-          </Pressable>
-        </View>
-
-        <Text style={styles.sectionTitle}>Source accounts</Text>
+        <SectionLabel style={styles.section}>Source accounts</SectionLabel>
         <Text style={styles.hint}>
           The scraper pulls from these accounts first. Search terms are the
           fallback. Mute anything that pollutes the feed.
@@ -226,36 +311,40 @@ export default function BrainScreen() {
 
         <View style={styles.addRow}>
           <View style={styles.platformToggle}>
-            {(['tiktok', 'instagram'] as const).map((p) => (
-              <Pressable
-                key={p}
-                style={[styles.platformChip, newPlatform === p && styles.tabOn]}
-                onPress={() => setNewPlatform(p)}
-              >
-                <Text
-                  style={[styles.tabText, newPlatform === p && styles.tabTextOn]}
+            {(['tiktok', 'instagram'] as const).map((p) => {
+              const active = newPlatform === p;
+              return (
+                <PressableScale
+                  key={p}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setNewPlatform(p)}
+                  style={[styles.platformChip, active && styles.chipActive]}
                 >
-                  {p === 'tiktok' ? 'TikTok' : 'IG'}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {p === 'tiktok' ? 'TikTok' : 'IG'}
+                  </Text>
+                </PressableScale>
+              );
+            })}
           </View>
           <TextInput
             style={styles.handleInput}
             placeholder="@handle"
-            placeholderTextColor="#9A9AA3"
+            placeholderTextColor={color.slate400}
             autoCapitalize="none"
+            autoCorrect={false}
             value={newHandle}
             onChangeText={setNewHandle}
             onSubmitEditing={() => void addAccount()}
           />
-          <Pressable
-            style={[styles.primaryBtn, newHandle.trim() === '' && styles.disabled]}
+          <Button
+            size="sm"
             disabled={newHandle.trim() === ''}
             onPress={() => void addAccount()}
           >
-            <Text style={styles.primaryText}>Add</Text>
-          </Pressable>
+            Add
+          </Button>
         </View>
 
         {accounts.length === 0 ? (
@@ -265,151 +354,273 @@ export default function BrainScreen() {
             gate.
           </Text>
         ) : (
-          accounts.map((a) => (
-            <View key={a.id} style={styles.accountRow}>
-              <View style={styles.accountInfo}>
-                <Text style={styles.accountHandle}>
-                  @{a.handle}
-                  <Text style={styles.accountMeta}>
-                    {'  '}
-                    {a.platform === 'tiktok' ? 'TikTok' : 'Instagram'}
-                    {a.kind === 'discovered' ? ' · discovered' : ''}
-                    {a.scraped_count > 0
-                      ? ` · ${a.keeper_count}/${a.scraped_count} kept`
-                      : ''}
-                  </Text>
-                </Text>
-              </View>
-              <Pressable style={styles.muteBtn} onPress={() => void toggleAccount(a)}>
-                <Text
-                  style={[
-                    styles.muteText,
-                    a.status === 'muted' && styles.muteTextMuted,
-                  ]}
+          <View style={styles.chipWrap}>
+            {accounts.map((a) => {
+              const muted = a.status === 'muted';
+              return (
+                <PressableScale
+                  key={a.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: !muted }}
+                  onPress={() => void toggleAccount(a)}
+                  style={[styles.accountChip, muted && styles.accountChipMuted]}
                 >
-                  {a.status === 'muted' ? 'Unmute' : 'Mute'}
-                </Text>
-              </Pressable>
-            </View>
-          ))
+                  <Icon
+                    name={a.platform === 'tiktok' ? 'music-2' : 'at-sign'}
+                    size={12}
+                    color={muted ? color.slate400 : color.blue600}
+                  />
+                  <Text
+                    style={[styles.accountChipText, muted && styles.accountChipTextMuted]}
+                    numberOfLines={1}
+                  >
+                    {`@${a.handle}`}
+                  </Text>
+                  {a.scraped_count > 0 && (
+                    <Text style={styles.accountChipCount}>
+                      {`${a.keeper_count}/${a.scraped_count}`}
+                    </Text>
+                  )}
+                </PressableScale>
+              );
+            })}
+          </View>
         )}
 
-        <Text style={styles.sectionTitle}>Saved search terms</Text>
+        <SectionLabel style={styles.section}>Saved search terms</SectionLabel>
         {terms.length === 0 ? (
           <Text style={styles.empty}>
             No saved terms yet. The scraper remembers terms whose results pass
             the gate and reuses the best ones.
           </Text>
         ) : (
-          terms.map((t) => (
-            <View key={`${t.kind}:${t.term}`} style={styles.accountRow}>
-              <Text style={styles.accountHandle}>
-                {t.kind === 'hashtag' ? `#${t.term}` : t.term}
-                <Text style={styles.accountMeta}>
-                  {'  '}
-                  {t.keepers}/{t.scrapes} kept
+          <View style={styles.rows}>
+            {terms.map((t) => (
+              <View key={`${t.kind}:${t.term}`} style={[styles.termRow, shadow.shadowCard]}>
+                <Text style={styles.termText} numberOfLines={1}>
+                  {t.kind === 'hashtag' ? `#${t.term}` : t.term}
                 </Text>
-              </Text>
-              <Pressable style={styles.muteBtn} onPress={() => void dropTerm(t)}>
-                <Text style={styles.muteText}>Remove</Text>
-              </Pressable>
-            </View>
-          ))
+                <Text style={styles.termCount}>{`Used ${t.scrapes} time${t.scrapes === 1 ? '' : 's'} · ${t.keepers} kept`}</Text>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${t.term}`}
+                  onPress={() => void dropTerm(t)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Icon name="x" size={15} color={color.slate400} />
+                </PressableScale>
+              </View>
+            ))}
+          </View>
         )}
       </ScrollView>
-    </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { paddingHorizontal: 0 },
-  content: { paddingHorizontal: 24, paddingBottom: 40, gap: 12 },
-  intro: { fontSize: 14, color: colors.muted, lineHeight: 20 },
-  tabRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  tab: {
+  screen: {
+    flex: 1,
+    backgroundColor: color.offWhite,
+  },
+  content: {
+    paddingHorizontal: space.gutterAdmin,
+    paddingVertical: 14,
+    paddingBottom: 40,
+    gap: 10,
+  },
+  intro: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.slate500,
+    lineHeight: type.size.bodySm * type.leading.body,
+    marginBottom: 4,
+  },
+  rows: {
+    gap: 10,
+  },
+  docRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 64,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
+    backgroundColor: color.white,
+    borderRadius: radiusAdmin.lg,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
   },
-  tabOn: { backgroundColor: colors.ink, borderColor: colors.ink },
-  tabText: { color: colors.ink, fontWeight: '600', fontSize: 14 },
-  tabTextOn: { color: '#fff' },
-  hint: { fontSize: 13, color: colors.muted, lineHeight: 18 },
-  editor: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
-    borderRadius: 14,
-    padding: 14,
-    minHeight: 260,
-    fontSize: 15,
-    lineHeight: 22,
-    color: colors.ink,
+  docBody: {
+    flex: 1,
+    gap: 2,
   },
-  row: { flexDirection: 'row', gap: 10 },
-  primaryBtn: {
-    backgroundColor: colors.ink,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-  },
-  primaryText: { color: '#fff', fontWeight: '700' },
-  secondaryBtn: {
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-  },
-  secondaryText: { color: colors.ink, fontWeight: '600' },
-  sectionTitle: {
-    fontSize: 17,
+  docTitle: {
+    fontSize: type.size.bodySm,
     fontWeight: '700',
-    color: colors.ink,
-    marginTop: 12,
+    color: color.ink,
   },
-  addRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  platformToggle: { flexDirection: 'row', gap: 6 },
+  docMeta: {
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  section: {
+    marginTop: 22,
+  },
+  hint: {
+    fontSize: type.size.chip,
+    fontWeight: '600',
+    color: color.slate500,
+    lineHeight: type.size.chip * type.leading.body,
+  },
+  editorHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  backBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: radiusAdmin.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  editorTitles: {
+    flex: 1,
+    gap: 1,
+  },
+  editorTitle: {
+    fontSize: type.size.cardLg,
+    fontWeight: '700',
+    letterSpacing: type.tracking.title,
+    color: color.ink,
+  },
+  editorMeta: {
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  editor: {
+    backgroundColor: color.white,
+    borderWidth: borderWidth.field,
+    borderColor: color.lineStrong,
+    borderRadius: radiusAdmin.md,
+    padding: 14,
+    minHeight: 280,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.ink,
+  },
+  editorActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  saveBtn: {
+    flex: 1,
+  },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  platformToggle: {
+    flexDirection: 'row',
+    gap: 6,
+  },
   platformChip: {
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  chipActive: {
+    backgroundColor: color.blue500,
+    borderColor: color.blue500,
+  },
+  chipText: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  chipTextActive: {
+    color: color.white,
   },
   handleInput: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
-    borderRadius: 12,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.field,
+    borderColor: color.lineStrong,
+    borderRadius: radiusAdmin.md,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
-    color: colors.ink,
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.ink,
   },
-  accountRow: {
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  accountChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E6E2DA',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
   },
-  accountInfo: { flex: 1 },
-  accountHandle: { fontSize: 15, fontWeight: '600', color: colors.ink },
-  accountMeta: { fontSize: 13, fontWeight: '400', color: colors.muted },
-  muteBtn: { paddingVertical: 4, paddingHorizontal: 6 },
-  muteText: { color: '#C1121F', fontWeight: '600', fontSize: 14 },
-  muteTextMuted: { color: '#2D6A4F' },
-  empty: { fontSize: 14, color: colors.muted, lineHeight: 20 },
-  disabled: { opacity: 0.5 },
+  accountChipMuted: {
+    backgroundColor: color.fillQuiet,
+  },
+  accountChipText: {
+    maxWidth: 160,
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.blue700,
+  },
+  accountChipTextMuted: {
+    color: color.slate400,
+  },
+  accountChipCount: {
+    fontSize: type.size.micro,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  termRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: color.white,
+    borderRadius: radiusAdmin.lg,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  termText: {
+    flex: 1,
+    fontSize: type.size.bodySm,
+    fontWeight: '700',
+    color: color.ink,
+  },
+  termCount: {
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  empty: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.slate500,
+    lineHeight: type.size.bodySm * type.leading.body,
+  },
 });
