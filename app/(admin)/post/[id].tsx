@@ -2,21 +2,16 @@
 // generates on open — AI assist is on demand. Screenshots live on
 // brief_segments keyed by talking_point_index.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
 
+import { CameraRollSheet } from '../../../components/admin/editor/CameraRollSheet';
+import { CaptionStep } from '../../../components/admin/editor/CaptionStep';
 import { CtaCard } from '../../../components/admin/editor/CtaCard';
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
+import { MoveSheet, type MoveSlot } from '../../../components/admin/editor/MoveSheet';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
@@ -61,9 +56,7 @@ import {
   type TalkingPoint,
 } from '../../../lib/briefs-api';
 import { supabase } from '../../../lib/supabase';
-import { color, radius, ringFocus, type } from '../../../theme/tokens';
-
-const CAPTION_MAX = 200;
+import { color, radius, type } from '../../../theme/tokens';
 
 const STEPS = [
   'title',
@@ -182,7 +175,12 @@ export default function PostEditorScreen() {
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
-  const [focused, setFocused] = useState<string | null>(null);
+  /** Which point the camera roll sheet is picking for; null means closed. */
+  const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
+  /** Which point's screenshot the Move sheet is placing; null means closed. */
+  const [moveIndex, setMoveIndex] = useState<number | null>(null);
+  /** The brand account shown on the merged caption preview. */
+  const [accountName, setAccountName] = useState('');
 
   const currentType = useMemo(
     () => postTypes.find((t) => t.id === postTypeId) ?? null,
@@ -212,6 +210,7 @@ export default function PostEditorScreen() {
           claimIds,
           { data: link },
           { data: claims },
+          { data: company },
         ] = await Promise.all([
           getBrief(id),
           listPostTypes(),
@@ -224,6 +223,7 @@ export default function PostEditorScreen() {
             .eq('brief_id', id)
             .maybeSingle(),
           supabase.from('product_features').select('id, name').eq('approved', true),
+          supabase.from('companies').select('slug, name').maybeSingle(),
         ]);
         if (!brief) {
           setMissing(true);
@@ -237,6 +237,9 @@ export default function PostEditorScreen() {
         setClaimNames(
           Object.fromEntries((claims ?? []).map((c) => [c.id, c.name])),
         );
+        // No posting-account handle lives in the data; the slug is the
+        // closest stable stand-in for the merged preview.
+        setAccountName(company?.slug ?? company?.name ?? '');
         setReviewedAt(brief.reviewed_at);
 
         const options = parseHookOptions(brief.hook_options);
@@ -732,30 +735,27 @@ export default function PostEditorScreen() {
       Alert.alert('Save first', 'Could not prepare clips for screenshots.');
       return;
     }
+    setShotPickerIndex(pointIndex);
+  }
+
+  /** Camera roll pick lands here: upload against the point's segment. */
+  async function uploadShotForPoint(pointIndex: number, localUri: string) {
+    if (!profile || !id) return;
     const segment =
-      rows.find(
-        (s) =>
-          (s.kind === 'point' || s.kind === 'slide') &&
-          s.talking_point_index === pointIndex,
-      ) ??
-      rows.find((s) => s.kind === 'hook') ??
-      rows[0];
+      segmentForPointIndex(pointIndex) ??
+      segments.find((s) => s.kind === 'hook') ??
+      segments[0];
     if (!segment) {
       Alert.alert('No clip yet', 'Save the post so clips exist, then attach.');
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-    });
-    if (result.canceled || !result.assets[0]) return;
     setShotBusyIndex(pointIndex);
     try {
       const path = await uploadSegmentScreenshot({
         companyId: profile.company_id,
         briefId: id,
         segmentId: segment.id,
-        localUri: result.assets[0].uri,
+        localUri,
       });
       await updateBriefSegment(segment.id, { screenshot_url: path });
       setSegments((prev) =>
@@ -797,66 +797,73 @@ export default function PostEditorScreen() {
   function moveScreenshotFromPoint(pointIndex: number) {
     const from = segmentForPointIndex(pointIndex);
     if (!from?.screenshot_url) return;
-    const targets = segments.filter((s) => s.id !== from.id);
-    if (targets.length === 0) {
+    if (segments.length <= 1) {
       Alert.alert('Nowhere to move', 'Only one clip exists on this post.');
       return;
     }
-    Alert.alert(
-      'Show screenshot on',
-      'Pick which clip or slide this screenshot pops up on.',
-      [
-        ...targets.map((target) => ({
-          text:
-            target.kind === 'hook'
-              ? 'Hook'
-              : target.kind === 'outro'
-                ? 'Outro'
-                : target.kind === 'slide'
-                  ? `Slide ${(target.talking_point_index ?? 0) + 1}`
-                  : `Point ${(target.talking_point_index ?? 0) + 1}`,
-          onPress: () => {
-            void (async () => {
-              setShotBusyIndex(pointIndex);
-              try {
-                const path = from.screenshot_url;
-                await updateBriefSegment(from.id, { screenshot_url: null });
-                await updateBriefSegment(target.id, { screenshot_url: path });
-                setSegments((prev) =>
-                  prev.map((s) => {
-                    if (s.id === from.id) return { ...s, screenshot_url: null };
-                    if (s.id === target.id) return { ...s, screenshot_url: path };
-                    return s;
-                  }),
-                );
-                if (path) {
-                  setScreenshotUrls((prev) => {
-                    const next = { ...prev };
-                    delete next[from.id];
-                    if (prev[from.id]) next[target.id] = prev[from.id];
-                    return next;
-                  });
-                }
-              } catch (e) {
-                Alert.alert(
-                  'Could not move',
-                  e instanceof Error ? e.message : 'Try again',
-                );
-              } finally {
-                setShotBusyIndex(null);
-              }
-            })();
-          },
-        })),
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
+    setMoveIndex(pointIndex);
+  }
+
+  /**
+   * One screenshot per slot, one slot per screenshot: moving onto an
+   * occupied slot swaps the two. Ordered so no slot ever holds two paths.
+   */
+  async function placeScreenshot(targetId: string) {
+    const pointIndex = moveIndex;
+    setMoveIndex(null);
+    if (pointIndex === null) return;
+    const from = segmentForPointIndex(pointIndex);
+    const target = segments.find((s) => s.id === targetId);
+    if (!from?.screenshot_url || !target || target.id === from.id) return;
+    setShotBusyIndex(pointIndex);
+    try {
+      const fromPath = from.screenshot_url;
+      const targetPath = target.screenshot_url;
+      await updateBriefSegment(from.id, { screenshot_url: null });
+      await updateBriefSegment(target.id, { screenshot_url: fromPath });
+      if (targetPath) {
+        await updateBriefSegment(from.id, { screenshot_url: targetPath });
+      }
+      setSegments((prev) =>
+        prev.map((s) => {
+          if (s.id === from.id) return { ...s, screenshot_url: targetPath ?? null };
+          if (s.id === target.id) return { ...s, screenshot_url: fromPath };
+          return s;
+        }),
+      );
+      setScreenshotUrls((prev) => {
+        const next = { ...prev };
+        const fromUrl = prev[from.id];
+        const targetUrl = prev[target.id];
+        if (targetPath && targetUrl) {
+          next[from.id] = targetUrl;
+        } else {
+          delete next[from.id];
+        }
+        if (fromUrl) next[target.id] = fromUrl;
+        return next;
+      });
+    } catch (e) {
+      Alert.alert(
+        'Could not move',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setShotBusyIndex(null);
+    }
   }
 
   function toggleHashtag(tag: string) {
     setHashtags((prev) => {
       if (prev.includes(tag)) return prev.filter((t) => t !== tag);
       if (prev.length >= 5) return prev;
+      return [...prev, tag];
+    });
+  }
+
+  function addHashtag(tag: string) {
+    setHashtags((prev) => {
+      if (prev.includes(tag) || prev.length >= 5) return prev;
       return [...prev, tag];
     });
   }
@@ -929,6 +936,24 @@ export default function PostEditorScreen() {
   const captionBody = caption.replace(/#\w+/g, ' ').replace(/\s+/g, ' ').trim();
   const currentStepIndex = stepIndex(step);
   const typeLabel = currentType?.label ?? 'Post';
+  const family: 'video' | 'photo_carousel' =
+    currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+
+  // The Move sheet's slot list, in segment order, derived from the type.
+  const moveSlots: MoveSlot[] = segments.map((s) => ({
+    segmentId: s.id,
+    label:
+      s.kind === 'hook'
+        ? 'Hook'
+        : s.kind === 'outro'
+          ? 'Outro'
+          : s.kind === 'slide'
+            ? `Slide ${(s.talking_point_index ?? 0) + 1}`
+            : `Clip ${(s.talking_point_index ?? 0) + 1}`,
+    occupied: s.screenshot_url !== null,
+  }));
+  const movingFrom =
+    moveIndex !== null ? (segmentForPointIndex(moveIndex) ?? null) : null;
 
   // Clip and slide counts are derived from the type, never entered.
   const pointCount =
@@ -1059,14 +1084,11 @@ export default function PostEditorScreen() {
 
         {step === 'points' ? (
           <View style={styles.section}>
-            <Text style={styles.hint}>
-              Tap a card to attach a screenshot. Move picks which clip it
-              pops up on. The CTA card is marked with a star.
-            </Text>
             <PointsEditor
               points={points}
               minPoints={currentType?.min_points ?? null}
               maxPoints={currentType?.max_points ?? null}
+              family={family}
               busyAll={regenBusy === 'talking_points'}
               busyIndex={regenBusy === 'talking_point' ? regenPointIndex : null}
               onChange={setPoints}
@@ -1088,75 +1110,18 @@ export default function PostEditorScreen() {
 
         {step === 'caption' ? (
           <View style={styles.section}>
-            <View style={styles.labelRow}>
-              <Text style={styles.hint}>Caption body</Text>
-              <Button
-                size="sm"
-                variant="tint"
-                disabled={regenBusy !== null}
-                onPress={() => void regenerate('caption')}
-              >
-                {regenBusy === 'caption' ? '…' : 'Regenerate'}
-              </Button>
-            </View>
-            <View style={[styles.fieldRing, focused === 'caption' && ringFocus]}>
-              <TextInput
-                multiline
-                value={captionBody}
-                onChangeText={setCaption}
-                onFocus={() => setFocused('caption')}
-                onBlur={() => setFocused(null)}
-                placeholder="Caption"
-                placeholderTextColor={color.slate400}
-                style={[styles.field, styles.multiline]}
-                autoFocus
-              />
-            </View>
-            <Text
-              style={[
-                styles.helper,
-                captionBody.length > CAPTION_MAX && styles.helperDanger,
-              ]}
-            >
-              {captionBody.length} of {CAPTION_MAX} characters
-            </Text>
-            <Text
-              style={[
-                styles.label,
-                (hashtags.length < 3 || hashtags.length > 5) && styles.labelWarn,
-              ]}
-            >
-              {`Hashtags (${hashtags.length}, pick 3–5)`}
-            </Text>
-            <View style={styles.pillRow}>
-              {bankTags.map((tag) => {
-                const selected = hashtags.includes(tag);
-                return (
-                  <PressableScale
-                    key={tag}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => toggleHashtag(tag)}
-                    style={[styles.pill, selected && styles.pillSelected]}
-                  >
-                    <Text
-                      style={[
-                        styles.pillText,
-                        selected && styles.pillTextSelected,
-                      ]}
-                    >
-                      {tag}
-                    </Text>
-                  </PressableScale>
-                );
-              })}
-            </View>
-            <Text style={styles.hint}>
-              Instagram needs hashtags in the caption. Saved merge:
-            </Text>
-            <View style={styles.previewCard}>
-              <Text style={styles.previewText}>{mergedCaption() || '—'}</Text>
-            </View>
+            <CaptionStep
+              caption={captionBody}
+              onChangeCaption={setCaption}
+              busy={regenBusy === 'caption'}
+              onRegenerate={() => void regenerate('caption')}
+              hashtags={hashtags}
+              bankTags={bankTags}
+              onToggleTag={toggleHashtag}
+              onAddTag={addHashtag}
+              merged={mergedCaption()}
+              accountName={accountName}
+            />
           </View>
         ) : null}
 
@@ -1223,6 +1188,24 @@ export default function PostEditorScreen() {
         onClose={() => setFillVisible(false)}
         onFillFromPhrase={() => void fillFrom({ query: searchPhrase })}
         onFillFromLink={(url, context) => void fillFrom({ url, context })}
+      />
+
+      <CameraRollSheet
+        visible={shotPickerIndex !== null}
+        onClose={() => setShotPickerIndex(null)}
+        onPick={(uri) => {
+          const index = shotPickerIndex;
+          setShotPickerIndex(null);
+          if (index !== null) void uploadShotForPoint(index, uri);
+        }}
+      />
+
+      <MoveSheet
+        visible={moveIndex !== null}
+        slots={moveSlots}
+        currentSegmentId={movingFrom?.id ?? null}
+        onClose={() => setMoveIndex(null)}
+        onPick={(segmentId) => void placeScreenshot(segmentId)}
       />
 
       <LibraryPickerSheet
@@ -1314,69 +1297,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   section: { gap: 10, marginBottom: 8 },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  label: {
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
-  },
-  labelWarn: { color: color.amber },
-  hint: {
-    fontSize: type.size.meta,
-    color: color.slate400,
-    lineHeight: type.size.meta * 1.4,
-  },
-  helper: {
-    fontSize: type.size.meta,
-    color: color.slate400,
-  },
-  helperDanger: { color: color.danger },
-  fieldRing: { borderRadius: radius.sm },
-  field: {
-    borderWidth: 1.5,
-    borderColor: color.lineStrong,
-    borderRadius: radius.sm,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    fontSize: type.size.body,
-    fontWeight: '600',
-    color: color.ink,
-    backgroundColor: color.white,
-  },
-  multiline: { minHeight: 96, textAlignVertical: 'top' },
-  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-  },
-  pillSelected: { backgroundColor: color.blue100 },
-  pillText: {
-    fontSize: type.size.meta,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  pillTextSelected: { color: color.blue700 },
-  previewCard: {
-    padding: 14,
-    borderRadius: radius.sm,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.lineStrong,
-  },
-  previewText: {
-    fontSize: type.size.bodySm,
-    color: color.ink,
-    lineHeight: type.size.bodySm * 1.45,
-  },
   footer: {
     flexDirection: 'row',
     gap: 10,

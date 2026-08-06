@@ -1,10 +1,16 @@
-import type { JSX } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+// Admin handoff §8 step 7 — ScoreDial plus one card per section (ScoreBar,
+// score, note), Apply / Ignore per suggestion, checks listed. AI review
+// never blocks and never silently edits: confirm is one tap at any score,
+// and nothing changes without an explicit Apply.
+import { useEffect, useState, type JSX } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 import type { BriefReviewResult, ReviewCheck } from '../../../lib/briefs-api';
-import { color, radius, type } from '../../../theme/tokens';
+import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
+import { PressableScale } from '../../ui/PressableScale';
 import { SheetShell } from '../../ui/SheetShell';
+import { ScoreBar, ScoreDial } from '../shared';
 
 const SECTION_ORDER: Array<{ key: ReviewCheck['section']; label: string }> = [
   { key: 'hook', label: 'Hook' },
@@ -14,17 +20,16 @@ const SECTION_ORDER: Array<{ key: ReviewCheck['section']; label: string }> = [
   { key: 'overall', label: 'Whole post' },
 ];
 
-function scoreColor(score: number): string {
-  if (score >= 85) return color.green;
-  if (score >= 60) return color.amber;
-  return color.danger;
+function sectionScore(
+  result: BriefReviewResult,
+  key: ReviewCheck['section'],
+): number | null {
+  if (key === 'hook') return result.scores.hook;
+  if (key === 'talking_points') return result.scores.talking_points;
+  if (key === 'cta') return result.scores.cta;
+  return null;
 }
 
-/**
- * The AI review step. Scores per section, every fired check listed with its
- * suggestion when one exists. Review never blocks: Confirm is one tap no
- * matter the score, and nothing is ever applied without an explicit Apply.
- */
 export function ReviewSheet(props: {
   visible: boolean;
   running: boolean;
@@ -58,6 +63,18 @@ export function ReviewSheet(props: {
   } = props;
   const busy = running || confirming;
 
+  // Ignore is a reading aid, not a write: the check still logs on save.
+  const [ignoredIndexes, setIgnoredIndexes] = useState<ReadonlySet<number>>(
+    new Set(),
+  );
+  useEffect(() => {
+    setIgnoredIndexes(new Set());
+  }, [result]);
+
+  function ignore(index: number) {
+    setIgnoredIndexes((prev) => new Set(prev).add(index));
+  }
+
   const body = (
     <>
       {!hideHeader && <Text style={styles.h2}>AI review</Text>}
@@ -67,30 +84,18 @@ export function ReviewSheet(props: {
         <>
           {!hideHeader && (
             <Text style={styles.subtitle}>
-              Suggestions only. Apply what helps, ignore the rest, confirm
-              when it reads right.
+              Suggestions only. Apply what helps, ignore the rest, save when
+              it reads right.
             </Text>
           )}
 
-          <View style={styles.scoreRow}>
-            <View style={styles.overallScore}>
-              <Text style={[styles.overallValue, { color: scoreColor(result.scores.overall) }]}>
-                {result.scores.overall}
-              </Text>
-              <Text style={styles.scoreLabel}>Overall</Text>
-            </View>
-            {(
-              [
-                ['Hook', result.scores.hook],
-                ['Points', result.scores.talking_points],
-                ['Plug', result.scores.cta],
-              ] as const
-            ).map(([label, score]) => (
-              <View key={label} style={styles.sectionScore}>
-                <Text style={[styles.sectionValue, { color: scoreColor(score) }]}>{score}</Text>
-                <Text style={styles.scoreLabel}>{label}</Text>
-              </View>
-            ))}
+          <View style={[styles.dialCard, shadow.shadowCard]}>
+            <ScoreDial score={result.scores.overall} label="Overall" size={76} />
+            <Text style={styles.dialNote}>
+              {result.checks.length === 0
+                ? 'Every check passed. Ship it.'
+                : `${result.checks.length} ${result.checks.length === 1 ? 'check' : 'checks'} fired. The review never blocks saving.`}
+            </Text>
           </View>
 
           {!result.tier3.spoken ? (
@@ -102,57 +107,87 @@ export function ReviewSheet(props: {
             </View>
           ) : null}
 
-          <ScrollView style={styles.checksScroll} showsVerticalScrollIndicator={false}>
-            {result.checks.length === 0 ? (
-              <Text style={styles.cleanText}>Every check passed. Ship it.</Text>
-            ) : (
-              SECTION_ORDER.map(({ key, label }) => {
-                const fired = result.checks
-                  .map((check, index) => ({ check, index }))
-                  .filter(({ check }) => check.section === key);
-                if (fired.length === 0) return null;
-                return (
-                  <View key={key} style={styles.group}>
-                    <Text style={styles.groupLabel}>{label}</Text>
-                    {fired.map(({ check, index }) => {
-                      const applied = appliedIndexes.has(index);
+          {SECTION_ORDER.map(({ key, label }) => {
+            const score = sectionScore(result, key);
+            const fired = result.checks
+              .map((check, index) => ({ check, index }))
+              .filter(({ check }) => check.section === key);
+            if (score === null && fired.length === 0) return null;
+            return (
+              <View key={key} style={[styles.sectionCard, shadow.shadowCard]}>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.sectionLabel}>{label}</Text>
+                  {score !== null && <Text style={styles.sectionScore}>{score}</Text>}
+                </View>
+                {score !== null && (
+                  <ScoreBar score={score} tone={fired.length === 0 ? 'green' : 'amber'} />
+                )}
+                {fired.length === 0 ? (
+                  <Text style={styles.sectionNote}>Reads clean.</Text>
+                ) : (
+                  fired.map(({ check, index }) => {
+                    const applied = appliedIndexes.has(index);
+                    const ignored = ignoredIndexes.has(index);
+                    if (applied) {
                       return (
-                        <View key={`${check.check_id}-${index}`} style={styles.check}>
-                          <View style={styles.checkHead}>
-                            <View
-                              style={[
-                                styles.severityDot,
-                                {
-                                  backgroundColor:
-                                    check.severity === 'fail' ? color.danger : color.amber,
-                                },
-                              ]}
-                            />
-                            <Text style={styles.checkMessage}>{check.message}</Text>
-                          </View>
-                          {check.suggestion ? (
-                            <View style={styles.suggestion}>
-                              <Text style={styles.suggestionText}>
-                                “{check.suggestion.replacement}”
-                              </Text>
-                              <Button
-                                size="sm"
-                                variant={applied ? 'tint' : 'primary'}
-                                disabled={applied || busy}
-                                onPress={() => onApply(index)}
-                              >
-                                {applied ? 'Applied' : 'Apply'}
-                              </Button>
-                            </View>
-                          ) : null}
+                        <View key={`${check.check_id}-${index}`} style={styles.appliedBlock}>
+                          <Text style={styles.appliedText}>
+                            Applied. The section will rescore on save.
+                          </Text>
                         </View>
                       );
-                    })}
-                  </View>
-                );
-              })
-            )}
-          </ScrollView>
+                    }
+                    return (
+                      <View
+                        key={`${check.check_id}-${index}`}
+                        style={[styles.check, ignored && styles.checkIgnored]}
+                      >
+                        <View style={styles.checkHead}>
+                          <View
+                            style={[
+                              styles.severityDot,
+                              {
+                                backgroundColor:
+                                  check.severity === 'fail' ? color.danger : color.amber,
+                              },
+                            ]}
+                          />
+                          <Text style={styles.checkMessage}>{check.message}</Text>
+                          {ignored && <Text style={styles.ignoredTag}>Ignored</Text>}
+                        </View>
+                        {check.suggestion && !ignored ? (
+                          <View style={styles.suggestion}>
+                            <Text style={styles.suggestionText}>
+                              “{check.suggestion.replacement}”
+                            </Text>
+                            <View style={styles.suggestionActions}>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={busy}
+                                onPress={() => onApply(index)}
+                              >
+                                Apply
+                              </Button>
+                              <PressableScale
+                                accessibilityRole="button"
+                                accessibilityLabel="Ignore this suggestion"
+                                disabled={busy}
+                                onPress={() => ignore(index)}
+                                style={styles.ignoreBtn}
+                              >
+                                <Text style={styles.ignoreText}>Ignore</Text>
+                              </PressableScale>
+                            </View>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            );
+          })}
 
           {!hideConfirm && (
             <Button
@@ -162,9 +197,7 @@ export function ReviewSheet(props: {
               disabled={busy}
               onPress={onConfirm}
             >
-              {confirming
-                ? 'Saving…'
-                : (confirmLabel ?? 'Confirm review')}
+              {confirming ? 'Saving…' : (confirmLabel ?? 'Confirm review')}
             </Button>
           )}
         </>
@@ -185,101 +218,91 @@ export function ReviewSheet(props: {
 }
 
 const styles = StyleSheet.create({
-  inlineWrap: { gap: 0, paddingBottom: 8 },
+  inlineWrap: { gap: 12, paddingBottom: 8 },
   h2: {
-    fontSize: type.size.titleSm,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '700',
     color: color.ink,
-    letterSpacing: type.tracking.title,
   },
   subtitle: {
     marginTop: 4,
-    marginBottom: 14,
-    fontSize: type.size.bodySm,
+    fontSize: 14,
+    fontWeight: '400',
     color: color.slate400,
   },
-  scoreRow: {
+  dialCard: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 10,
-    marginBottom: 14,
-  },
-  overallScore: {
-    flex: 1.4,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: radius.md,
-    backgroundColor: color.fillQuiet,
+    gap: 16,
+    padding: 16,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
   },
-  overallValue: {
-    fontSize: 30,
-    fontWeight: '800',
-  },
-  sectionScore: {
+  dialNote: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: radius.md,
-    backgroundColor: color.fillQuiet,
-  },
-  sectionValue: {
-    fontSize: type.size.titleSm,
-    fontWeight: '800',
-  },
-  scoreLabel: {
-    marginTop: 2,
-    fontSize: type.size.meta,
-    fontWeight: '700',
-    color: color.slate400,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 14 * 1.45,
+    color: color.slate500,
   },
   tier3Card: {
     gap: 4,
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: radius.sm,
+    padding: 14,
+    borderRadius: radiusAdmin.md,
     backgroundColor: color.dangerSoft,
   },
   tier3Title: {
-    fontSize: type.size.bodySm,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
     color: color.danger,
   },
   tier3Line: {
-    fontSize: type.size.bodySm,
+    fontSize: 14,
+    fontWeight: '400',
     color: color.ink,
   },
-  checksScroll: {
-    maxHeight: 380,
-    marginBottom: 14,
+  sectionCard: {
+    gap: 10,
+    padding: 16,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
   },
-  cleanText: {
-    paddingVertical: 20,
-    textAlign: 'center',
-    fontSize: type.size.bodySm,
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  sectionLabel: {
+    fontSize: 14,
     fontWeight: '700',
-    color: color.green,
+    color: color.ink,
   },
-  group: {
-    marginBottom: 12,
+  sectionScore: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: color.ink,
   },
-  groupLabel: {
-    marginBottom: 6,
-    fontSize: type.size.label,
-    fontWeight: '800',
+  sectionNote: {
+    fontSize: 13,
+    fontWeight: '400',
     color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
+  },
+  appliedBlock: {
+    padding: 12,
+    borderRadius: radiusAdmin.md,
+    backgroundColor: color.greenSoft,
+  },
+  appliedText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: color.green,
   },
   check: {
     gap: 8,
-    padding: 12,
-    marginBottom: 8,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: color.line,
-    backgroundColor: color.white,
+  },
+  checkIgnored: {
+    opacity: 0.45,
   },
   checkHead: {
     flexDirection: 'row',
@@ -294,18 +317,39 @@ const styles = StyleSheet.create({
   },
   checkMessage: {
     flex: 1,
-    fontSize: type.size.bodySm,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 14 * 1.4,
     color: color.ink,
   },
+  ignoredTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: color.slate400,
+  },
   suggestion: {
-    gap: 8,
-    padding: 10,
-    borderRadius: radius.sm,
+    gap: 10,
+    padding: 12,
+    borderRadius: radiusAdmin.md,
     backgroundColor: color.fillQuiet,
   },
   suggestionText: {
-    fontSize: type.size.bodySm,
+    fontSize: 14,
     fontStyle: 'italic',
     color: color.slate500,
+  },
+  suggestionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  ignoreBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  ignoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: color.slate400,
   },
 });
