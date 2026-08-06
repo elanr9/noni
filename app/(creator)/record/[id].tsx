@@ -18,9 +18,10 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Teleprompter } from '../../../components/Teleprompter';
+import { BeatsPrompter, Teleprompter } from '../../../components/Teleprompter';
 import { color, shadow } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
+import { parseHookOptions, parseTalkingPoints } from '../../../lib/briefs-api';
 import {
   getAssignment,
   getTask,
@@ -41,7 +42,8 @@ const COUNTDOWN_STEP_MS = 800;
 const TOAST_MS = 2600;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-const MAX_TOTAL_MS = 90_000;
+// 240s makes real post length (300-450 words) possible; it is not a target.
+const MAX_TOTAL_MS = 240_000;
 const STOP_WATCHDOG_MS = 5_000;
 
 function splitScriptParts(script: string): string[] {
@@ -100,10 +102,46 @@ export default function RecordScreen() {
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
 
-  const rawScript = isAssignment ? assignment?.briefs.script : task?.script;
+  // Structured briefs branch on the creator's script_mode: beats get the
+  // static beats view (segment per beat), full gets the points joined into
+  // the scrolling teleprompter. Legacy briefs (points empty, script present)
+  // and content_tasks keep the old script path untouched.
+  const brief = isAssignment ? assignment?.briefs ?? null : null;
+  const talkingPoints = useMemo(
+    () => (brief ? parseTalkingPoints(brief.talking_points) : []),
+    [brief],
+  );
+  const pointTexts = useMemo(
+    () =>
+      talkingPoints
+        .map((p) => p.text?.trim() ?? '')
+        .filter((t) => t.length > 0),
+    [talkingPoints],
+  );
+  const hookLine = brief
+    ? brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || ''
+    : '';
+  const structured =
+    brief !== null && brief.format !== 'photo_carousel' && pointTexts.length > 0;
+  const beatsMode = structured && profile?.script_mode !== 'full';
+
+  const rawScript = isAssignment
+    ? structured
+      ? [hookLine, ...pointTexts.map((t, i) => `${i + 1}. ${t}`)]
+          .filter(Boolean)
+          .join('\n\n')
+      : assignment?.briefs.script
+    : task?.script;
   const title = (isAssignment ? assignment?.briefs.title : task?.title) ?? '';
   const script = rawScript?.trim() || 'No script on this task. Speak freely.';
-  const parts = useMemo(() => splitScriptParts(script), [script]);
+  const beatsParts = useMemo(
+    () => (hookLine ? [hookLine, ...pointTexts] : pointTexts),
+    [hookLine, pointTexts],
+  );
+  const parts = useMemo(
+    () => (beatsMode ? beatsParts : splitScriptParts(script)),
+    [beatsMode, beatsParts, script],
+  );
   const partIndex = Math.min(segments.length, parts.length - 1);
   const totalRecordedMs = segments.reduce((sum, s) => sum + s.durationMs, 0);
   const remainingMs = MAX_TOTAL_MS - totalRecordedMs;
@@ -245,8 +283,12 @@ export default function RecordScreen() {
     }
     const startedAt = Date.now();
     try {
+      // Pin H.264 so concat at approve time never mixes codecs across clips.
+      // expo-camera 17 exposes no fps or audio sample rate control; those two
+      // are normalized server-side in post-approved's single FFmpeg job.
       const clip = await cam.recordAsync({
         maxDuration: Math.max(1, Math.ceil(remainingMs / 1000)),
+        codec: 'avc1',
       });
       if (discardClipRef.current) {
         discardClipRef.current = false;
@@ -358,6 +400,7 @@ export default function RecordScreen() {
           facing={facing}
           mode="video"
           videoQuality="1080p"
+          videoBitrate={8_000_000}
           enableTorch={flashOn && facing === 'back'}
           onCameraReady={() => setCameraReady(true)}
         />
@@ -407,17 +450,26 @@ export default function RecordScreen() {
 
       {showCamera ? (
         <View style={[styles.prompterSlot, { paddingTop: insets.top + 48 }]}>
-          <Teleprompter
-            text={parts[partIndex] ?? script}
-            running={phase === 'recording' && !scriptPaused}
-            paused={phase === 'recording' && scriptPaused}
-            speed={speed}
-            speedLabel={`${speed}x`}
-            resetKey={takeCount}
-            onTap={() => {
-              if (phase === 'recording') setScriptPaused((p) => !p);
-            }}
-          />
+          {beatsMode ? (
+            <BeatsPrompter
+              credential={profile?.credential_line ?? null}
+              hook={hookLine}
+              points={pointTexts}
+              activeIndex={partIndex}
+            />
+          ) : (
+            <Teleprompter
+              text={parts[partIndex] ?? script}
+              running={phase === 'recording' && !scriptPaused}
+              paused={phase === 'recording' && scriptPaused}
+              speed={speed}
+              speedLabel={`${speed}x`}
+              resetKey={takeCount}
+              onTap={() => {
+                if (phase === 'recording') setScriptPaused((p) => !p);
+              }}
+            />
+          )}
         </View>
       ) : null}
 
@@ -498,17 +550,19 @@ export default function RecordScreen() {
 
         {phase === 'idle' || phase === 'countdown' ? (
           <>
-            <View style={styles.speedRow}>
-              {SPEEDS.map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setSpeed(s)}
-                  style={[styles.speedChip, speed === s && styles.speedOn]}
-                >
-                  <Text style={styles.speedText}>{s}x</Text>
-                </Pressable>
-              ))}
-            </View>
+            {!beatsMode ? (
+              <View style={styles.speedRow}>
+                {SPEEDS.map((s) => (
+                  <Pressable
+                    key={s}
+                    onPress={() => setSpeed(s)}
+                    style={[styles.speedChip, speed === s && styles.speedOn]}
+                  >
+                    <Text style={styles.speedText}>{s}x</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             {phase === 'idle' && segments.length === 0 && parts.length > 1 ? (
               <Text style={styles.hintSmall}>
                 {parts.length} parts. Stop between each to cut and continue.

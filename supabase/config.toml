@@ -391,3 +391,57 @@ verify_jwt = false
 
 [functions.poll-metrics]
 verify_jwt = false
+
+[functions.ingest-brief]
+verify_jwt = false
+
+[functions.social-connect]
+verify_jwt = false
+
+[functions.notify]
+verify_jwt = false
+
+[functions.post-approved]
+verify_jwt = false
+
+[functions.brand-ingest]
+verify_jwt = false
+
+[functions.generate-script]
+verify_jwt = false
+
+[functions.scrape-trends]
+verify_jwt = false
+
+[functions.stripe-connect]
+verify_jwt = false
+
+[functions.creator-payout]
+verify_jwt = false
+
+[functions.publish-campaign]
+verify_jwt = false
+
+[functions.auto-fill]
+verify_jwt = false
+
+[functions.ingest-codebase]
+verify_jwt = false
+
+[functions.ingest-features]
+verify_jwt = false
+
+[functions.brief-assist]
+verify_jwt = false
+
+[functions.sync-conversions]
+verify_jwt = false
+
+[functions.library-link]
+verify_jwt = false
+
+[functions.brief-review]
+verify_jwt = false
+
+[functions.notify-scheduled]
+verify_jwt = false

@@ -107,6 +107,26 @@ export default function SettingsScreen() {
           Product truth, voice, audience, and source accounts.
         </Text>
       </PressableScale>
+      <PressableScale
+        accessibilityRole="button"
+        onPress={() => router.push('/(admin)/features')}
+        style={[styles.card, shadow.shadowCard]}
+      >
+        <Text style={styles.name}>Features</Text>
+        <Text style={styles.meta}>
+          Approved claims briefs may use. Add, edit, or reject.
+        </Text>
+      </PressableScale>
+      <PressableScale
+        accessibilityRole="button"
+        onPress={() => router.push('/(admin)/account-template')}
+        style={[styles.card, shadow.shadowCard]}
+      >
+        <Text style={styles.name}>Account template</Text>
+        <Text style={styles.meta}>
+          Instagram and TikTok bios, Instagram link, and example account.
+        </Text>
+      </PressableScale>
 
       <Text style={styles.section}>Account</Text>
       <View style={[styles.card, shadow.shadowCard]}>

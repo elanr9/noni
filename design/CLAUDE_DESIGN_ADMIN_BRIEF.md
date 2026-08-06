@@ -1,108 +1,230 @@
-# Noni — Admin app + onboarding design brief for Claude Design
+# Noni — Admin rebuild redesign brief for Claude Design
 
-You already designed the Noni creator app (the `ui_kits/creator-app` kit and the `design_handoff_creator_app` handoff bundle). That design shipped. Now design **everything else**: auth, company onboarding, creator onboarding, and the entire admin app. Same product, same design system, same quality bar.
+You already designed the Noni creator app (`ui_kits/creator-app`, `design_handoff_creator_app`). That design shipped. The admin app has been **functionally rebuilt** in code (see `noni-build-final.md`, `HANDOFF.md`, `app/(admin)/`). Your job now: **redesign every admin surface so it is beautiful, fast, and on-system** — same product, same design system, higher craft.
+
+This brief overrides `design/CLAUDE_DESIGN_ADMIN_BRIEF.md` history and the older Queue/Trends tab model. **Code + `noni-build-final.md` win** when docs disagree.
 
 ---
 
-## 1. The one rule that governs everything
+## 1. The one rule
 
-**The creator app design system is now law. Extend it, never reinvent it.**
+**The creator app design system is law. Extend it, never reinvent it.**
 
-- Reuse the existing tokens verbatim: every color, type size, weight, spacing value, radius, shadow, duration, and easing from `tokens/` and the creator handoff README. No new hex values without a reason you can defend in one sentence.
-- Primary buttons are `#1BA6EE`. Baby blue `#8EC9F5` is a tint only and never carries white text.
-- Reuse existing components (Button, Icon, StatusChip, EmptyState, TabBar, MediaCard, WeekStrip, charts, skeletons) and extend them with variants where admin needs differ. New components only where no existing one fits.
-- Same motion language: 240ms surfaces, 160ms color, 90ms `scale(0.97)` press, 420ms chart draw, 1400ms skeleton shimmer, easing `cubic-bezier(0.22,0.61,0.36,1)`.
-- Same frame: 390×844 iPhone, safe areas respected, primary actions in thumb reach.
-- Same copy rules: short, direct, sentence case, no emoji, buttons say what happens ("Approve", "Request changes", "Turn into task"). Real copy everywhere, never lorem ipsum.
-- Same mock data world: FieldVision AI, a football tech brand, is the tenant. All example tasks, scripts, trends, creators, and numbers are football / sports themed. Both content formats appear everywhere: video (Reel) and static photo / carousel (Slideshow). Never design video-only.
+- Reuse tokens from `theme/tokens.ts` and the creator handoff: colors, type, spacing, radius, shadow, motion. No new hex without a one-sentence defense.
+- Primary buttons / CTAs: `#1BA6EE` (`blue500` / `accent`). Baby blue `#8EC9F5` (`blue300` / `accentTint`) is tint only — never white text on it.
+- Backgrounds: white + off-white `#F7FAFD`. Ink `#0F1720`. Soft status chips only.
+- Reuse / extend existing components (Button, Icon, StatusChip, EmptyState, TabBar, MediaCard, charts, skeletons, SheetShell). New components only when nothing fits.
+- Motion: 240ms surfaces, 160ms color, 90ms `scale(0.97)` press, 420ms chart draw, 1400ms skeleton shimmer, easing `cubic-bezier(0.22,0.61,0.36,1)`.
+- Frame: 390×844 iPhone, safe areas, primary actions in thumb reach. Floating pill TabBar (BlurView), same treatment as creator.
+- Copy: short, direct, sentence case, no emoji. Buttons say what happens. Real FieldVision / college soccer copy — never lorem.
+- Formats everywhere: **video (Reel)** and **photo_carousel (Slideshow)**. Never video-only.
 
 ---
 
 ## 2. Who the admin is
 
-A founder or marketer who opens the app a few times a day to approve content and glance at the calendar. They are not living in this app; they are clearing a queue in ninety seconds between meetings. Every admin screen optimizes for fast triage and glanceable oversight. Approve is the last human touch in the pipeline: after it, editing, posting, and tracking are automatic. The design should quietly communicate that ("Approve and it's live" energy).
+A founder/marketer who opens the app a few times a day to clear queues and author ~30 briefs a week. Not living in the app. Optimize for:
+
+1. **Triage speed** on Review (approve submissions, music, account gates).
+2. **Authoring flow** on Briefs (week setup → grid → post editor → AI review → publish).
+3. **Glanceable oversight** on Creators, Library, Analytics.
+
+After Approve on a submission, edit/post/track is automatic. Design should feel like “Approve and it’s live.”
 
 ---
 
-## 3. Screens to design
+## 3. Product context (as built)
 
-### 3.1 Auth (shared by both roles)
+Pipeline: **author week → publish to creators → creators record → admin approves → auto edit → Upload-Post → track.**
 
-1. **Login.** Logo lockup (bubble N + wordmark), email field, one button (magic link). One screen, no clutter.
-2. **Magic link sent.** Confirmation state, with a resend affordance after a delay.
-3. **Link processing / callback.** Brief loading state while the session resolves.
+Admin tabs (live): **Review · Briefs · Library · Creators · Analytics**
 
-### 3.2 Company onboarding (admin, runs once at signup)
+Hidden but reachable: Calendar (view toggle inside Briefs), Settings (gear from Analytics), Trends (orphaned — do not prioritize).
 
-One question per screen, progress bar, big tap targets. A conversation, not a form. Thirteen steps:
+Push screens: Review detail, Creator detail, Creator post, Chat, Account approval, Account template, Brand Brain, Features, Week setup, Week grid, Post editor.
 
-1. **Welcome.** Logo, one line on what Noni does, "Get started".
-2. **Company name + website.**
-3. **Instagram and TikTok handles.**
-4. **Brand study — the showpiece.** "Give us 60 seconds, we're studying your brand." Animated progress states stream in: "Reading your site" → "Watching your posts" → "Learning your voice". This is the moment the product proves it's smart. Make it feel alive and premium. Design the full sequence, not one frame.
-5. **Who is your customer.** Free text, AI prefilled suggestion the user confirms or edits.
-6. **What are you selling.** Same pattern.
-7. **How do people buy.** Three big options: link in bio / DMs / website.
-8. **Content pillars.** AI suggested chips from the brand study, tap to keep, add your own.
-9. **Tone slider — second showpiece.** Professional ↔ unhinged, with a live example caption that rewrites as the slider moves. Design at least three slider positions.
-10. **Cadence.** Posts per week per creator, big stepper or picker.
-11. **Who approves content.** Just me / me + others.
-12. **Invite creators.** Share sheet with invite links.
-13. **Done.** Lands on the admin Calendar already filled with the first week of AI generated tasks. The user never sees an empty app.
-
-### 3.3 Creator onboarding (under two minutes, ends in action)
-
-1. **Invite link landing → magic link auth.**
-2. **Name + selfie avatar.**
-3. **Camera and mic permissions.** Honest one line explanations for each.
-4. **Connect socials.** Link the creator's own TikTok and Instagram (hosted linking flow). Explain plainly: approved content posts to these accounts. Skippable but discouraged.
-5. **Teleprompter practice.** Record a 15 second throwaway clip against sample text. Teach by doing. Dark full-screen camera treatment consistent with the Record screen you already designed.
-6. **Lands on Home** with their first real task waiting (you already designed Home; just show the transition frame).
-
-### 3.4 Admin app
-
-Admin tab bar, same floating treatment as the creator one: **Queue · Calendar · Trends · Analytics · Settings**. Review and Brand Brain are pushed screens.
-
-1. **Queue.** Submissions awaiting review, newest first, badge count on the tab. Each row: creator avatar + name, 9:16 thumbnail, format chip (Reel / Slideshow), title, submitted time, status. Built for triage speed: an admin should clear five submissions in under a minute. Empty state: "Nothing to review" with what happens next.
-2. **Review.** The most important admin screen. Two variants, one layout language:
-   - **Video:** player with the script scrollable beneath (or beside) it so the admin can check delivery against the script.
-   - **Slideshow:** swipeable slides with dots, caption below. No fake video chrome.
-   - Both: task context (hook, caption), the review thread when the task is in a changes-requested loop (admin notes + creator resubmissions, chronological), and two actions: **Approve** (primary, `#1BA6EE`) and **Request changes** (opens a note field). After Approve, a confirmation state that communicates the automation taking over: it will be edited and posted automatically at its scheduled time.
-3. **Calendar.** Week view across all creators showing the AI filled queue. Rows or columns per creator, each cell a compact task card with format chip and status. Oversight and override: tap a task to edit or remove it, a manual "New task" fallback, and a **Generate** button where AI drafts title, hook, script, and caption. Design the task edit sheet.
-4. **Trends.** The scraped feed. Cards: 9:16 thumbnail, view count, hook line, one liner on why it works, format, and a **Turn into task** button (choose creator + day, then it drops into the Calendar). Filter chips by format and pillar. Empty and loading states.
-5. **Brand Brain.** The brand's living profile, edited by the admin, consumed by the AI. Three parts:
-   - **Doctrine documents** as tabs: Product (what it does, who pays, killer features, banned claims), Audience (who they are, pains, dreams, their language), Voice (how the brand talks), Learnings (what has worked). Each is an editable long-text document with an "AI draft" action that fills it from the brand study.
-   - **Source accounts:** list of TikTok / Instagram accounts Noni scrapes for inspiration, with active / paused status and an add flow.
-   - **Search terms:** the pillar-derived terms driving the scraper, shown as removable chips.
-6. **Analytics.** Views and revenue per post, per creator totals, best hooks. Reuse the chart language from the creator Analytics screen (hand-drawn SVG area chart, mini stats, split bar). Clean data cards, no dashboard bloat. Loading and empty states.
-7. **Settings.** Creator roster with avatar, name, and social connection status per creator; invite creators (share sheet); company profile basics; sign out.
+Tenant mock world: **FieldVision AI** (college soccer recruiting tech). Every example post plugs the product inside one talking point (never a standalone ad beat).
 
 ---
 
-## 4. States
+## 4. Screens to redesign (full inventory)
 
-Every screen ships with every state that can occur: default, loading (skeleton shimmer, same treatment as creator app), empty (real copy + next action, bubble-style illustration), and error where relevant. Review needs both format variants and the changes-requested-loop variant. Queue needs populated, single-item, and empty. The brand study screen needs its full animation sequence.
+Design every state: default, loading (skeleton), empty (real copy + next action), error where relevant. Both Reel and Slideshow variants wherever media appears.
+
+### 4.1 Review tab — `app/(admin)/(tabs)/index.tsx`
+
+Three queues in one tab (segmented or stacked — make it beautiful and scannable):
+
+1. **Post submissions** — newest first; badge on tab = queue length. Row: avatar, name, 9:16 thumb, format chip (Reel / Slideshow), title, time, status. Tap → review detail.
+2. **Music approvals** — slideshows only; one-tap confirm after glance. Fast lane (~10/week).
+3. **Creator account approval** — once per creator; pending / needs_changes / approved.
+
+Empty: “Nothing to review” + what happens next.
+
+### 4.2 Review detail — `app/(admin)/review/[id].tsx`
+
+Most important triage screen.
+
+- **Video:** player + script / segments / talking points for delivery check. Per-segment approve or reject with comment (rejected clip returns to creator; others untouched). Show `attempt` on redos.
+- **Slideshow:** swipeable slides + caption; no fake video chrome.
+- Actions: **Approve** (primary `#1BA6EE`), **Request changes** / reject clip with note. Post-approve confirmation: automation takes over (edit + post at schedule).
+- Entry to chat thread for that creator/post.
+
+### 4.3 Account approval — `app/(admin)/account-approval/[accountId].tsx`
+
+Review Instagram/TikTok screen recordings + profile screenshots. Status machine: pending → needs_changes → approved. Structured reason on needs_changes. Capture handles at approval (linking moment). College soccer feed requirement visible in UI.
+
+### 4.4 Account template — `app/(admin)/account-template.tsx` (from Settings)
+
+Company-scoped: bio (one-tap copy), profile picture (one-tap download), example account screenshot. Creators see this on account setup — design both ends consistently.
+
+### 4.5 Briefs tab — `app/(admin)/(tabs)/create.tsx`
+
+Week authoring home. View toggle: **Grid | Calendar** (Calendar is not a separate tab).
+
+- Progress switcher: `Videos 7/20` · `Slideshows 3/10`
+- Rows: one per post (all 30 exist from week creation). States readable while scrolling, no legend: **empty · partial · filled-unreviewed · complete**
+- Empty row shows pre-stamped type + suggested search phrase (kills blank page)
+- Actions: New week, Publish (disabled with count until all complete), open post editor
+- Publish rules: before Sunday 8PM EST → scheduled notify; after → immediate
+
+### 4.6 Week setup — `app/(admin)/week-setup.tsx`
+
+Only stepped ceremony in the product (once a week). Three steps:
+
+1. Ratio — video count / slideshow count (defaults 20 / 10)
+2. Video type split — must sum to video count (defaults: numbered_list 8, talking_head 5, explainer 3, contrast 2, replay_bait 2)
+3. Slideshow type split (defaults: numbered_tips 5, how_to 3, getting_started 2)
+
+Pool not lock — types remain editable later; grid header shows drift.
+
+### 4.7 Week / grid — `app/(admin)/week/[id].tsx` + `components/admin/grid/`
+
+Full week grid polish: type chips, kill_reason empty slots, live split header, publish CTA.
+
+### 4.8 Post editor — `app/(admin)/post/[id].tsx` + `components/admin/editor/`
+
+Authoring workhorse. Fields:
+
+- Hook (≤9 words) from 8–10 generated options, best first
+- Talking points (count from post type) — spoken only; plug inside one point
+- CTA / plug (traceable to approved product feature)
+- Caption (<200 chars excl. hashtags), hashtags 3–5
+- Example URL from Library
+- **Segments** (render manifest): hook / point / outro / slide — overlay_text, show_on_screen, screenshot_url
+
+AI assist per field + fill-whole-post. Nothing auto-generates on open.
+
+**AI Review step** (in editor, not background): overall + per-section scores (hook, points, CTA), accept/edit/ignore suggestions, confirm → complete. Never blocks; never silently edits.
+
+Type picker, Fill sheet, Review sheet, Segments section, Hook options, Points editor — all need visual polish as one coherent editor, not a form dump.
+
+### 4.9 Calendar view — `app/(admin)/(tabs)/calendar.tsx` + `CalendarView` / `DayDetailSheet`
+
+Week oversight across creators; opened as toggle from Briefs. Compact task cells, format chip, status, day detail sheet.
+
+### 4.10 Library — `app/(admin)/(tabs)/library.tsx`
+
+One tab, four chips: **Ideas · Our posts · References · From creator**
+
+- Ideas: quick capture text field pinned top (enter to save; multiline paste = multiple ideas). No sheet/form.
+- References: paste link → thumbnail
+- Our posts: performance-first (top last 60 days), search/filter by creator, type, date
+- Library picker sheet from post editor (filtered by type)
+
+### 4.11 Creators — `app/(admin)/(tabs)/creators.tsx` + `creator/[id].tsx` + `creator/post/[assignmentId].tsx`
+
+- List: card per creator — money, posts, views + sort
+- Detail: Instagram-style profile — stats, calendar/grid toggle of posts
+- Post detail: media, caption, views/payout/saves/likes/comments
+- Chat entry top-right → `chat/[creatorId]` (one thread per creator; post refs inline). Same thread as Review chat.
+
+### 4.12 Chat — `app/(admin)/chat/[creatorId].tsx` + `components/ChatThread.tsx`
+
+Clean messaging UI; post reference bubbles; scroll-to-post from Review.
+
+### 4.13 Analytics — `app/(admin)/(tabs)/analytics.tsx` + `TimeSeriesChart`
+
+Views/revenue, per-creator totals, best hooks. Reuse creator chart language. Gear → Settings. No dashboard bloat.
+
+### 4.14 Settings — `app/(admin)/(tabs)/settings.tsx`
+
+Roster, invites, company basics, account template link, sign out. Reachable from Analytics gear.
+
+### 4.15 Brand Brain — `app/(admin)/brain.tsx`
+
+Doctrine docs (Product / Audience / Voice / Learnings), source accounts, search terms. Editable long text + AI draft. Fix any legacy cream/orange leftovers to the blue system.
+
+### 4.16 Features — `app/(admin)/features.tsx` + `FeatureEditSheet`
+
+Approved product claims/features the plug must trace to. Admin CRUD, clear approved vs rejected.
+
+### 4.17 Music approval row — `components/admin/MusicApprovalRow.tsx`
+
+Compact, one-tap, beautiful in the Review queue.
 
 ---
 
-## 5. Priority order
+## 5. Post types (must appear in UI)
 
-1. Admin Queue + Review (both formats) — the daily loop.
-2. Admin Calendar (including task edit sheet and Generate).
-3. Company onboarding, with extra care on the brand study and tone slider showpieces.
-4. Trends.
-5. Creator onboarding.
-6. Brand Brain, Analytics, Settings, Auth.
+| type | family | notes |
+|---|---|---|
+| numbered_list | video | hook + N + outro |
+| talking_head | video | hook + N + outro |
+| explainer | video | hook + N + outro |
+| contrast | video | single speaker, two sides |
+| replay_bait | video | one short loop clip; no plug/credential |
+| numbered_tips | photo_carousel | one slide per point |
+| how_to | photo_carousel | one slide per point |
+| getting_started | photo_carousel | one slide per point |
+
+Clip/slide count is **derived** — never a human field.
 
 ---
 
-## 6. Deliverables
+## 6. Priority order
 
-Match the creator handoff format exactly:
+1. Review tab + Review detail (both formats) + music + account approval — daily loop
+2. Briefs grid + Week setup + Post editor + AI Review sheet — weekly authoring loop
+3. Library + Library picker
+4. Creators profile + Chat + Creator post
+5. Analytics + Settings + Account template
+6. Brand Brain + Features
+7. Calendar view polish (inside Briefs)
 
-- A running kit at `ui_kits/admin-app/` (and `ui_kits/onboarding/` for the two onboarding flows) with `index.html` and `all-screens.html`, rendering every screen and state at 390×844, built on the same shared tokens and components.
-- New or extended components live in `components/` alongside the existing ones, small and reusable.
-- A handoff bundle `design_handoff_admin_app/` containing:
-  - `README.md` — the spec, same structure and fidelity as the creator one: every hex, px, weight, radius, shadow, duration, copy string, and state, verified from the running source, with assumptions flagged.
-  - `CURSOR_PROMPT.md` — the paste-into-Cursor master prompt, same rules as the creator one (preserve stack, tokens verbatim, no invented details, stage-by-stage implementation with overlay verification, explicit "stop and ask" list).
-  - `screenshots/` — numbered PNGs, one per screen/state, same scale convention as before.
+---
+
+## 7. Deliverables
+
+Match the creator handoff format:
+
+- Running kit `ui_kits/admin-app/` with `index.html` and `all-screens.html` at 390×844, shared tokens/components.
+- Extended components in `components/` alongside existing ones.
+- Handoff bundle `design_handoff_admin_app/`:
+  - `README.md` — every hex, px, weight, radius, shadow, duration, copy string, state (verified from source)
+  - `CURSOR_PROMPT.md` — paste-into-Cursor implementation prompt (preserve Expo stack, tokens verbatim, stage-by-stage, stop-and-ask list)
+  - `screenshots/` — numbered PNGs per screen/state
+
+Also update any screen that currently looks like a scaffold so the handoff can be implemented without inventing layout.
+
+---
+
+## 8. What NOT to do
+
+- Do not redesign the creator Today / Record / Profile flows unless a shared component must change (call that out).
+- Do not invent a Trends tab as primary nav.
+- Do not make Calendar a fifth tab.
+- Do not introduce purple gradients, cream+terracotta, newspaper layouts, emoji, or generic AI dashboard chrome.
+- Do not hardcode video-only assumptions.
+- Do not change product rules in §4–5 — beauty only; behavior stays.
+
+---
+
+## 9. Read in repo before designing
+
+1. `theme/tokens.ts`
+2. `noni-build-final.md` (product truth)
+3. `HANDOFF.md` (as-built agent notes)
+4. `design/screen-handoff.md` (navigation + discrepancies; code wins)
+5. Live screens under `app/(admin)/` and `components/admin/`
+6. Existing creator kit / handoff if available in the design folder for token parity

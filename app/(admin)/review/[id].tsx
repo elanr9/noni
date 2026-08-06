@@ -241,6 +241,20 @@ export default function ReviewScreen() {
       <Text numberOfLines={1} style={styles.metaAge}>
         {`${row.title} \u00b7 ${row.ageLabel}`}
       </Text>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Message ${row.creator.name} about this post`}
+        onPress={() =>
+          router.push({
+            pathname: '/(admin)/chat/[creatorId]',
+            params: { creatorId: assignment.creator_id, assignment: assignment.id },
+          })
+        }
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={styles.chatButton}
+      >
+        <Icon name="message-circle" size={20} color={color.blue700} />
+      </PressableScale>
     </View>
   );
 
@@ -441,10 +455,12 @@ const styles = StyleSheet.create({
   },
   metaAge: {
     flexShrink: 1,
+    flexGrow: 1,
     fontSize: type.size.meta,
     fontWeight: '400',
     color: color.slate400,
   },
+  chatButton: { marginLeft: 'auto' },
   h1: {
     fontSize: type.size.titleSm,
     lineHeight: 31,

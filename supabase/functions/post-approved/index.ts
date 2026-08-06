@@ -1,4 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { handleCors, jsonResponse } from '../_shared/wp8.ts';
+import {
+  buildRenderTimeline,
+  timelineHasOverlays,
+  type BriefSegmentRow,
+} from '../_shared/renderTimeline.ts';
+import { renderOverlays } from '../_shared/renderAdapter.ts';
 
 type PostApprovedBody = { assignment_id?: string; task_id?: string };
 
@@ -13,6 +20,8 @@ type PostTarget = {
   platforms: string[];
   assignmentId: string | null;
   taskId: string | null;
+  /** Set on assignment targets; overlays render only when the brief has segments. */
+  briefId: string | null;
 };
 
 type PlatformResult = {
@@ -21,13 +30,6 @@ type PlatformResult = {
   error?: string;
   post_id?: string;
 };
-
-function jsonResponse(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 function uploadPostKey(): string {
   const key = Deno.env.get('UPLOAD_POST_API_KEY');
@@ -128,8 +130,14 @@ async function signVideoUrls(
   return urls;
 }
 
-// Concatenate segment clips into one video. Expo Go cannot run FFmpeg on device.
-async function stitchSegments(params: {
+// Stitch and the WP9 basic pass merged into ONE job: one re-encode instead of
+// two, one poll against the wall clock. Every input is normalized first
+// (fps 30, 1080x1920, 48k stereo) so concat never sees mismatched clips —
+// capture pins codec and resolution, but expo-camera cannot pin fps or audio
+// sample rate, and front/back camera flips can change frame size.
+// Head: -ss 0.15 on input 0 only (sync-safe). Tail: silenceremove + -shortest.
+// Works for N=1 (replaces the old standalone edit pass).
+async function stitchAndEditPass(params: {
   admin: AdminClient;
   apiKey: string;
   segmentPaths: string[];
@@ -140,12 +148,22 @@ async function stitchSegments(params: {
 
   const n = segmentPaths.length;
   const inputs = segmentPaths.map((_p, i) => `-i {input${i}}`).join(' ');
-  const streams = segmentPaths.map((_p, i) => `[${i}:v][${i}:a]`).join('');
+  const normalize = segmentPaths
+    .map(
+      (_p, i) =>
+        `[${i}:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,` +
+        `crop=1080:1920,setsar=1[v${i}];` +
+        `[${i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`,
+    )
+    .join(';');
+  const streams = segmentPaths.map((_p, i) => `[v${i}][a${i}]`).join('');
   const fullCommand =
-    `ffmpeg -y -hide_banner ${inputs} ` +
-    `-filter_complex "${streams}concat=n=${n}:v=1:a=1[outv][outa]" ` +
-    `-map "[outv]" -map "[outa]" -c:v h264_nvenc -preset p5 -cq 23 ` +
-    `-c:a aac -b:a 128k {output}`;
+    `ffmpeg -y -hide_banner -ss 0.15 ${inputs} ` +
+    `-filter_complex "${normalize};${streams}concat=n=${n}:v=1:a=1[cv][ca];` +
+    `[ca]silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-45dB:detection=peak,` +
+    `loudnorm=I=-16:TP=-1.5:LRA=11[outa]" ` +
+    `-map "[cv]" -map "[outa]" -c:v h264_nvenc -preset p5 -cq 23 ` +
+    `-c:a aac -b:a 128k -shortest {output}`;
 
   await runFfmpegJob({
     admin,
@@ -153,36 +171,45 @@ async function stitchSegments(params: {
     files,
     fullCommand,
     outputPath,
-    label: 'stitch',
+    label: 'stitch-edit',
   });
 }
 
-// WP9 basic pass: trim head/tail dead air, loudnorm, conform 1080x1920.
-// Head: -ss 0.15 (sync-safe). Tail: silenceremove stop_periods + -shortest.
-async function basicEditPass(params: {
-  admin: AdminClient;
-  apiKey: string;
-  inputPath: string;
-  outputPath: string;
-}): Promise<void> {
-  const { admin, apiKey, inputPath, outputPath } = params;
-  const files = await signVideoUrls(admin, [inputPath]);
+type SegmentClips = { paths: string[]; durationsMs: number[] | null };
 
-  const fullCommand =
-    'ffmpeg -y -hide_banner -ss 0.15 -i {input0} ' +
-    '-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1" ' +
-    '-af "silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-45dB:detection=peak,' +
-    'loudnorm=I=-16:TP=-1.5:LRA=11" ' +
-    '-c:v h264_nvenc -preset p5 -cq 23 -c:a aac -b:a 128k -shortest {output}';
+// Clips for a submission in slot order, latest attempt per slot, from
+// submission_segments. Falls back to null so callers can use the legacy
+// submissions.segment_paths array. Durations are null unless every clip has
+// one (legacy backfilled rows have none) — overlay timing needs all of them.
+async function resolveSegmentClips(
+  admin: AdminClient,
+  submissionId: string,
+): Promise<SegmentClips | null> {
+  const { data } = await admin
+    .from('submission_segments')
+    .select('slot_index, attempt, storage_path, duration_ms')
+    .eq('submission_id', submissionId)
+    .order('slot_index', { ascending: true })
+    .order('attempt', { ascending: false });
+  if (!data || data.length === 0) return null;
 
-  await runFfmpegJob({
-    admin,
-    apiKey,
-    files,
-    fullCommand,
-    outputPath,
-    label: 'edit',
-  });
+  const bySlot = new Map<number, { storage_path: string; duration_ms: number | null }>();
+  for (const row of data) {
+    const slot = row.slot_index as number;
+    if (!bySlot.has(slot)) {
+      bySlot.set(slot, {
+        storage_path: row.storage_path as string,
+        duration_ms: (row.duration_ms ?? null) as number | null,
+      });
+    }
+  }
+  const slots = [...bySlot.keys()].sort((a, b) => a - b);
+  const paths = slots.map((s) => bySlot.get(s)!.storage_path);
+  const durations = slots.map((s) => bySlot.get(s)!.duration_ms);
+  const durationsMs = durations.every((d): d is number => d !== null)
+    ? durations
+    : null;
+  return { paths, durationsMs };
 }
 
 async function pollStatus(
@@ -234,9 +261,20 @@ async function resolveTarget(
     }
     const { data: brief } = await admin
       .from('briefs')
-      .select('title, caption')
+      .select('title, caption, format, post_type_id')
       .eq('id', assignment.brief_id)
       .maybeSingle();
+    // New-world slideshows are held until the Instagram Replace Audio path is
+    // verified; legacy carousels (null post_type_id) keep the old behavior.
+    if (brief?.format === 'photo_carousel' && brief.post_type_id) {
+      return jsonResponse(
+        {
+          error:
+            'Slideshow posting is not wired yet. The video pipeline posts videos only for now.',
+        },
+        409,
+      );
+    }
     return {
       id: assignment.id as string,
       companyId: assignment.company_id as string,
@@ -245,6 +283,7 @@ async function resolveTarget(
       platforms: ['tiktok', 'instagram'],
       assignmentId: assignment.id as string,
       taskId: (assignment.task_id ?? null) as string | null,
+      briefId: assignment.brief_id as string,
     };
   }
 
@@ -281,6 +320,7 @@ async function resolveTarget(
     platforms,
     assignmentId: (mirror?.id ?? null) as string | null,
     taskId: task.id as string,
+    briefId: null,
   };
 }
 
@@ -333,6 +373,8 @@ async function resolveSubmission(
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   try {
     const body = (await req.json().catch(() => null)) as PostApprovedBody | null;
     if (!body?.assignment_id && !body?.task_id) {
@@ -387,53 +429,120 @@ Deno.serve(async (req) => {
 
     const apiKey = uploadPostKey();
 
-    // Multi-segment takes are stitched into one video before posting.
-    // Single segments skip stitching entirely.
-    let videoPath = submission.video_path as string;
-    const segmentPaths = (submission.segment_paths ?? []) as string[];
+    // Clips in slot order: submission_segments when present (new recordings),
+    // legacy segment_paths otherwise, the single video_path as last resort.
+    const clips = await resolveSegmentClips(admin, submission.id as string);
+    const legacyPaths = (submission.segment_paths ?? []) as string[];
+    const segmentPaths =
+      clips?.paths ??
+      (legacyPaths.length > 0 ? legacyPaths : [submission.video_path as string]);
+    const durationsMs = clips?.durationsMs ?? null;
     const version = submission.version ?? 1;
-    if (segmentPaths.length > 1) {
-      const stitchedPath = `${target.companyId}/${target.id}/${version}-stitched.mp4`;
-      try {
-        await stitchSegments({
-          admin,
-          apiKey,
-          segmentPaths,
-          outputPath: stitchedPath,
-        });
-      } catch (stitchError) {
-        const detail =
-          stitchError instanceof Error
-            ? stitchError.message
-            : String(stitchError);
-        return jsonResponse({ error: 'stitching failed', detail }, 502);
-      }
-      videoPath = stitchedPath;
-      await admin
-        .from('submissions')
-        .update({ video_path: stitchedPath })
-        .eq('id', submission.id);
-    }
 
-    // WP9: basic FFmpeg pass before Upload-Post (trim dead air, loudnorm, 1080x1920).
-    const editedPath = `${target.companyId}/${target.id}/${version}-edited.mp4`;
+    // One FFmpeg job on Upload-Post: normalize each clip, concat, trim,
+    // loudnorm, conform 1080x1920. Single re-encode for any clip count.
+    let videoPath = `${target.companyId}/${target.id}/${version}-edited.mp4`;
     try {
-      await basicEditPass({
+      await stitchAndEditPass({
         admin,
         apiKey,
-        inputPath: videoPath,
-        outputPath: editedPath,
+        segmentPaths,
+        outputPath: videoPath,
       });
-    } catch (editError) {
+    } catch (stitchError) {
       const detail =
-        editError instanceof Error ? editError.message : String(editError);
-      return jsonResponse({ error: 'edit pass failed', detail }, 502);
+        stitchError instanceof Error ? stitchError.message : String(stitchError);
+      return jsonResponse({ error: 'stitch-edit pass failed', detail }, 502);
     }
-    videoPath = editedPath;
     await admin
       .from('submissions')
-      .update({ video_path: editedPath })
+      .update({ video_path: videoPath })
       .eq('id', submission.id);
+
+    // On-screen text and screenshots from brief_segments, rendered through
+    // the adapter. Overlay timing needs every clip's duration; legacy
+    // submissions without them post un-overlaid with a warning instead of
+    // guessing.
+    let overlayWarning: string | null = null;
+    if (target.briefId) {
+      const { data: segmentRows } = await admin
+        .from('brief_segments')
+        .select('slot_index, kind, overlay_text, show_on_screen, screenshot_url')
+        .eq('brief_id', target.briefId)
+        .eq('company_id', target.companyId)
+        .order('slot_index', { ascending: true });
+      const briefSegments = (segmentRows ?? []) as BriefSegmentRow[];
+
+      if (briefSegments.length > 0) {
+        if (!durationsMs) {
+          overlayWarning =
+            'overlays skipped: this submission has no per-clip durations';
+        } else {
+          const timeline = buildRenderTimeline({ briefSegments, durationsMs });
+          await admin
+            .from('submissions')
+            .update({ render_timeline: timeline })
+            .eq('id', submission.id);
+
+          if (timelineHasOverlays(timeline)) {
+            const renderKey = Deno.env.get('CREATOMATE_API_KEY');
+            if (!renderKey) {
+              return jsonResponse(
+                {
+                  error:
+                    'This post has on-screen text or screenshots but CREATOMATE_API_KEY is not set in the edge function env.',
+                },
+                502,
+              );
+            }
+            try {
+              const [videoUrl] = await signVideoUrls(admin, [videoPath]);
+              const imageUrls: Record<string, string> = {};
+              for (const img of timeline.images) {
+                const { data: signedImg, error: imgError } = await admin.storage
+                  .from('brief-assets')
+                  .createSignedUrl(img.screenshot_path, 3600);
+                if (imgError || !signedImg?.signedUrl) {
+                  throw new Error(
+                    `could not sign screenshot ${img.screenshot_path}: ${imgError?.message}`,
+                  );
+                }
+                imageUrls[img.screenshot_path] = signedImg.signedUrl;
+              }
+              const rendered = await renderOverlays({
+                apiKey: renderKey,
+                videoUrl,
+                timeline,
+                imageUrls,
+              });
+              const renderedPath = `${target.companyId}/${target.id}/${version}-rendered.mp4`;
+              const { error: renderUploadError } = await admin.storage
+                .from('videos')
+                .upload(renderedPath, rendered, {
+                  contentType: 'video/mp4',
+                  upsert: true,
+                });
+              if (renderUploadError) {
+                throw new Error(
+                  `could not store rendered video: ${renderUploadError.message}`,
+                );
+              }
+              videoPath = renderedPath;
+              await admin
+                .from('submissions')
+                .update({ video_path: renderedPath })
+                .eq('id', submission.id);
+            } catch (renderError) {
+              const detail =
+                renderError instanceof Error
+                  ? renderError.message
+                  : String(renderError);
+              return jsonResponse({ error: 'overlay render failed', detail }, 502);
+            }
+          }
+        }
+      }
+    }
 
     const { data: signed, error: signError } = await admin.storage
       .from('videos')
@@ -564,6 +673,7 @@ Deno.serve(async (req) => {
       upload_post_profile: creator.upload_post_profile,
       posts: postRows,
       results,
+      overlay_warning: overlayWarning,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

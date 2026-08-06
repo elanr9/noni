@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MusicApprovalRow } from '../../../components/admin/MusicApprovalRow';
 import { NextUpCard } from '../../../components/admin/NextUpCard';
 import { QueueRow } from '../../../components/admin/QueueRow';
 import { QueueSkeletonRow } from '../../../components/admin/QueueSkeletonRow';
@@ -11,10 +12,18 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { Wordmark } from '../../../components/ui/Wordmark';
 import {
+  approveMusic,
   countAssignmentsInFlight,
   latestSubmissionsByAssignment,
   listAssignmentQueue,
+  listMusicApprovalQueue,
+  type MusicApprovalItem,
 } from '../../../lib/admin-api';
+import {
+  listAccountApprovalQueue,
+  type AccountApprovalItem,
+} from '../../../lib/creator-accounts-api';
+import { useAuth } from '../../../lib/auth';
 import { toAssignmentQueueRow } from '../../../lib/admin-queue-map';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
 import { color, radius, space, type } from '../../../theme/tokens';
@@ -28,28 +37,38 @@ type QueueFilter =
   | { kind: 'creator'; id: string }
   | { kind: 'brief'; id: string };
 
-function useAdminQueue(): {
+function useAdminQueue(companyId: string | undefined): {
   items: MockQueueItem[];
+  music: MusicApprovalItem[];
+  accounts: AccountApprovalItem[];
   loading: boolean;
   inFlight: number;
+  reload: () => Promise<void>;
 } {
   const [items, setItems] = useState<MockQueueItem[]>([]);
+  const [music, setMusic] = useState<MusicApprovalItem[]>([]);
+  const [accounts, setAccounts] = useState<AccountApprovalItem[]>([]);
   const [inFlight, setInFlight] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (companyId === undefined) return;
     try {
-      const [queue, flying] = await Promise.all([
+      const [queue, flying, musicQueue, accountQueue] = await Promise.all([
         listAssignmentQueue(),
         countAssignmentsInFlight(),
+        listMusicApprovalQueue(companyId),
+        listAccountApprovalQueue(companyId),
       ]);
       const subs = await latestSubmissionsByAssignment(queue.map((a) => a.id));
       setItems(queue.map((a) => toAssignmentQueueRow(a, subs.get(a.id) ?? null)));
       setInFlight(flying);
+      setMusic(musicQueue);
+      setAccounts(accountQueue);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [companyId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -58,7 +77,7 @@ function useAdminQueue(): {
     }, [load]),
   );
 
-  return { items, loading, inFlight };
+  return { items, music, accounts, loading, inFlight, reload: load };
 }
 
 function matchesFilter(item: MockQueueItem, filter: QueueFilter): boolean {
@@ -70,8 +89,29 @@ function matchesFilter(item: MockQueueItem, filter: QueueFilter): boolean {
 export default function QueueScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { items, loading, inFlight } = useAdminQueue();
+  const { profile } = useAuth();
+  const { items, music, accounts, loading, inFlight, reload } = useAdminQueue(
+    profile?.company_id,
+  );
   const [filter, setFilter] = useState<QueueFilter>({ kind: 'all' });
+  const [musicBusy, setMusicBusy] = useState<string | null>(null);
+
+  const approveMusicItem = async (assignmentId: string) => {
+    if (!profile) return;
+    setMusicBusy(assignmentId);
+    try {
+      await approveMusic({
+        companyId: profile.company_id,
+        assignmentId,
+        adminId: profile.id,
+      });
+      await reload();
+    } catch (e) {
+      Alert.alert("Couldn't approve", e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setMusicBusy(null);
+    }
+  };
 
   const n = items.length;
   const visible = items.filter((i) => matchesFilter(i, filter));
@@ -130,6 +170,53 @@ export default function QueueScreen() {
 
       <Text style={styles.h1}>Queue</Text>
       {subtitle !== null && <Text style={styles.subtitle}>{subtitle}</Text>}
+
+      {music.length > 0 && (
+        <View style={styles.sideQueue}>
+          <Text style={styles.sectionLabel}>Music approvals</Text>
+          {music.map((item) => (
+            <MusicApprovalRow
+              key={item.assignment.id}
+              item={item}
+              busy={musicBusy === item.assignment.id}
+              onApprove={() => void approveMusicItem(item.assignment.id)}
+            />
+          ))}
+        </View>
+      )}
+
+      {accounts.length > 0 && (
+        <View style={styles.sideQueue}>
+          <Text style={styles.sectionLabel}>Account approvals</Text>
+          {accounts.map((account) => (
+            <PressableScale
+              key={account.id}
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({
+                  pathname: '/(admin)/account-approval/[accountId]',
+                  params: { accountId: account.id },
+                })
+              }
+              style={styles.accountRow}
+            >
+              <View style={styles.accountText}>
+                <Text style={styles.accountName} numberOfLines={1}>
+                  {account.profiles?.full_name?.trim() || 'Creator'}
+                </Text>
+                <Text style={styles.accountMeta} numberOfLines={1}>
+                  {account.tiktok_handle ? `@${account.tiktok_handle}` : 'No TikTok handle'}
+                  {' · '}
+                  {account.instagram_handle
+                    ? `@${account.instagram_handle}`
+                    : 'No Instagram handle'}
+                </Text>
+              </View>
+              <Text style={styles.accountCta}>Review</Text>
+            </PressableScale>
+          ))}
+        </View>
+      )}
 
       {!loading && n >= 2 && (
         <ScrollView
@@ -244,6 +331,41 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: type.weight.regular,
     color: color.slate500,
+  },
+  sideQueue: {
+    gap: 8,
+    marginBottom: 18,
+  },
+  sectionLabel: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    color: color.slate400,
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+  },
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: color.white,
+    borderRadius: radius.md,
+    padding: 14,
+  },
+  accountText: { flex: 1, gap: 2 },
+  accountName: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  accountMeta: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
+  },
+  accountCta: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
   },
   chipScroll: {
     marginBottom: 14,

@@ -1,43 +1,73 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
-  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import {
+  router,
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+} from 'expo-router';
 
-import { StatusChip } from '../../../components/StatusChip';
+import { PostTile } from '../../../components/admin/PostTile';
+import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { Segmented } from '../../../components/ui/Segmented';
 import { useAuth } from '../../../lib/auth';
-import { fetchCreatorDetail, type CreatorDetail } from '../../../lib/admin-api';
+import {
+  fetchCreatorDetail,
+  latestSubmissionsByAssignment,
+  type CreatorDetail,
+} from '../../../lib/admin-api';
 import { formatMetric } from '../../../lib/analytics';
 import { parseAssignmentMetrics } from '../../../lib/tasks-api';
-import { formatCents, ledgerKindLabel } from '../../../lib/wallet-api';
+import { formatCents } from '../../../lib/wallet-api';
 import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
 
-function formatDate(iso: string): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
+const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function monthLabel(d: Date): string {
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
-export default function AdminCreatorDetail() {
+function dateKey(year: number, month: number, day: number): string {
+  return `${year}-${`${month + 1}`.padStart(2, '0')}-${`${day}`.padStart(2, '0')}`;
+}
+
+export default function AdminCreatorProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuth();
+  const { width: winWidth } = useWindowDimensions();
   const [data, setData] = useState<CreatorDetail | null>(null);
+  const [videoPaths, setVideoPaths] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [view, setView] = useState(0);
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile || !id) return;
     try {
-      setData(await fetchCreatorDetail(profile.company_id, id));
+      const detail = await fetchCreatorDetail(profile.company_id, id);
+      const subs = await latestSubmissionsByAssignment(
+        detail.assignments.map((a) => a.id),
+      );
+      const paths = new Map<string, string>();
+      for (const [assignmentId, sub] of subs) {
+        paths.set(assignmentId, sub.video_path);
+      }
+      setData(detail);
+      setVideoPaths(paths);
     } catch (e) {
       Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -52,16 +82,69 @@ export default function AdminCreatorDetail() {
     }, [load]),
   );
 
-  const paidCents = (data?.ledger ?? [])
-    .filter((entry) => entry.kind === 'payout_paid')
-    .reduce((sum, entry) => sum + -entry.amountCents, 0);
+  const assignments = data?.assignments ?? [];
   const earnedCents = (data?.ledger ?? [])
     .filter((entry) => entry.amountCents > 0)
     .reduce((sum, entry) => sum + entry.amountCents, 0);
+  const views = assignments.reduce(
+    (sum, a) => sum + (parseAssignmentMetrics(a.metrics).views ?? 0),
+    0,
+  );
+  const postedCount = assignments.filter((a) => a.status === 'posted').length;
+
+  const byDay = useMemo(() => {
+    const map = new Map<string, typeof assignments>();
+    for (const a of assignments) {
+      const key = a.scheduled_date.slice(0, 10);
+      map.set(key, [...(map.get(key) ?? []), a]);
+    }
+    return map;
+  }, [assignments]);
+
+  const tileSize = Math.floor((winWidth - space.gutter * 2 - 8 * 2) / 3);
+
+  const openPost = (assignmentId: string) =>
+    router.push(`/(admin)/creator/post/${assignmentId}`);
+
+  const weeks = useMemo(() => {
+    const year = month.getFullYear();
+    const m = month.getMonth();
+    const firstWeekday = new Date(year, m, 1).getDay();
+    const daysInMonth = new Date(year, m + 1, 0).getDate();
+    const cells: Array<{ day: number; key: string } | null> = [
+      ...Array.from({ length: firstWeekday }, () => null),
+      ...Array.from({ length: daysInMonth }, (_v, i) => ({
+        day: i + 1,
+        key: dateKey(year, m, i + 1),
+      })),
+    ];
+    while (cells.length % 7 !== 0) cells.push(null);
+    const rows: Array<typeof cells> = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }, [month]);
+
+  const selectedPosts = selectedDay !== null ? byDay.get(selectedDay) ?? [] : [];
 
   return (
     <>
-      <Stack.Screen options={{ title: data?.name ?? 'Creator' }} />
+      <Stack.Screen
+        options={{
+          title: data?.name ?? 'Creator',
+          headerRight: () => (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Message creator"
+              onPress={() =>
+                router.push(`/(admin)/chat/${id}`)
+              }
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="message-circle" size={22} color={color.ink} />
+            </PressableScale>
+          ),
+        }}
+      />
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.content}
@@ -82,91 +165,120 @@ export default function AdminCreatorDetail() {
           <>
             <View style={styles.totalsRow}>
               <Stat label="Earned" value={formatCents(earnedCents)} />
-              <Stat label="Paid out" value={formatCents(paidCents)} />
-              <Stat label="Posts" value={`${data.assignments.length}`} />
+              <Stat label="Posts" value={`${postedCount}`} />
+              <Stat label="Views" value={formatMetric(views)} />
             </View>
 
-            <Text style={styles.section}>Posts</Text>
-            {data.assignments.length === 0 ? (
-              <Text style={styles.empty}>No assignments yet.</Text>
+            <Segmented options={['Grid', 'Calendar']} value={view} onChange={setView} />
+
+            {assignments.length === 0 ? (
+              <Text style={styles.empty}>No posts yet.</Text>
+            ) : view === 0 ? (
+              <View style={styles.grid}>
+                {assignments.map((a) => (
+                  <PostTile
+                    key={a.id}
+                    title={a.briefs.title}
+                    format={a.briefs.format}
+                    status={a.status}
+                    videoPath={videoPaths.get(a.id) ?? null}
+                    size={tileSize}
+                    onPress={() => openPost(a.id)}
+                  />
+                ))}
+              </View>
             ) : (
-              data.assignments.map((a) => {
-                const metrics = parseAssignmentMetrics(a.metrics);
-                return (
+              <>
+                <View style={[styles.calendar, shadow.shadowCard]}>
+                  <View style={styles.monthRow}>
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel="Previous month"
+                      onPress={() => {
+                        setSelectedDay(null);
+                        setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1));
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Icon name="chevron-left" size={20} color={color.ink} />
+                    </PressableScale>
+                    <Text style={styles.monthLabel}>{monthLabel(month)}</Text>
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel="Next month"
+                      onPress={() => {
+                        setSelectedDay(null);
+                        setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1));
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Icon name="chevron-right" size={20} color={color.ink} />
+                    </PressableScale>
+                  </View>
+                  <View style={styles.weekRow}>
+                    {DAY_LABELS.map((d, i) => (
+                      <Text key={`${d}-${i}`} style={styles.dayLabel}>
+                        {d}
+                      </Text>
+                    ))}
+                  </View>
+                  {weeks.map((week, wi) => (
+                    <View key={wi} style={styles.weekRow}>
+                      {week.map((cell, ci) => {
+                        if (cell === null) return <View key={ci} style={styles.dayCell} />;
+                        const count = byDay.get(cell.key)?.length ?? 0;
+                        const selected = cell.key === selectedDay;
+                        return (
+                          <PressableScale
+                            key={ci}
+                            accessibilityRole="button"
+                            disabled={count === 0}
+                            onPress={() => setSelectedDay(cell.key)}
+                            style={[
+                              styles.dayCell,
+                              count > 0 && styles.dayCellActive,
+                              selected && styles.dayCellSelected,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.dayNumber,
+                                count === 0 && styles.dayNumberMuted,
+                                selected && styles.dayNumberSelected,
+                              ]}
+                            >
+                              {cell.day}
+                            </Text>
+                            {count > 0 && (
+                              <View
+                                style={[styles.dot, selected && styles.dotSelected]}
+                              />
+                            )}
+                          </PressableScale>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </View>
+
+                {selectedPosts.map((a) => (
                   <PressableScale
                     key={a.id}
-                    accessibilityRole={a.post_url ? 'link' : 'none'}
-                    disabled={!a.post_url}
-                    onPress={() => {
-                      if (a.post_url) void Linking.openURL(a.post_url);
-                    }}
-                    style={[styles.card, shadow.shadowCard]}
+                    accessibilityRole="button"
+                    onPress={() => openPost(a.id)}
+                    style={[styles.dayPost, shadow.shadowCard]}
                   >
-                    <View style={styles.cardHeader}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>
-                        {a.briefs.title}
-                      </Text>
-                      <StatusChip status={a.status} />
-                    </View>
-                    <Text style={styles.cardMeta}>
-                      {formatDate(a.scheduled_date)}
-                      {metrics.views !== undefined
-                        ? ` · ${formatMetric(metrics.views)} views`
-                        : ''}
-                      {a.post_url ? ' · open post' : ''}
+                    <Text style={styles.dayPostTitle} numberOfLines={1}>
+                      {a.briefs.title}
+                    </Text>
+                    <Text style={styles.dayPostMeta}>
+                      {a.briefs.format === 'video' ? 'Video' : 'Slideshow'}
+                      {' · '}
+                      {formatMetric(parseAssignmentMetrics(a.metrics).views ?? 0)} views
                     </Text>
                   </PressableScale>
-                );
-              })
-            )}
-
-            <Text style={styles.section}>Chat history</Text>
-            {data.events.length === 0 ? (
-              <Text style={styles.empty}>No review activity yet.</Text>
-            ) : (
-              data.events.map((e) => (
-                <View key={e.id} style={[styles.card, shadow.shadowCard]}>
-                  <Text style={styles.cardTitle}>
-                    {e.profiles?.full_name?.trim() || 'Someone'}
-                    <Text style={styles.eventAction}>
-                      {e.action === 'approved'
-                        ? ' approved'
-                        : e.action === 'changes_requested'
-                          ? ' requested changes'
-                          : ' commented'}
-                    </Text>
-                  </Text>
-                  {e.note ? <Text style={styles.note}>{e.note}</Text> : null}
-                  <Text style={styles.cardMeta}>{formatDate(e.created_at)}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.section}>Earnings</Text>
-            {data.ledger.length === 0 ? (
-              <Text style={styles.empty}>No ledger entries yet.</Text>
-            ) : (
-              data.ledger.map((entry) => (
-                <View key={entry.id} style={[styles.card, shadow.shadowCard]}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle}>
-                      {ledgerKindLabel(entry.kind)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.amount,
-                        entry.amountCents < 0 && styles.amountNegative,
-                      ]}
-                    >
-                      {formatCents(entry.amountCents)}
-                    </Text>
-                  </View>
-                  <Text style={styles.cardMeta}>
-                    {formatDate(entry.createdAt)}
-                    {entry.note ? ` · ${entry.note}` : ''}
-                  </Text>
-                </View>
-              ))
+                ))}
+              </>
             )}
           </>
         )}
@@ -186,7 +298,7 @@ function Stat(props: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 10 },
+  content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 12 },
   empty: {
     fontSize: type.size.bodySm,
     color: color.slate500,
@@ -214,16 +326,63 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: type.tracking.label,
   },
-  section: {
-    marginTop: 14,
-    marginBottom: 2,
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  card: {
+  calendar: {
+    backgroundColor: color.white,
+    borderRadius: radius.md,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+    padding: 12,
+    gap: 6,
+  },
+  monthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  monthLabel: {
+    fontSize: type.size.bodySm,
+    fontWeight: '800',
+    color: color.ink,
+  },
+  weekRow: { flexDirection: 'row' },
+  dayLabel: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: type.size.micro,
+    fontWeight: '700',
+    color: color.slate400,
+  },
+  dayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.cell,
+    gap: 2,
+  },
+  dayCellActive: { backgroundColor: color.blue100 },
+  dayCellSelected: { backgroundColor: color.blue600 },
+  dayNumber: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.blue700,
+  },
+  dayNumberMuted: { color: color.slate400, fontWeight: '500' },
+  dayNumberSelected: { color: color.white },
+  dot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: color.blue600,
+  },
+  dotSelected: { backgroundColor: color.white },
+  dayPost: {
     backgroundColor: color.white,
     borderRadius: radius.md,
     padding: 14,
@@ -231,34 +390,14 @@ const styles = StyleSheet.create({
     borderColor: color.line,
     gap: 4,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  cardTitle: {
-    flexShrink: 1,
+  dayPostTitle: {
     fontSize: type.size.bodySm,
     fontWeight: '700',
     color: color.ink,
   },
-  cardMeta: {
+  dayPostMeta: {
     fontSize: type.size.chip,
     fontWeight: '600',
     color: color.slate500,
   },
-  eventAction: { fontWeight: '600', color: color.slate500 },
-  note: {
-    fontSize: type.size.bodySm,
-    fontWeight: '500',
-    color: color.ink,
-    lineHeight: 20,
-  },
-  amount: {
-    fontSize: type.size.bodySm,
-    fontWeight: '800',
-    color: color.ink,
-  },
-  amountNegative: { color: color.slate500 },
 });

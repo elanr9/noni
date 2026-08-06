@@ -2,10 +2,24 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { summarizeItem, type GoldenExample } from './relevance.ts';
 
+export const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-cron-secret',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+export function handleCors(req: Request): Response | null {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+  return null;
+}
+
 export function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
@@ -80,6 +94,42 @@ export async function askClaude(
     .join('');
 }
 
+/** Cheap ChatGPT path for light edits (Brand Brain cleanup). */
+export async function askOpenAI(
+  system: string,
+  user: string,
+  maxTokens = 2048,
+): Promise<string> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) throw new Error('OPENAI_API_KEY not set');
+  const model = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini';
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error('OpenAI returned an empty response');
+  return text;
+}
+
 // Vision variant used for carousel slide OCR: image URLs plus a text prompt.
 export async function askClaudeVision(
   system: string,
@@ -147,6 +197,15 @@ export type SourcingTerm = {
   scrapes: number;
 };
 
+// Approved claim library row. Product points in briefs must be composed from
+// these; the model phrases, it does not invent capability.
+export type ProductFeature = {
+  id: string;
+  name: string;
+  what_it_does: string;
+  claim: string;
+};
+
 export type BrandContext = {
   companyName: string;
   tone: string | null;
@@ -159,6 +218,9 @@ export type BrandContext = {
   referenceHandles: string[];
   docs: BrandDocs;
   sourcingTerms: SourcingTerm[];
+  approvedClaims: ProductFeature[];
+  hashtagBank: string[];
+  bannedPhrases: string[];
 };
 
 const DOC_KIND_TO_KEY: Record<string, keyof BrandDocs> = {
@@ -172,18 +234,26 @@ export async function loadBrandContext(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<BrandContext> {
-  const [{ data: company }, { data: brand }, { data: docs }] = await Promise.all([
-    admin.from('companies').select('name, settings').eq('id', companyId).single(),
-    admin
-      .from('brand_profiles')
-      .select('tone, audience, products, content_pillars, buying_path, sourcing')
-      .eq('company_id', companyId)
-      .maybeSingle(),
-    admin
-      .from('brand_docs')
-      .select('kind, content')
-      .eq('company_id', companyId),
-  ]);
+  const [{ data: company }, { data: brand }, { data: docs }, { data: claims }] =
+    await Promise.all([
+      admin.from('companies').select('name, settings').eq('id', companyId).single(),
+      admin
+        .from('brand_profiles')
+        .select(
+          'tone, audience, products, content_pillars, buying_path, sourcing, hashtag_bank, banned_phrases',
+        )
+        .eq('company_id', companyId)
+        .maybeSingle(),
+      admin
+        .from('brand_docs')
+        .select('kind, content')
+        .eq('company_id', companyId),
+      admin
+        .from('product_features')
+        .select('id, name, what_it_does, claim')
+        .eq('company_id', companyId)
+        .eq('approved', true),
+    ]);
   const settings = (company?.settings ?? {}) as {
     handles?: { instagram?: string; tiktok?: string };
     vertical?: string;
@@ -217,6 +287,13 @@ export async function loadBrandContext(
       : [],
     docs: brandDocs,
     sourcingTerms: Array.isArray(sourcing.terms) ? sourcing.terms : [],
+    approvedClaims: (claims ?? []) as ProductFeature[],
+    hashtagBank: Array.isArray(brand?.hashtag_bank)
+      ? (brand.hashtag_bank as string[])
+      : [],
+    bannedPhrases: Array.isArray(brand?.banned_phrases)
+      ? (brand.banned_phrases as string[])
+      : [],
   };
 }
 

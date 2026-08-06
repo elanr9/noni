@@ -1,3 +1,5 @@
+import { createVideoPlayer } from 'expo-video';
+
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
 import type { Assignment, ContentTask, TaskStatus } from './tasks';
@@ -19,6 +21,75 @@ export type RecordedSegment = {
   uri: string;
   durationMs: number;
 };
+
+const PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * Real media duration of a recorded clip. The wall-clock durationMs from the
+ * record screen includes camera start latency; overlay timing on the render
+ * timeline is absolute, so probe the file itself and fall back to wall clock.
+ */
+async function probeDurationMs(uri: string, fallbackMs: number): Promise<number> {
+  const player = createVideoPlayer(uri);
+  try {
+    const seconds = await new Promise<number>((resolve) => {
+      if (player.status === 'readyToPlay') {
+        resolve(player.duration);
+        return;
+      }
+      const timeout = setTimeout(() => resolve(0), PROBE_TIMEOUT_MS);
+      const sub = player.addListener('statusChange', ({ status }) => {
+        if (status === 'readyToPlay' || status === 'error') {
+          clearTimeout(timeout);
+          sub.remove();
+          resolve(status === 'readyToPlay' ? player.duration : 0);
+        }
+      });
+    });
+    return seconds > 0 ? Math.round(seconds * 1000) : fallbackMs;
+  } finally {
+    player.release();
+  }
+}
+
+/**
+ * One submission_segments row per clip, slot order matching upload order.
+ * brief_segment_id links each clip to its render manifest row when the brief
+ * has segments; legacy briefs and content_tasks leave it null.
+ */
+async function insertSubmissionSegments(params: {
+  companyId: string;
+  submissionId: string;
+  briefId: string | null;
+  paths: string[];
+  durationsMs: number[];
+}): Promise<void> {
+  const { companyId, submissionId, briefId, paths, durationsMs } = params;
+
+  let briefSegmentIds: (string | null)[] = paths.map(() => null);
+  if (briefId) {
+    const { data, error } = await supabase
+      .from('brief_segments')
+      .select('id, slot_index')
+      .eq('brief_id', briefId)
+      .order('slot_index', { ascending: true });
+    if (error) throw error;
+    briefSegmentIds = paths.map((_p, i) => data?.[i]?.id ?? null);
+  }
+
+  const rows = paths.map((path, i) => ({
+    company_id: companyId,
+    submission_id: submissionId,
+    brief_segment_id: briefSegmentIds[i],
+    slot_index: i,
+    storage_path: path,
+    duration_ms: durationsMs[i],
+    status: 'submitted',
+  }));
+
+  const { error } = await supabase.from('submission_segments').insert(rows);
+  if (error) throw error;
+}
 
 async function uploadClip(localUri: string, path: string): Promise<void> {
   const response = await fetch(localUri);
@@ -57,21 +128,36 @@ export async function submitRecording(params: {
     await uploadClip(segments[i].uri, paths[i]);
   }
 
+  const durationsMs = await Promise.all(
+    segments.map((s) => probeDurationMs(s.uri, s.durationMs)),
+  );
   const durationSeconds = Math.max(
     1,
-    Math.round(segments.reduce((sum, s) => sum + s.durationMs, 0) / 1000),
+    Math.round(durationsMs.reduce((sum, d) => sum + d, 0) / 1000),
   );
 
-  const { error: insertError } = await supabase.from('submissions').insert({
-    task_id: task.id,
-    creator_id: creatorId,
-    video_path: paths[0],
-    segment_paths: paths,
-    duration_seconds: durationSeconds,
-    version,
-  });
+  const { data: submission, error: insertError } = await supabase
+    .from('submissions')
+    .insert({
+      task_id: task.id,
+      creator_id: creatorId,
+      video_path: paths[0],
+      segment_paths: paths,
+      duration_seconds: durationSeconds,
+      version,
+    })
+    .select('id')
+    .single();
 
   if (insertError) throw insertError;
+
+  await insertSubmissionSegments({
+    companyId,
+    submissionId: submission.id,
+    briefId: null,
+    paths,
+    durationsMs,
+  });
 
   let current: TaskStatus = task.status;
   let updated = task;
@@ -116,9 +202,12 @@ export async function submitAssignmentRecording(params: {
     await uploadClip(segments[i].uri, paths[i]);
   }
 
+  const durationsMs = await Promise.all(
+    segments.map((s) => probeDurationMs(s.uri, s.durationMs)),
+  );
   const durationSeconds = Math.max(
     1,
-    Math.round(segments.reduce((sum, s) => sum + s.durationMs, 0) / 1000),
+    Math.round(durationsMs.reduce((sum, d) => sum + d, 0) / 1000),
   );
 
   const { data: submission, error: insertError } = await supabase
@@ -135,6 +224,14 @@ export async function submitAssignmentRecording(params: {
     .single();
 
   if (insertError) throw insertError;
+
+  await insertSubmissionSegments({
+    companyId,
+    submissionId: submission.id,
+    briefId: assignment.brief_id,
+    paths,
+    durationsMs,
+  });
 
   const { error: linkError } = await supabase
     .from('assignments')

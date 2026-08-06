@@ -1,16 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 type Body = {
   action: 'status' | 'connect_url' | 'team_status';
   creator_id?: string;
 };
-
-function jsonResponse(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 function uploadPostKey(): string {
   const key = Deno.env.get('UPLOAD_POST_API_KEY');
@@ -76,6 +70,8 @@ async function fetchSocialAccounts(
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   try {
     const body = (await req.json().catch(() => null)) as Body | null;
     if (

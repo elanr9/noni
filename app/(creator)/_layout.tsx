@@ -34,6 +34,26 @@ export default function CreatorLayout() {
           headerTintColor: color.ink,
         }}
       />
+      <Stack.Screen
+        name="chat"
+        options={{
+          headerShown: true,
+          title: 'Messages',
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: color.offWhite },
+          headerTintColor: color.ink,
+        }}
+      />
+      <Stack.Screen
+        name="account-setup"
+        options={{
+          headerShown: true,
+          title: 'Account setup',
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: color.offWhite },
+          headerTintColor: color.ink,
+        }}
+      />
       <Stack.Screen name="task/[id]" />
       <Stack.Screen name="record/[id]" options={{ presentation: 'fullScreenModal' }} />
     </Stack>

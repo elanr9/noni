@@ -26,6 +26,7 @@ import {
 } from '../../../lib/review-events';
 import {
   getAssignment,
+  markMusicAdded,
   parseAssignmentMetrics,
   type AssignmentWithBrief,
 } from '../../../lib/tasks-api';
@@ -116,6 +117,11 @@ export default function AssignmentDetailScreen() {
   const changesNote = latestChangesNote(events);
   const metrics = parseAssignmentMetrics(assignment.metrics);
   const bountyPaid = assignment.bounty_credited_at !== null;
+  // Slideshow music loop: live post -> creator adds the song in each app ->
+  // one tap here -> admin's music approval queue -> earnings unlock.
+  const showMusicStep =
+    !isVideo && assignment.status === 'posted' && assignment.music_approved_at === null;
+  const musicMarked = assignment.music_marked_by_creator_at !== null;
 
   function onRecord() {
     if (!assignment) return;
@@ -127,6 +133,19 @@ export default function AssignmentDetailScreen() {
       'Create slides',
       'Photo carousel posting is coming soon. Open the example above and shoot the slides to match.',
     );
+  }
+
+  async function onMusicAdded() {
+    if (!assignment) return;
+    try {
+      const updated = await markMusicAdded(assignment.id);
+      setAssignment({ ...assignment, ...updated });
+    } catch (e) {
+      Alert.alert(
+        'Could not send',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    }
   }
 
   async function sendComment(text: string) {
@@ -259,6 +278,28 @@ export default function AssignmentDetailScreen() {
                 </Text>
               </View>
             </View>
+          </View>
+        ) : null}
+
+        {showMusicStep ? (
+          <View style={styles.block}>
+            <Text style={styles.blockLabel}>Music</Text>
+            {musicMarked ? (
+              <Text style={styles.blockBody}>
+                Sent. The admin is confirming the song and your earnings unlock
+                after that.
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.blockBody}>
+                  Open the post in TikTok and Instagram, add the song, then tap
+                  once here.
+                </Text>
+                <Button variant="primary" block onPress={() => void onMusicAdded()}>
+                  Music added
+                </Button>
+              </>
+            )}
           </View>
         ) : null}
 

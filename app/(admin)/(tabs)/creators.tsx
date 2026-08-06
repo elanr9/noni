@@ -20,31 +20,18 @@ import { formatMetric } from '../../../lib/analytics';
 import { formatCents } from '../../../lib/wallet-api';
 import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
 
-type SortKey =
-  | 'views'
-  | 'followers'
-  | 'postsCompleted'
-  | 'approvalRate'
-  | 'revenueCents'
-  | 'paidCents';
+type SortKey = 'earnedCents' | 'postsCompleted' | 'views' | 'approvalRate';
 
 const SORTS: Array<{ key: SortKey; label: string }> = [
-  { key: 'views', label: 'Views' },
-  { key: 'followers', label: 'Followers' },
+  { key: 'earnedCents', label: 'Earned' },
   { key: 'postsCompleted', label: 'Posts' },
+  { key: 'views', label: 'Views' },
   { key: 'approvalRate', label: 'Approval' },
-  { key: 'revenueCents', label: 'Revenue' },
-  { key: 'paidCents', label: 'Paid' },
 ];
 
 function sortValue(row: CreatorLeaderboardRow, key: SortKey): number {
   const value = row[key];
   return value ?? -1;
-}
-
-function formatFollowers(n: number | null): string {
-  if (n === null) return '—';
-  return formatMetric(n);
 }
 
 function formatApproval(rate: number | null): string {
@@ -58,7 +45,7 @@ export default function CreatorsScreen() {
   const [rows, setRows] = useState<CreatorLeaderboardRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('views');
+  const [sortKey, setSortKey] = useState<SortKey>('earnedCents');
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -157,12 +144,10 @@ export default function CreatorsScreen() {
               </Text>
             </View>
             <View style={styles.statGrid}>
-              <Cell label="Views" value={formatMetric(c.views)} active={sortKey === 'views'} />
-              <Cell label="Followers" value={formatFollowers(c.followers)} active={sortKey === 'followers'} />
+              <Cell label="Earned" value={formatCents(c.earnedCents)} active={sortKey === 'earnedCents'} />
               <Cell label="Posts" value={`${c.postsCompleted}`} active={sortKey === 'postsCompleted'} />
+              <Cell label="Views" value={formatMetric(c.views)} active={sortKey === 'views'} />
               <Cell label="Approval" value={formatApproval(c.approvalRate)} active={sortKey === 'approvalRate'} />
-              <Cell label="Revenue" value={formatCents(c.revenueCents)} active={sortKey === 'revenueCents'} />
-              <Cell label="Paid" value={formatCents(c.paidCents)} active={sortKey === 'paidCents'} />
             </View>
           </PressableScale>
         ))
@@ -255,7 +240,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     rowGap: 8,
   },
-  cell: { width: '33.33%', gap: 1 },
+  cell: { width: '25%', gap: 1 },
   cellValue: {
     fontSize: type.size.bodySm,
     fontWeight: '800',

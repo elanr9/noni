@@ -4,6 +4,7 @@ import {
   adminClient,
   authenticate,
   generateTaskDraft,
+  handleCors,
   jsonResponse,
   loadBrandContext,
 } from '../_shared/wp8.ts';
@@ -157,6 +158,8 @@ async function run(companyIds: string[]): Promise<void> {
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
   if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);

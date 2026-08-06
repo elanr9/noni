@@ -49,7 +49,13 @@
           "recordAudioAndroid": true
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Noni saves the account template profile picture to your photos so you can set it on TikTok and Instagram."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

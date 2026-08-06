@@ -1,12 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
-
-function jsonResponse(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 function stripeClient(): Stripe {
   const key = Deno.env.get('STRIPE_SECRET_KEY');
@@ -15,6 +9,8 @@ function stripeClient(): Stripe {
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   try {
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,

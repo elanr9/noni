@@ -2,6 +2,7 @@ import {
   adminClient,
   authenticate,
   generateTaskDraft,
+  handleCors,
   jsonResponse,
   loadBrandContext,
   type TrendForPrompt,
@@ -10,6 +11,8 @@ import {
 type Body = { trend_id?: string };
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
   if (!caller || caller.kind !== 'user') {

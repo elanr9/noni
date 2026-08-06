@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
+  <defs>
+    <linearGradient id="g" x1="0.5" y1="0.15" x2="0.5" y2="0.9">
+      <stop offset="0" stop-color="#5BB8FF"/>
+      <stop offset="0.45" stop-color="#2F8CFF"/>
+      <stop offset="1" stop-color="#1B63D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="114" ry="114" fill="#E8F4FF"/>
+  <!-- Approximate Expo chevron: stadium-stroke inverted V -->
+  <path fill="url(#g)" d="
+    M256 118
+    C248 118 120 278 98 310
+    C82 334 98 362 128 362
+    C148 362 176 330 214 280
+    C232 256 246 236 256 222
+    C266 236 280 256 298 280
+    C336 330 364 362 384 362
+    C414 362 430 334 414 310
+    C392 278 264 118 256 118
+    Z"/>
+</svg>

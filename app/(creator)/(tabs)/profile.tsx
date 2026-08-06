@@ -327,6 +327,12 @@ export default function ProfileScreen() {
       </Group>
 
       <Group label="Accounts">
+        <Row
+          icon="circle-check-big"
+          label="Account setup"
+          chevron
+          onPress={() => router.push('/(creator)/account-setup' as Href)}
+        />
         <ConnectRow
           icon="at-sign"
           label="Instagram"
@@ -343,6 +349,16 @@ export default function ProfileScreen() {
           busy={connectBusy}
           last
           onConnect={() => void connect()}
+        />
+      </Group>
+
+      <Group label="Messages">
+        <Row
+          icon="message-circle"
+          label="Chat with the team"
+          chevron
+          last
+          onPress={() => router.push('/(creator)/chat' as Href)}
         />
       </Group>
 

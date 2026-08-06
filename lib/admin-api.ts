@@ -1,3 +1,6 @@
+import { Image } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
+
 import { supabase } from './supabase';
 import { assertTransition, type Assignment, type ContentTask, type TaskStatus } from './tasks';
 import { parseAssignmentMetrics, transitionAssignment, type Brief } from './tasks-api';
@@ -130,6 +133,12 @@ export async function reviewAssignment(params: {
     if (postError) throw postError;
     const errMsg = (postResult as { error?: string } | null)?.error;
     if (errMsg) throw new Error(errMsg);
+
+    // The post is through Upload-Post: tell the creator, with deep links to
+    // both platforms resolved server-side by notify.
+    void supabase.functions.invoke('notify', {
+      body: { assignment_id: assignment.id, event: 'post_live' },
+    });
   }
 
   return updated;
@@ -281,6 +290,10 @@ export async function reviewTask(params: {
     if (postError) throw postError;
     const errMsg = (postResult as { error?: string } | null)?.error;
     if (errMsg) throw new Error(errMsg);
+
+    void supabase.functions.invoke('notify', {
+      body: { task_id: task.id, event: 'post_live' },
+    });
   }
 
   return data as ContentTask;
@@ -471,14 +484,21 @@ export async function saveBrandDoc(
   if (error) throw error;
 }
 
-/** Asks brand-ingest to draft the given docs from the site and socials. */
-export async function draftBrandDocs(kinds: BrandDocKind[]): Promise<void> {
+/** Cheap OpenAI cleanup of a Product or Audience doc. Returns cleaned markdown. */
+export async function cleanupBrandDoc(
+  kind: 'product_truth' | 'audience_niche',
+  content: string,
+): Promise<string> {
   const { data, error } = await supabase.functions.invoke('brand-ingest', {
-    body: { docs: kinds },
+    body: { action: 'cleanup_doc', kind, content },
   });
   if (error) throw error;
-  const result = data as { error?: string } | null;
+  const result = data as { error?: string; content?: string } | null;
   if (result?.error) throw new Error(result.error);
+  if (!result?.content?.trim()) {
+    throw new Error('Cleanup came back empty. Try again.');
+  }
+  return result.content;
 }
 
 export async function listSourceAccounts(): Promise<SourceAccount[]> {
@@ -640,23 +660,15 @@ function assignmentRevenue(maps: RevenueMaps, a: AssignmentStatRow): number {
   );
 }
 
-function followerCount(value: unknown): number {
-  if (!value || typeof value !== 'object') return 0;
-  const obj = value as Record<string, unknown>;
-  const raw = obj.followers ?? obj.follower_count;
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 0;
-}
-
 export type CreatorLeaderboardRow = {
   creatorId: string;
   creatorName: string;
   views: number;
-  followers: number | null;
   postsCompleted: number;
   /** approved / reviewed, 0..1. Null when nothing has been reviewed yet. */
   approvalRate: number | null;
-  revenueCents: number;
-  paidCents: number;
+  /** Positive wallet_ledger sum: bounties and bonuses credited. */
+  earnedCents: number;
 };
 
 export async function fetchCreatorLeaderboard(
@@ -666,8 +678,6 @@ export async function fetchCreatorLeaderboard(
     { data: creators, error: creatorsError },
     { data: assignments, error: assignmentsError },
     { data: ledger, error: ledgerError },
-    revenueMaps,
-    socialByCreator,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -683,23 +693,7 @@ export async function fetchCreatorLeaderboard(
       .from('wallet_ledger')
       .select('creator_id, amount_cents')
       .eq('company_id', companyId)
-      .eq('kind', 'payout_paid'),
-    fetchRevenueMaps(companyId),
-    // Followers come from Upload-Post via the social-connect edge function.
-    // If that call fails the table still renders, just without followers.
-    listCreatorSocialStatus()
-      .then((members) => {
-        const map = new Map<string, number>();
-        for (const m of members) {
-          const total = Object.values(m.social_accounts ?? {}).reduce<number>(
-            (sum, account) => sum + followerCount(account),
-            0,
-          );
-          if (total > 0) map.set(m.id, total);
-        }
-        return map;
-      })
-      .catch(() => new Map<string, number>()),
+      .gt('amount_cents', 0),
   ]);
   if (creatorsError) throw creatorsError;
   if (assignmentsError) throw assignmentsError;
@@ -712,11 +706,9 @@ export async function fetchCreatorLeaderboard(
         creatorId: p.id,
         creatorName: p.full_name?.trim() || 'Creator',
         views: 0,
-        followers: socialByCreator.get(p.id) ?? null,
         postsCompleted: 0,
         approvalRate: null,
-        revenueCents: 0,
-        paidCents: 0,
+        earnedCents: 0,
       },
     ]),
   );
@@ -734,7 +726,6 @@ export async function fetchCreatorLeaderboard(
     } else if (a.status === 'changes_requested') {
       reviewed.set(a.creator_id, (reviewed.get(a.creator_id) ?? 0) + 1);
     }
-    row.revenueCents += assignmentRevenue(revenueMaps, a);
   }
   for (const [creatorId, reviewedCount] of reviewed) {
     const row = rows.get(creatorId);
@@ -744,11 +735,10 @@ export async function fetchCreatorLeaderboard(
   }
   for (const entry of ledger ?? []) {
     const row = rows.get(entry.creator_id);
-    // payout_paid rows are negative debits; total paid is the positive sum.
-    if (row) row.paidCents += -entry.amount_cents;
+    if (row) row.earnedCents += entry.amount_cents;
   }
 
-  return [...rows.values()].sort((a, b) => b.views - a.views);
+  return [...rows.values()].sort((a, b) => b.earnedCents - a.earnedCents);
 }
 
 export type BriefPerformance = {
@@ -978,4 +968,382 @@ export async function startMetricsPoll(): Promise<void> {
   if (error) throw error;
   const result = data as { error?: string } | null;
   if (result?.error) throw new Error(result.error);
+}
+
+export type ProductFeature = Database['public']['Tables']['product_features']['Row'];
+
+export type ProductFeatureInput = {
+  name: string;
+  what_it_does: string;
+  claim: string;
+};
+
+/** Non-rejected claims for the admin Features screen. RLS scopes by company. */
+export async function listProductFeatures(): Promise<ProductFeature[]> {
+  const { data, error } = await supabase
+    .from('product_features')
+    .select('*')
+    .eq('rejected', false)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Admin-written claim: already approved, never pending. */
+export async function addManualProductFeature(
+  companyId: string,
+  input: ProductFeatureInput,
+): Promise<ProductFeature> {
+  const { data, error } = await supabase
+    .from('product_features')
+    .insert({
+      company_id: companyId,
+      name: input.name.trim(),
+      what_it_does: input.what_it_does.trim(),
+      claim: input.claim.trim(),
+      source: 'manual',
+      approved: true,
+      rejected: false,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Edit fields only; leaves approved untouched so typos do not yank a claim from the bank. */
+export async function updateProductFeature(
+  id: string,
+  input: ProductFeatureInput,
+): Promise<void> {
+  const { error } = await supabase
+    .from('product_features')
+    .update({
+      name: input.name.trim(),
+      what_it_does: input.what_it_does.trim(),
+      claim: input.claim.trim(),
+    })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function approveProductFeature(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_features')
+    .update({ approved: true, rejected: false })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/** Soft dismiss. Row stays so rescans and idempotency skip the name. */
+export async function rejectProductFeature(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_features')
+    .update({ rejected: true, approved: false })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export type ProductType = 'software' | 'physical';
+
+/** Steers ingest-features extraction. Defaults to software when missing. */
+export async function getProductType(companyId: string): Promise<ProductType> {
+  const { data, error } = await supabase
+    .from('brand_profiles')
+    .select('product_type')
+    .eq('company_id', companyId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.product_type === 'physical' ? 'physical' : 'software';
+}
+
+export async function setProductType(
+  companyId: string,
+  productType: ProductType,
+): Promise<void> {
+  const { data: existing, error: readError } = await supabase
+    .from('brand_profiles')
+    .select('id')
+    .eq('company_id', companyId)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  if (existing) {
+    const { error } = await supabase
+      .from('brand_profiles')
+      .update({
+        product_type: productType,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from('brand_profiles').insert({
+    company_id: companyId,
+    product_type: productType,
+  });
+  if (error) throw error;
+}
+
+const FEATURE_SHOT_BUCKET = 'feature-screenshots';
+const FEATURE_SHOT_LONG_EDGE = 1600;
+
+/** Client picker cap. Server allows 12; 150s idle timeout makes 7 the safe batch. */
+export const FEATURE_INGEST_MAX_IMAGES = 7;
+
+export type IngestFeaturesResult = {
+  scanned: number;
+  inserted: number;
+  skipped_existing: number;
+  dropped_over_cap: number;
+};
+
+async function downscaleFeatureShot(localUri: string): Promise<string> {
+  const { width, height } = await new Promise<{ width: number; height: number }>(
+    (resolve, reject) => {
+      Image.getSize(
+        localUri,
+        (w, h) => resolve({ width: w, height: h }),
+        (err) => reject(err ?? new Error('Could not read image size')),
+      );
+    },
+  );
+  const long = Math.max(width, height);
+  const actions =
+    long > FEATURE_SHOT_LONG_EDGE
+      ? width >= height
+        ? [{ resize: { width: FEATURE_SHOT_LONG_EDGE } }]
+        : [{ resize: { height: FEATURE_SHOT_LONG_EDGE } }]
+      : [];
+  const result = await ImageManipulator.manipulateAsync(localUri, actions, {
+    compress: 0.82,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+  return result.uri;
+}
+
+/** Downscale then upload under feature-screenshots/{company_id}/. Returns storage path. */
+export async function uploadFeatureScreenshot(
+  companyId: string,
+  localUri: string,
+): Promise<string> {
+  const resizedUri = await downscaleFeatureShot(localUri);
+  const response = await fetch(resizedUri);
+  if (!response.ok) throw new Error('Could not read the screenshot');
+  const blob = await response.blob();
+  const path = `${companyId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage
+    .from(FEATURE_SHOT_BUCKET)
+    .upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+// --- Music approvals (slideshows only) -------------------------------------
+
+export type MusicApprovalItem = {
+  assignment: Assignment;
+  briefTitle: string;
+  creatorName: string;
+  markedAt: string;
+  /** Live post links, one per platform Upload-Post responded for. */
+  postLinks: Array<{ platform: string; url: string }>;
+};
+
+/**
+ * Slideshows where the creator tapped "Music added" and no admin has
+ * approved yet. Approval unlocks earnings for that post (the gate itself is
+ * enforced in poll-metrics bounty crediting).
+ */
+export async function listMusicApprovalQueue(
+  companyId: string,
+): Promise<MusicApprovalItem[]> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('*, briefs:brief_id ( id, title ), profiles:creator_id ( id, full_name )')
+    .eq('company_id', companyId)
+    .not('music_marked_by_creator_at', 'is', null)
+    .is('music_approved_at', null)
+    .order('music_marked_by_creator_at', { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []) as Array<
+    Assignment & {
+      briefs: { id: string; title: string } | null;
+      profiles: { id: string; full_name: string | null } | null;
+    }
+  >;
+  if (rows.length === 0) return [];
+
+  const { data: posts, error: postsError } = await supabase
+    .from('posts')
+    .select('assignment_id, platform, post_url')
+    .in('assignment_id', rows.map((r) => r.id))
+    .not('post_url', 'is', null);
+  if (postsError) throw postsError;
+
+  const linksByAssignment = new Map<string, Array<{ platform: string; url: string }>>();
+  for (const p of posts ?? []) {
+    if (p.assignment_id === null || p.post_url === null) continue;
+    const list = linksByAssignment.get(p.assignment_id) ?? [];
+    list.push({ platform: p.platform ?? 'post', url: p.post_url });
+    linksByAssignment.set(p.assignment_id, list);
+  }
+
+  return rows.map((r) => ({
+    assignment: r,
+    briefTitle: r.briefs?.title ?? 'Post',
+    creatorName: r.profiles?.full_name?.trim() || 'Creator',
+    markedAt: r.music_marked_by_creator_at ?? '',
+    postLinks: linksByAssignment.get(r.id) ?? [],
+  }));
+}
+
+export async function approveMusic(params: {
+  companyId: string;
+  assignmentId: string;
+  adminId: string;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('assignments')
+    .update({
+      music_approved_at: new Date().toISOString(),
+      music_approved_by: params.adminId,
+    })
+    .eq('company_id', params.companyId)
+    .eq('id', params.assignmentId);
+  if (error) throw error;
+
+  void supabase.functions.invoke('notify', {
+    body: { assignment_id: params.assignmentId, event: 'music_approved' },
+  });
+}
+
+// --- Creator post detail ----------------------------------------------------
+
+export type PostPlatformStats = {
+  platform: string;
+  url: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  saves: number | null;
+};
+
+export type AssignmentPostDetail = {
+  assignment: Assignment & { briefs: Brief };
+  creatorName: string;
+  submission: Submission | null;
+  platforms: PostPlatformStats[];
+  totals: { views: number; likes: number; comments: number; saves: number | null };
+};
+
+/**
+ * One post for the creator profile: the video, caption, payout, and the
+ * latest per-platform metrics. Saves stay null until poll-metrics writes
+ * them; the UI shows a dash.
+ */
+export async function fetchAssignmentPostDetail(
+  companyId: string,
+  assignmentId: string,
+): Promise<AssignmentPostDetail> {
+  const [{ data: assignment, error: assignmentError }, subs] = await Promise.all([
+    supabase
+      .from('assignments')
+      .select('*, briefs:brief_id (*), profiles:creator_id ( id, full_name )')
+      .eq('company_id', companyId)
+      .eq('id', assignmentId)
+      .single(),
+    latestSubmissionsByAssignment([assignmentId]),
+  ]);
+  if (assignmentError) throw assignmentError;
+  const row = assignment as Assignment & {
+    briefs: Brief;
+    profiles: { id: string; full_name: string | null } | null;
+  };
+
+  const { data: posts, error: postsError } = await supabase
+    .from('posts')
+    .select('id, platform, post_url')
+    .eq('assignment_id', assignmentId);
+  if (postsError) throw postsError;
+
+  const postIds = (posts ?? []).map((p) => p.id);
+  const latestByPost = new Map<
+    string,
+    { views: number | null; likes: number | null; comments: number | null; saves: number | null }
+  >();
+  if (postIds.length > 0) {
+    const { data: metrics, error: metricsError } = await supabase
+      .from('post_metrics')
+      .select('post_id, views, likes, comments, saves, fetched_at')
+      .in('post_id', postIds)
+      .order('fetched_at', { ascending: false });
+    if (metricsError) throw metricsError;
+    for (const m of metrics ?? []) {
+      if (!latestByPost.has(m.post_id)) {
+        latestByPost.set(m.post_id, {
+          views: m.views,
+          likes: m.likes,
+          comments: m.comments,
+          saves: m.saves,
+        });
+      }
+    }
+  }
+
+  const platforms: PostPlatformStats[] = (posts ?? []).map((p) => {
+    const m = latestByPost.get(p.id);
+    return {
+      platform: p.platform ?? 'post',
+      url: p.post_url,
+      views: m?.views ?? null,
+      likes: m?.likes ?? null,
+      comments: m?.comments ?? null,
+      saves: m?.saves ?? null,
+    };
+  });
+
+  const rollup = parseAssignmentMetrics(row.metrics);
+  const sum = (pick: (p: PostPlatformStats) => number | null): number =>
+    platforms.reduce((total, p) => total + (pick(p) ?? 0), 0);
+  const anySaves = platforms.some((p) => p.saves !== null);
+
+  return {
+    assignment: row,
+    creatorName: row.profiles?.full_name?.trim() || 'Creator',
+    submission: subs.get(assignmentId) ?? null,
+    platforms,
+    totals: {
+      views: platforms.length > 0 ? sum((p) => p.views) : rollup.views ?? 0,
+      likes: platforms.length > 0 ? sum((p) => p.likes) : rollup.likes ?? 0,
+      comments: sum((p) => p.comments),
+      saves: anySaves ? sum((p) => p.saves) : null,
+    },
+  };
+}
+
+/** Draft pending claims from uploaded screenshot paths and/or a page URL. */
+export async function ingestFeatures(params: {
+  companyId: string;
+  imageUrls?: string[];
+  pageUrl?: string;
+}): Promise<IngestFeaturesResult> {
+  const { data, error } = await supabase.functions.invoke('ingest-features', {
+    body: {
+      company_id: params.companyId,
+      image_urls: params.imageUrls,
+      page_url: params.pageUrl,
+    },
+  });
+  if (error) throw error;
+  const result = data as Partial<IngestFeaturesResult> & { error?: string };
+  if (result?.error) throw new Error(result.error);
+  return {
+    scanned: result.scanned ?? 0,
+    inserted: result.inserted ?? 0,
+    skipped_existing: result.skipped_existing ?? 0,
+    dropped_over_cap: result.dropped_over_cap ?? 0,
+  };
 }

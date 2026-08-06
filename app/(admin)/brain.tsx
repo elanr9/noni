@@ -15,7 +15,7 @@ import { LoadingScreen, Screen, colors } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
 import {
   addSourceAccount,
-  draftBrandDocs,
+  cleanupBrandDoc,
   getSourcingTerms,
   listBrandDocs,
   listSourceAccounts,
@@ -23,12 +23,13 @@ import {
   saveBrandDoc,
   setSourceAccountStatus,
   type BrandDoc,
-  type BrandDocKind,
   type SourceAccount,
   type SourcingTerm,
 } from '../../lib/admin-api';
 
-const DOC_TABS: Array<{ kind: BrandDocKind; label: string; hint: string }> = [
+type BrainDocKind = 'product_truth' | 'audience_niche';
+
+const DOC_TABS: Array<{ kind: BrainDocKind; label: string; hint: string }> = [
   {
     kind: 'product_truth',
     label: 'Product',
@@ -39,16 +40,6 @@ const DOC_TABS: Array<{ kind: BrandDocKind; label: string; hint: string }> = [
     label: 'Audience',
     hint: 'Who the audience is, their pains and dreams, niche boundaries, accounts they follow, their language.',
   },
-  {
-    kind: 'voice',
-    label: 'Voice',
-    hint: 'How the brand sounds, with real example lines, and what the voice never does.',
-  },
-  {
-    kind: 'learnings',
-    label: 'Learnings',
-    hint: 'Machine-written, append only. What the engine has learned from performance and refreshes.',
-  },
 ];
 
 export default function BrainScreen() {
@@ -56,12 +47,12 @@ export default function BrainScreen() {
   const [docs, setDocs] = useState<BrandDoc[]>([]);
   const [accounts, setAccounts] = useState<SourceAccount[]>([]);
   const [terms, setTerms] = useState<SourcingTerm[]>([]);
-  const [tab, setTab] = useState<BrandDocKind>('product_truth');
+  const [tab, setTab] = useState<BrainDocKind>('product_truth');
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [drafting, setDrafting] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [newHandle, setNewHandle] = useState('');
   const [newPlatform, setNewPlatform] = useState<'tiktok' | 'instagram'>('tiktok');
 
@@ -111,21 +102,19 @@ export default function BrainScreen() {
     }
   }
 
-  async function draftWithAI() {
-    if (tab === 'learnings') return;
-    setDrafting(true);
+  async function cleanUpWithAI() {
+    if (!content.trim()) {
+      Alert.alert('Nothing to clean', 'Write the doc first, then clean it up.');
+      return;
+    }
+    setCleaning(true);
     try {
-      await draftBrandDocs([tab]);
-      setDraft((prev) => {
-        const next = { ...prev };
-        delete next[tab];
-        return next;
-      });
-      await load();
+      const cleaned = await cleanupBrandDoc(tab, content);
+      setDraft((prev) => ({ ...prev, [tab]: cleaned }));
     } catch (e) {
       Alert.alert('Failed', e instanceof Error ? e.message : 'Try again');
     } finally {
-      setDrafting(false);
+      setCleaning(false);
     }
   }
 
@@ -204,36 +193,30 @@ export default function BrainScreen() {
           multiline
           value={content}
           onChangeText={(text) => setDraft((prev) => ({ ...prev, [tab]: text }))}
-          editable={tab !== 'learnings'}
-          placeholder={
-            tab === 'learnings'
-              ? 'Nothing learned yet. The engine writes here as campaigns run.'
-              : 'Write it yourself (best) or draft it with AI below.'
-          }
+          editable
+          placeholder="Write the doc, then clean it up with AI if you want."
           placeholderTextColor="#9A9AA3"
           textAlignVertical="top"
         />
 
-        {tab !== 'learnings' ? (
-          <View style={styles.row}>
-            <Pressable
-              style={[styles.secondaryBtn, drafting && styles.disabled]}
-              disabled={drafting}
-              onPress={() => void draftWithAI()}
-            >
-              <Text style={styles.secondaryText}>
-                {drafting ? 'Drafting…' : 'Draft with AI'}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.primaryBtn, (!dirty || saving) && styles.disabled]}
-              disabled={!dirty || saving}
-              onPress={() => void save()}
-            >
-              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save'}</Text>
-            </Pressable>
-          </View>
-        ) : null}
+        <View style={styles.row}>
+          <Pressable
+            style={[styles.secondaryBtn, (cleaning || !content.trim()) && styles.disabled]}
+            disabled={cleaning || !content.trim()}
+            onPress={() => void cleanUpWithAI()}
+          >
+            <Text style={styles.secondaryText}>
+              {cleaning ? 'Cleaning…' : 'Clean up with AI'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.primaryBtn, (!dirty || saving) && styles.disabled]}
+            disabled={!dirty || saving}
+            onPress={() => void save()}
+          >
+            <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save'}</Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.sectionTitle}>Source accounts</Text>
         <Text style={styles.hint}>

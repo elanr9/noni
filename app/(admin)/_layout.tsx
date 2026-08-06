@@ -29,7 +29,18 @@ export default function AdminLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
       <Stack.Screen name="creator/[id]" options={{ title: 'Creator' }} />
+      <Stack.Screen name="creator/post/[assignmentId]" options={{ title: 'Post' }} />
+      <Stack.Screen name="chat/[creatorId]" options={{ title: 'Chat' }} />
+      <Stack.Screen
+        name="account-approval/[accountId]"
+        options={{ title: 'Account approval' }}
+      />
+      <Stack.Screen name="account-template" options={{ title: 'Account template' }} />
       <Stack.Screen name="brain" options={{ title: 'Brand Brain' }} />
+      <Stack.Screen name="features" options={{ title: 'Features' }} />
+      <Stack.Screen name="week-setup" options={{ title: 'New week' }} />
+      <Stack.Screen name="week/[id]" options={{ title: 'Week' }} />
+      <Stack.Screen name="post/[id]" options={{ title: 'Post' }} />
     </Stack>
   );
 }

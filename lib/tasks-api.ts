@@ -289,3 +289,27 @@ export async function transitionAssignment(
 
   return assignment;
 }
+
+/**
+ * Creator's one-tap "Music added" on a live slideshow. Not a status change
+ * (the assignment stays posted), so this writes the timestamp directly. The
+ * compare on null makes a double tap harmless, and the admin's music
+ * approval queue picks it up via the music_pending notification.
+ */
+export async function markMusicAdded(assignmentId: string): Promise<Assignment> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .update({ music_marked_by_creator_at: new Date().toISOString() })
+    .eq('id', assignmentId)
+    .is('music_marked_by_creator_at', null)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+
+  void supabase.functions.invoke('notify', {
+    body: { assignment_id: assignmentId, event: 'music_pending' },
+  });
+
+  return data as Assignment;
+}

@@ -1,22 +1,38 @@
-// Admin Create paste-link flow: URL in, draft brief out. Scrapes the single
-// post via Apify, transcribes audio (actor transcript, Deepgram fallback),
-// OCRs carousel slides via Claude vision, then Claude drafts the brief in
-// the brand voice. Nothing is written to the database; the client saves the
-// admin-edited result through lib/briefs-api.ts.
+// Admin draft flow: { query } or { url }, optionally with { post_type }, in;
+// structured draft brief out (or { kill_reason } when generation refuses to
+// pad). URL path scrapes via Apify, transcribes (actor / Deepgram), OCRs
+// carousels, then drafts. Query path drafts from the search string alone.
+// Both paths share the generation core in _shared/generateBrief.ts and
+// validateBrief (one retry), and log to brief_validations (brief_id null,
+// joined later by generation_id). The brief itself is only saved by the
+// client through lib/briefs-api.ts; segments are derived after save through
+// brief-assist { action: "derive_segments" }.
 
 import {
   adminClient,
   askClaude,
   askClaudeVision,
   authenticate,
+  handleCors,
   jsonResponse,
-  legacyBrandLines,
   loadBrandContext,
   parseClaudeJson,
   type BrandContext,
 } from '../_shared/wp8.ts';
+import {
+  brandDocBlocks,
+  buildBriefSystem,
+  isKill,
+  loadPostType,
+  normalizeGenerated,
+  toPostTypeShape,
+  type GenOutcome,
+  type PostTypeRow,
+  type RawGenerated,
+} from '../_shared/generateBrief.ts';
+import { validateBrief, type ValidationResult } from '../_shared/validateBrief.ts';
 
-type Body = { url?: string };
+type Body = { url?: string; context?: string; query?: string; post_type?: string };
 
 type SourcePost = {
   platform: 'tiktok' | 'instagram';
@@ -162,53 +178,74 @@ async function ocrSlides(imageUrls: string[]): Promise<string[] | null> {
   }
 }
 
-type RawDraft = {
-  title: string;
-  hook: string;
-  script: string;
-  caption: string;
-  format: string;
-  why_it_works: string;
-};
-
-async function draftBrief(
+async function generateOnce(
   brand: BrandContext,
-  post: SourcePost,
-  transcript: string | null,
-  slideTexts: string[] | null,
-): Promise<RawDraft> {
-  const system = `You write UGC content briefs for creators posting on TikTok and Instagram. You always answer with a single JSON object: {"title": string, "hook": string, "script": string, "caption": string, "format": "video" | "photo_carousel", "why_it_works": string}. The title is a short punchy brief name a creator scans in a feed (under 8 words). The hook is the first spoken line, under 12 words, engineered to stop scrolling. The script is roughly 60 seconds spoken aloud, written in the brand voice, first person, no camera directions, split into 3 or 4 short paragraphs separated by blank lines, and the first paragraph starts with the hook. The caption is under 200 characters with a clear call to action. The format is "photo_carousel" only when the source is a slideshow or the idea is clearly text-on-image; otherwise "video". why_it_works is one punchy sentence a content strategist would say about why this concept performs. Plain language only, no hashtag spam (2 hashtags max).`;
-
-  const docBlocks: string[] = [`Brand: ${brand.companyName}`];
-  if (brand.docs.productTruth.trim()) {
-    docBlocks.push(`Product truth:\n${brand.docs.productTruth.trim()}`);
+  postType: PostTypeRow | null,
+  fallbackFormat: 'video' | 'photo_carousel',
+  sourceLines: string[],
+  priorFailures: string[],
+): Promise<GenOutcome> {
+  const lines = [...sourceLines];
+  if (priorFailures.length) {
+    lines.push(
+      `Your previous draft failed validation. Fix every one of these and return the corrected JSON:\n${priorFailures.map((f) => `- ${f}`).join('\n')}`,
+    );
   }
-  if (brand.docs.voice.trim()) {
-    docBlocks.push(`Voice:\n${brand.docs.voice.trim()}`);
-  }
-  if (brand.docs.learnings.trim()) {
-    docBlocks.push(`What has worked so far:\n${brand.docs.learnings.trim()}`);
-  }
-  if (docBlocks.length === 1) docBlocks.push(legacyBrandLines(brand));
+  const raw = await askClaude(
+    buildBriefSystem(postType, fallbackFormat, brand.bannedPhrases),
+    [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
+    4096,
+  );
+  return normalizeGenerated(
+    parseClaudeJson<RawGenerated>(raw),
+    postType ? postType.family : fallbackFormat,
+  );
+}
 
-  const sourceLines = [
-    `Base the brief on this ${post.platform} ${post.format === 'photo_carousel' ? 'photo slideshow' : 'video'} the admin pasted as a reference:`,
-    post.caption ? `Caption: ${post.caption.slice(0, 400)}` : null,
-    transcript ? `Transcript: ${transcript.slice(0, 2000)}` : null,
-    slideTexts?.length
-      ? `Slide texts: ${slideTexts.map((s, i) => `[${i + 1}] ${s}`).join(' ').slice(0, 2000)}`
-      : null,
-    'Take the hook style and structure, then rewrite the body entirely for this brand and its product. Do not mention the original creator.',
-    post.format === 'photo_carousel'
-      ? 'The source is a photo slideshow, so use format "photo_carousel" and write the script as slide-by-slide overlay text (one short paragraph per slide).'
-      : null,
-  ].filter((l): l is string => l !== null);
+async function generateValidated(
+  admin: ReturnType<typeof adminClient>,
+  companyId: string,
+  generationId: string,
+  postType: PostTypeRow | null,
+  draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
+  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[] },
+): Promise<{ outcome: GenOutcome; warnings: string[] }> {
+  const ctx = {
+    ...validationCtx,
+    postType: postType ? toPostTypeShape(postType) : null,
+  };
+  const logAttempt = async (attempt: number, res: ValidationResult) => {
+    const { error } = await admin.from('brief_validations').insert({
+      company_id: companyId,
+      generation_id: generationId,
+      attempt,
+      passed: res.passed,
+      failures: res.failures,
+      warnings: res.warnings,
+    });
+    if (error) console.error('brief_validations insert failed:', error.message);
+  };
 
-  const raw = await askClaude(system, [...docBlocks, '', ...sourceLines].join('\n\n'));
-  return parseClaudeJson<RawDraft>(raw);
+  let outcome = await draftOnce([]);
+  if (isKill(outcome)) return { outcome, warnings: [] };
+  let result = validateBrief(outcome.draft, ctx);
+  await logAttempt(1, result);
+  if (!result.passed) {
+    const retry = await draftOnce(result.failures);
+    if (isKill(retry)) return { outcome: retry, warnings: [] };
+    outcome = retry;
+    result = validateBrief(outcome.draft, ctx);
+    await logAttempt(2, result);
+  }
+  const warnings = result.passed
+    ? result.warnings
+    : [...result.failures, ...result.warnings];
+  return { outcome, warnings };
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
   if (!caller || caller.kind !== 'user') {
@@ -218,11 +255,77 @@ Deno.serve(async (req) => {
 
   const body = ((await req.json().catch(() => null)) ?? {}) as Body;
   const url = body.url?.trim();
-  if (!url) return jsonResponse({ error: 'expected { url }' }, 400);
+  const query = body.query?.trim();
+  const context = body.context?.trim() || null;
+  if (url && query) {
+    return jsonResponse({ error: 'expected { url } or { query }, not both' }, 400);
+  }
+  if (!url && !query) {
+    return jsonResponse({ error: 'expected { url } or { query }' }, 400);
+  }
+
+  let postType: PostTypeRow | null = null;
+  if (body.post_type?.trim()) {
+    postType = await loadPostType(admin, caller.companyId, body.post_type.trim());
+    if (!postType) {
+      return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
+    }
+  }
+
+  // Query path: no scrape / transcribe / OCR. This is the grid's path: the
+  // row is pre-stamped with a post type and a search phrase.
+  if (query) {
+    try {
+      const brand = await loadBrandContext(admin, caller.companyId);
+      const validationCtx = {
+        hashtagBank: brand.hashtagBank,
+        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+      };
+      const generationId = crypto.randomUUID();
+      const sourceLines = [
+        'There is no source post. Draft a brief that answers this search phrase a target viewer types with a deadline in mind:',
+        `Search phrase (set search_phrase in the JSON to exactly this string): ${query}`,
+        'Invent the structure from the search phrase and brand.',
+        ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
+      ];
+      const { outcome, warnings } = await generateValidated(
+        admin,
+        caller.companyId,
+        generationId,
+        postType,
+        (priorFailures) =>
+          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+        validationCtx,
+      );
+      if (isKill(outcome)) {
+        return jsonResponse({
+          kill_reason: outcome.kill_reason,
+          generation_id: generationId,
+          post_type_id: postType?.id ?? null,
+        });
+      }
+      return jsonResponse({
+        ...outcome.draft,
+        search_phrase: query,
+        overlay_labels: outcome.overlayLabels,
+        post_type_id: postType?.id ?? null,
+        generation_id: generationId,
+        warnings,
+        example_url: null,
+        example_transcript: null,
+      });
+    } catch (e) {
+      console.error('ingest-brief query error:', e);
+      return jsonResponse(
+        { error: e instanceof Error ? e.message : 'ingest failed' },
+        500,
+      );
+    }
+  }
 
   let host: string;
   try {
-    host = new URL(url).hostname;
+    host = new URL(url!).hostname;
   } catch {
     return jsonResponse({ error: 'That is not a valid link' }, 400);
   }
@@ -233,7 +336,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const post = isTikTok ? await scrapeTikTok(url) : await scrapeInstagram(url);
+    const post = isTikTok ? await scrapeTikTok(url!) : await scrapeInstagram(url!);
     if (!post) {
       return jsonResponse({ error: 'Could not read that post. Check the link.' }, 404);
     }
@@ -248,7 +351,47 @@ Deno.serve(async (req) => {
     }
 
     const brand = await loadBrandContext(admin, caller.companyId);
-    const draft = await draftBrief(brand, post, transcript, slideTexts);
+    const validationCtx = {
+      hashtagBank: brand.hashtagBank,
+      approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+    };
+
+    const sourceLines = [
+      `Base the brief on this ${post.platform} ${post.format === 'photo_carousel' ? 'photo slideshow' : 'video'} the admin pasted as a reference:`,
+      ...(post.caption ? [`Caption: ${post.caption.slice(0, 400)}`] : []),
+      ...(transcript ? [`Transcript: ${transcript.slice(0, 2000)}`] : []),
+      ...(slideTexts?.length
+        ? [
+            `Slide texts: ${slideTexts.map((s, i) => `[${i + 1}] ${s}`).join(' ').slice(0, 2000)}`,
+          ]
+        : []),
+      ...(context
+        ? [
+            `Admin angle / context (follow this closely when rewriting — keep the source structure but shift the story to this angle):\n${context.slice(0, 1500)}`,
+          ]
+        : []),
+      'Take the hook style and structure, then rewrite the body entirely for this brand and its product. Do not mention the original creator.',
+    ];
+
+    // Nothing is saved yet, so brief_id stays null; generation_id joins the
+    // validation rows to the brief once the admin saves it.
+    const generationId = crypto.randomUUID();
+    const { outcome, warnings } = await generateValidated(
+      admin,
+      caller.companyId,
+      generationId,
+      postType,
+      (priorFailures) =>
+        generateOnce(brand, postType, post.format, sourceLines, priorFailures),
+      validationCtx,
+    );
+    if (isKill(outcome)) {
+      return jsonResponse({
+        kill_reason: outcome.kill_reason,
+        generation_id: generationId,
+        post_type_id: postType?.id ?? null,
+      });
+    }
 
     const exampleTranscript =
       transcript ??
@@ -257,12 +400,11 @@ Deno.serve(async (req) => {
         : null);
 
     return jsonResponse({
-      title: draft.title,
-      hook: draft.hook,
-      script: draft.script,
-      caption: draft.caption,
-      format: draft.format === 'photo_carousel' ? 'photo_carousel' : 'video',
-      why_it_works: draft.why_it_works,
+      ...outcome.draft,
+      overlay_labels: outcome.overlayLabels,
+      post_type_id: postType?.id ?? null,
+      generation_id: generationId,
+      warnings,
       example_url: url,
       example_transcript: exampleTranscript,
     });

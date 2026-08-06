@@ -3,13 +3,17 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import {
   adminClient,
   askClaude,
+  askOpenAI,
   authenticate,
+  handleCors,
   jsonResponse,
   parseClaudeJson,
 } from '../_shared/wp8.ts';
+import { crawlSite } from '../_shared/crawlSite.ts';
 
 type HumanDocKind = 'product_truth' | 'audience_niche' | 'voice';
 const HUMAN_DOC_KINDS: HumanDocKind[] = ['product_truth', 'audience_niche', 'voice'];
+type CleanupKind = 'product_truth' | 'audience_niche';
 
 type IngestBody = {
   company_name?: string;
@@ -19,6 +23,10 @@ type IngestBody = {
   // Admin "draft this doc" button: draft these docs even if non-empty,
   // as long as they were never human edited.
   docs?: HumanDocKind[];
+  // Brand Brain "Clean up with AI" — cheap OpenAI rewrite of editor text.
+  action?: 'cleanup_doc';
+  kind?: CleanupKind;
+  content?: string;
 };
 
 type BrandResult = {
@@ -27,71 +35,6 @@ type BrandResult = {
   products: string;
   pillars: string[];
 };
-
-const PAGE_CHAR_CAP = 6000;
-const TOTAL_CHAR_CAP = 20000;
-const MAX_SUBPAGES = 5;
-const SUBPAGE_HINTS = [
-  'about', 'product', 'pricing', 'feature', 'how', 'faq', 'team', 'mission', 'why',
-];
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&[a-z#0-9]+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function fetchPage(url: string): Promise<string> {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(15000),
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NoniBot/1.0)' },
-  });
-  if (!res.ok) throw new Error(`site fetch ${res.status}`);
-  return res.text();
-}
-
-// Homepage plus up to MAX_SUBPAGES same-domain pages, preferring paths that
-// look like about/product/pricing content.
-async function crawlSite(website: string): Promise<string> {
-  const base = new URL(website.startsWith('http') ? website : `https://${website}`);
-  const homeHtml = await fetchPage(base.href);
-
-  const paths = new Set<string>();
-  for (const match of homeHtml.matchAll(/href="([^"#?]+)"/gi)) {
-    try {
-      const url = new URL(match[1], base);
-      if (url.hostname !== base.hostname) continue;
-      const path = url.pathname.replace(/\/$/, '');
-      if (!path || path === base.pathname.replace(/\/$/, '')) continue;
-      if (/\.(png|jpe?g|svg|gif|pdf|css|js|ico|webp|mp4)$/i.test(path)) continue;
-      paths.add(path);
-    } catch {
-      // Ignore malformed hrefs.
-    }
-  }
-
-  const ranked = [...paths].sort((a, b) => {
-    const score = (p: string) =>
-      SUBPAGE_HINTS.some((h) => p.toLowerCase().includes(h)) ? 0 : 1;
-    return score(a) - score(b) || a.length - b.length;
-  });
-
-  const chunks = [stripHtml(homeHtml).slice(0, PAGE_CHAR_CAP)];
-  for (const path of ranked.slice(0, MAX_SUBPAGES)) {
-    try {
-      const html = await fetchPage(new URL(path, base).href);
-      chunks.push(`\n[Page ${path}]\n${stripHtml(html).slice(0, PAGE_CHAR_CAP)}`);
-    } catch {
-      // Skip unreachable pages.
-    }
-    if (chunks.join('').length >= TOTAL_CHAR_CAP) break;
-  }
-  return chunks.join('\n').slice(0, TOTAL_CHAR_CAP);
-}
 
 // Best effort: recent TikTok captions via Apify so Claude hears the brand's
 // actual social voice, not just the website.
@@ -126,6 +69,7 @@ async function gatherSources(
   admin: SupabaseClient,
   companyId: string,
   body: IngestBody,
+  opts?: { skipCaptions?: boolean },
 ): Promise<SourceMaterial> {
   const { data: company } = await admin
     .from('companies')
@@ -140,11 +84,13 @@ async function gatherSources(
   const tiktokHandle = body.tiktok_handle || settings.handles?.tiktok || '';
   const instagramHandle = body.instagram_handle || settings.handles?.instagram || '';
 
+  // Admin "Draft with AI" must stay under ~15s. Apify profile sync regularly
+  // burns 60s alone; skip captions on that path and rely on the website.
   const [siteText, captions] = await Promise.all([
     website ? crawlSite(website).catch(() => '') : Promise.resolve(''),
-    tiktokHandle
-      ? fetchRecentCaptions(tiktokHandle).catch(() => [] as string[])
-      : Promise.resolve([] as string[]),
+    opts?.skipCaptions || !tiktokHandle
+      ? Promise.resolve([] as string[])
+      : fetchRecentCaptions(tiktokHandle).catch(() => [] as string[]),
   ]);
   return { name, website, instagramHandle, tiktokHandle, siteText, captions };
 }
@@ -162,6 +108,23 @@ function sourceLines(src: SourceMaterial): string {
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+// Seed hashtag_bank from the brand's own recent captions: most frequent tags
+// first, capped at ten. Only used when the bank is still empty, so an admin
+// edited (or migration seeded) bank is never clobbered.
+function hashtagsFromCaptions(captions: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const caption of captions) {
+    for (const match of caption.matchAll(/#[\p{L}\p{N}_]+/gu)) {
+      const tag = match[0].toLowerCase();
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([tag]) => tag);
 }
 
 // Legacy structured fields, still consumed by onboarding suggestions.
@@ -245,12 +208,18 @@ async function ingestCompany(
   };
   const { data: existing } = await admin
     .from('brand_profiles')
-    .select('id')
+    .select('id, hashtag_bank')
     .eq('company_id', companyId)
     .maybeSingle();
+  const bankEmpty =
+    !Array.isArray(existing?.hashtag_bank) || existing.hashtag_bank.length === 0;
+  const seededBank = bankEmpty ? hashtagsFromCaptions(src.captions) : [];
+  const write = seededBank.length > 0
+    ? { ...fields, hashtag_bank: seededBank }
+    : fields;
   const { error } = existing
-    ? await admin.from('brand_profiles').update(fields).eq('id', existing.id)
-    : await admin.from('brand_profiles').insert({ company_id: companyId, ...fields });
+    ? await admin.from('brand_profiles').update(write).eq('id', existing.id)
+    : await admin.from('brand_profiles').insert({ company_id: companyId, ...write });
   if (error) throw error;
 
   const docs = await loadDocs(admin, companyId);
@@ -299,7 +268,62 @@ async function refreshLearnings(admin: SupabaseClient, companyId: string): Promi
   await upsertDoc(admin, companyId, 'learnings', `${learnings}${note}`.trim());
 }
 
+/** Admin Draft-with-AI: draft only the requested docs, no profile rewrite, no Apify. */
+async function draftRequestedDocs(
+  admin: SupabaseClient,
+  companyId: string,
+  body: IngestBody,
+): Promise<{ drafted: HumanDocKind[] }> {
+  const requested = (body.docs ?? []).filter((k): k is HumanDocKind =>
+    (HUMAN_DOC_KINDS as string[]).includes(k),
+  );
+  if (requested.length === 0) {
+    throw new Error('No draftable docs requested');
+  }
+  const existing = await loadDocs(admin, companyId);
+  const blocked = requested.filter(
+    (kind) => existing.find((d) => d.kind === kind)?.human_edited === true,
+  );
+  const draftable = requested.filter((kind) => !blocked.includes(kind));
+  if (draftable.length === 0) {
+    throw new Error(
+      'This doc was saved by a human. Clear it and save an empty doc, or edit it yourself.',
+    );
+  }
+  const src = await gatherSources(admin, companyId, body, { skipCaptions: true });
+  if (!src.siteText.trim() && !src.name.trim()) {
+    throw new Error('No website text to draft from. Set the company website first.');
+  }
+  const drafted = await draftDocs(src, draftable);
+  const written: HumanDocKind[] = [];
+  for (const kind of draftable) {
+    const content = drafted[kind];
+    if (content?.trim()) {
+      await upsertDoc(admin, companyId, kind, content);
+      written.push(kind);
+    }
+  }
+  if (written.length === 0) {
+    throw new Error('AI returned an empty draft. Try again.');
+  }
+  return { drafted: written };
+}
+
+const CLEANUP_SPECS: Record<CleanupKind, string> = {
+  product_truth:
+    'This is a product truth doc: what the product does, who pays, killer features, natural plug angles, banned claims.',
+  audience_niche:
+    'This is an audience niche doc: who the audience is, pains and dreams, niche boundaries, accounts they follow, language they use.',
+};
+
+async function cleanupDoc(kind: CleanupKind, content: string): Promise<string> {
+  const system = `You clean up brand knowledge documents for a UGC content engine. ${CLEANUP_SPECS[kind]} Rewrite the user's draft into tight markdown: short sections, concrete specifics, no filler, no invented facts or features. Keep every real claim. Do not wrap the answer in JSON or code fences — return only the cleaned markdown document.`;
+  return askOpenAI(system, content.slice(0, 12000), 4096);
+}
+
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
   if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
@@ -309,6 +333,23 @@ Deno.serve(async (req) => {
   try {
     if (caller.kind === 'user') {
       if (caller.role !== 'admin') return jsonResponse({ error: 'forbidden' }, 403);
+      if (body.action === 'cleanup_doc') {
+        const kind = body.kind;
+        const content = body.content?.trim() ?? '';
+        if (kind !== 'product_truth' && kind !== 'audience_niche') {
+          return jsonResponse({ error: 'kind must be product_truth or audience_niche' }, 400);
+        }
+        if (!content) {
+          return jsonResponse({ error: 'Write something first, then clean it up.' }, 400);
+        }
+        const cleaned = await cleanupDoc(kind, content);
+        return jsonResponse({ content: cleaned });
+      }
+      // Optional draft path still available for onboarding tooling.
+      if (Array.isArray(body.docs) && body.docs.length > 0) {
+        const result = await draftRequestedDocs(admin, caller.companyId, body);
+        return jsonResponse(result);
+      }
       const result = await ingestCompany(admin, caller.companyId, body);
       return jsonResponse(result as unknown as Record<string, unknown>);
     }

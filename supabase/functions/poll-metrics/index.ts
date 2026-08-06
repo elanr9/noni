@@ -3,10 +3,22 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import {
   adminClient,
   authenticate,
+  handleCors,
   jsonResponse,
 } from '../_shared/wp8.ts';
+import { adminPushTokens, sendExpoPush } from '../_shared/push.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+
+// The only purely positive notification in the product. Fires once per post
+// per threshold, claimed atomically via claim_post_milestone.
+const MILESTONES = [5000, 10000, 50000, 100000, 1000000] as const;
+
+function milestoneLabel(threshold: number): string {
+  return threshold >= 1_000_000
+    ? `${threshold / 1_000_000}m`
+    : `${threshold / 1000}k`;
+}
 
 type PostRow = {
   id: string;
@@ -14,6 +26,7 @@ type PostRow = {
   provider_post_id: string | null;
   post_url: string | null;
   task_id: string;
+  milestones_fired: number[] | null;
   submissions: { creator_id: string } | { creator_id: string }[] | null;
 };
 
@@ -22,6 +35,7 @@ type PlatformMetrics = {
   likes?: number | null;
   comments?: number | null;
   shares?: number | null;
+  saves?: number | null;
   impressions?: number | null;
 };
 
@@ -63,10 +77,19 @@ function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
+type FetchedMetrics = {
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  /** Null when the platform does not report saves; distinct from zero. */
+  saves: number | null;
+};
+
 function extractMetrics(
   body: Record<string, unknown>,
   platform: string | null,
-): { views: number; likes: number; comments: number; shares: number } | null {
+): FetchedMetrics | null {
   const platforms = body.platforms;
   if (!platforms || typeof platforms !== 'object' || Array.isArray(platforms)) {
     return null;
@@ -86,6 +109,9 @@ function extractMetrics(
       likes: asInt(metrics.likes),
       comments: asInt(metrics.comments),
       shares: asInt(metrics.shares),
+      saves: metrics.saves === null || metrics.saves === undefined
+        ? null
+        : asInt(metrics.saves),
     };
   }
   return null;
@@ -94,7 +120,7 @@ function extractMetrics(
 async function fetchPostAnalytics(
   requestId: string,
   platform: string | null,
-): Promise<{ views: number; likes: number; comments: number; shares: number } | null> {
+): Promise<FetchedMetrics | null> {
   const url = new URL(
     `https://api.upload-post.com/api/uploadposts/post-analytics/${encodeURIComponent(requestId)}`,
   );
@@ -244,8 +270,10 @@ type AssignmentRow = {
   id: string;
   creator_id: string;
   task_id: string | null;
+  brief_id: string | null;
   post_url: string | null;
   bounty_credited_at: string | null;
+  music_approved_at: string | null;
   metrics: Record<string, unknown> | null;
 };
 
@@ -312,7 +340,9 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
 
   const { data: assignments, error: assignmentsError } = await admin
     .from('assignments')
-    .select('id, creator_id, task_id, post_url, bounty_credited_at, metrics')
+    .select(
+      'id, creator_id, task_id, brief_id, post_url, bounty_credited_at, music_approved_at, metrics',
+    )
     .eq('company_id', companyId);
   if (assignmentsError) throw assignmentsError;
   const assignmentById = new Map<string, AssignmentRow>();
@@ -320,6 +350,27 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   for (const raw of (assignments ?? []) as AssignmentRow[]) {
     assignmentById.set(raw.id, raw);
     if (raw.task_id) assignmentByTask.set(raw.task_id, raw);
+  }
+
+  // Music gate needs the brief's format: photo_carousel earnings unlock only
+  // after the admin approves the song. Videos skip the music loop entirely.
+  const briefIds = [
+    ...new Set(
+      (assignments ?? [])
+        .map((a) => a.brief_id as string | null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const briefFormat = new Map<string, string>();
+  if (briefIds.length > 0) {
+    const { data: briefs, error: briefsError } = await admin
+      .from('briefs')
+      .select('id, format')
+      .in('id', briefIds);
+    if (briefsError) throw briefsError;
+    for (const brief of briefs ?? []) {
+      briefFormat.set(brief.id as string, (brief.format as string | null) ?? 'video');
+    }
   }
 
   const { data: tasks, error: tasksError } = await admin
@@ -336,7 +387,9 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     assignmentIds.length > 0
       ? admin
           .from('posts')
-          .select('id, platform, provider_post_id, post_url, assignment_id')
+          .select(
+            'id, platform, provider_post_id, post_url, assignment_id, milestones_fired',
+          )
           .in('assignment_id', assignmentIds)
           .not('provider_post_id', 'is', null)
           .in('status', ['posted', 'pending'])
@@ -345,7 +398,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       ? admin
           .from('posts')
           .select(
-            'id, platform, provider_post_id, post_url, task_id, submissions!inner(creator_id)',
+            'id, platform, provider_post_id, post_url, task_id, milestones_fired, submissions!inner(creator_id)',
           )
           .in('task_id', taskIds)
           .is('assignment_id', null)
@@ -361,6 +414,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     requestId: string;
     platform: string | null;
     postUrl: string | null;
+    milestonesFired: number[];
     assignment: AssignmentRow | null;
     creatorId: string | null;
   };
@@ -373,6 +427,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       requestId: raw.provider_post_id as string,
       platform: raw.platform as string | null,
       postUrl: raw.post_url as string | null,
+      milestonesFired: (raw.milestones_fired as number[] | null) ?? [],
       assignment,
       creatorId: assignment?.creator_id ?? null,
     });
@@ -385,6 +440,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       requestId: raw.provider_post_id,
       platform: raw.platform,
       postUrl: raw.post_url,
+      milestonesFired: raw.milestones_fired ?? [],
       assignment: assignmentByTask.get(raw.task_id) ?? null,
       creatorId: submission.creator_id,
     });
@@ -394,6 +450,14 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   let credited = 0;
   let skipped = 0;
   const rollups = new Map<string, AssignmentRollup>();
+  type MilestoneClaim = {
+    postId: string;
+    platform: string | null;
+    creatorId: string | null;
+    assignmentId: string | null;
+    threshold: number;
+  };
+  const milestoneClaims: MilestoneClaim[] = [];
 
   for (const post of pending) {
     const metrics = await fetchPostAnalytics(post.requestId, post.platform);
@@ -408,6 +472,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       likes: metrics.likes,
       comments: metrics.comments,
       shares: metrics.shares,
+      saves: metrics.saves,
     });
     if (insertError) {
       console.error(`post_metrics insert ${post.postId}:`, insertError.message);
@@ -415,6 +480,44 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       continue;
     }
     polled += 1;
+
+    // Best views ever seen for this post (includes the snapshot just written),
+    // so a platform undercount on one poll never hides a crossed threshold.
+    const { data: history } = await admin
+      .from('post_metrics')
+      .select('views')
+      .eq('post_id', post.postId);
+    const bestViews = Math.max(
+      metrics.views,
+      ...(history ?? []).map((r) => asInt(r.views)),
+    );
+
+    // Milestones fire once per post per threshold. Membership check first,
+    // then an atomic claim so a concurrent poll cannot double-fire.
+    for (const threshold of MILESTONES) {
+      if (bestViews < threshold) break;
+      if (post.milestonesFired.includes(threshold)) continue;
+      const { data: claimed, error: claimError } = await admin.rpc(
+        'claim_post_milestone',
+        { p_post_id: post.postId, p_threshold: threshold },
+      );
+      if (claimError) {
+        console.error(`milestone claim ${post.postId}:`, claimError.message);
+        continue;
+      }
+      if (claimed === true) {
+        console.log(
+          `milestone fired post=${post.postId} threshold=${threshold}`,
+        );
+        milestoneClaims.push({
+          postId: post.postId,
+          platform: post.platform,
+          creatorId: post.creatorId,
+          assignmentId: post.assignment?.id ?? null,
+          threshold,
+        });
+      }
+    }
 
     if (post.assignment) {
       // Roll up into the assignment; bounty is decided per assignment below.
@@ -438,23 +541,64 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     }
 
     // Legacy post with no assignment: per-post bounty on max views in history.
-    const { data: history } = await admin
-      .from('post_metrics')
-      .select('views')
-      .eq('post_id', post.postId);
-    const maxViews = Math.max(
-      metrics.views,
-      ...(history ?? []).map((r) => asInt(r.views)),
-    );
     const didCredit = await maybeCreditBounty(admin, {
       companyId,
       creatorId: post.creatorId,
       postId: post.postId,
-      views: maxViews,
+      views: bestViews,
       amountCents: bounty.amountCents,
       viewThreshold: bounty.viewThreshold,
     });
     if (didCredit) credited += 1;
+  }
+
+  // One push per post that crossed something, naming the highest new
+  // threshold. Sent only for claims this poll actually won.
+  if (milestoneClaims.length > 0) {
+    const topByPost = new Map<string, MilestoneClaim>();
+    for (const claim of milestoneClaims) {
+      const current = topByPost.get(claim.postId);
+      if (!current || claim.threshold > current.threshold) {
+        topByPost.set(claim.postId, claim);
+      }
+    }
+    const creatorIds = [
+      ...new Set(
+        [...topByPost.values()]
+          .map((c) => c.creatorId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const creatorName = new Map<string, string>();
+    if (creatorIds.length > 0) {
+      const { data: creators } = await admin
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', creatorIds);
+      for (const c of creators ?? []) {
+        creatorName.set(c.id as string, (c.full_name as string | null) ?? 'A creator');
+      }
+    }
+    const tokens = await adminPushTokens(admin, companyId);
+    for (const claim of topByPost.values()) {
+      const name = claim.creatorId
+        ? (creatorName.get(claim.creatorId) ?? 'A creator')
+        : 'A creator';
+      const where = claim.platform ? ` on ${claim.platform}` : '';
+      try {
+        await sendExpoPush(tokens, {
+          title: 'Milestone',
+          body: `${name}'s post crossed ${milestoneLabel(claim.threshold)} views${where}`,
+          data: {
+            post_id: claim.postId,
+            assignment_id: claim.assignmentId,
+            event: 'milestone',
+          },
+        });
+      } catch (e) {
+        console.error(`milestone push ${claim.postId}:`, e);
+      }
+    }
   }
 
   if (rollups.size === 0) return { polled, credited, skipped };
@@ -494,6 +638,15 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       rollup.views,
       asInt((previous as Record<string, unknown>).views),
     );
+    // Music gate (Agent 7 owns this): photo_carousel bounties additionally
+    // require admin music approval on the assignment. Videos are never gated;
+    // they skip the music loop entirely.
+    const isCarousel =
+      assignment.brief_id !== null &&
+      briefFormat.get(assignment.brief_id) === 'photo_carousel';
+    if (isCarousel && assignment.music_approved_at === null) {
+      continue;
+    }
     if (assignment.bounty_credited_at === null && bountyViews >= bounty.viewThreshold) {
       const didCredit = await creditAssignmentBounty(admin, {
         companyId,
@@ -525,6 +678,8 @@ async function run(companyIds: string[]): Promise<void> {
 }
 
 Deno.serve(async (req) => {
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
   if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
