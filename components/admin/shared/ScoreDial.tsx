@@ -2,21 +2,27 @@ import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
-import { color, motion, type } from '../../../theme/tokens';
+import { color, motion, type as typeToken } from '../../../theme/tokens';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export interface ScoreDialProps {
-  /** 0–100. */
+  /** 0–100. Ring colour: green >= 80, amber >= 65, else danger. */
   score: number;
+  /** 700 9px uppercase line beneath the value. */
+  label?: string;
   size?: number;
-  /** Green for passing, amber for failed checks. */
-  tone?: 'green' | 'amber';
 }
 
-/** Admin handoff §8 step 7 — AI score dial, 420ms draw. */
-export function ScoreDial({ score, size = 116, tone = 'green' }: ScoreDialProps) {
-  const strokeWidth = 10;
+function ringColor(score: number): string {
+  if (score >= 80) return color.green;
+  if (score >= 65) return color.amber;
+  return color.danger;
+}
+
+/** Admin handoff §8 step 7 — AI score dial, 76px, 7px stroke, 420ms draw. */
+export function ScoreDial({ score, label, size = 76 }: ScoreDialProps) {
+  const strokeWidth = 7;
   const r = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * r;
   const progress = useRef(new Animated.Value(0)).current;
@@ -51,7 +57,7 @@ export function ScoreDial({ score, size = 116, tone = 'green' }: ScoreDialProps)
           cx={size / 2}
           cy={size / 2}
           r={r}
-          stroke={tone === 'green' ? color.green : color.amber}
+          stroke={ringColor(score)}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           strokeDasharray={`${circumference} ${circumference}`}
@@ -61,7 +67,8 @@ export function ScoreDial({ score, size = 116, tone = 'green' }: ScoreDialProps)
         />
       </Svg>
       <View style={styles.center}>
-        <Text style={[styles.score, { fontSize: Math.round(size * 0.29) }]}>{score}</Text>
+        <Text style={styles.score}>{score}</Text>
+        {label !== undefined && <Text style={styles.label}>{label.toUpperCase()}</Text>}
       </View>
     </View>
   );
@@ -74,8 +81,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   score: {
+    fontSize: 24,
     fontWeight: '700',
-    letterSpacing: type.tracking.title,
+    letterSpacing: typeToken.tracking.title,
     color: color.ink,
+  },
+  label: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: typeToken.tracking.label,
+    color: color.slate400,
   },
 });
