@@ -1,27 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PinnedPlayer } from '../../../components/admin/PinnedPlayer';
-import { RequestChangesSheet } from '../../../components/admin/RequestChangesSheet';
-import { ScriptLineList } from '../../../components/admin/ScriptLineList';
-import { SlideshowViewer } from '../../../components/admin/SlideshowViewer';
-import { ThreadTab } from '../../../components/admin/ThreadTab';
+import { ApprovedOverlay } from '../../../components/admin/review/ApprovedOverlay';
+import { ReelSurface } from '../../../components/admin/review/ReelSurface';
+import { ReviewMetaOverlay } from '../../../components/admin/review/ReviewMetaOverlay';
+import { ReviewTopBar } from '../../../components/admin/review/ReviewTopBar';
+import {
+  RevisionMode,
+  type RevisionSection,
+} from '../../../components/admin/review/RevisionMode';
+import { SentConfirmation } from '../../../components/admin/review/SentConfirmation';
+import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
 import { Button } from '../../../components/ui/Button';
-import { Icon } from '../../../components/ui/Icon';
-import { InfoBlock } from '../../../components/ui/InfoBlock';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/ui/Segmented';
 import {
   latestSubmissionsByAssignment,
   listAssignmentQueue,
@@ -31,21 +24,31 @@ import {
   type Submission,
 } from '../../../lib/admin-api';
 import {
-  eventsToThread,
   scriptToLines,
   slidesFromScript,
   toAssignmentQueueRow,
 } from '../../../lib/admin-queue-map';
+import {
+  listBriefSegments,
+  listPostTypes,
+  type BriefSegment,
+} from '../../../lib/briefs-api';
 import { useAuth } from '../../../lib/auth';
-import { listAssignmentReviewEvents } from '../../../lib/review-events';
-import type { MockQueueItem, MockThreadEntry } from '../../../lib/admin-review-types';
-import { borderWidth, color, radius, type } from '../../../theme/tokens';
+import type { MockQueueItem } from '../../../lib/admin-review-types';
+import { borderWidth, color, type } from '../../../theme/tokens';
 
 type ReviewItem = {
   assignment: AssignmentQueueItem;
   row: MockQueueItem;
   submission: Submission | null;
 };
+
+/** Hook / Clip n / Outro for Reels, Cover / Slide n / Close for Slideshows. */
+function sectionLabel(index: number, count: number, isReel: boolean): string {
+  if (index === 0) return isReel ? 'Hook' : 'Cover';
+  if (index === count - 1 && count >= 3) return isReel ? 'Outro' : 'Close';
+  return `${isReel ? 'Clip' : 'Slide'} ${index}`;
+}
 
 export default function ReviewScreen() {
   const { id, creator, brief } = useLocalSearchParams<{
@@ -55,21 +58,23 @@ export default function ReviewScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { height: winHeight } = useWindowDimensions();
   const { profile } = useAuth();
 
   const [queue, setQueue] = useState<ReviewItem[]>([]);
   const [index, setIndex] = useState(0);
   const [videoUri, setVideoUri] = useState<string | null>(null);
-  const [thread, setThread] = useState<MockThreadEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const [playing, setPlaying] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
-  const [tab, setTab] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
-  const [sheetVisible, setSheetVisible] = useState(false);
+  const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
+  const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
+
+  const [revisionVisible, setRevisionVisible] = useState(false);
+  const [approvedVisible, setApprovedVisible] = useState(false);
+  const [sentVisible, setSentVisible] = useState(false);
 
   /** Signed URLs by assignment id, so the next item starts instantly. */
   const urlCache = useRef(new Map<string, string>());
@@ -81,6 +86,19 @@ export default function ReviewScreen() {
     const url = await signedVideoUrl(item.submission.video_path);
     urlCache.current.set(item.assignment.id, url);
     return url;
+  }, []);
+
+  // The `type` in the bottom scrim's `type · age` line.
+  useEffect(() => {
+    let cancelled = false;
+    void listPostTypes()
+      .then((rows) => {
+        if (!cancelled) setTypeLabels(new Map(rows.map((r) => [r.id, r.label])));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -120,13 +138,13 @@ export default function ReviewScreen() {
   const current = queue[index] as ReviewItem | undefined;
   const currentId = current?.assignment.id;
 
-  // Load the current item's video and thread, autoplay, prefetch the next one.
+  // Load the current item's video and segments, autoplay, prefetch the next one.
   useEffect(() => {
     if (currentId === undefined || current === undefined) return;
     let cancelled = false;
     setPositionSec(0);
     setSlideIndex(0);
-    setTab(current.row.resubmitted ? 2 : 0);
+    setBriefSegments([]);
     void (async () => {
       try {
         const url = await signedUrlFor(current);
@@ -137,10 +155,10 @@ export default function ReviewScreen() {
         if (!cancelled) setVideoUri(null);
       }
       try {
-        const events = await listAssignmentReviewEvents(currentId);
-        if (!cancelled) setThread(eventsToThread(events));
+        const segments = await listBriefSegments(current.assignment.brief_id);
+        if (!cancelled) setBriefSegments(segments);
       } catch {
-        if (!cancelled) setThread([]);
+        if (!cancelled) setBriefSegments([]);
       }
       const next = queue[index + 1];
       if (next !== undefined) void signedUrlFor(next).catch(() => undefined);
@@ -159,7 +177,7 @@ export default function ReviewScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.screen, styles.centered]}>
+      <View style={[styles.fallbackScreen, styles.centered]}>
         <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator color={color.blue500} />
       </View>
@@ -168,7 +186,7 @@ export default function ReviewScreen() {
 
   if (!current) {
     return (
-      <View style={[styles.screen, styles.centered, { paddingTop: insets.top }]}>
+      <View style={[styles.fallbackScreen, styles.centered, { paddingTop: insets.top }]}>
         <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.missing}>Nothing left to review.</Text>
         <Button size="md" variant="outline" onPress={() => router.back()}>
@@ -183,10 +201,32 @@ export default function ReviewScreen() {
   const isReel = row.format === 'video';
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
   const caption = briefRow.caption ?? '';
-  const scriptLines = scriptToLines(briefRow.script);
-  const slides = slidesFromScript(briefRow.script);
-  // The video owns the screen; meta, tabs and footer share the remainder.
-  const playerHeight = Math.max(330, winHeight - insets.top - 330);
+  const attempt = submission?.version ?? 1;
+  const typeLabel =
+    briefRow.post_type_id !== null
+      ? typeLabels.get(briefRow.post_type_id) ?? null
+      : null;
+
+  const scriptTexts = isReel
+    ? scriptToLines(briefRow.script).map((line) => line.text)
+    : slidesFromScript(briefRow.script);
+  // brief_segments carry the render fields; slot order matches slide order.
+  const slideTexts = scriptTexts.map((text, i) => {
+    const overlay = briefSegments[i]?.overlay_text;
+    return overlay?.trim() ? overlay : text;
+  });
+  const hasScreenshot = scriptTexts.map(
+    (_, i) => briefSegments[i]?.screenshot_url != null,
+  );
+
+  const sections: RevisionSection[] = [
+    ...scriptTexts.map((text, i) => ({
+      key: `segment-${i}`,
+      label: sectionLabel(i, scriptTexts.length, isReel),
+      text,
+    })),
+    { key: 'caption', label: 'Caption', text: caption || 'No caption.' },
+  ];
 
   const togglePlay = () => {
     if (!playing && durationSec > 0 && positionSec >= durationSec) setPositionSec(0);
@@ -200,16 +240,19 @@ export default function ReviewScreen() {
       return;
     }
     setVideoUri(null);
-    setThread([]);
+    setPlaying(false);
     setQueue(rest);
     setIndex(Math.min(index, rest.length - 1));
   }
 
-  async function runReview(action: 'approved' | 'changes_requested', note: string | null) {
-    if (!profile || !current) return;
+  async function runReview(
+    action: 'approved' | 'changes_requested',
+    note: string | null,
+  ): Promise<boolean> {
+    if (!profile || !current) return false;
     if (!current.submission) {
       Alert.alert('Missing submission', 'This post has no video to review yet.');
-      return;
+      return false;
     }
     setBusy(true);
     try {
@@ -220,54 +263,96 @@ export default function ReviewScreen() {
         action,
         note,
       });
-      advance();
+      return true;
     } catch (e) {
       Alert.alert(
-        action === 'approved' ? "Couldn't approve" : "Couldn't send note",
+        action === 'approved' ? "Couldn't approve" : "Couldn't send back",
         e instanceof Error ? e.message : 'Check your connection and try again.',
       );
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  const metaRow = (
-    <View style={styles.metaRow}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarInitial}>{row.creator.initial}</Text>
-      </View>
-      <Text style={styles.metaName}>{row.creator.name}</Text>
-      <Text style={styles.metaDot}>{'\u00b7'}</Text>
-      <Text numberOfLines={1} style={styles.metaAge}>
-        {`${row.title} \u00b7 ${row.ageLabel}`}
-      </Text>
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel={`Message ${row.creator.name} about this post`}
-        onPress={() =>
-          router.push({
-            pathname: '/(admin)/chat/[creatorId]',
-            params: { creatorId: assignment.creator_id, assignment: assignment.id },
-          })
-        }
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        style={styles.chatButton}
-      >
-        <Icon name="message-circle" size={20} color={color.blue700} />
-      </PressableScale>
-    </View>
-  );
+  const approve = async () => {
+    const ok = await runReview('approved', null);
+    if (ok) {
+      setPlaying(false);
+      setApprovedVisible(true);
+    }
+  };
 
-  const footer = (
-    <View style={styles.footer}>
-      <View style={styles.footerRow}>
+  const sendBack = async (note: string) => {
+    const ok = await runReview('changes_requested', note);
+    if (ok) {
+      setPlaying(false);
+      setRevisionVisible(false);
+      setSentVisible(true);
+    }
+  };
+
+  const closeAndAdvance = () => {
+    setApprovedVisible(false);
+    setSentVisible(false);
+    advance();
+  };
+
+  return (
+    <View style={styles.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar style="light" />
+
+      <View style={styles.media}>
+        {isReel ? (
+          <ReelSurface
+            key={assignment.id}
+            videoUri={videoUri}
+            playing={playing}
+            onTogglePlay={togglePlay}
+            positionSec={positionSec}
+            durationSec={durationSec}
+            onPositionSec={setPositionSec}
+          />
+        ) : (
+          <SlideshowSurface
+            slides={slideTexts}
+            index={slideIndex}
+            onIndex={setSlideIndex}
+            hasScreenshot={hasScreenshot}
+          />
+        )}
+
+        <ReviewMetaOverlay
+          creatorName={row.creator.name}
+          handle={null}
+          typeLabel={typeLabel}
+          ageLabel={row.ageLabel}
+          format={row.format}
+          caption={caption}
+          hashtags={briefRow.hashtags}
+        />
+        <ReviewTopBar
+          topInset={insets.top}
+          counterLabel={counterLabel}
+          takeLabel={attempt > 1 ? `Take ${attempt}` : undefined}
+          onBack={() => router.back()}
+          onChat={() =>
+            router.push({
+              pathname: '/(admin)/chat/[creatorId]',
+              params: { creatorId: assignment.creator_id, assignment: assignment.id },
+            })
+          }
+        />
+      </View>
+
+      <View style={[styles.actionStrip, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Button
           variant="outline"
           size="md"
-          block
           disabled={busy}
-          style={styles.footerRequest}
-          onPress={() => setSheetVisible(true)}
+          style={styles.request}
+          onPress={() => setRevisionVisible(true)}
         >
           Request changes
         </Button>
@@ -275,101 +360,33 @@ export default function ReviewScreen() {
           variant="primary"
           size="md"
           icon="check"
-          block
           disabled={busy}
-          style={styles.footerApprove}
-          onPress={() => void runReview('approved', null)}
+          style={styles.approve}
+          onPress={() => void approve()}
         >
           Approve
         </Button>
       </View>
-    </View>
-  );
 
-  const sheet = (
-    <RequestChangesSheet
-      visible={sheetVisible}
-      creatorName={row.creator.name}
-      onClose={() => setSheetVisible(false)}
-      onSend={(note) => {
-        setSheetVisible(false);
-        void runReview('changes_requested', note);
-      }}
-    />
-  );
-
-  if (isReel) {
-    return (
-      <View style={styles.screen}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar style="light" />
-        <PinnedPlayer
-          key={assignment.id}
-          heightPx={playerHeight}
-          playing={playing}
-          onTogglePlay={togglePlay}
-          positionSec={positionSec}
-          durationSec={durationSec}
-          videoUri={videoUri}
-          onPositionSec={videoUri !== null ? setPositionSec : undefined}
-          onBack={() => router.back()}
-          counterLabel={counterLabel}
-          takeChip={row.resubmitted ? `Take ${submission?.version ?? 2}` : undefined}
+      {revisionVisible && (
+        <RevisionMode
+          sections={sections}
+          busy={busy}
+          onCancel={() => setRevisionVisible(false)}
+          onSend={(note) => void sendBack(note)}
         />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          {metaRow}
-          <Segmented options={['Script', 'Caption', 'Thread']} value={tab} onChange={setTab} />
-          {tab === 0 && (
-            <ScriptLineList
-              lines={scriptLines}
-              positionSec={positionSec}
-              hasTimings={false}
-              onSeek={setPositionSec}
-            />
-          )}
-          {tab === 1 && <InfoBlock label="CAPTION">{caption || 'No caption.'}</InfoBlock>}
-          {tab === 2 &&
-            (thread.length > 0 ? (
-              <ThreadTab entries={thread} />
-            ) : (
-              <Text style={styles.emptyThread}>No notes yet on this post.</Text>
-            ))}
-        </ScrollView>
-        {footer}
-        {sheet}
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <View style={styles.header}>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          onPress={() => router.back()}
-          hitSlop={{ top: 9, bottom: 9, left: 16, right: 9 }}
-        >
-          <Icon name="chevron-left" size={26} color={color.ink} />
-        </PressableScale>
-        <Text style={styles.headerTitle}>Review</Text>
-        <View style={styles.headerCounter}>
-          <Text style={styles.headerCounterText}>{counterLabel}</Text>
-        </View>
-      </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <SlideshowViewer slides={slides} index={slideIndex} onSelect={setSlideIndex} />
-        {metaRow}
-        <Text style={styles.h1}>{row.title}</Text>
-        <InfoBlock label={`SLIDE ${slideIndex + 1} COPY`}>
-          {slides[slideIndex] ?? ''}
-        </InfoBlock>
-        <InfoBlock label="CAPTION">{caption || 'No caption.'}</InfoBlock>
-      </ScrollView>
-      {footer}
-      {sheet}
+      )}
+      {approvedVisible && (
+        <ApprovedOverlay
+          title={row.title}
+          format={row.format}
+          creatorName={row.creator.name}
+          onNext={closeAndAdvance}
+        />
+      )}
+      {sentVisible && (
+        <SentConfirmation creatorName={row.creator.name} onNext={closeAndAdvance} />
+      )}
     </View>
   );
 }
@@ -377,7 +394,11 @@ export default function ReviewScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: color.white,
+    backgroundColor: color.ink900,
+  },
+  fallbackScreen: {
+    flex: 1,
+    backgroundColor: color.offWhite,
   },
   centered: {
     alignItems: 'center',
@@ -386,109 +407,26 @@ const styles = StyleSheet.create({
   },
   missing: {
     fontSize: type.size.bodySm,
-    fontWeight: '600',
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
-  scroll: {
+  media: {
     flex: 1,
+    overflow: 'hidden',
   },
-  content: {
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  header: {
+  actionStrip: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 4,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  headerTitle: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    fontSize: type.size.bodySm,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  headerCounter: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-  },
-  headerCounterText: {
-    fontSize: type.size.label,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  avatar: {
-    width: 24,
-    height: 24,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontSize: type.size.micro11,
-    fontWeight: '800',
-    color: color.blue700,
-  },
-  metaName: {
-    fontSize: type.size.meta,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  metaDot: {
-    fontSize: type.size.meta,
-    color: color.slate300,
-  },
-  metaAge: {
-    flexShrink: 1,
-    flexGrow: 1,
-    fontSize: type.size.meta,
-    fontWeight: '400',
-    color: color.slate400,
-  },
-  chatButton: { marginLeft: 'auto' },
-  h1: {
-    fontSize: type.size.titleSm,
-    lineHeight: 31,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-    color: color.ink,
-  },
-  emptyThread: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-  },
-  footer: {
+    gap: 10,
+    paddingTop: 12,
+    paddingHorizontal: 20,
     borderTopWidth: borderWidth.hair,
     borderTopColor: color.line,
     backgroundColor: color.white,
-    paddingTop: 12,
-    paddingHorizontal: 24,
-    paddingBottom: 30,
   },
-  footerRow: {
-    flexDirection: 'row',
-    gap: 10,
+  request: {
+    flex: 46,
   },
-  footerRequest: {
-    flex: 1,
-  },
-  footerApprove: {
-    flex: 1.35,
+  approve: {
+    flex: 54,
   },
 });
