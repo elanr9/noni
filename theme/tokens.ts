@@ -76,6 +76,23 @@ export const color = {
   whiteA16: 'rgba(255,255,255,0.16)',
 } as const;
 
+/**
+ * Admin handoff §1 — one tint per post type so a lane reads by colour
+ * before it reads by word. Keys match public.post_types.key.
+ */
+export const postTypeTone = {
+  numbered_list: { bg: '#E3F2FD', fg: '#0E6BA8' },
+  numbered_tips: { bg: '#E3F2FD', fg: '#0E6BA8' },
+  talking_head: { bg: '#ECE7FB', fg: '#5B44B4' },
+  explainer: { bg: '#DFF3EE', fg: '#0E6E5C' },
+  contrast: { bg: '#FDEEDC', fg: '#95560C' },
+  getting_started: { bg: '#FDEEDC', fg: '#95560C' },
+  replay_bait: { bg: '#FBE7EF', fg: '#A03A67' },
+  how_to: { bg: '#E7EAFB', fg: '#3B4EA0' },
+} as const;
+
+export type PostTypeKey = keyof typeof postTypeTone;
+
 export const type = {
   size: {
     hero: 44,
@@ -127,6 +144,8 @@ export const space = {
   10: 32,
   11: 40,
   gutter: 24,
+  /** Admin handoff §1 — admin surfaces are dense lists, gutter is 20. */
+  gutterAdmin: 20,
   cardPad: 18,
   stackGap: 12,
   sectionGap: 28,
@@ -140,6 +159,16 @@ export const radius = {
   cell: 14,
   md: 16,
   lg: 18,
+  xl: 20,
+  '2xl': 24,
+  pill: 999,
+} as const;
+
+/** Admin handoff §1 radii: sm inner blocks, md fields, lg cards, xl media, 2xl sheets. */
+export const radiusAdmin = {
+  sm: 8,
+  md: 12,
+  lg: 16,
   xl: 20,
   '2xl': 24,
   pill: 999,
