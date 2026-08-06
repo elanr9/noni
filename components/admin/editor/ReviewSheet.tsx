@@ -37,6 +37,10 @@ export function ReviewSheet(props: {
   /** Render as a page section instead of a bottom sheet. */
   inline?: boolean;
   confirmLabel?: string;
+  /** The wizard shell owns the h1 and intent line. */
+  hideHeader?: boolean;
+  /** The wizard shell's pinned footer owns the confirm button. */
+  hideConfirm?: boolean;
 }): JSX.Element {
   const {
     visible,
@@ -49,20 +53,24 @@ export function ReviewSheet(props: {
     onConfirm,
     inline = false,
     confirmLabel,
+    hideHeader = false,
+    hideConfirm = false,
   } = props;
   const busy = running || confirming;
 
   const body = (
     <>
-      <Text style={styles.h2}>AI review</Text>
+      {!hideHeader && <Text style={styles.h2}>AI review</Text>}
       {running || !result ? (
         <Text style={styles.subtitle}>Reading the post…</Text>
       ) : (
         <>
-          <Text style={styles.subtitle}>
-            Suggestions only. Apply what helps, ignore the rest, confirm when
-            it reads right.
-          </Text>
+          {!hideHeader && (
+            <Text style={styles.subtitle}>
+              Suggestions only. Apply what helps, ignore the rest, confirm
+              when it reads right.
+            </Text>
+          )}
 
           <View style={styles.scoreRow}>
             <View style={styles.overallScore}>
@@ -146,17 +154,19 @@ export function ReviewSheet(props: {
             )}
           </ScrollView>
 
-          <Button
-            size="lg"
-            variant="primary"
-            block
-            disabled={busy}
-            onPress={onConfirm}
-          >
-            {confirming
-              ? 'Saving…'
-              : (confirmLabel ?? 'Confirm review')}
-          </Button>
+          {!hideConfirm && (
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              disabled={busy}
+              onPress={onConfirm}
+            >
+              {confirming
+                ? 'Saving…'
+                : (confirmLabel ?? 'Confirm review')}
+            </Button>
+          )}
         </>
       )}
     </>

@@ -10,13 +10,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
+import { StepDots } from '../../../components/admin/editor/StepDots';
+import { PushHeader } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
@@ -29,6 +32,7 @@ import {
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
+  listCampaigns,
   listPostTypes,
   logBriefReviewEvents,
   markSearchQueryUsedByText,
@@ -72,8 +76,21 @@ const STEP_TITLES: Record<EditorStep, string> = {
   hook: 'Hook',
   cta: 'CTA',
   points: 'Talking points',
-  caption: 'Caption',
+  caption: 'Caption + hashtags',
   review: 'AI review',
+};
+
+/** One line of intent under each step's h1 (README §8 shell). */
+const STEP_INTENTS: Record<EditorStep, string> = {
+  title: 'Optional. It is how the post reads in the grid, not on the platform.',
+  search:
+    'The TikTok search this post answers. Everything downstream is written against it.',
+  hook: 'Nine words maximum, written against the finished body. Pick one or write your own.',
+  cta: 'One plug sentence. On the talking points step it lands inside one point, never its own clip.',
+  points: 'Clip count is derived from the type, never entered.',
+  caption: 'Caption and 3 to 5 hashtags. Instagram reads tags inside the caption.',
+  review:
+    'Suggestions only. Apply what helps, ignore the rest, confirm when it reads right.',
 };
 
 function wordCount(text: string): number {
@@ -106,10 +123,13 @@ export default function PostEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState<EditorStep>('title');
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [postNumber, setPostNumber] = useState<number | null>(null);
+  const [weekNumber, setWeekNumber] = useState<number | null>(null);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
   const [hashtagBank, setHashtagBank] = useState<string[]>([]);
   const [segments, setSegments] = useState<BriefSegment[]>([]);
@@ -179,13 +199,19 @@ export default function PostEditorScreen() {
     if (!id) return;
     void (async () => {
       try {
-        const [brief, types, segs, { data: brand }, claimIds] = await Promise.all([
-          getBrief(id),
-          listPostTypes(),
-          listBriefSegments(id),
-          supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
-          listApprovedClaimIds(),
-        ]);
+        const [brief, types, segs, { data: brand }, claimIds, { data: link }] =
+          await Promise.all([
+            getBrief(id),
+            listPostTypes(),
+            listBriefSegments(id),
+            supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
+            listApprovedClaimIds(),
+            supabase
+              .from('campaign_briefs')
+              .select('position, campaign_id')
+              .eq('brief_id', id)
+              .maybeSingle(),
+          ]);
         if (!brief) {
           setMissing(true);
           return;
@@ -229,6 +255,42 @@ export default function PostEditorScreen() {
             points: briefPoints,
             postTypeId: brief.post_type_id,
           }),
+        );
+
+        // Header meta: "Post 04" from the row's position in the week,
+        // "Week 14" from the campaign's chronological number.
+        if (link) {
+          if (typeof link.position === 'number') setPostNumber(link.position + 1);
+          void listCampaigns()
+            .then((all) => {
+              const idx = all.findIndex((c) => c.id === link.campaign_id);
+              if (idx >= 0) setWeekNumber(all.length - idx);
+            })
+            .catch(() => undefined);
+        }
+
+        // Entering the editor opens the first incomplete step, or step 1
+        // on an untouched row. Never lands on review — that would either
+        // generate on open (rule 1) or show an empty screen.
+        const rowType = types.find((t) => t.id === brief.post_type_id) ?? null;
+        const untouched =
+          !brief.hook?.trim() &&
+          briefPoints.length === 0 &&
+          !brief.cta?.trim() &&
+          !brief.caption?.trim() &&
+          brief.hashtags.length === 0;
+        setStep(
+          untouched
+            ? 'title'
+            : !brief.search_phrase?.trim()
+              ? 'search'
+              : !brief.hook?.trim()
+                ? 'hook'
+                : (rowType?.requires_plug ?? true) && !brief.cta?.trim()
+                  ? 'cta'
+                  : briefPoints.length < (rowType?.min_points ?? 1)
+                    ? 'points'
+                    : 'caption',
         );
       } catch (e) {
         Alert.alert(
@@ -818,16 +880,16 @@ export default function PostEditorScreen() {
     setStep(STEPS[idx - 1]);
   }
 
+  /** Header action: save through the normal path and exit, row stays partial. */
   async function saveProgress() {
     const ok = await save();
-    if (ok) {
-      Alert.alert('Progress saved', 'You can leave and finish this post later.');
-    }
+    if (ok) router.back();
   }
 
   if (!loaded) {
     return (
       <View style={styles.center}>
+        <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.centerText}>Loading post…</Text>
       </View>
     );
@@ -835,6 +897,7 @@ export default function PostEditorScreen() {
   if (missing) {
     return (
       <View style={styles.center}>
+        <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.centerText}>Post not found.</Text>
       </View>
     );
@@ -847,29 +910,61 @@ export default function PostEditorScreen() {
   const currentStepIndex = stepIndex(step);
   const typeLabel = currentType?.label ?? 'Post';
 
+  // Clip and slide counts are derived from the type, never entered.
+  const pointCount =
+    currentType !== null ? Math.max(points.length, currentType.min_points) : points.length;
+  const stepIntent =
+    step === 'points' && currentType !== null
+      ? currentType.clip_structure === 'single_clip'
+        ? 'One clip, derived from the type.'
+        : currentType.clip_structure === 'slide_per_point'
+          ? `One slide per point = ${pointCount} slides. Derived from the type, never entered.`
+          : `Hook + ${pointCount} points + outro = ${pointCount + 2} clips. Derived from the type, never entered.`
+      : STEP_INTENTS[step];
+
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      <View style={styles.shellTop}>
+        <PushHeader
+          title={
+            postNumber !== null
+              ? `Post ${String(postNumber).padStart(2, '0')}`
+              : 'Post'
+          }
+          subtitle={
+            weekNumber !== null ? `${typeLabel} · Week ${weekNumber}` : typeLabel
+          }
+          onBack={goBack}
+          trailing={
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Save progress"
+              disabled={saving}
+              onPress={() => void saveProgress()}
+            >
+              <Text style={styles.saveProgress}>
+                {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
+              </Text>
+            </PressableScale>
+          }
+        />
+        <StepDots
+          current={currentStepIndex}
+          total={STEPS.length}
+          name={STEP_TITLES[step]}
+        />
+      </View>
+
       <ScrollView
         style={styles.flex}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.progressRow}>
-          {STEPS.map((s, i) => (
-            <View
-              key={s}
-              style={[
-                styles.progressDot,
-                i <= currentStepIndex && styles.progressDotOn,
-              ]}
-            />
-          ))}
-        </View>
-        <Text style={styles.stepMeta}>
-          {currentStepIndex + 1} of {STEPS.length} · {typeLabel}
-        </Text>
-        <Text style={styles.stepTitle}>{STEP_TITLES[step]}</Text>
+        <Text style={styles.h1}>{STEP_TITLES[step]}</Text>
+        <Text style={styles.intent}>{stepIntent}</Text>
 
         {killReason && step === 'title' ? (
           <View style={styles.killCard}>
@@ -1108,6 +1203,8 @@ export default function PostEditorScreen() {
         {step === 'review' ? (
           <ReviewSheet
             inline
+            hideHeader
+            hideConfirm
             visible
             running={reviewRunning}
             confirming={reviewConfirming}
@@ -1128,36 +1225,34 @@ export default function PostEditorScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={styles.footer}>
-        <View style={styles.footerTop}>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={saving}
-            onPress={() => void saveProgress()}
-          >
-            {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <View style={styles.backButton}>
+          <Button size="lg" variant="ghost" block onPress={goBack}>
+            Back
           </Button>
         </View>
-        <View style={styles.footerRow}>
-          <View style={styles.footerButton}>
-            <Button size="lg" variant="tint" block onPress={goBack}>
-              Back
-            </Button>
-          </View>
+        <View style={styles.nextButton}>
           {step !== 'review' ? (
-            <View style={styles.footerButton}>
-              <Button
-                size="lg"
-                variant="primary"
-                block
-                disabled={saving || filling}
-                onPress={() => void goNext()}
-              >
-                Next
-              </Button>
-            </View>
-          ) : null}
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              disabled={saving || filling}
+              onPress={() => void goNext()}
+            >
+              Next
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              disabled={reviewRunning || reviewConfirming || !reviewResult}
+              onPress={() => void confirmReview()}
+            >
+              {reviewConfirming ? 'Saving…' : 'Save post'}
+            </Button>
+          )}
         </View>
       </View>
 
@@ -1187,30 +1282,29 @@ const styles = StyleSheet.create({
     fontSize: type.size.bodySm,
     color: color.slate400,
   },
-  progressRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 10,
+  shellTop: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 4,
   },
-  progressDot: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: color.lineStrong,
-  },
-  progressDotOn: { backgroundColor: color.accent },
-  stepMeta: {
-    fontSize: type.size.meta,
+  saveProgress: {
+    fontSize: 13,
     fontWeight: '700',
-    color: color.slate400,
-    marginBottom: 4,
+    color: color.blue600,
   },
-  stepTitle: {
-    fontSize: type.size.titleSm,
-    fontWeight: '800',
+  h1: {
+    fontSize: 28,
+    fontWeight: '700',
     color: color.ink,
-    marginBottom: 16,
     letterSpacing: type.tracking.title,
+  },
+  intent: {
+    marginTop: 6,
+    marginBottom: 16,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 14 * 1.45,
+    color: color.slate500,
   },
   killCard: {
     gap: 6,
@@ -1313,20 +1407,16 @@ const styles = StyleSheet.create({
     lineHeight: type.size.bodySm * 1.45,
   },
   footer: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 20,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.lineStrong,
-    backgroundColor: color.offWhite,
-    gap: 8,
-  },
-  footerTop: { alignItems: 'flex-start' },
-  footerRow: {
     flexDirection: 'row',
     gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.line,
+    backgroundColor: color.glass,
   },
-  footerButton: { flex: 1 },
+  backButton: { flexBasis: '30%' },
+  nextButton: { flex: 1 },
   reviewedNote: {
     marginTop: 10,
     fontSize: type.size.meta,
