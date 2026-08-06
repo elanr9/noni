@@ -5,7 +5,6 @@ import {
   Linking,
   RefreshControl,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
@@ -14,12 +13,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   LibraryItemCard,
+  cardHeightFor,
   itemCardModel,
   ourPostCardModel,
-  type LibraryCardModel,
 } from '../../../components/admin/LibraryItemCard';
-import { PressableScale } from '../../../components/ui/PressableScale';
+import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
+import { QuickCapture } from '../../../components/admin/library/QuickCapture';
+import { SourceChips } from '../../../components/admin/library/SourceChips';
+import { AdminHeader, AdminScreen } from '../../../components/admin/shared';
 import { Dropdown } from '../../../components/ui/Dropdown';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import type { IconName } from '../../../components/ui/Icon';
 import { useAuth } from '../../../lib/auth';
 import { listPostTypes, type PostType } from '../../../lib/briefs-api';
 import {
@@ -27,26 +31,45 @@ import {
   listCreatorOptions,
   listLibraryItems,
   listOurPosts,
+  markLibraryItemUsed,
+  type LibraryItem,
   type LibrarySource,
+  type OurPost,
   type OurPostsSort,
 } from '../../../lib/library-api';
-import { borderWidth, color, radius, ringFocus, space, type } from '../../../theme/tokens';
-
-const CHIPS: Array<{ source: LibrarySource; label: string }> = [
-  { source: 'idea', label: 'Ideas' },
-  { source: 'our_post', label: 'Our posts' },
-  { source: 'reference', label: 'References' },
-  { source: 'from_creator', label: 'From creator' },
-];
+import { borderWidth, color, radiusAdmin, space, type } from '../../../theme/tokens';
 
 const PAGE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 
-const EMPTY_COPY: Record<LibrarySource, string> = {
-  idea: 'Nothing captured yet. Type above, hit enter, saved. Paste the whole doc for one idea per line.',
-  our_post: 'No posts in this window yet. Posts appear here as creators go live.',
-  reference: 'Paste a link above to save it as a reference with a thumbnail.',
-  from_creator: 'Nothing submitted by creators yet.',
+type Row =
+  | { kind: 'item'; item: LibraryItem }
+  | { kind: 'our_post'; post: OurPost };
+
+const EMPTY: Record<
+  LibrarySource,
+  { icon: IconName; title: string; body: string }
+> = {
+  idea: {
+    icon: 'sparkles',
+    title: 'No ideas yet',
+    body: 'Type one above and save it. Paste a whole doc and every line becomes its own idea.',
+  },
+  our_post: {
+    icon: 'trending-up',
+    title: 'No posts yet',
+    body: 'Posts land here as creators go live, sorted by how they perform.',
+  },
+  reference: {
+    icon: 'link',
+    title: 'No references yet',
+    body: 'Paste a TikTok or Instagram link above and it saves here with a thumbnail.',
+  },
+  from_creator: {
+    icon: 'users',
+    title: 'Nothing from creators yet',
+    body: 'When a creator sends in an idea, it shows up here with their name on it.',
+  },
 };
 
 export default function LibraryScreen() {
@@ -60,11 +83,10 @@ export default function LibraryScreen() {
   const [postTypeId, setPostTypeId] = useState<string | null>(null);
 
   const [capture, setCapture] = useState('');
-  const [captureFocused, setCaptureFocused] = useState(false);
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [cards, setCards] = useState<LibraryCardModel[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [endReached, setEndReached] = useState(false);
@@ -80,7 +102,7 @@ export default function LibraryScreen() {
       const version = ++queryVersion.current;
       if (offset === 0) setLoading(true);
       try {
-        const next =
+        const next: Row[] =
           source === 'our_post'
             ? (
                 await listOurPosts({
@@ -92,13 +114,13 @@ export default function LibraryScreen() {
                   limit: PAGE,
                   offset,
                 })
-              ).map(ourPostCardModel)
+              ).map((post): Row => ({ kind: 'our_post', post }))
             : (
                 await listLibraryItems({ source, search, limit: PAGE, offset })
-              ).map(itemCardModel);
+              ).map((item): Row => ({ kind: 'item', item }));
         if (version !== queryVersion.current) return;
         setEndReached(next.length < PAGE);
-        setCards((prev) => (offset === 0 ? next : [...prev, ...next]));
+        setRows((prev) => (offset === 0 ? next : [...prev, ...next]));
       } catch (e) {
         if (version !== queryVersion.current) return;
         Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
@@ -157,115 +179,122 @@ export default function LibraryScreen() {
     }
   }
 
-  function onCardPress(card: LibraryCardModel) {
-    if (card.url) void Linking.openURL(card.url);
+  function nameOf(id: string | null): string | null {
+    if (!id) return null;
+    return creators.find((c) => c.id === id)?.full_name ?? null;
+  }
+
+  function onRowPress(row: Row) {
+    const url = row.kind === 'item' ? row.item.url : row.post.post_url;
+    if (url) void Linking.openURL(url);
+  }
+
+  function onUse(item: LibraryItem) {
+    // Using never removes — the count just goes up.
+    markLibraryItemUsed(item).catch(() => undefined);
+    setRows((prev) =>
+      prev.map((row) =>
+        row.kind === 'item' && row.item.id === item.id
+          ? { kind: 'item', item: { ...item, used_count: item.used_count + 1 } }
+          : row,
+      ),
+    );
   }
 
   const showOurPostControls = source === 'our_post';
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
+    <AdminScreen scroll={false}>
       <View style={styles.header}>
-        <Text style={styles.h1}>Library</Text>
+        <AdminHeader title="Library" />
 
-        <View style={[styles.captureRing, captureFocused && ringFocus]}>
-          <TextInput
-            value={capture}
-            onChangeText={setCapture}
-            onFocus={() => setCaptureFocused(true)}
-            onBlur={() => setCaptureFocused(false)}
-            onSubmitEditing={() => void onCapture()}
-            placeholder="Idea or link. Paste lines for many at once."
-            placeholderTextColor={color.slate400}
-            multiline
-            submitBehavior="blurAndSubmit"
-            returnKeyType="done"
-            style={styles.capture}
-          />
-        </View>
-        {savedNote !== null && <Text style={styles.savedNote}>{savedNote}</Text>}
+        <QuickCapture
+          value={capture}
+          onChangeText={setCapture}
+          onSave={() => void onCapture()}
+          note={savedNote}
+        />
 
-        <View style={styles.chipRow}>
-          {CHIPS.map((chip) => {
-            const active = chip.source === source;
-            return (
-              <PressableScale
-                key={chip.source}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => {
-                  if (chip.source === source) return;
-                  setCards([]);
-                  setSource(chip.source);
-                }}
-                style={[styles.chip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {chip.label}
-                </Text>
-              </PressableScale>
-            );
-          })}
-        </View>
-
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder={showOurPostControls ? 'Search topic' : 'Search'}
-          placeholderTextColor={color.slate400}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={styles.search}
+        <SourceChips
+          value={source}
+          onChange={(next) => {
+            if (next === source) return;
+            setRows([]);
+            setSource(next);
+          }}
         />
 
         {showOurPostControls && (
-          <View style={styles.controls}>
-            <Dropdown<OurPostsSort>
-              options={[
-                { label: 'Top 60 days', value: 'top' },
-                { label: 'Recent', value: 'recent' },
-              ]}
-              value={sort}
-              onChange={setSort}
+          <>
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search topic"
+              placeholderTextColor={color.slate400}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.search}
             />
-            <Dropdown<string | null>
-              options={[
-                { label: 'All creators', value: null },
-                ...creators.map((c) => ({
-                  label: c.full_name ?? 'Unnamed',
-                  value: c.id as string | null,
-                })),
-              ]}
-              value={creatorId}
-              onChange={setCreatorId}
-            />
-            <Dropdown<string | null>
-              options={[
-                { label: 'All types', value: null },
-                ...postTypes.map((t) => ({
-                  label: t.label,
-                  value: t.id as string | null,
-                })),
-              ]}
-              value={postTypeId}
-              onChange={setPostTypeId}
-            />
-          </View>
+            <View style={styles.controls}>
+              <Dropdown<OurPostsSort>
+                options={[
+                  { label: 'Top 60 days', value: 'top' },
+                  { label: 'Recent', value: 'recent' },
+                ]}
+                value={sort}
+                onChange={setSort}
+              />
+              <Dropdown<string | null>
+                options={[
+                  { label: 'All creators', value: null },
+                  ...creators.map((c) => ({
+                    label: c.full_name ?? 'Unnamed',
+                    value: c.id as string | null,
+                  })),
+                ]}
+                value={creatorId}
+                onChange={setCreatorId}
+              />
+              <Dropdown<string | null>
+                options={[
+                  { label: 'All types', value: null },
+                  ...postTypes.map((t) => ({
+                    label: t.label,
+                    value: t.id as string | null,
+                  })),
+                ]}
+                value={postTypeId}
+                onChange={setPostTypeId}
+              />
+            </View>
+          </>
         )}
       </View>
 
       <FlatList
-        data={cards}
-        keyExtractor={(card) => card.id}
-        renderItem={({ item }) => (
-          <LibraryItemCard model={item} onPress={() => onCardPress(item)} />
+        data={rows}
+        keyExtractor={(row) => (row.kind === 'item' ? row.item.id : row.post.post_id)}
+        renderItem={({ item: row }) => (
+          <LibraryItemCard
+            model={
+              row.kind === 'item'
+                ? itemCardModel(row.item, nameOf(row.item.creator_id))
+                : ourPostCardModel(row.post)
+            }
+            onPress={() => onRowPress(row)}
+            onUse={
+              row.kind === 'item' && row.item.source === 'from_creator'
+                ? () => onUse(row.item)
+                : undefined
+            }
+          />
         )}
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 116 }]}
         ItemSeparatorComponent={ListGap}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
-          if (!loading && !endReached && cards.length > 0) {
-            void loadPage(cards.length);
+          if (!loading && !endReached && rows.length > 0) {
+            void loadPage(rows.length);
           }
         }}
         refreshControl={
@@ -278,13 +307,20 @@ export default function LibraryScreen() {
           />
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {loading ? 'Loading…' : EMPTY_COPY[source]}
-          </Text>
+          loading ? (
+            <LibraryListSkeleton height={cardHeightFor(source)} />
+          ) : (
+            <EmptyState
+              icon={EMPTY[source].icon}
+              title={EMPTY[source].title}
+              body={EMPTY[source].body}
+              compact
+            />
+          )
         }
         keyboardShouldPersistTaps="handled"
       />
-    </View>
+    </AdminScreen>
   );
 }
 
@@ -293,58 +329,14 @@ function ListGap() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  header: { paddingHorizontal: space.gutter, gap: 10 },
-  h1: {
-    fontSize: type.size.titleXl,
-    lineHeight: type.size.titleXl * type.leading.title,
-    fontWeight: '800',
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-    marginTop: 10,
+  header: {
+    paddingHorizontal: space.gutterAdmin,
+    gap: 10,
   },
-  captureRing: { borderRadius: radius.sm },
-  capture: {
-    minHeight: 48,
-    maxHeight: 120,
-    borderWidth: borderWidth.field,
-    borderColor: color.lineStrong,
-    borderRadius: radius.sm,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: type.size.body,
-    fontWeight: '600',
-    color: color.ink,
-    backgroundColor: color.white,
-  },
-  savedNote: {
-    fontSize: type.size.label,
-    fontWeight: '700',
-    color: color.green,
-  },
-  chipRow: { flexDirection: 'row', gap: 6 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-  },
-  chipActive: {
-    backgroundColor: color.blue100,
-    borderColor: color.blue600,
-  },
-  chipText: {
-    fontSize: type.size.chip,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  chipTextActive: { color: color.blue700 },
   search: {
     borderWidth: borderWidth.hair,
     borderColor: color.lineStrong,
-    borderRadius: radius.sm,
+    borderRadius: radiusAdmin.md,
     paddingVertical: 10,
     paddingHorizontal: 14,
     fontSize: type.size.bodySm,
@@ -352,14 +344,17 @@ const styles = StyleSheet.create({
     color: color.ink,
     backgroundColor: color.white,
   },
-  controls: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, zIndex: 30 },
-  list: { paddingHorizontal: space.gutter, paddingTop: 12 },
-  gap: { height: 10 },
-  empty: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-    lineHeight: type.size.bodySm * type.leading.body,
-    paddingVertical: 8,
+  controls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    zIndex: 30,
+  },
+  list: {
+    paddingHorizontal: space.gutterAdmin,
+    paddingTop: 12,
+  },
+  gap: {
+    height: 10,
   },
 });

@@ -1,30 +1,31 @@
-// The Library picker that opens from inside the post editor (Agent 3 mounts
-// it). Filtered to the post's type: our_post rows by post_type_id, other
-// sources show typed matches plus untyped items (ideas carry no type).
-// Picking an item marks it used — used_count increments, nothing is ever
+// The Library picker that opens from inside the post editor. Filtered to the
+// post's type (README §9): a filter line names the type, a References /
+// Our posts segmented control, and one primary action — Attach to post.
+// Attaching marks the item used — used_count increments, nothing is ever
 // removed — then hands the result to the editor:
 //   { kind: 'example', url }  -> attach as example_url
 //   { kind: 'fill', text }    -> seed the post's content
-// Items offer only the actions their data supports.
 
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../../lib/auth';
+import { listPostTypes, type PostType } from '../../lib/briefs-api';
 import {
   listLibraryItems,
   listOurPosts,
   markLibraryItemUsed,
   markOurPostUsed,
   type LibraryItem,
-  type LibrarySource,
   type OurPost,
 } from '../../lib/library-api';
-import { borderWidth, color, radius, type } from '../../theme/tokens';
-import { PressableScale } from '../ui/PressableScale';
-import { SheetShell } from '../ui/SheetShell';
+import { borderWidth, color, radiusAdmin, type } from '../../theme/tokens';
+import { LibraryListSkeleton } from './library/LibraryListSkeleton';
+import { Segmented, Sheet } from './shared';
+import { Button } from '../ui/Button';
 import {
   LibraryItemCard,
+  MEDIA_CARD_HEIGHT,
   itemCardModel,
   ourPostCardModel,
 } from './LibraryItemCard';
@@ -35,24 +36,27 @@ export type LibraryPick =
 
 export interface LibraryPickerSheetProps {
   visible: boolean;
-  /** The post's type; filters every chip. Null on legacy briefs shows all. */
+  /** The post's type; filters both lanes. Null on legacy briefs shows all. */
   postTypeId: string | null;
   onClose: () => void;
   onPick: (pick: LibraryPick) => void;
 }
-
-const CHIPS: Array<{ source: LibrarySource; label: string }> = [
-  { source: 'idea', label: 'Ideas' },
-  { source: 'our_post', label: 'Our posts' },
-  { source: 'reference', label: 'References' },
-  { source: 'from_creator', label: 'From creator' },
-];
 
 const SEARCH_DEBOUNCE_MS = 350;
 
 type Row =
   | { kind: 'item'; item: LibraryItem }
   | { kind: 'our_post'; post: OurPost };
+
+function rowId(row: Row): string {
+  return row.kind === 'item' ? row.item.id : row.post.post_id;
+}
+
+function filterLine(postType: PostType | null): string | null {
+  if (!postType) return null;
+  const noun = postType.family === 'photo_carousel' ? 'slideshows' : 'videos';
+  return `Filtered to ${postType.label.toLowerCase()} ${noun}.`;
+}
 
 export function LibraryPickerSheet({
   visible,
@@ -61,35 +65,39 @@ export function LibraryPickerSheet({
   onPick,
 }: LibraryPickerSheetProps) {
   const { profile } = useAuth();
-  const [source, setSource] = useState<LibrarySource>('idea');
+  const [segment, setSegment] = useState(0);
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [postType, setPostType] = useState<PostType | null>(null);
+
+  const ourPosts = segment === 1;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (source === 'our_post') {
+      if (ourPosts) {
         const posts = await listOurPosts({
           postTypeId: postTypeId ?? undefined,
           search,
           sort: 'top',
         });
-        setRows(posts.map((post) => ({ kind: 'our_post', post })));
+        setRows(posts.map((post): Row => ({ kind: 'our_post', post })));
       } else {
         const items = await listLibraryItems({
-          source,
+          source: 'reference',
           search,
           postTypeId: postTypeId ?? undefined,
         });
-        setRows(items.map((item) => ({ kind: 'item', item })));
+        setRows(items.map((item): Row => ({ kind: 'item', item })));
       }
     } catch (e) {
       Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
       setLoading(false);
     }
-  }, [source, search, postTypeId]);
+  }, [ourPosts, search, postTypeId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -97,76 +105,63 @@ export function LibraryPickerSheet({
     return () => clearTimeout(timer);
   }, [visible, load]);
 
-  function markUsed(row: Row) {
-    if (!profile) return;
-    const done =
-      row.kind === 'item'
-        ? markLibraryItemUsed(row.item)
-        : markOurPostUsed(profile.company_id, profile.id, row.post);
-    // Usage tracking must never block the pick.
-    done.catch(() => undefined);
-  }
+  useEffect(() => {
+    if (!visible || postTypeId === null) return;
+    void listPostTypes()
+      .then((types) => setPostType(types.find((t) => t.id === postTypeId) ?? null))
+      .catch(() => undefined);
+  }, [visible, postTypeId]);
 
-  function onRowPress(row: Row) {
-    const url = row.kind === 'item' ? row.item.url : row.post.post_url;
+  const selected = rows.find((row) => rowId(row) === selectedId) ?? null;
+
+  function attach() {
+    if (!selected) return;
+
+    if (profile) {
+      // Usage tracking must never block the pick; using never removes.
+      const marked =
+        selected.kind === 'item'
+          ? markLibraryItemUsed(selected.item)
+          : markOurPostUsed(profile.company_id, profile.id, selected.post);
+      marked.catch(() => undefined);
+    }
+
+    const url = selected.kind === 'item' ? selected.item.url : selected.post.post_url;
     const text =
-      row.kind === 'item' ? row.item.text : (row.post.title ?? row.post.hook);
-
-    const actions: Array<{ text: string; onPress: () => void }> = [];
-    if (url) {
-      actions.push({
-        text: 'Use as example',
-        onPress: () => {
-          markUsed(row);
-          onPick({ kind: 'example', url });
-        },
-      });
-    }
-    if (text) {
-      actions.push({
-        text: 'Fill from this',
-        onPress: () => {
-          markUsed(row);
-          onPick({ kind: 'fill', text });
-        },
-      });
-    }
-    if (actions.length === 0) return;
-    if (actions.length === 1) {
-      actions[0].onPress();
-      return;
-    }
-    Alert.alert('Use this item', text ?? url ?? '', [
-      ...actions,
-      { text: 'Cancel', style: 'cancel', onPress: () => undefined },
-    ]);
+      selected.kind === 'item'
+        ? selected.item.text
+        : (selected.post.title ?? selected.post.hook);
+    if (url) onPick({ kind: 'example', url });
+    else if (text) onPick({ kind: 'fill', text });
   }
+
+  const line = filterLine(postType);
 
   return (
-    <SheetShell visible={visible} onClose={onClose} pinnedTop={90}>
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      pinnedTop={90}
+      footer={
+        <Button block disabled={selected === null} onPress={attach}>
+          Attach to post
+        </Button>
+      }
+    >
       <Text style={styles.title}>Library</Text>
+      {line !== null && <Text style={styles.filterLine}>{line}</Text>}
 
-      <View style={styles.chipRow}>
-        {CHIPS.map((chip) => {
-          const active = chip.source === source;
-          return (
-            <PressableScale
-              key={chip.source}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => {
-                if (chip.source === source) return;
-                setRows([]);
-                setSource(chip.source);
-              }}
-              style={[styles.chip, active && styles.chipActive]}
-            >
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                {chip.label}
-              </Text>
-            </PressableScale>
-          );
-        })}
+      <View style={styles.segmentWrap}>
+        <Segmented
+          options={[{ label: 'References' }, { label: 'Our posts' }]}
+          value={segment}
+          onChange={(index) => {
+            if (index === segment) return;
+            setRows([]);
+            setSelectedId(null);
+            setSegment(index);
+          }}
+        />
       </View>
 
       <TextInput
@@ -181,26 +176,26 @@ export function LibraryPickerSheet({
 
       <View style={styles.list}>
         {loading && rows.length === 0 ? (
-          <Text style={styles.empty}>Loading…</Text>
+          <LibraryListSkeleton height={MEDIA_CARD_HEIGHT} count={3} />
         ) : rows.length === 0 ? (
           <Text style={styles.empty}>Nothing here for this post type yet.</Text>
         ) : (
           rows.map((row) => {
+            const id = rowId(row);
             const model =
-              row.kind === 'item'
-                ? itemCardModel(row.item)
-                : ourPostCardModel(row.post);
+              row.kind === 'item' ? itemCardModel(row.item) : ourPostCardModel(row.post);
             return (
               <LibraryItemCard
-                key={model.id}
+                key={id}
                 model={model}
-                onPress={() => onRowPress(row)}
+                selected={id === selectedId}
+                onPress={() => setSelectedId(id === selectedId ? null : id)}
               />
             );
           })
         )}
       </View>
-    </SheetShell>
+    </Sheet>
   );
 }
 
@@ -208,32 +203,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: type.size.cardLg,
     fontWeight: '800',
+    letterSpacing: type.tracking.title,
     color: color.ink,
-    marginBottom: 12,
+    marginBottom: 4,
   },
-  chipRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-  },
-  chipActive: {
-    backgroundColor: color.blue100,
-    borderColor: color.blue600,
-  },
-  chipText: {
-    fontSize: type.size.chip,
-    fontWeight: '700',
+  filterLine: {
+    fontSize: type.size.meta,
+    fontWeight: '600',
     color: color.slate500,
+    marginBottom: 8,
   },
-  chipTextActive: { color: color.blue700 },
+  segmentWrap: {
+    marginTop: 4,
+    marginBottom: 10,
+  },
   search: {
     borderWidth: borderWidth.hair,
     borderColor: color.lineStrong,
-    borderRadius: radius.sm,
+    borderRadius: radiusAdmin.md,
     paddingVertical: 10,
     paddingHorizontal: 14,
     fontSize: type.size.bodySm,
@@ -242,7 +229,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
     marginBottom: 12,
   },
-  list: { gap: 10 },
+  list: {
+    gap: 10,
+  },
   empty: {
     fontSize: type.size.bodySm,
     fontWeight: '600',
