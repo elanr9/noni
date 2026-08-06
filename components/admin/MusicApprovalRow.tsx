@@ -1,9 +1,11 @@
 import { Linking, StyleSheet, Text, View } from 'react-native';
 
 import type { MusicApprovalItem } from '../../lib/admin-api';
-import { borderWidth, color, radius, shadow, type } from '../../theme/tokens';
+import { formatAge } from '../../lib/admin-queue-map';
+import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
+import { PostThumb } from './shared';
 import { Button } from '../ui/Button';
-import { PressableScale } from '../ui/PressableScale';
+import { Icon } from '../ui/Icon';
 
 function platformLabel(platform: string): string {
   if (platform === 'tiktok') return 'TikTok';
@@ -11,16 +13,9 @@ function platformLabel(platform: string): string {
   return platform;
 }
 
-function ageLabel(iso: string): string {
-  const hours = Math.max(0, (Date.now() - new Date(iso).getTime()) / 36e5);
-  if (hours < 1) return 'just now';
-  if (hours < 24) return `${Math.round(hours)}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
 /**
- * One slideshow waiting for its song check. Open the live post, confirm the
- * sound is on it, approve. One tap, ten times a week.
+ * Admin handoff §2 music row — one slideshow waiting for its song check.
+ * A glance, then one tap on Approve.
  */
 export function MusicApprovalRow(props: {
   item: MusicApprovalItem;
@@ -30,75 +25,88 @@ export function MusicApprovalRow(props: {
   const { item, busy, onApprove } = props;
   return (
     <View style={[styles.card, shadow.shadowCard]}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title} numberOfLines={1}>
+      <PostThumb uri={null} format="photo_carousel" width={44} height={58} />
+      <View style={styles.column}>
+        <Text numberOfLines={1} style={styles.title}>
           {item.briefTitle}
         </Text>
-        <Text style={styles.meta}>{ageLabel(item.markedAt)}</Text>
+        <Text numberOfLines={1} style={styles.meta}>
+          {`${item.creatorName} · posted`}
+        </Text>
+        <View style={styles.musicRow}>
+          <Icon name="music-2" size={13} color={color.blue600} />
+          <Text numberOfLines={1} style={styles.musicText}>
+            {`Song added ${formatAge(item.markedAt)}`}
+          </Text>
+        </View>
+        {item.postLinks.length > 0 && (
+          <View style={styles.linkRow}>
+            {item.postLinks.map((link) => (
+              <Text
+                key={link.platform}
+                accessibilityRole="link"
+                onPress={() => void Linking.openURL(link.url)}
+                style={styles.link}
+              >
+                {platformLabel(link.platform)}
+              </Text>
+            ))}
+          </View>
+        )}
       </View>
-      <Text style={styles.meta}>{item.creatorName} marked the song added</Text>
-      <View style={styles.actionRow}>
-        {item.postLinks.map((link) => (
-          <PressableScale
-            key={link.platform}
-            accessibilityRole="link"
-            onPress={() => void Linking.openURL(link.url)}
-            style={styles.linkChip}
-          >
-            <Text style={styles.linkText}>{platformLabel(link.platform)}</Text>
-          </PressableScale>
-        ))}
-        <View style={styles.spacer} />
-        <Button size="sm" variant="primary" icon="check" disabled={busy} onPress={onApprove}>
-          Approve
-        </Button>
-      </View>
+      <Button size="sm" variant="approve" icon="check" disabled={busy} onPress={onApprove}>
+        Approve
+      </Button>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 14,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    gap: 6,
-  },
-  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    gap: 12,
+    padding: 12,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  column: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
   },
   title: {
-    flexShrink: 1,
-    fontSize: type.size.bodySm,
-    fontWeight: '700',
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.2,
     color: color.ink,
   },
   meta: {
-    fontSize: type.size.chip,
-    fontWeight: '600',
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
-  actionRow: {
+  musicRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
+    gap: 5,
   },
-  spacer: { flex: 1 },
-  linkChip: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
+  musicText: {
+    flexShrink: 1,
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
+    color: color.blue600,
   },
-  linkText: {
-    fontSize: type.size.chip,
-    fontWeight: '700',
+  linkRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 2,
+  },
+  link: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
     color: color.blue700,
   },
 });
