@@ -1,4 +1,5 @@
 import { Linking, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import type { MusicApprovalItem } from '../../lib/admin-api';
 import { formatAge } from '../../lib/admin-queue-map';
@@ -6,6 +7,7 @@ import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/token
 import { PostThumb } from './shared';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
+import { PressableScale } from '../ui/PressableScale';
 
 function platformLabel(platform: string): string {
   if (platform === 'tiktok') return 'TikTok';
@@ -23,8 +25,14 @@ export function MusicApprovalRow(props: {
   onApprove: () => void;
 }) {
   const { item, busy, onApprove } = props;
+  const router = useRouter();
   return (
-    <View style={[styles.card, shadow.shadowCard]}>
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${item.briefTitle} music approval`}
+      onPress={() => router.push(`/(admin)/music/${item.assignment.id}`)}
+      style={[styles.card, shadow.shadowCard]}
+    >
       <PostThumb uri={null} format="photo_carousel" width={44} height={58} />
       <View style={styles.column}>
         <Text numberOfLines={1} style={styles.title}>
@@ -57,7 +65,7 @@ export function MusicApprovalRow(props: {
       <Button size="sm" variant="approve" icon="check" disabled={busy} onPress={onApprove}>
         Approve
       </Button>
-    </View>
+    </PressableScale>
   );
 }
 

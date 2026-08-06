@@ -1,29 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
 
+import { FeedTestCard, type FeedVerdict } from '../../../components/admin/approval/FeedTestCard';
+import {
+  ReasonPicker,
+  REJECT_REASONS,
+  type RejectReasonKey,
+} from '../../../components/admin/approval/ReasonPicker';
+import { ProofRow } from '../../../components/admin/approval/ProofRow';
+import { ScreenshotRow } from '../../../components/admin/approval/ScreenshotRow';
+import { AdminScreen, CreatorAvatar, PushHeader, SectionLabel } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
+import { formatAge } from '../../../lib/admin-queue-map';
 import {
-  DECISION_CHECKS,
   decideAccount,
   fetchAccountApprovalItem,
   signedVerificationUrl,
   type AccountApprovalItem,
   type AccountDecision,
 } from '../../../lib/creator-accounts-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
+import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
 
 type SignedUrls = {
   instagramRecording: string | null;
@@ -32,38 +31,11 @@ type SignedUrls = {
   tiktokScreenshot: string | null;
 };
 
-function Recording({ label, uri }: { label: string; uri: string | null }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-  });
-  return (
-    <View style={styles.assetBlock}>
-      <Text style={styles.assetLabel}>{label}</Text>
-      {uri !== null ? (
-        <VideoView player={player} style={styles.recording} contentFit="cover" nativeControls />
-      ) : (
-        <View style={[styles.recording, styles.assetMissing]}>
-          <Text style={styles.missingText}>Not uploaded</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-function Screenshot({ label, uri }: { label: string; uri: string | null }) {
-  return (
-    <View style={styles.assetBlock}>
-      <Text style={styles.assetLabel}>{label}</Text>
-      {uri !== null ? (
-        <Image source={{ uri }} style={styles.screenshot} resizeMode="cover" />
-      ) : (
-        <View style={[styles.screenshot, styles.assetMissing]}>
-          <Text style={styles.missingText}>Not uploaded</Text>
-        </View>
-      )}
-    </View>
-  );
-}
+const STATUS_CHIP: Record<string, { label: string; fg: string; bg: string }> = {
+  pending: { label: 'Pending', fg: color.amber, bg: color.amberSoft },
+  needs_changes: { label: 'Needs changes', fg: color.amber, bg: color.amberSoft },
+  approved: { label: 'Approved', fg: color.green, bg: color.greenSoft },
+};
 
 export default function AccountApprovalScreen() {
   const { accountId } = useLocalSearchParams<{ accountId: string }>();
@@ -75,15 +47,14 @@ export default function AccountApprovalScreen() {
     instagramScreenshot: null,
     tiktokScreenshot: null,
   });
-  const [checks, setChecks] = useState<AccountDecision>({
-    instagram_recording_ok: false,
-    tiktok_recording_ok: false,
-    feed_is_niche: false,
-    profile_matches_template: false,
-  });
-  const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const [feedVerdict, setFeedVerdict] = useState<FeedVerdict | null>(null);
+  const [showHandles, setShowHandles] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [reasons, setReasons] = useState<RejectReasonKey[]>([]);
+  const [note, setNote] = useState('');
 
   const load = useCallback(async () => {
     if (!profile || !accountId) return;
@@ -111,12 +82,51 @@ export default function AccountApprovalScreen() {
     void load();
   }, [load]);
 
+  const onVerdict = (verdict: FeedVerdict) => {
+    setFeedVerdict(verdict);
+    if (verdict === 'wrong') {
+      setRejecting(true);
+      setShowHandles(false);
+      setReasons((prev) => (prev.includes('feed') ? prev : [...prev, 'feed']));
+    }
+  };
+
   const decide = async (status: 'approved' | 'needs_changes') => {
     if (!profile || !account) return;
-    if (status === 'needs_changes' && reason.trim().length === 0) {
-      Alert.alert('Reason required', 'Tell the creator what to fix before resubmitting.');
-      return;
+
+    let reason: string | null = null;
+    if (status === 'needs_changes') {
+      const labels = REJECT_REASONS.filter((r) => reasons.includes(r.key)).map(
+        (r) => r.label,
+      );
+      const trimmed = note.trim();
+      if (labels.length === 0 && trimmed.length === 0) {
+        Alert.alert('Reason required', 'Pick a reason so the creator knows what to fix.');
+        return;
+      }
+      reason =
+        labels.length > 0
+          ? `${labels.join(' \u00b7 ')}${trimmed.length > 0 ? ` \u2014 ${trimmed}` : ''}`
+          : trimmed;
     }
+
+    // The structured decision the checks table stores. Approval asserts the
+    // proof; a send-back flips the booleans its reasons cover.
+    const decision: AccountDecision =
+      status === 'approved'
+        ? {
+            instagram_recording_ok: true,
+            tiktok_recording_ok: true,
+            feed_is_niche: true,
+            profile_matches_template: true,
+          }
+        : {
+            instagram_recording_ok: !reasons.includes('proof'),
+            tiktok_recording_ok: !reasons.includes('proof'),
+            feed_is_niche: feedVerdict !== 'wrong' && !reasons.includes('feed'),
+            profile_matches_template: !reasons.includes('bio'),
+          };
+
     setBusy(true);
     try {
       await decideAccount({
@@ -124,8 +134,8 @@ export default function AccountApprovalScreen() {
         accountId: account.id,
         adminId: profile.id,
         status,
-        reason: status === 'needs_changes' ? reason.trim() : null,
-        decision: checks,
+        reason,
+        decision,
       });
       router.back();
     } catch (e) {
@@ -135,214 +145,255 @@ export default function AccountApprovalScreen() {
     }
   };
 
-  const allChecked = Object.values(checks).every(Boolean);
-  const creatorName = account?.profiles?.full_name?.trim() || 'Creator';
+  const onApprovePress = () => {
+    // First tap reveals the handles that get linked; the second confirms.
+    if (!showHandles) {
+      setShowHandles(true);
+      setRejecting(false);
+      return;
+    }
+    void decide('approved');
+  };
+
+  const onSendBackPress = () => {
+    if (!rejecting) {
+      setRejecting(true);
+      setShowHandles(false);
+      return;
+    }
+    void decide('needs_changes');
+  };
+
+  if (loading || !account) {
+    return (
+      <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ActivityIndicator color={color.blue500} />
+      </View>
+    );
+  }
+
+  const creatorName = account.profiles?.full_name?.trim() || 'Creator';
+  const chip = STATUS_CHIP[account.status] ?? STATUS_CHIP.pending;
+  const decided = account.status === 'approved';
 
   return (
-    <>
-      <Stack.Screen options={{ title: creatorName }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading || !account ? (
-          <Text style={styles.empty}>Loading submission…</Text>
-        ) : (
-          <>
-            <View style={[styles.card, shadow.shadowCard]}>
-              <Text style={styles.cardLabel}>Handles</Text>
-              <Text style={styles.handle}>
-                TikTok {account.tiktok_handle ? `@${account.tiktok_handle}` : '—'}
+    <AdminScreen
+      actionBar={
+        decided ? undefined : (
+          <View style={styles.footerRow}>
+            <Button
+              variant="outline"
+              size="md"
+              disabled={busy}
+              style={styles.footerButton}
+              onPress={onSendBackPress}
+            >
+              Send back
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              icon="check"
+              disabled={busy || feedVerdict !== 'ok'}
+              style={styles.footerButton}
+              onPress={onApprovePress}
+            >
+              Approve and link
+            </Button>
+          </View>
+        )
+      }
+    >
+      <Stack.Screen options={{ headerShown: false }} />
+      <PushHeader title="Account approval" onBack={() => router.back()} />
+
+      <View style={styles.creatorCard}>
+        <CreatorAvatar uri={null} name={creatorName} size={46} />
+        <View style={styles.creatorText}>
+          <Text numberOfLines={1} style={styles.creatorName}>
+            {creatorName}
+          </Text>
+          <Text numberOfLines={1} style={styles.creatorMeta}>
+            {`Submitted ${formatAge(account.updated_at)}`}
+          </Text>
+        </View>
+        <Text style={[styles.statusChip, { color: chip.fg, backgroundColor: chip.bg }]}>
+          {chip.label}
+        </Text>
+      </View>
+
+      {account.status === 'needs_changes' && account.reason !== null && (
+        <View style={styles.sentBackCard}>
+          <Text style={styles.sentBackTitle}>Sent back</Text>
+          <Text style={styles.sentBackReason}>{account.reason}</Text>
+        </View>
+      )}
+
+      <SectionLabel style={styles.sectionLabel}>Warm-up proof</SectionLabel>
+      <View style={styles.stack}>
+        <ProofRow
+          label="Instagram scroll"
+          requirement={'Home, explore and reels \u00b7 20s required'}
+          uri={urls.instagramRecording}
+        />
+        <ProofRow
+          label="TikTok For You"
+          requirement={'For You feed \u00b7 15s minimum'}
+          uri={urls.tiktokRecording}
+        />
+        <ScreenshotRow
+          items={[
+            { label: 'Instagram profile', uri: urls.instagramScreenshot },
+            { label: 'TikTok profile', uri: urls.tiktokScreenshot },
+          ]}
+        />
+      </View>
+
+      <SectionLabel style={styles.sectionLabel}>The feed test</SectionLabel>
+      <FeedTestCard verdict={feedVerdict} onVerdict={onVerdict} />
+
+      {showHandles && (
+        <>
+          <SectionLabel style={styles.sectionLabel}>Handles to link</SectionLabel>
+          <View style={styles.handlesCard}>
+            <View style={styles.handleRow}>
+              <Icon name="music-2" size={15} color={color.blue700} />
+              <Text style={styles.handleText}>
+                {account.tiktok_handle ? `@${account.tiktok_handle}` : 'No TikTok handle'}
               </Text>
-              <Text style={styles.handle}>
-                Instagram {account.instagram_handle ? `@${account.instagram_handle}` : '—'}
+            </View>
+            <View style={styles.handleRow}>
+              <Icon name="at-sign" size={15} color={color.blue700} />
+              <Text style={styles.handleText}>
+                {account.instagram_handle
+                  ? `@${account.instagram_handle}`
+                  : 'No Instagram handle'}
               </Text>
             </View>
+            <Text style={styles.handleNote}>
+              Captured on approval. Upload-Post cannot post to an unlinked account.
+            </Text>
+          </View>
+        </>
+      )}
 
-            <Recording
-              label="Instagram recording (home, explore, reels — 20s)"
-              uri={urls.instagramRecording}
-            />
-            <Recording
-              label="TikTok For You recording (15s minimum)"
-              uri={urls.tiktokRecording}
-            />
-            <View style={styles.screenshotRow}>
-              <Screenshot label="Instagram profile" uri={urls.instagramScreenshot} />
-              <Screenshot label="TikTok profile" uri={urls.tiktokScreenshot} />
-            </View>
-
-            <View style={[styles.card, shadow.shadowCard]}>
-              <Text style={styles.cardLabel}>Checks</Text>
-              {DECISION_CHECKS.map((check) => {
-                const on = checks[check.key];
-                return (
-                  <PressableScale
-                    key={check.key}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: on }}
-                    onPress={() =>
-                      setChecks((prev) => ({ ...prev, [check.key]: !prev[check.key] }))
-                    }
-                    style={styles.checkRow}
-                  >
-                    <View style={[styles.checkbox, on && styles.checkboxOn]}>
-                      {on && <Icon name="check" size={13} color={color.white} />}
-                    </View>
-                    <Text style={styles.checkLabel}>{check.label}</Text>
-                  </PressableScale>
-                );
-              })}
-            </View>
-
-            <TextInput
-              style={styles.reasonInput}
-              value={reason}
-              onChangeText={setReason}
-              placeholder="What needs to change (required to send back)"
-              placeholderTextColor={color.slate400}
-              multiline
-            />
-
-            <View style={styles.footerRow}>
-              <Button
-                variant="outline"
-                size="md"
-                block
-                disabled={busy}
-                style={styles.footerButton}
-                onPress={() => void decide('needs_changes')}
-              >
-                Needs changes
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                icon="check"
-                block
-                disabled={busy || !allChecked}
-                style={styles.footerButton}
-                onPress={() => void decide('approved')}
-              >
-                Approve
-              </Button>
-            </View>
-            {!allChecked && (
-              <Text style={styles.hint}>
-                Tick all four checks to approve. The decision is stored so it can
-                become an automated review later.
-              </Text>
-            )}
-          </>
-        )}
-      </ScrollView>
-    </>
+      {rejecting && (
+        <View style={styles.reasonBlock}>
+          <ReasonPicker
+            selected={reasons}
+            note={note}
+            onToggle={(key) =>
+              setReasons((prev) =>
+                prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+              )
+            }
+            onNote={setNote}
+          />
+        </View>
+      )}
+    </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 12, paddingBottom: 40 },
-  empty: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-    fontWeight: '600',
-  },
-  card: {
-    backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 14,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    gap: 8,
-  },
-  cardLabel: {
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
-  },
-  handle: {
-    fontSize: type.size.bodySm,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  assetBlock: { gap: 6 },
-  assetLabel: {
-    fontSize: type.size.chip,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  recording: {
-    width: '100%',
-    aspectRatio: 9 / 16,
-    borderRadius: radius.md,
-    backgroundColor: color.ink,
-    overflow: 'hidden',
-  },
-  screenshotRow: { flexDirection: 'row', gap: 8 },
-  screenshot: {
+  centered: {
     flex: 1,
-    aspectRatio: 9 / 16,
-    borderRadius: radius.md,
-    backgroundColor: color.fillQuiet,
-  },
-  assetMissing: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.fillQuiet,
+    backgroundColor: color.offWhite,
   },
-  missingText: {
-    fontSize: type.size.chip,
-    fontWeight: '600',
+  creatorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  creatorText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  creatorName: {
+    fontSize: type.size.body,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.2,
+    color: color.ink,
+  },
+  creatorMeta: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
-  checkRow: {
+  statusChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radiusAdmin.pill,
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.bold,
+    overflow: 'hidden',
+  },
+  sentBackCard: {
+    marginTop: 10,
+    gap: 4,
+    padding: 14,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.amberSoft,
+  },
+  sentBackTitle: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
+    letterSpacing: type.tracking.label,
+    color: color.amber,
+    textTransform: 'uppercase',
+  },
+  sentBackReason: {
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
+    fontWeight: type.weight.semibold,
+    color: color.ink,
+  },
+  sectionLabel: {
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  stack: {
+    gap: 8,
+  },
+  handlesCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.blue50,
+  },
+  handleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 4,
   },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: borderWidth.field,
-    borderColor: color.lineStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
+  handleText: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.ink,
   },
-  checkboxOn: {
-    backgroundColor: color.blue600,
-    borderColor: color.blue600,
+  handleNote: {
+    fontSize: type.size.label,
+    lineHeight: type.size.label * 1.4,
+    fontWeight: type.weight.semibold,
+    color: color.blue700,
   },
-  checkLabel: {
+  reasonBlock: {
+    marginTop: 18,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  footerButton: {
     flex: 1,
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.ink,
-    lineHeight: 20,
-  },
-  reasonInput: {
-    minHeight: 72,
-    borderRadius: radius.md,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    backgroundColor: color.white,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: type.size.bodySm,
-    color: color.ink,
-    textAlignVertical: 'top',
-  },
-  footerRow: { flexDirection: 'row', gap: 10 },
-  footerButton: { flex: 1 },
-  hint: {
-    fontSize: type.size.chip,
-    fontWeight: '600',
-    color: color.slate500,
-    lineHeight: 18,
   },
 });

@@ -2,14 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Image,
-  ScrollView,
+  Linking,
   StyleSheet,
   Text,
   TextInput,
+  View,
 } from 'react-native';
 import { router, Stack } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 
+import { CopyChip } from '../../components/admin/approval/CopyChip';
+import { AdminScreen, PushHeader, SectionLabel } from '../../components/admin/shared';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -21,7 +24,7 @@ import {
   type AccountTemplate,
 } from '../../lib/account-template';
 import { signedVerificationUrl } from '../../lib/creator-accounts-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../theme/tokens';
+import { borderWidth, color, radiusAdmin, type } from '../../theme/tokens';
 
 const EMPTY: AccountTemplate = {
   instagramBio: '',
@@ -51,6 +54,7 @@ export default function AccountTemplateScreen() {
   const { profile } = useAuth();
   const [template, setTemplate] = useState<AccountTemplate>(EMPTY);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [pictureUrl, setPictureUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -63,6 +67,11 @@ export default function AccountTemplateScreen() {
         if (saved.exampleScreenshotPath !== null) {
           setScreenshotUrl(
             await signedVerificationUrl(saved.exampleScreenshotPath).catch(() => null),
+          );
+        }
+        if (saved.profilePicturePath !== null) {
+          setPictureUrl(
+            await signedVerificationUrl(saved.profilePicturePath).catch(() => null),
           );
         }
       }
@@ -79,10 +88,7 @@ export default function AccountTemplateScreen() {
 
   const persist = async (next: AccountTemplate) => {
     if (!profile) return;
-    await saveAccountTemplate(profile.company_id, {
-      ...next,
-      profilePicturePath: null,
-    });
+    await saveAccountTemplate(profile.company_id, next);
   };
 
   const replaceScreenshot = async () => {
@@ -96,11 +102,7 @@ export default function AccountTemplateScreen() {
         'example-screenshot',
         uri,
       );
-      const next = {
-        ...template,
-        profilePicturePath: null,
-        exampleScreenshotPath: path,
-      };
+      const next = { ...template, exampleScreenshotPath: path };
       await persist(next);
       setTemplate(next);
       setScreenshotUrl(await signedVerificationUrl(path).catch(() => null));
@@ -125,32 +127,26 @@ export default function AccountTemplateScreen() {
   };
 
   return (
-    <>
-      <Stack.Screen
-        options={{
-          title: 'Account template',
-          headerLeft: () => (
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Back"
-              onPress={goBack}
-              hitSlop={8}
-            >
-              <Icon name="chevron-left" size={22} color={color.ink} />
-            </PressableScale>
-          ),
-        }}
+    <AdminScreen
+      actionBar={
+        loading ? undefined : (
+          <Button size="md" variant="primary" block disabled={busy} onPress={() => void saveCopy()}>
+            Save
+          </Button>
+        )
+      }
+    >
+      <Stack.Screen options={{ headerShown: false }} />
+      <PushHeader
+        title="Account template"
+        subtitle="Creators see the same values during setup"
+        onBack={goBack}
       />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {loading ? (
-          <Text style={styles.empty}>Loading template…</Text>
-        ) : (
-          <>
+
+      {loading ? (
+        <Text style={styles.loading}>Loading template…</Text>
+      ) : (
+        <>
           <Text style={styles.body}>
             The standard for a creator account. Creators copy the bios and
             Instagram link, then match the example look. Setup also suggests
@@ -158,7 +154,8 @@ export default function AccountTemplateScreen() {
             like name.d1soccer.
           </Text>
 
-          <Text style={styles.section}>Instagram bio</Text>
+          <SectionLabel style={styles.sectionLabel}>Instagram bio</SectionLabel>
+          <View style={styles.fieldCard}>
             <TextInput
               style={styles.bioInput}
               value={template.instagramBio}
@@ -169,122 +166,191 @@ export default function AccountTemplateScreen() {
               placeholderTextColor={color.slate400}
               multiline
             />
+            <View style={styles.fieldFooter}>
+              <CopyChip value={template.instagramBio} label="Instagram bio" />
+            </View>
+          </View>
 
-            <Text style={styles.section}>Instagram link</Text>
-            <TextInput
-              style={styles.linkInput}
-              value={template.instagramLink}
-              onChangeText={(instagramLink) =>
-                setTemplate((t) => ({ ...t, instagramLink }))
-              }
-              placeholder="fieldvisionai.com"
-              placeholderTextColor={color.slate400}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
+          <SectionLabel style={styles.sectionLabel}>Link in bio</SectionLabel>
+          <View style={styles.fieldCard}>
+            <View style={styles.linkRow}>
+              <TextInput
+                style={styles.linkInput}
+                value={template.instagramLink}
+                onChangeText={(instagramLink) =>
+                  setTemplate((t) => ({ ...t, instagramLink }))
+                }
+                placeholder="fieldvisionai.com"
+                placeholderTextColor={color.slate400}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+              />
+              <CopyChip value={template.instagramLink} label="link in bio" />
+            </View>
+          </View>
 
-            <Text style={styles.section}>TikTok bio</Text>
+          <SectionLabel style={styles.sectionLabel}>TikTok bio</SectionLabel>
+          <View style={styles.fieldCard}>
             <TextInput
               style={styles.bioInput}
               value={template.tiktokBio}
-              onChangeText={(tiktokBio) =>
-                setTemplate((t) => ({ ...t, tiktokBio }))
-              }
+              onChangeText={(tiktokBio) => setTemplate((t) => ({ ...t, tiktokBio }))}
               placeholder="Exact TikTok bio creators should use"
               placeholderTextColor={color.slate400}
               multiline
             />
+            <View style={styles.fieldFooter}>
+              <CopyChip value={template.tiktokBio} label="TikTok bio" />
+            </View>
+          </View>
 
-            <Button
-              size="md"
-              variant="primary"
-              disabled={busy}
-              onPress={() => void saveCopy()}
-            >
-              Save
-            </Button>
-
-            <Text style={styles.section}>Example account</Text>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Replace example account screenshot"
-              disabled={busy}
-              onPress={() => void replaceScreenshot()}
-              style={[styles.screenshotSlot, shadow.shadowCard]}
-            >
-              {screenshotUrl !== null ? (
+          <SectionLabel style={styles.sectionLabel}>Profile picture</SectionLabel>
+          <View style={styles.pictureCard}>
+            <View style={styles.pictureThumb}>
+              {pictureUrl !== null ? (
                 <Image
-                  source={{ uri: screenshotUrl }}
-                  style={styles.screenshot}
+                  source={{ uri: pictureUrl }}
                   resizeMode="cover"
+                  style={StyleSheet.absoluteFill}
                 />
               ) : (
-                <Text style={styles.slotText}>
-                  Tap to add a profile header screenshot of an example account
-                </Text>
+                <Icon name="circle-user-round" size={26} color={color.slate300} />
               )}
-            </PressableScale>
-          </>
-        )}
-      </ScrollView>
-    </>
+            </View>
+            <View style={styles.pictureText}>
+              <Text style={styles.pictureTitle}>1080 × 1080</Text>
+              <Text style={styles.pictureMeta}>
+                {pictureUrl !== null
+                  ? 'Every creator account uses this picture.'
+                  : 'No profile picture yet.'}
+              </Text>
+            </View>
+            {pictureUrl !== null && (
+              <Button
+                size="sm"
+                variant="tint"
+                onPress={() => void Linking.openURL(pictureUrl)}
+              >
+                Download
+              </Button>
+            )}
+          </View>
+
+          <SectionLabel style={styles.sectionLabel}>Example account</SectionLabel>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Replace example account screenshot"
+            disabled={busy}
+            onPress={() => void replaceScreenshot()}
+            style={styles.screenshotSlot}
+          >
+            {screenshotUrl !== null ? (
+              <Image
+                source={{ uri: screenshotUrl }}
+                style={styles.screenshot}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.slotText}>
+                Tap to add a profile header screenshot of an example account
+              </Text>
+            )}
+          </PressableScale>
+          <Text style={styles.barLine}>
+            This is the bar. Same bio shape, same grid, no gym content.
+          </Text>
+        </>
+      )}
+    </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: {
-    paddingHorizontal: space.gutter,
-    paddingVertical: 12,
-    gap: 10,
-    paddingBottom: 40,
-  },
-  empty: {
+  loading: {
     fontSize: type.size.bodySm,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
-    fontWeight: '600',
   },
   body: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.5,
+    fontWeight: type.weight.regular,
     color: color.slate500,
-    lineHeight: 21,
   },
-  section: {
-    marginTop: 10,
-    fontSize: type.size.label,
-    fontWeight: '800',
-    color: color.slate400,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
+  sectionLabel: {
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  fieldCard: {
+    gap: 8,
+    padding: 12,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
   },
   bioInput: {
-    minHeight: 96,
-    borderRadius: radius.md,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    backgroundColor: color.white,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: type.size.bodySm,
-    color: color.ink,
+    minHeight: 84,
     textAlignVertical: 'top',
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * 1.45,
+    color: color.ink,
+    padding: 0,
+  },
+  fieldFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   linkInput: {
-    borderRadius: radius.md,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    backgroundColor: color.white,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    flex: 1,
     fontSize: type.size.bodySm,
     color: color.ink,
+    padding: 0,
+  },
+  pictureCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: radiusAdmin.lg,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+  },
+  pictureThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  pictureText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  pictureTitle: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  pictureMeta: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
+    color: color.slate500,
   },
   screenshotSlot: {
     width: '100%',
     aspectRatio: EXAMPLE_ASPECT,
-    borderRadius: radius.md,
+    borderRadius: radiusAdmin.lg,
     backgroundColor: color.white,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
@@ -292,12 +358,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  screenshot: { width: '100%', height: '100%' },
+  screenshot: {
+    width: '100%',
+    height: '100%',
+  },
   slotText: {
     fontSize: type.size.chip,
-    fontWeight: '600',
+    fontWeight: type.weight.semibold,
     color: color.slate500,
     textAlign: 'center',
     paddingHorizontal: 14,
+  },
+  barLine: {
+    marginTop: 8,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
+    fontWeight: type.weight.semibold,
+    color: color.slate500,
   },
 });
