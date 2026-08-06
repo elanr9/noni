@@ -15,10 +15,12 @@ import {
   useLocalSearchParams,
 } from 'expo-router';
 
-import { PostTile } from '../../../components/admin/PostTile';
+import { PostGridTile } from '../../../components/admin/creator/PostGridTile';
+import { ProfileHeader } from '../../../components/admin/creator/ProfileHeader';
+import { Segmented, SkeletonCard, SkeletonLine } from '../../../components/admin/shared';
+import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/ui/Segmented';
 import { useAuth } from '../../../lib/auth';
 import {
   fetchCreatorDetail,
@@ -26,9 +28,17 @@ import {
   type CreatorDetail,
 } from '../../../lib/admin-api';
 import { formatMetric } from '../../../lib/analytics';
+import { supabase } from '../../../lib/supabase';
 import { parseAssignmentMetrics } from '../../../lib/tasks-api';
 import { formatCents } from '../../../lib/wallet-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
+import {
+  borderWidth,
+  color,
+  radiusAdmin,
+  shadow,
+  space,
+  type,
+} from '../../../theme/tokens';
 
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -40,11 +50,55 @@ function dateKey(year: number, month: number, day: number): string {
   return `${year}-${`${month + 1}`.padStart(2, '0')}-${`${day}`.padStart(2, '0')}`;
 }
 
+/** Credential, handles and photo live outside fetchCreatorDetail. */
+type ProfileExtras = {
+  avatarUri: string | null;
+  credential: string | null;
+  tiktokHandle: string | null;
+  instagramHandle: string | null;
+};
+
+async function fetchProfileExtras(
+  companyId: string,
+  creatorId: string,
+): Promise<ProfileExtras> {
+  const [{ data: p }, { data: account }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('avatar_path, credential_line')
+      .eq('company_id', companyId)
+      .eq('id', creatorId)
+      .maybeSingle(),
+    supabase
+      .from('creator_accounts')
+      .select('tiktok_handle, instagram_handle')
+      .eq('company_id', companyId)
+      .eq('creator_id', creatorId)
+      .maybeSingle(),
+  ]);
+
+  let avatarUri: string | null = null;
+  if (p?.avatar_path) {
+    const { data: signed } = await supabase.storage
+      .from('avatars')
+      .createSignedUrl(p.avatar_path, 3600);
+    avatarUri = signed?.signedUrl ?? null;
+  }
+
+  return {
+    avatarUri,
+    credential: p?.credential_line ?? null,
+    tiktokHandle: account?.tiktok_handle ?? null,
+    instagramHandle: account?.instagram_handle ?? null,
+  };
+}
+
 export default function AdminCreatorProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuth();
   const { width: winWidth } = useWindowDimensions();
   const [data, setData] = useState<CreatorDetail | null>(null);
+  const [extras, setExtras] = useState<ProfileExtras | null>(null);
   const [videoPaths, setVideoPaths] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,6 +128,9 @@ export default function AdminCreatorProfile() {
       setLoading(false);
       setRefreshing(false);
     }
+    void fetchProfileExtras(profile.company_id, id)
+      .then(setExtras)
+      .catch(() => undefined);
   }, [profile, id]);
 
   useFocusEffect(
@@ -101,7 +158,7 @@ export default function AdminCreatorProfile() {
     return map;
   }, [assignments]);
 
-  const tileSize = Math.floor((winWidth - space.gutter * 2 - 8 * 2) / 3);
+  const tileSize = Math.floor((winWidth - space.gutterAdmin * 2 - 8 * 2) / 3);
 
   const openPost = (assignmentId: string) =>
     router.push(`/(admin)/creator/post/${assignmentId}`);
@@ -124,7 +181,7 @@ export default function AdminCreatorProfile() {
     return rows;
   }, [month]);
 
-  const selectedPosts = selectedDay !== null ? byDay.get(selectedDay) ?? [] : [];
+  const selectedPosts = selectedDay !== null ? (byDay.get(selectedDay) ?? []) : [];
 
   return (
     <>
@@ -135,9 +192,7 @@ export default function AdminCreatorProfile() {
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Message creator"
-              onPress={() =>
-                router.push(`/(admin)/chat/${id}`)
-              }
+              onPress={() => router.push(`/(admin)/chat/${id}`)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Icon name="message-circle" size={22} color={color.ink} />
@@ -160,29 +215,53 @@ export default function AdminCreatorProfile() {
         }
       >
         {loading || !data ? (
-          <Text style={styles.empty}>Loading creator…</Text>
+          <>
+            <View style={styles.skeletonHead}>
+              <SkeletonCard height={64} radius={32} style={styles.skeletonAvatar} />
+              <SkeletonLine height={40} style={styles.skeletonStats} />
+            </View>
+            <SkeletonCard height={tileSize * 1.4} radius={radiusAdmin.md} />
+          </>
         ) : (
           <>
-            <View style={styles.totalsRow}>
-              <Stat label="Earned" value={formatCents(earnedCents)} />
-              <Stat label="Posts" value={`${postedCount}`} />
-              <Stat label="Views" value={formatMetric(views)} />
-            </View>
+            <ProfileHeader
+              name={data.name}
+              avatarUri={extras?.avatarUri ?? null}
+              credential={extras?.credential ?? null}
+              tiktokHandle={extras?.tiktokHandle ?? null}
+              instagramHandle={extras?.instagramHandle ?? null}
+              earned={formatCents(earnedCents)}
+              posts={`${postedCount}`}
+              views={formatMetric(views)}
+            />
 
-            <Segmented options={['Grid', 'Calendar']} value={view} onChange={setView} />
+            <Segmented
+              options={[{ label: 'Grid' }, { label: 'Calendar' }]}
+              value={view}
+              onChange={setView}
+            />
 
             {assignments.length === 0 ? (
-              <Text style={styles.empty}>No posts yet.</Text>
+              <EmptyState
+                icon="layout-list"
+                title="No posts yet"
+                body="Posts show up here as this creator's week fills in."
+                compact
+              />
             ) : view === 0 ? (
               <View style={styles.grid}>
                 {assignments.map((a) => (
-                  <PostTile
+                  <PostGridTile
                     key={a.id}
                     title={a.briefs.title}
-                    format={a.briefs.format}
-                    status={a.status}
+                    format={
+                      a.briefs.format === 'photo_carousel' ? 'photo_carousel' : 'video'
+                    }
                     videoPath={videoPaths.get(a.id) ?? null}
                     size={tileSize}
+                    viewsLabel={formatMetric(
+                      parseAssignmentMetrics(a.metrics).views ?? 0,
+                    )}
                     onPress={() => openPost(a.id)}
                   />
                 ))}
@@ -268,14 +347,21 @@ export default function AdminCreatorProfile() {
                     onPress={() => openPost(a.id)}
                     style={[styles.dayPost, shadow.shadowCard]}
                   >
-                    <Text style={styles.dayPostTitle} numberOfLines={1}>
-                      {a.briefs.title}
-                    </Text>
-                    <Text style={styles.dayPostMeta}>
-                      {a.briefs.format === 'video' ? 'Video' : 'Slideshow'}
-                      {' · '}
-                      {formatMetric(parseAssignmentMetrics(a.metrics).views ?? 0)} views
-                    </Text>
+                    <Icon
+                      name={a.briefs.format === 'video' ? 'play' : 'images'}
+                      size={15}
+                      color={color.blue600}
+                    />
+                    <View style={styles.dayPostBody}>
+                      <Text style={styles.dayPostTitle} numberOfLines={1}>
+                        {a.briefs.title}
+                      </Text>
+                      <Text style={styles.dayPostMeta}>
+                        {a.briefs.format === 'video' ? 'Reel' : 'Slideshow'}
+                        {' · '}
+                        {formatMetric(parseAssignmentMetrics(a.metrics).views ?? 0)} views
+                      </Text>
+                    </View>
                   </PressableScale>
                 ))}
               </>
@@ -287,44 +373,26 @@ export default function AdminCreatorProfile() {
   );
 }
 
-function Stat(props: { label: string; value: string }) {
-  return (
-    <View style={[styles.stat, shadow.shadowCard]}>
-      <Text style={styles.statValue}>{props.value}</Text>
-      <Text style={styles.statLabel}>{props.label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 12 },
-  empty: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-    fontWeight: '600',
-  },
-  totalsRow: { flexDirection: 'row', gap: 8 },
-  stat: {
+  screen: {
     flex: 1,
-    backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 14,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    gap: 4,
+    backgroundColor: color.offWhite,
   },
-  statValue: {
-    fontSize: type.size.card,
-    fontWeight: '800',
-    color: color.ink,
+  content: {
+    paddingHorizontal: space.gutterAdmin,
+    paddingVertical: 14,
+    gap: 14,
   },
-  statLabel: {
-    fontSize: type.size.micro,
-    fontWeight: '700',
-    color: color.slate400,
-    textTransform: 'uppercase',
-    letterSpacing: type.tracking.label,
+  skeletonHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  skeletonAvatar: {
+    width: 64,
+  },
+  skeletonStats: {
+    flex: 1,
   },
   grid: {
     flexDirection: 'row',
@@ -333,7 +401,7 @@ const styles = StyleSheet.create({
   },
   calendar: {
     backgroundColor: color.white,
-    borderRadius: radius.md,
+    borderRadius: radiusAdmin.lg,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
     padding: 12,
@@ -347,10 +415,13 @@ const styles = StyleSheet.create({
   },
   monthLabel: {
     fontSize: type.size.bodySm,
-    fontWeight: '800',
+    fontWeight: '700',
+    letterSpacing: type.tracking.title,
     color: color.ink,
   },
-  weekRow: { flexDirection: 'row' },
+  weekRow: {
+    flexDirection: 'row',
+  },
   dayLabel: {
     flex: 1,
     textAlign: 'center',
@@ -363,32 +434,49 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.cell,
+    borderRadius: radiusAdmin.md,
     gap: 2,
   },
-  dayCellActive: { backgroundColor: color.blue100 },
-  dayCellSelected: { backgroundColor: color.blue600 },
+  dayCellActive: {
+    backgroundColor: color.blue100,
+  },
+  dayCellSelected: {
+    backgroundColor: color.blue500,
+  },
   dayNumber: {
     fontSize: type.size.label,
     fontWeight: '700',
     color: color.blue700,
   },
-  dayNumberMuted: { color: color.slate400, fontWeight: '500' },
-  dayNumberSelected: { color: color.white },
+  dayNumberMuted: {
+    color: color.slate400,
+    fontWeight: '500',
+  },
+  dayNumberSelected: {
+    color: color.white,
+  },
   dot: {
     width: 4,
     height: 4,
     borderRadius: 2,
     backgroundColor: color.blue600,
   },
-  dotSelected: { backgroundColor: color.white },
-  dayPost: {
+  dotSelected: {
     backgroundColor: color.white,
-    borderRadius: radius.md,
+  },
+  dayPost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: color.white,
+    borderRadius: radiusAdmin.lg,
     padding: 14,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
-    gap: 4,
+  },
+  dayPostBody: {
+    flex: 1,
+    gap: 2,
   },
   dayPostTitle: {
     fontSize: type.size.bodySm,

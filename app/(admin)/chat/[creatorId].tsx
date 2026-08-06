@@ -3,7 +3,10 @@ import { StyleSheet, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
 
-import { ChatThread, type PendingPostRef } from '../../../components/ChatThread';
+import {
+  AdminChatThread,
+  type PendingPostRef,
+} from '../../../components/admin/chat/AdminChatThread';
 import { useAuth } from '../../../lib/auth';
 import { supabase } from '../../../lib/supabase';
 import { color } from '../../../theme/tokens';
@@ -68,7 +71,7 @@ export default function AdminCreatorChat() {
     <View style={styles.screen}>
       <Stack.Screen options={{ title: creatorName }} />
       {ready && (
-        <ChatThread
+        <AdminChatThread
           companyId={profile.company_id}
           creatorId={creatorId}
           meId={profile.id}

@@ -10,9 +10,11 @@ import {
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
+import { PostSlides } from '../../../../components/admin/creator/PostSlides';
+import { StatBlock } from '../../../../components/admin/creator/StatBlock';
+import { SkeletonCard } from '../../../../components/admin/shared';
 import { InfoBlock } from '../../../../components/ui/InfoBlock';
 import { PressableScale } from '../../../../components/ui/PressableScale';
-import { SlideshowViewer } from '../../../../components/admin/SlideshowViewer';
 import { useAuth } from '../../../../lib/auth';
 import {
   fetchAssignmentPostDetail,
@@ -22,7 +24,16 @@ import {
 import { slidesFromScript } from '../../../../lib/admin-queue-map';
 import { formatMetric } from '../../../../lib/analytics';
 import { formatCents } from '../../../../lib/wallet-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../../../theme/tokens';
+import {
+  borderWidth,
+  color,
+  radiusAdmin,
+  shadow,
+  space,
+  type,
+} from '../../../../theme/tokens';
+
+const MEDIA_HEIGHT = 300;
 
 function platformLabel(platform: string): string {
   if (platform === 'tiktok') return 'TikTok';
@@ -85,7 +96,10 @@ export default function AdminCreatorPostDetail() {
         showsVerticalScrollIndicator={false}
       >
         {loading || !data || !brief ? (
-          <Text style={styles.empty}>Loading post…</Text>
+          <>
+            <SkeletonCard height={MEDIA_HEIGHT} radius={radiusAdmin.xl} />
+            <SkeletonCard height={64} radius={radiusAdmin.lg} />
+          </>
         ) : (
           <>
             {isVideo ? (
@@ -97,7 +111,7 @@ export default function AdminCreatorPostDetail() {
                 </View>
               )
             ) : (
-              <SlideshowViewer
+              <PostSlides
                 slides={slides}
                 index={slideIndex}
                 onSelect={setSlideIndex}
@@ -105,19 +119,37 @@ export default function AdminCreatorPostDetail() {
             )}
 
             <View style={styles.statsRow}>
-              <Stat label="Views" value={formatMetric(data.totals.views)} />
-              <Stat
-                label="Payout"
-                value={payoutCents !== null ? formatCents(payoutCents) : '—'}
+              <StatBlock
+                label="Views"
+                value={formatMetric(data.totals.views)}
+                style={styles.statTile}
               />
-              <Stat
+              <StatBlock
+                label="Payout"
+                value={payoutCents !== null ? formatCents(payoutCents) : 'None'}
+                style={styles.statTile}
+              />
+              <StatBlock
                 label="Saves"
-                value={data.totals.saves !== null ? formatMetric(data.totals.saves) : '—'}
+                value={
+                  data.totals.saves !== null
+                    ? formatMetric(data.totals.saves)
+                    : 'Pending'
+                }
+                style={styles.statTile}
               />
             </View>
             <View style={styles.statsRow}>
-              <Stat label="Likes" value={formatMetric(data.totals.likes)} />
-              <Stat label="Comments" value={formatMetric(data.totals.comments)} />
+              <StatBlock
+                label="Likes"
+                value={formatMetric(data.totals.likes)}
+                style={styles.statTile}
+              />
+              <StatBlock
+                label="Comments"
+                value={formatMetric(data.totals.comments)}
+                style={styles.statTile}
+              />
               <View style={styles.statSpacer} />
             </View>
 
@@ -150,18 +182,16 @@ export default function AdminCreatorPostDetail() {
   );
 }
 
-function Stat(props: { label: string; value: string }) {
-  return (
-    <View style={[styles.stat, shadow.shadowCard]}>
-      <Text style={styles.statValue}>{props.value}</Text>
-      <Text style={styles.statLabel}>{props.label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 12 },
+  screen: {
+    flex: 1,
+    backgroundColor: color.offWhite,
+  },
+  content: {
+    paddingHorizontal: space.gutterAdmin,
+    paddingVertical: 14,
+    gap: 12,
+  },
   empty: {
     fontSize: type.size.bodySm,
     color: color.slate500,
@@ -169,9 +199,9 @@ const styles = StyleSheet.create({
   },
   video: {
     width: '100%',
-    aspectRatio: 9 / 14,
-    borderRadius: radius.md,
-    backgroundColor: color.ink,
+    height: MEDIA_HEIGHT,
+    borderRadius: radiusAdmin.xl,
+    backgroundColor: color.ink900,
     overflow: 'hidden',
   },
   videoEmpty: {
@@ -179,34 +209,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: color.fillQuiet,
   },
-  statsRow: { flexDirection: 'row', gap: 8 },
-  stat: {
-    flex: 1,
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  statTile: {
     backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 14,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
-    gap: 4,
+    borderRadius: radiusAdmin.lg,
+    ...shadow.shadowCard,
   },
-  statSpacer: { flex: 1 },
-  statValue: {
-    fontSize: type.size.card,
-    fontWeight: '800',
-    color: color.ink,
+  statSpacer: {
+    flex: 1,
   },
-  statLabel: {
-    fontSize: type.size.micro,
-    fontWeight: '700',
-    color: color.slate400,
-    textTransform: 'uppercase',
-    letterSpacing: type.tracking.label,
+  linkRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  linkRow: { flexDirection: 'row', gap: 8 },
   linkChip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    borderRadius: radius.pill,
+    borderRadius: radiusAdmin.pill,
     backgroundColor: color.white,
     borderWidth: borderWidth.hair,
     borderColor: color.line,

@@ -1,48 +1,89 @@
 import { useCallback, useMemo, useState } from 'react';
-import {
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, RefreshControl, View, StyleSheet } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PressableScale } from '../../../components/ui/PressableScale';
+import {
+  CREATOR_CARD_HEIGHT,
+  CreatorCard,
+} from '../../../components/admin/creator/CreatorCard';
+import { SortChips } from '../../../components/admin/creator/SortChips';
+import { AdminHeader, AdminScreen, SkeletonCard } from '../../../components/admin/shared';
+import { EmptyState } from '../../../components/ui/EmptyState';
 import { useAuth } from '../../../lib/auth';
 import {
   fetchCreatorLeaderboard,
   type CreatorLeaderboardRow,
 } from '../../../lib/admin-api';
 import { formatMetric } from '../../../lib/analytics';
+import { supabase } from '../../../lib/supabase';
 import { formatCents } from '../../../lib/wallet-api';
-import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
+import { radiusAdmin } from '../../../theme/tokens';
 
-type SortKey = 'earnedCents' | 'postsCompleted' | 'views' | 'approvalRate';
+type SortKey = 'earnedCents' | 'views' | 'postsCompleted';
 
 const SORTS: Array<{ key: SortKey; label: string }> = [
-  { key: 'earnedCents', label: 'Earned' },
-  { key: 'postsCompleted', label: 'Posts' },
+  { key: 'earnedCents', label: 'Earnings' },
   { key: 'views', label: 'Views' },
-  { key: 'approvalRate', label: 'Approval' },
+  { key: 'postsCompleted', label: 'Posts' },
 ];
 
-function sortValue(row: CreatorLeaderboardRow, key: SortKey): number {
-  const value = row[key];
-  return value ?? -1;
-}
+/** Handle + profile photo live outside the leaderboard query. */
+type CreatorExtras = {
+  handle: string | null;
+  avatarUri: string | null;
+};
 
-function formatApproval(rate: number | null): string {
-  if (rate === null) return '—';
-  return `${Math.round(rate * 100)}%`;
+async function fetchCreatorExtras(
+  companyId: string,
+): Promise<Map<string, CreatorExtras>> {
+  const [{ data: profiles }, { data: accounts }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, avatar_path')
+      .eq('company_id', companyId)
+      .eq('role', 'creator'),
+    supabase
+      .from('creator_accounts')
+      .select('creator_id, tiktok_handle, instagram_handle')
+      .eq('company_id', companyId),
+  ]);
+
+  const avatarPaths = (profiles ?? [])
+    .map((p) => p.avatar_path)
+    .filter((path): path is string => path !== null);
+  const signedByPath = new Map<string, string>();
+  if (avatarPaths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from('avatars')
+      .createSignedUrls(avatarPaths, 3600);
+    for (const entry of signed ?? []) {
+      if (entry.path !== null && entry.signedUrl) {
+        signedByPath.set(entry.path, entry.signedUrl);
+      }
+    }
+  }
+
+  const handleByCreator = new Map<string, string>();
+  for (const account of accounts ?? []) {
+    const handle = account.tiktok_handle ?? account.instagram_handle;
+    if (handle) handleByCreator.set(account.creator_id, handle);
+  }
+
+  const extras = new Map<string, CreatorExtras>();
+  for (const p of profiles ?? []) {
+    extras.set(p.id, {
+      handle: handleByCreator.get(p.id) ?? null,
+      avatarUri:
+        p.avatar_path !== null ? (signedByPath.get(p.avatar_path) ?? null) : null,
+    });
+  }
+  return extras;
 }
 
 export default function CreatorsScreen() {
   const { profile } = useAuth();
-  const insets = useSafeAreaInsets();
   const [rows, setRows] = useState<CreatorLeaderboardRow[]>([]);
+  const [extras, setExtras] = useState<Map<string, CreatorExtras>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('earnedCents');
@@ -57,6 +98,10 @@ export default function CreatorsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+    // Handles and photos arrive after the roster; cards fall back gracefully.
+    void fetchCreatorExtras(profile.company_id)
+      .then(setExtras)
+      .catch(() => undefined);
   }, [profile]);
 
   useFocusEffect(
@@ -66,19 +111,12 @@ export default function CreatorsScreen() {
   );
 
   const sorted = useMemo(
-    () =>
-      [...rows].sort((a, b) => sortValue(b, sortKey) - sortValue(a, sortKey)),
+    () => [...rows].sort((a, b) => b[sortKey] - a[sortKey]),
     [rows, sortKey],
   );
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + 6, paddingBottom: 116 },
-      ]}
-      showsVerticalScrollIndicator={false}
+    <AdminScreen
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -89,169 +127,52 @@ export default function CreatorsScreen() {
         />
       }
     >
-      <Text style={styles.h1}>Creators</Text>
-      <Text style={styles.subtitle}>
-        Tap a column to sort. Tap a creator for posts, chat, earnings.
-      </Text>
+      <AdminHeader title="Creators" />
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.sortRow}
-      >
-        {SORTS.map((s) => {
-          const active = s.key === sortKey;
-          return (
-            <PressableScale
-              key={s.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => setSortKey(s.key)}
-              style={[styles.sortChip, active && styles.sortChipActive]}
-            >
-              <Text
-                style={[styles.sortText, active && styles.sortTextActive]}
-              >
-                {s.label}
-              </Text>
-            </PressableScale>
-          );
-        })}
-      </ScrollView>
+      <SortChips options={SORTS} value={sortKey} onChange={setSortKey} />
 
-      {loading ? (
-        <Text style={styles.empty}>Loading creators…</Text>
-      ) : sorted.length === 0 ? (
-        <Text style={styles.empty}>No creators on the roster yet.</Text>
-      ) : (
-        sorted.map((c, i) => (
-          <PressableScale
-            key={c.creatorId}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${c.creatorName}`}
-            onPress={() =>
-              router.push({
-                pathname: '/(admin)/creator/[id]',
-                params: { id: c.creatorId },
-              })
-            }
-            style={[styles.card, shadow.shadowCard]}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={styles.rank}>{i + 1}</Text>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {c.creatorName}
-              </Text>
-            </View>
-            <View style={styles.statGrid}>
-              <Cell label="Earned" value={formatCents(c.earnedCents)} active={sortKey === 'earnedCents'} />
-              <Cell label="Posts" value={`${c.postsCompleted}`} active={sortKey === 'postsCompleted'} />
-              <Cell label="Views" value={formatMetric(c.views)} active={sortKey === 'views'} />
-              <Cell label="Approval" value={formatApproval(c.approvalRate)} active={sortKey === 'approvalRate'} />
-            </View>
-          </PressableScale>
-        ))
-      )}
-    </ScrollView>
-  );
-}
-
-function Cell(props: { label: string; value: string; active: boolean }) {
-  return (
-    <View style={styles.cell}>
-      <Text style={[styles.cellValue, props.active && styles.cellValueActive]}>
-        {props.value}
-      </Text>
-      <Text style={styles.cellLabel}>{props.label}</Text>
-    </View>
+      <View style={styles.list}>
+        {loading ? (
+          Array.from({ length: 4 }, (_, i) => (
+            <SkeletonCard key={i} height={CREATOR_CARD_HEIGHT} radius={radiusAdmin.lg} />
+          ))
+        ) : sorted.length === 0 ? (
+          <EmptyState
+            icon="users"
+            title="No creators yet"
+            body="Invite creators from Settings and they show up here once they join."
+            compact
+          />
+        ) : (
+          sorted.map((c) => {
+            const extra = extras.get(c.creatorId);
+            return (
+              <CreatorCard
+                key={c.creatorId}
+                name={c.creatorName}
+                handle={extra?.handle ?? null}
+                avatarUri={extra?.avatarUri ?? null}
+                earned={formatCents(c.earnedCents)}
+                posts={`${c.postsCompleted}`}
+                views={formatMetric(c.views)}
+                onPress={() =>
+                  router.push({
+                    pathname: '/(admin)/creator/[id]',
+                    params: { id: c.creatorId },
+                  })
+                }
+              />
+            );
+          })
+        )}
+      </View>
+    </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { paddingHorizontal: space.gutter, gap: 10 },
-  h1: {
-    fontSize: type.size.titleXl,
-    lineHeight: type.size.titleXl * type.leading.title,
-    fontWeight: '800',
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-    marginTop: 10,
-  },
-  subtitle: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.slate500,
-    marginBottom: 4,
-  },
-  sortRow: { flexDirection: 'row', gap: 6, paddingBottom: 2 },
-  sortChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-  },
-  sortChipActive: {
-    backgroundColor: color.blue100,
-    borderColor: color.blue600,
-  },
-  sortText: {
-    fontSize: type.size.chip,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  sortTextActive: { color: color.blue700 },
-  empty: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-    fontWeight: '600',
-  },
-  card: {
-    backgroundColor: color.white,
-    borderRadius: radius.md,
-    padding: 14,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
+  list: {
+    marginTop: 12,
     gap: 10,
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rank: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 999,
-    backgroundColor: color.blue100,
-    color: color.blue700,
-    fontSize: type.size.micro,
-    fontWeight: '800',
-    textAlign: 'center',
-    lineHeight: 22,
-    overflow: 'hidden',
-  },
-  cardTitle: {
-    flex: 1,
-    fontSize: type.size.body,
-    fontWeight: '800',
-    color: color.ink,
-  },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: 8,
-  },
-  cell: { width: '25%', gap: 1 },
-  cellValue: {
-    fontSize: type.size.bodySm,
-    fontWeight: '800',
-    color: color.ink,
-  },
-  cellValueActive: { color: color.blue700 },
-  cellLabel: {
-    fontSize: type.size.micro,
-    fontWeight: '700',
-    color: color.slate400,
-    textTransform: 'uppercase',
-    letterSpacing: type.tracking.label,
   },
 });
