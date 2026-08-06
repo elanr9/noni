@@ -1,374 +1,224 @@
-# Noni — Admin app handoff (Queue · Review · Calendar)
+# Noni admin app — full design handoff
 
-Spec for the admin surface designed in `Noni Admin - Queue, Review, Calendar.dc.html`.
-Every value below was read off that running source. Anything not measurable there is marked **ASSUMPTION** or **STOP AND ASK**.
+Every admin surface, measured from the running kit in `ui_kits/admin-app/`. Frame 390×844. Tenant in all copy is **FieldVision AI** (college soccer recruiting).
 
-Screens: 390×844 iPhone, iOS, portrait only. No desktop layout.
+Companion files: `CURSOR_PROMPT.md` (staged build plan — read it before writing code) and `screenshots/`.
+Creator app parity: `design_handoff_creator_app/README.md`. Any value not listed here is unchanged from that document.
 
----
-
-## 0. Scope and status
-
-**Designed and specified here (build this):**
-
-| # | Screen / state | Screenshot |
-|---|---|---|
-| 1a | Queue — row list (Option A) | `screenshots/01-queue-row-list.png` |
-| 1b | Queue — triage cards (Option B) | `screenshots/02-queue-triage-cards.png` |
-| 1c | Queue — one submission left | `screenshots/03-queue-one-left.png` |
-| 1d | Queue — empty · loading | `screenshots/04-queue-empty-and-loading.png` |
-| 1e | Review — Reel, script beneath (Option A) | `screenshots/05-review-reel-script-beneath.png` |
-| 1f | Review — Reel, pinned player + tabs (Option B) | `screenshots/06-review-reel-pinned-player.png` |
-| 1g | Review — Slideshow | `screenshots/07-review-slideshow.png` |
-| 1h | Review — changes-requested thread | `screenshots/08-review-changes-thread.png` |
-| 1i | Review — note sheet · approved confirmation | `screenshots/09-review-note-sheet-and-approved.png` |
-| 1j | Calendar — light week (3 creators) | `screenshots/10-calendar-light-week.png` |
-| 1k | Calendar — heavy week (5 creators) | `screenshots/11-calendar-heavy-week.png` |
-| 1l | Task edit sheet | `screenshots/12-task-edit-sheet.png` |
-| 1m | Generate — setup · running | `screenshots/13-generate-setup-and-running.png` |
-| 1n | Clickable loop (behaviour reference) | `screenshots/14-clickable-loop.png` |
-
-**Not designed yet — do NOT invent these:** Trends, Brand Brain, Analytics, Settings, company onboarding (13 steps), creator onboarding, auth. Tab bar entries for Trends / Analytics / Settings exist visually; wire them to a placeholder route and stop.
-
-**Two open decisions the build must not resolve on its own:**
-
-1. **Queue layout** — 1a (row list, open to decide) *or* 1b (triage cards with inline Approve). Build the one the design owner names.
-2. **Review layout** — 1e (player then script) *or* 1f (pinned player, script scrolls with the delivered line highlighted, Script / Caption / Thread tabs). 1g / 1h / 1i are shared by both.
-
-**Documented deviation:** Approve is `--blue-500 #1BA6EE` (primary), per the design brief. The earlier creator-app kit used a green `approve` button variant. Blue wins here; the green variant stays in the library unused. Red `--danger #D93A3A` is reserved for *Remove from calendar* and error text only — **Request changes is an outline button, not red.**
+**Navigation.** Tabs: **Review · Briefs · Library · Creators · Analytics**. Calendar is a view toggle inside Briefs. Settings is the gear on Analytics. Push screens: review detail, revision mode, music approval, account approval, account template, week setup, post editor, creator profile, creator post, chat, Brand Brain, Features.
 
 ---
 
-## 1. Foundations — use verbatim, invent nothing
+## 1. Foundations
 
-Tokens come from `tokens/*.css` in the Noni design system. In React Native mirror them in one `theme.ts`; the literal values are:
+| Token | Value | Used for |
+| --- | --- | --- |
+| `--blue-500` | `#1BA6EE` | Primary buttons, active lane card, selected radio, step dot, send bubble |
+| `--blue-300` | `#8EC9F5` | Tint only — completed dots, progress fill, media glyphs. Never white text on it |
+| `--blue-200` | | Chart activity bars |
+| `--blue-100` | `#DDEFFB` | AI pills, hashtag chips, avatars, claim chips |
+| `--blue-50` | `#F1F8FE` | Selected rows, notes, suggestion blocks |
+| `--blue-600` / `--blue-700` | | Text and icons on blue tints |
+| `--off-white` | `#F7FAFD` | Screen ground, inner blocks |
+| `--white` | | Cards, sheets, chat bar |
+| `--ink` / `--ink-900` | `#0F1720` / near-black | Text / review-detail ground |
+| `--slate-500 / 400 / 300` | | body grey / meta grey / placeholder grey |
+| `--green`, `--green-soft` | | complete, approved, AI score, passing checks |
+| `--amber`, `--amber-soft` | | needs review, retakes, split drift, failed checks |
+| `--danger`, `--danger-soft` | | rejected claims, sign out |
+| Radii | 8 / 12 / 16 / 20 / 24 | `sm` inner blocks, `md` fields, `lg` cards, `xl` media, `2xl` sheets |
+| Shadows | `--shadow-card`, `--shadow-accent`, `--shadow-media`, `--shadow-raised` | cards, primary/active, media, sheets |
+| Motion | 240ms surfaces · 160ms colour · 90ms `scale(0.97)` press · 420ms chart draw · 1400ms shimmer · `cubic-bezier(0.22,0.61,0.36,1)` | |
 
-### Colour
+**Gutter is 20px** on admin screens (creator app uses 24) — admin surfaces are dense lists.
 
-```
-blue-50   #F2F9FE    white        #FFFFFF     amber        #E08A16
-blue-100  #E7F4FD    off-white    #F7FAFD     amber-soft   #FDF2DF
-blue-200  #A7D3F7    fill-quiet   #F1F3F5     green        #1F8F5F
-blue-300  #8EC9F5    line         #E6EEF6     green-soft   #E4F5EC
-blue-400  #4FBAF2    line-strong  #D6E3EF     danger       #D93A3A
-blue-500  #1BA6EE    slate-300    #B4BFCB     danger-soft  #FCEBEB
-blue-600  #0F8FD1    slate-400    #8E9AA6     scrim        rgba(0,0,0,0.45)
-blue-700  #0B76AD    slate-500    #6B7A8C     scrim-strong rgba(0,0,0,0.60)
-                     ink          #0F1720     glass        rgba(255,255,255,0.82)
-                     ink-800      #151D26
-                     ink-900      #0B0F14
-```
+**Type.** Display font for numbers, titles and headings (`700`, negative tracking); UI font for body, labels and chips. Screen title `700 30px` display. Push title `700 17px`. Card title `700 15–17px`. Body `400 14–15px/1.45`. Label `700 12px` uppercase with `--tracking-label`. Meta `600 12px`.
 
-Rules: `blue-500` is the only action colour. `blue-100/200/300` are tints and never carry white text. `ink-900` appears **only** behind media (player, slide canvas). Status colour lives only in chips.
+**Post type colours.** One tint per type so a lane reads by colour before it reads by word. Chip: `padding:5px 10px`, `radius:999`, `700 12px`, nowrap.
 
-### Type
+| Type | Background | Text |
+| --- | --- | --- |
+| `numbered_list`, `numbered_tips` | `#E3F2FD` | `#0E6BA8` |
+| `talking_head` | `#ECE7FB` | `#5B44B4` |
+| `explainer` | `#DFF3EE` | `#0E6E5C` |
+| `contrast`, `getting_started` | `#FDEEDC` | `#95560C` |
+| `replay_bait` | `#FBE7EF` | `#A03A67` |
+| `how_to` | `#E7EAFB` | `#3B4EA0` |
 
-Family: SF Pro / SF Pro Rounded on device (web kit substitutes Figtree + Nunito — **ASSUMPTION**, swap for the licensed files if different).
+**Media rule (applies everywhere).** Every card that shows a post renders the **real thumbnail** — Reel: first frame; Slideshow: slide 1 — at a fixed box with `object-fit: cover`. Every creator renders the **real profile photo** from the linked account. The blue gradient with a `play` / `images` glyph and the initial-letter circle are loading / missing-asset fallbacks only.
 
-```
-hero      44 / 1.05 / -1.2px / 800      body        16 / 1.5  / 400
-title-xl  34 / 1.12 / -0.5px / 800      body-sm     15 / 1.4  / 400-600
-title-sm  26 / 1.20 / -0.5px / 700      meta        14 / —    / 400-700
-card-lg   20 / 1.35 / -0.3px / 700      chip        13 / 1    / 700
-card      18 / 1.35 / -0.2px / 700      label       12 / 1    / 800 / +0.7px UPPERCASE
-action    17 / —    / -0.1px / 700-800  micro       10-11     / 700 (in-cell meta only)
-```
+**Fixed heights.** Cards in a scrolling queue are all the same height. Conditional content (retake counts, badges) goes onto the media, never into the body as a fourth chip that wraps.
 
-Weights used: 400, 500, 600, 700, 800. Never lighter than 400.
-
-### Spacing / shape / elevation
-
-```
-gutter 24 · card padding 18 (12 on compact rows) · stack gap 12 · section gap 28
-radius: field 12 · cell 14 · card 18 · media 20 · sheet 24 · pill 999
-border: hairline 1px #E6EEF6 · field 1.5px #D6E3EF · selected 2px #1BA6EE
-shadow-card    0 1px 2px rgba(15,23,32,.04), 0 6px 16px rgba(15,23,32,.05)
-shadow-raised  0 2px 6px rgba(15,23,32,.06), 0 12px 28px rgba(15,23,32,.08)
-shadow-media   0 4px 18px rgba(15,23,32,.10)
-shadow-float   0 6px 24px rgba(15,23,32,.14)
-shadow-accent  0 8px 20px rgba(27,166,238,.28)
-ring-focus     0 0 0 3px rgba(27,166,238,.30)
-tap targets: 44 minimum · primary pill 60 tall
-```
-
-### Motion
-
-```
-surfaces / sheets / progress  240ms   cubic-bezier(0.22,0.61,0.36,1)
-colour / opacity              160ms   same easing
-press feedback                 90ms   scale 0.97 + one step darker fill
-chart draw                    420ms
-skeleton shimmer             1400ms   linear, infinite
-```
+**Skeletons** shimmer 1400ms; **empty states** always carry a next action or say what will fill them. Both formats — Reel and Slideshow — exist on every media surface.
 
 ---
 
-## 2. Device frame (every screen)
+## 2. Review tab — `app/(admin)/(tabs)/index.tsx`
 
-```
-canvas 390 × 844, corner radius 46
-status bar        54 tall, 16 top / 30 side padding, time 15/700, non-interactive
-content           inset 0, padding-top 54
-screen gutter     24 left/right
-tab bar           floating: left 16, right 16, bottom 24, height 72, radius 999
-                  fill rgba(255,255,255,0.82) + 18px backdrop blur, 1px #E6EEF6, shadow-float
-list bottom pad   116 (so content clears the floating bar)
-home indicator    134 × 5, radius 999, rgba(15,23,32,0.3), bottom 8
-```
+Three queues, one tab. Header `Review` + a count pill (`8 waiting` / `All clear`, green when clear). Subtitle changes with the load: cleared / one left / `Approve and it's live. Editing, posting and tracking are automatic.`
 
-Tab bar items, in order: **Queue** (`inbox`, badge = pending count) · **Calendar** (`calendar-days`) · **Trends** (`trending-up`) · **Analytics** (`chart-column`) · **Settings** (`settings`).
-Active item: `blue-100` pill behind the icon, icon `blue-600`, label `blue-700` 11/700. Inactive: icon `slate-400`, label `slate-400`. Badge: min-width 16, height 16, `blue-500`, white 10/800, offset top −4 right −7.
-Review, the sheets and the confirmation are **pushed screens — no tab bar.**
+`Segmented` switcher with counts inside it (`Posts 5 · Music 2 · Accounts 1`) so an empty lane never costs a tap. Track `--fill-quiet`, active pill white + `--shadow-card`, count bubble blue when the active lane is non-zero.
+
+**Submission row — fixed 96px.** 54×72 thumbnail (badge bottom-left: duration for Reels, slide count for Slideshows; badge top-left amber `Take 2` when `attempt > 1`), then a column set to `space-between`: creator row (20px profile photo, short name, time), title clamped to 2 lines, one non-wrapping chip row (format · type · clips/slides). Footer note: *Reject a single clip and only that clip goes back.*
+
+**Music row.** 44×58 thumb, title, `creator · N slides · posted`, blue `music-2` line with when it was marked, and an `Approve` button (`variant="approve"`) on the right. One tap after a glance.
+
+**Account row.** 40px avatar, name + Pending/Needs changes chip, both handles, submitted time or the rejection reason. Sent-back accounts appear under a `Sent back` section label.
+
+Empties: `Nothing to review` / `No songs waiting` / `No accounts to approve`, each with the sentence that says what fills it.
 
 ---
 
-## 3. Components
+## 3. Review detail — `app/(admin)/review/[id].tsx`
 
-Reuse from the design system; do not re-draw.
+The most important triage screen. It shows **the post as it will appear on the platform** and nothing about the render manifest.
 
-| Component | Used for | Notes / new variants |
-|---|---|---|
-| `Button` | every action | sizes lg 60 / md 48 / sm 40; variants primary, outline, ghost, tint, danger. Paired footer buttons: `block` + flex 1 (Request changes) and flex 1.35 (Approve). |
-| `Icon` | Lucide set, stroke 2 | used: play, pause, images, chevron-left, chevron-right, check, inbox, calendar-days, trending-up, chart-column, settings, sparkles, plus, arrow-right, circle-check-big, rotate-ccw |
-| `StatusChip` | task lifecycle | needs `white-space: nowrap`; label override used for "Resubmitted" |
-| `InfoBlock` | HOOK / SCRIPT / CAPTION / SLIDE COPY | 12/800/+0.7 uppercase label, 16/1.5 body |
-| `EmptyState` | queue empty | 72 circle `blue-100`, 30 glyph `blue-500` |
-| `TabBar` | admin nav | items above |
-| `Wordmark` | Queue header only | `size=20 capsule` |
+- Full-width 9:16 frame, `--ink-900` ground. Reel: player surface with a 3px scrubber at `bottom:148` and `0:13 / 0:52`. Slideshow: real slides in the same box, overlay text centred `800 25px/1.26` display, dot pager at `top:62` (active dot 18px wide), glass 34px arrows, `Screenshot` chip when a slide has one.
+- Top scrim bar: 36px glass back button, `Take 2` amber pill when applicable, `1 of 5`, glass chat button.
+- Bottom scrim: creator photo, `@handle`, `type · age`, format chip, caption, hashtags — the platform layout, not a form.
+- White action strip: **Request changes** (outline, 46%) + **Approve** (primary, `check`). Two actions, no more.
+- **Approved overlay:** green check, `Approved`, `{title} is out of your hands. Noni takes it from here.`, then the three automatic steps (Reel: stitch → post at slot time → track. Slideshow: assemble → post with auto-add music on TikTok, silent on Instagram → creator adds the song, then one tap back here). Primary `Next in queue`.
 
-**New in this handoff** (add to the library, small and reusable):
-
-- `FormatPill` — 5/9 padding, radius 999, `fill-quiet` bg, `slate-500` 11/700, text "Reel" | "Slideshow". Compact variant 3/7 with 10/700 for calendar cells.
-- `MediaFallback` — 9:16 quiet fill `#F1F3F5` + centred Lucide glyph `slate-400` + duration/length label bottom-centre 10/700. Used until real 9:16 frames exist. Real frames replace the fill and keep the 3px white border + `shadow-media` rule from the system.
-- `SegmentedTabs` — 4 padding on `fill-quiet` radius 999; active segment white + `shadow-card`; labels 13/700 (`ink` active, `slate-500` idle).
-- `SheetShell` — bottom sheet: scrim `rgba(11,15,20,0.5)`, panel white, radius 24 top only, `shadow-raised`, 40×4 `line-strong` grabber centred, padding 14 / 24 / 30.
-- `CalendarCell` — spec in §7.
-- `SkeletonBlock` — shimmer gradient `#EEF3F8 → #F7FAFD → #EEF3F8`, background-size 320px, 1400ms linear infinite.
+**Revision mode** (Request changes) — `Segmented`: *Section by section* | *Whole post*.
+- Section by section: one card per spoken segment plus the caption. Tap a card → a `--blue-50` note box opens under it with a textarea and Cancel / Save note. Saved notes render as a blue block with the note and an `x`; the card border turns `--blue-500` and the label reads `Note added`. Only noted sections go back.
+- Whole post: one textarea, one re-record.
+- Footer: Cancel + `Send back · N notes` (disabled at zero).
+- Sent confirmation: `Sent back` + *{creator} gets this post back with your notes on the sections you marked. Nothing else has to be re-recorded.*
 
 ---
 
-## 4. Queue
+## 4. Music approval — `app/(admin)/music/[id].tsx`
 
-### 4.1 Header (all queue states)
-
-```
-Wordmark size 20 capsule            count pill: 6/12, radius 999, blue-100 bg, blue-700 13/700
-                                    text "5 waiting" | "1 waiting" | "All clear" (green-soft / green)
-H1        "Queue"                   34/1.12, 800, -0.5px, ink
-Subtitle  "Approve and it's live. Editing, posting and tracking are automatic."
-          15/1.4, 400, slate-500, margin-bottom 16-20
-```
-1c subtitle instead: "One to clear, then you're done for today."
-
-Filter chips (1a only, below the subtitle, gap 8, 14 bottom margin, nowrap):
-`All 5` (ink bg, white) · `Reels 3` · `Slideshows 2` (fill-quiet, slate-500) — 8/14 padding, 13/700.
-
-### 4.2 Row — Option A (1a)
-
-```
-card      display flex, gap 14, align center, padding 12, radius 18,
-          white, 1px #E6EEF6, shadow-card; whole row is the tap target → Review
-thumb     56 wide, aspect 9/16, radius 12, fill-quiet, centred glyph (play | images) 18 slate-400,
-          length label bottom 6, centred, 10/700 slate-400  ("0:52" | "4 slides")
-column    gap 6, min-width 0
-  line 1  avatar 20 circle blue-100 / blue-700 10/800 initial · creator 13/700 slate-500 ·
-          "·" slate-300 · relative time 13/400 slate-400, nowrap
-  line 2  title 15/1.3, 700, -0.2px, ink, clamp 2 lines
-  line 3  gap 7 — FormatPill + StatusChip (nowrap)
-chevron   chevron-right 20 slate-300
-```
-
-### 4.3 Card — Option B (1b)
-
-Same header. Card padding 12, gap 12, radius 18.
-Thumb 82 wide, aspect 9/16, radius 14, FormatPill overlaid top-left (4/7, `rgba(255,255,255,0.92)`, ink 10/700), glyph 24, length label bottom 7 (11/700).
-Right column gap 8: creator line, title (15/1.3/700, clamp 2), then a button row gap 8 — `Approve` (sm, primary, icon `check`, block, flex 1) and `Open` (sm, outline, block, flex 1).
-Below the list, centred: "Approve is the last human touch." 12/500 slate-400.
-Inline approve is optimistic: row animates out over 240ms, badge decrements, undo is **STOP AND ASK** (not designed).
-
-### 4.4 Empty (1d left)
-
-Header count pill becomes `All clear` (green-soft bg, green text). `EmptyState`:
-icon `circle-check-big` · title "Nothing to review" · body "Everything submitted is approved and scheduled. Six tasks are with creators for this week." · action `Open Calendar` (tint, md). Block starts 56 below the H1.
-
-### 4.5 Loading (1d right)
-
-Count pill → 82×28 skeleton. Four skeleton rows, same 12/18/1px card shell: thumb 56×(9:16); lines 52% × 12, 92% × 14, 64% × 14, 34% × 22 (radius 6/7/7/999), gap 9. Shimmer 1400ms.
-
-### 4.6 One left (1c)
-
-Single row, then a note card 20 below: `off-white`, radius 18, padding 16/18 — label "NEXT UP" 12/800/+0.7 slate-400, body "Four tasks are recording now. The next batch lands Thursday." 15/1.4/600 slate-500.
+Slideshows only. Slide frame, then a `--blue-50` card: *{creator} says the song is added* + when. Two link rows (Open on TikTok / Open on Instagram with the handles). Footer: `Not on it yet` (outline) + `Song is on it` (approve). Note: *Approving unlocks this post's earnings. Videos never enter this queue.* Confirmation: `Song approved`.
 
 ---
 
-## 5. Review — shared rules
+## 5. Account approval — `app/(admin)/account-approval/[accountId].tsx`
 
-- Header bar (light variants): padding 4/16/8 — back `chevron-left` 26 ink · centred "Review" 15/700 · counter pill `fill-quiet` 12/700 slate-500 ("1 of 5").
-- Content scrolls; the action footer is pinned.
-- Footer: 1px `#E6EEF6` top border, white, padding 12 / 24 / 30, row gap 10 —
-  `Request changes` (md, **outline**, block, flex 1) · `Approve` (md, **primary**, icon `check`, block, flex 1.35).
-  Under it, centred 12/500 slate-400: "Approving posts it Thursday 6:40pm. No further steps." (Slideshow: "…Sunday 11:00am…"; thread variant: "Second round. Approving closes the loop for Tolu.")
-- Media is the only dark surface: `ink-900`.
+Once per creator, and the same moment as handle linking. States: pending → needs_changes → approved.
 
-### 5.1 Option A — script beneath (1e)
+Creator card (46px photo, name, credential, status chip). If sent back, an amber card with the structured reason and note. **Warm-up proof**: Instagram scroll and TikTok For You rows with the required length and the recorded length as a media badge, plus a profile-screenshots row (two 38×50 thumbs). **The feed test** card: *For You has to be college soccer and recruiting. A cold or off-topic feed throttles every post this creator will ever make.* with `Feed checks out` / `Wrong content`. Approving reveals **Handles to link** (TikTok + Instagram, captured on approval — Upload-Post cannot post to an unlinked account). Rejecting reveals four structured reasons (feed / age / bio / proof) plus a free-text box. Footer: `Send back` + `Approve and link`.
 
-Media: width 100%, aspect **9/11**, radius 20, `shadow-media`. Centred play circle 64, `rgba(255,255,255,0.92)`, glyph `play` 26 ink. FormatPill top 12 / left 12 (white 92%).
-Scrub row bottom 14, sides 14: `0:12` 12/700 white90 · track 3px `rgba(255,255,255,0.28)` with white fill at 23% · `0:52` 12/700 white60.
-Then: meta row (avatar 24 · "Mara" 14/700 ink · "·" · "submitted 4m ago" 14/400 slate-400, nowrap) → H1 title 26/1.2/700/-0.5 → `InfoBlock` HOOK, SCRIPT, CAPTION (gap 12).
-
-### 5.2 Option B — pinned player (1f)
-
-Player is fixed at the top, **330 tall**, full-bleed `ink-900`, status bar text switches to white.
-Back chevron white at top 60 / left 16; counter chip top 64 / right 20 on `rgba(255,255,255,0.16)`.
-Centre control `pause` 24 in a 64 white-92% circle. Scrub row bottom 16 with a 10px white knob at 37%.
-Below: meta row, then `SegmentedTabs` **Script | Caption | Thread**.
-Script list (gap 10, scrolls): each line is a row — padding 10/12, radius 14; timestamp 12/700 min-width 30; body 15/1.5.
-Current line: row bg `blue-100`, timestamp `blue-600`, body 700 `ink`. Other lines: transparent, timestamp `slate-300`, body 400 `slate-500`.
-Reference script (Mara, 0:52): `0:00` "Your winger isn't unfit. He's sprinting the wrong yards." · `0:08` "We tracked 60 wide players across a full season." · **`0:19` "The ones who faded after 70 covered the same distance as the ones who didn't."** · `0:31` "They just did it recovering, not attacking." · `0:44` "FieldVision splits the two on one chart. Link in bio."
-The highlight follows playback position; tapping a line seeks to it.
-
-### 5.3 Slideshow (1g)
-
-No video chrome anywhere. Media aspect 9/11, `ink-900`: FormatPill "Slideshow" top-left; "Slide 2 of 4" chip top-right on `rgba(255,255,255,0.16)`; slide copy centred, 30/1.15, 800, -0.5px, white, sides 24; dots bottom 16 — 7×7 `rgba(255,255,255,0.45)`, active 22×7 white.
-Below the media, a thumb strip: 4 cells, flex 1, height 52, radius 10, gap 8 — idle `fill-quiet` + `slate-400` 13/700; selected `blue-100`, 2px `blue-500` border, `blue-700`.
-Then meta row, H1, `InfoBlock` "Slide 2 copy" (follows the selected slide) and "Caption".
-
-### 5.4 Changes-requested thread (1h)
-
-Player 250 tall; "Take 2" chip top-right, `amber-soft` bg / `amber` text 12/700; caption bottom-left 12/700 `rgba(255,255,255,0.75)` — "Tolu · 0:41 · resubmitted 3h ago". `SegmentedTabs` with **Thread** active.
-Thread, chronological, oldest first, gap 14:
-
-| Author | Header | Bubble |
-|---|---|---|
-| Creator | avatar 22 · "Tolu" 13/700 · "Take 1 · Monday" 13/400 slate-400 | `off-white`, radius 16, padding 14/16, 15/1.5 400 slate-500 |
-| Admin (right-aligned) | "You · Monday" 13/400 slate-400 · "Changes requested" 13/700 ink | `amber-soft`, 15/1.5 500 ink |
-| Creator (latest) | "Tolu" · "Take 2 · 3h ago" | `blue-100`, 15/1.5 500 ink |
-
-Copy in the reference: note = "Hook lands late. Start on the 31% number, and reshoot indoors — the wind eats the first line."; take 2 = "Reshot in the analysis room. Opens on 31% now."
-
-### 5.5 Request-changes sheet (1i left)
-
-`SheetShell` over a 55% `ink-900` scrim on the dimmed Review screen.
-H2 "What should Mara fix?" 22/1.2/700/-0.4 · reason chips (9/14, 13/700; selected `blue-100`/`blue-700`, idle `fill-quiet`/`slate-500`): **Hook lands late · Audio · Off script · Framing** — tapping one prefills the note, still editable.
-Note field: radius 12, 1.5px `blue-500` border + `ring-focus` when focused, min-height 104, padding 14, 16/1.5.
-CTA `Send note to {creator}` (lg, primary, block). Helper 12/500 slate-400: "The task goes back to Mara's queue with your note attached."
-
-### 5.6 Approved confirmation (1i right)
-
-Centred: 88 circle `green-soft` + `check` 40 `green` → H1 "Approved" 34/1.12/800 → body 16/1.5 slate-500 "Noni is editing it now. It posts to @fieldvision.ai on Thursday at 6:40pm and starts tracking itself."
-Automation card: full width, `off-white`, radius 18, padding 16/18, rows gap 10, left dot 8px —
-`green` "Edit and captions" + right meta "~4 min" · `blue-300` "Posts Thursday 6:40pm" + "Reel" · `line-strong` "Views land in Analytics" (slate-500).
-Bottom: `Next in queue` (lg, primary, block, icon-right `arrow-right`) and `Back to Queue` (md, ghost, block). When the queue is empty the primary label becomes "Back to Queue".
-Note-sent variant of the same screen: circle `amber-soft`, glyph `rotate-ccw` `amber`, title "Note sent", body "The task is back in {creator}'s queue with your note attached."
+**Account template** (from Settings) — company-scoped, and the creator sees the same values during setup: bio with one-tap Copy, profile picture 1080×1080 with Download, link in bio with copy, and one example account card (`This is the bar. Same bio shape, same grid, no gym content.`).
 
 ---
 
-## 6. Calendar
+## 6. Briefs grid — `app/(admin)/(tabs)/create.tsx`
 
-Rows per creator × day columns; days scroll horizontally, creators scroll vertically. Header and grid scroll together.
+Header `Briefs` + `Week 14 · Aug 10–16`, trailing grid/calendar toggle (36×32 pills, active white + `--shadow-card`).
 
-```
-H1 "Calendar" 34/1.12/800/-0.5
-week label "Week of 3 Aug" 15/600 slate-500   (heavy week also shows a right-aligned
-                                               "21 tasks" pill: amber-soft / amber 13/700)
-week nav      two 32 circles, fill-quiet, chevron-left / chevron-right 18 slate-500
-actions row   gap 8 — Generate (sm, primary, icon sparkles, block, flex 1)
-                      New task (sm, outline, icon plus, block, flex 1)
-day header    108 wide per column, 12/700, today ink / others slate-400 ("Mon 3" … "Sun 9")
-creator col   72 wide, left pad 16 — avatar 30 blue-100/blue-700 12/800, name 12/700 slate-500
-row gap 10 · column gap 8 · list bottom pad 116
-```
+**Lane switcher.** Two cards, `gap:10`, `radius-lg`, `padding:14`. Active `--blue-500` + `--shadow-accent`, inactive white. Icon 15 + label `700 13px`; count `700 26px` display with `/ target` at `700 17px`, 60% opacity; 5px progress rail.
 
-### CalendarCell
+**Split header.** Chip row from the week pool. A type that drifts from plan gets an amber border and shows `actual/planned`. This is the only place drift is reported.
 
-```
-filled  108 wide, min-height 96, padding 9, radius 14, white, 1px #E6EEF6, shadow-card, gap 5
-        FormatPill compact (3/7, fill-quiet, 10/700)
-        title 12/1.3, 700, ink, clamp 3
-        status pill (3/7, 10/700):  To do  blue-100/blue-700 · Recorded fill-quiet/slate-500
-                                    In review amber-soft/amber · Approved green-soft/green
-                                    Posted green/white
-empty   same box, 1.5px dashed #D6E3EF, transparent, centred "+" 18/700 slate-300 → New task
-        prefilled with that creator and day
-tap filled cell → Task edit sheet
-```
+**Row states** (all 30 rows exist from week creation):
 
-### Task edit sheet (1l)
+- `empty` — dashed `1.5px --line-strong`, transparent. Stamped type chip + the suggested search phrase in quotes with a `search` icon, trailing `plus`. This is what kills the blank page.
+- `partial` — white card, title + type chip + grey `600 12px` progress (`Hook and 3 of 5 points`).
+- `filled` — amber `700 12px` **Needs review**.
+- `complete` — green `700 12px` **AI score 88** + green `circle-check-big` 19.
+- `killed` — `--fill-quiet` block, `Left empty on purpose` + reason. Killing beats padding.
 
-`SheetShell` pinned 92 from the top (tall sheet, content scrolls, footer pinned).
-Header row: H2 "Edit task" (nowrap) + right chip "Wed 5 · Fabri" (`blue-100`/`blue-700` 12/700).
-Sections, gap 16, each with a 12/800/+0.7 uppercase `slate-400` label:
+Card `padding:14`, `radius-lg`, index `700 12px --slate-300` in a 20px column, title `700 16px/1.3` display. Format is **not** repeated on the row — the lane states it.
 
-| Label | Control |
-|---|---|
-| TITLE | text field — 1.5px `line-strong`, radius 12, padding 13/14, 16/600 |
-| FORMAT | `SegmentedTabs` Reel / Slideshow (padding 10 per segment, 14/700) |
-| CREATOR | pill row, flex 1 each, padding 10, radius 999, selected `blue-100`/`blue-700` |
-| DAY | pill row Mon–Fri, same treatment |
-| HOOK | field + right-aligned "Rewrite" chip (`blue-100`, sparkles 13, 12/700) that regenerates just that field |
-| SCRIPT / SLIDE COPY | multiline field, 16/1.5 slate-500; label follows the format toggle |
+**Footer state machine — the admin works one week at a time:**
 
-Footer: `Save task` (lg, primary, block) then `Remove from calendar` (md, ghost, block, label in `--danger`). Removing asks for confirmation — **STOP AND ASK** for that dialog's copy.
+1. **In progress** → no buttons. White status strip: blue count bubble + `N posts left this week. Publish opens when all thirty are complete.` **New week is not offered.**
+2. **All thirty complete** → primary `Publish to creators` + `Before Sunday 8:00 PM EST, so creators are notified on schedule.` (after the cutoff: `Creators are notified immediately.`)
+3. **Published** → outline `Start week 15` + `Week 14 is with the creators. Next week opens now.`
 
-### Generate (1m)
+No week yet → `EmptyState` `layout-list`, `No week yet`, action `Start week`.
 
-**Setup sheet:** H2 "Fill the week" · body "Noni writes the title, hook, script and caption for each task from Brand Brain and this week's trends."
-POSTS PER CREATOR — stepper on a `fill-quiet` radius 14 bar: two 40 white circles (`shadow-card`) with − / +, value 800/26 centred.
-PILLARS — chips, selected `blue-100`/`blue-700`, idle `fill-quiet`/`slate-500` (reference: Coach education, Match data, Gear, Player stories).
-Summary row: `off-white`, radius 16, padding 14/16 — "5 creators × 4 posts. Existing tasks stay as they are." 15/1.4/600 slate-500 + count 22/800 ink.
-CTA `Generate 20 tasks` (lg, primary, icon sparkles, block, nowrap) — the number tracks creators × posts.
-
-**Running sheet:** H2 "Writing the briefs…" · body "This takes about a minute. You can leave the screen."
-Progress: 6px track `fill-quiet`, fill `blue-500`, 240ms width transitions; caption "13 of 20 written" 13/700 slate-400.
-Checklist rows gap 10: done = `check` 18 `green` + 15/600 slate-500; active = 18 ring (2px `blue-300`, top `blue-500`, 900ms linear spin) + 15/700 ink; pending = 18 `fill-quiet` dot + 15/600 slate-300.
-Phases, in order: "Read this week's 40 trends" → "Matched pillars to creators" → "Writing hooks and scripts" → "Scheduling to the calendar".
-CTA `Run in background` (lg, outline, block). Generation never blocks the UI; new tasks fade into the grid as they land.
+**Calendar view** (toggle, not a tab) — one card per day: weekday + date column, then compact task cells (status dot, title, format glyph, creator). Rest days say `Rest day`. Tapping a day opens a sheet with the day's posts, format chip, status label and creator avatar.
 
 ---
 
-## 7. Behaviour (from the clickable reference, 1n)
+## 7. Week setup — `app/(admin)/week-setup.tsx`
 
-```
-Queue row tap                 → Review (push, 240ms)
-Review · Approve              → Approved confirmation; task leaves the queue; badge −1
-Review · Request changes      → note sheet (240ms up); Send → "Note sent"; task leaves the queue
-Confirmation · Next in queue  → next submission, or Queue when empty
-Queue empty                   → EmptyState (§4.4)
-Every press                   → scale 0.97 over 90ms
-```
+Three screens, once a week — the only stepped ceremony besides the editor. Dots progress, `Step N of 3`.
 
-Approve is optimistic: update locally, reconcile with the server, and on failure restore the row plus an error toast — **STOP AND ASK** for that toast (not designed).
+1. **This week's mix** — two ratio cards with 34px round steppers. Defaults **20 videos / 10 slideshows**. Blue note `30 rows will be stamped and ready to fill`.
+2. **Video types** — must sum to the video count. Defaults `numbered_list 8 · talking_head 5 · explainer 3 · contrast 2 · replay_bait 2`.
+3. **Slideshow types** — defaults `numbered_tips 5 · how_to 3 · getting_started 2`.
+
+Sum banner green when matched (`8 of 8 videos assigned`), amber when not (`2 over. Take 2 off a type.`). Next disabled until it matches. Standing footer line: *This is a pool, not a lock.*
 
 ---
 
-## 8. Mock content (FieldVision AI — keep it, do not paraphrase)
+## 8. Post editor — seven steps — `app/(admin)/post/[id].tsx`
 
-Creators: Fabri (F), Mara (M), Deniz (D), Tolu (T), Rhea (R). Handle: `@fieldvision.ai`.
+**Not a long form.** One decision group per screen. The post type is **locked** (stamped at week setup), shown as header meta `Numbered list · Week 14`. No type picker. No "why this works".
 
-Queue, newest first:
+Shell on every step: back chevron, `Post 04`, type meta, trailing **Save progress** (`700 13px --blue-600`, exits leaving the row `partial`); step dots (7 bars 6px tall, current stretches to 26px `--blue-500`, past `--blue-300`, future `--line-strong`) with `Step 3 of 7 · Hook`; `h1 700 28px` display + one line of intent; footer **Back** (ghost 30%) + **Next** (primary), replaced by **Save post** on step 7.
 
-| Creator | Title | Format | Length | Age | Status |
-|---|---|---|---|---|---|
-| Mara | Why your winger fades after 70 minutes | Reel | 0:52 | 4m ago | In review |
-| Fabri | The tripod setup that took 90 seconds | Reel | 0:38 | 22m ago | In review |
-| Deniz | 3 stats that win Sunday | Slideshow | 4 slides | 1h ago | In review |
-| Tolu | What a 31% possession drop looks like | Reel | 0:41 | 3h ago | Resubmitted |
-| Rhea | Reading a pass map in 20 seconds | Slideshow | 6 slides | Yesterday | In review |
+| Step | Content | AI |
+| --- | --- | --- |
+| 1 Title | Optional, `700 20px/1.3` display, grey `Untitled post` when unwritten | `Fill with AI` → fill sheet (whole post, claim → phrase → points → hook order) |
+| 2 Search phrase | The TikTok search this post answers, `600 17px` + `search` icon; `Also searched` alternates below as tappable rows | `Regenerate` |
+| 3 Hook | 8–10 options best first, each with a word count (red over 9). Radio rows, selected `--blue-50` + `--blue-500` border. Last row **Other** expands an inline write field with a live count. `Library` pill opens the picker filtered to this type | per option |
+| 4 CTA | One plug sentence + `Traces to: <approved claim>` chip. Blue note: *On the next step this sentence lands inside one talking point. It never gets its own card or clip.* | `Rewrite` |
+| 5 Talking points | N cards, count derived from type (`Hook + 5 points + outro = 7 clips`). Card: numbered badge, text, screenshot slot, Move control. Plug card starred — `zap` icon, `Plug rides here`, `--blue-300` border, blue badge | per card |
+| 6 Caption + hashtags | Caption (`x of 200`), 3–5 hashtag chips with `Add`, then **Merged preview**: avatar, `fieldvision.ai`, caption and tags as one string (Instagram reads tags inside the caption) | per field |
+| 7 AI review | Score dial + one card per section (bar + score + note), `Apply` / `Ignore` per suggestion, checks list | — |
 
-Hooks / captions per task, and the light and heavy week grids, are in the design source (`QUEUE`, `COPY`, `WEEK_LIGHT`, `WEEK_HEAVY`). Copy them across verbatim.
+**Screenshot + Move (step 5).** Empty is a dashed `Add screenshot` button; filled shows a 30×40 thumb and the shot name. Camera roll sheet: 3-up grid of 124px tiles with date badges, selection = 2.5px `--blue-500` outline + blue check. Move is a `--fill-quiet` pill showing the slot (`Clip 3` / `Slide 3`) and opens the slot list derived from the type (`Hook, Clip 1…Clip 5, Outro`). Clip and slide counts are never a human field.
+
+**AI review never blocks and never silently edits.** Applying turns the block green (`Applied. The section will rescore on save.`). Save is enabled at any score; overrides log the check that fired.
+
+**Slideshow variant**: same seven steps, slide slots (`Cover, Slide 1…Slide 4, Close`), slideshow copy.
 
 ---
 
-## 9. Copy rules
+## 9. Library — `app/(admin)/(tabs)/library.tsx`
 
-Sentence case. No emoji. No exclamation marks. Buttons name the outcome: Approve · Request changes · Send note to Mara · Save task · Generate 20 tasks · New task · Open Calendar · Next in queue · Run in background · Remove from calendar. Empty states name the next action. Numbers rounded in prose, exact in data.
+One tab. Quick capture pinned to the top: single field with a `plus` icon, focus ring `0 0 0 3px rgba(27,166,238,0.30)`, Save appears with text, multiline paste shows `3 ideas will be saved`. No sheet, no form, no category picker.
+
+Chips: **Ideas · Our posts · References · From creator** (active solid `--blue-500`). Our posts adds a search row plus Top/creator/type filters and sorts by performance. References show a thumb and `@handle · views`. From creator rows carry the avatar and a `Use` button.
+
+**Library picker sheet** opens from the editor, filtered to the post's type (`Filtered to numbered list videos.`), References / Our posts segmented, primary `Attach to post`. Using an item marks it used; it is never removed.
 
 ---
 
-## 10. Assumptions and gaps
+## 10. Creators — `app/(admin)/(tabs)/creators.tsx`
 
-- **ASSUMPTION** Fonts: SF Pro on device; Figtree/Nunito is the web substitute only.
-- **ASSUMPTION** Thumbnails use the quiet-fill + glyph fallback because no real 9:16 frames were supplied. Drop real frames in and keep the 3px white border + `shadow-media`.
-- **ASSUMPTION** Relative times ("4m ago") are client-formatted from `submitted_at`.
-- **ASSUMPTION** Scheduled-post strings ("Thursday 6:40pm") come from the task's scheduled slot.
-- **STOP AND ASK**: undo after inline approve · error/offline states · delete-task confirmation · push-notification copy · Trends / Brand Brain / Analytics / Settings / onboarding / auth · pagination beyond ~20 queue items · multi-week calendar range.
+List: sort chips (Earnings / Views / Posts), then a card per creator — 44px profile photo, name, `@handle`, and three stat blocks (earned / posts / views) on `--off-white`.
+
+**Profile** — Instagram-shaped: 64px photo + three stats, credential, both handles, grid/calendar toggle. Grid is 3-up 9:16 tiles with the format glyph and view count. Chat button top-right.
+
+**Post detail** — 300px media, five stat tiles (views, payout, saves, likes, comments), caption card.
+
+**Chat** — one thread per creator, shared with Review's per-post entry. Admin bubbles `--blue-500` with `16px 16px 4px 16px`, creator bubbles `--fill-quiet`. A message can carry a post reference: a nested translucent block with a 34×46 thumb, title and meta. Composer is a pill field + 44px blue send button.
+
+---
+
+## 11. Analytics and settings — `app/(admin)/(tabs)/analytics.tsx`
+
+`Segmented` Views / Revenue / Sales. Headline `700 34px` display + range label + green delta pill. One chart: posting activity as `--blue-200` bars and the metric as a `#1BA6EE` 2.5px line with a 22%→0 area gradient, one axis, last point dotted. Range control 7 / 30 / 90 days. Legend names both series. Then **Per creator** rows (photo, posts · views, revenue) and **Best hooks** (rank bubble, hook, views). Gear opens Settings. No dashboard bloat.
+
+**Settings** — Roster list with Invite, then Company rows: Account template, Brand Brain (`4 docs`), Features (`3 approved`), Publish time (`Sun 8PM EST`). Sign out is a danger row.
+
+**Brand Brain** — the doctrine the generator writes against: four docs (Product / Audience / Voice / Learnings) with word counts and last-updated, editing state with a `Clean up` AI action, source accounts as chips, saved search terms with use counts.
+
+**Features** — approved claims the plug must trace to. Approved cards with a green check and an edit pencil; rejected cards quiet with a red `x` and a "do not claim" line. `Add a claim` opens a sheet with name, body and an Approved / Rejected toggle.
+
+---
+
+## 12. Rules the UI enforces
+
+1. Nothing generates when the post editor opens. Every AI action is a tap.
+2. Order of truth: type (stamped) → claim → search phrase → talking points → hook last → caption and hashtags.
+3. Kill rather than pad — an empty slot with a reason is a valid row.
+4. Clip and slide count is derived from the type, never entered.
+5. Every post plugs FieldVision inside exactly one talking point.
+6. AI review never blocks and never silently edits.
+7. Approve is the last human touch: editing, posting and tracking are automatic afterwards.
+8. Reject a single clip and only that clip comes back.
+9. One week at a time — a new week cannot start until the current one is published.
+
+---
+
+## 13. Files in the kit
+
+`ui_kits/admin-app/` — `AdminShared.jsx` (scaffold, chips, sheet, score dial, media) · `ReviewScreen.jsx` · `ReviewDetailScreen.jsx` · `ApprovalScreens.jsx` · `BriefsScreen.jsx` · `WeekSetupScreen.jsx` · `PostEditorScreen.jsx` (shell + steps 1–4) · `PostEditorSteps.jsx` (steps 5–7) · `EditorSheets.jsx` · `LibraryScreen.jsx` · `CreatorsScreens.jsx` · `AnalyticsScreens.jsx` · `admin-data.js` (all FieldVision copy).
+
+`index.html` is the clickable app. `all-screens.html` is every screen and state. `shots.html` is the handoff sheet the screenshots come from.

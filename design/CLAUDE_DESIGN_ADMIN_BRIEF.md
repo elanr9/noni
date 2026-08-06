@@ -102,22 +102,19 @@ Pool not lock — types remain editable later; grid header shows drift.
 
 Full week grid polish: type chips, kill_reason empty slots, live split header, publish CTA.
 
-### 4.8 Post editor — `app/(admin)/post/[id].tsx` + `components/admin/editor/`
+### 4.8 Post editor — stepped wizard — `app/(admin)/post/[id].tsx`
 
-Authoring workhorse. Fields:
+**Not a long form.** One field group per screen, progress dots, Back / Next / Save progress. Post type is locked (no type picker). No “why this works.”
 
-- Hook (≤9 words) from 8–10 generated options, best first
-- Talking points (count from post type) — spoken only; plug inside one point
-- CTA / plug (traceable to approved product feature)
-- Caption (<200 chars excl. hashtags), hashtags 3–5
-- Example URL from Library
-- **Segments** (render manifest): hook / point / outro / slide — overlay_text, show_on_screen, screenshot_url
+1. Title (+ optional Fill with AI)
+2. Search phrase (+ Regenerate)
+3. Hook — multiple choice options **or Other** (free write)
+4. CTA / plug sentence
+5. Talking points — N cards; CTA card marked ★; tap card → camera roll screenshot; Move chooses which clip it pops up on
+6. Caption + hashtags together (merged preview for Instagram)
+7. AI review — scores + suggestions → Save post (complete)
 
-AI assist per field + fill-whole-post. Nothing auto-generates on open.
-
-**AI Review step** (in editor, not background): overall + per-section scores (hook, points, CTA), accept/edit/ignore suggestions, confirm → complete. Never blocks; never silently edits.
-
-Type picker, Fill sheet, Review sheet, Segments section, Hook options, Points editor — all need visual polish as one coherent editor, not a form dump.
+Halfway posts stay `partial` via Save progress.
 
 ### 4.9 Calendar view — `app/(admin)/(tabs)/calendar.tsx` + `CalendarView` / `DayDetailSheet`
 

@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import type { TalkingPoint } from '../../../lib/briefs-api';
@@ -20,6 +20,12 @@ export function PointsEditor(props: {
   onChange: (points: TalkingPoint[]) => void;
   onRegenerateAll: () => void;
   onRegeneratePoint: (index: number) => void;
+  /** Signed URL for a screenshot attached to this point's segment, if any. */
+  screenshotUrlForIndex?: (index: number) => string | undefined;
+  screenshotBusyIndex?: number | null;
+  onAttachScreenshot?: (index: number) => void;
+  onMoveScreenshot?: (index: number) => void;
+  onRemoveScreenshot?: (index: number) => void;
 }): JSX.Element {
   const {
     points,
@@ -30,6 +36,11 @@ export function PointsEditor(props: {
     onChange,
     onRegenerateAll,
     onRegeneratePoint,
+    screenshotUrlForIndex,
+    screenshotBusyIndex,
+    onAttachScreenshot,
+    onMoveScreenshot,
+    onRemoveScreenshot,
   } = props;
 
   function updatePoint(id: string, text: string) {
@@ -92,6 +103,8 @@ export function PointsEditor(props: {
       ) : null}
       {points.map((point, i) => {
         const busy = busyIndex === i;
+        const shotBusy = screenshotBusyIndex === i;
+        const shotUrl = screenshotUrlForIndex?.(i);
         return (
           <View
             key={point.id}
@@ -100,8 +113,8 @@ export function PointsEditor(props: {
             <View style={styles.pointHead}>
               <Text style={styles.pointIndex}>{i + 1}</Text>
               {point.is_product ? (
-                <View style={styles.fvTag}>
-                  <Text style={styles.fvTagText}>FV</Text>
+                <View style={styles.starTag}>
+                  <Text style={styles.starText}>★ CTA</Text>
                 </View>
               ) : (
                 <PressableScale
@@ -109,7 +122,7 @@ export function PointsEditor(props: {
                   onPress={() => markProduct(point.id)}
                   style={styles.fvGhost}
                 >
-                  <Text style={styles.fvGhostText}>FV</Text>
+                  <Text style={styles.fvGhostText}>Mark CTA</Text>
                 </PressableScale>
               )}
               <View style={styles.pointTools}>
@@ -157,6 +170,43 @@ export function PointsEditor(props: {
               placeholderTextColor={color.slate400}
               style={styles.pointInput}
             />
+            {onAttachScreenshot ? (
+              <View style={styles.shotBlock}>
+                {shotUrl ? (
+                  <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
+                ) : null}
+                <View style={styles.shotActions}>
+                  <Button
+                    size="sm"
+                    variant="tint"
+                    disabled={shotBusy}
+                    onPress={() => onAttachScreenshot(i)}
+                  >
+                    {shotBusy ? '…' : shotUrl ? 'Replace screenshot' : 'Attach screenshot'}
+                  </Button>
+                  {shotUrl && onMoveScreenshot ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={shotBusy}
+                      onPress={() => onMoveScreenshot(i)}
+                    >
+                      Move
+                    </Button>
+                  ) : null}
+                  {shotUrl && onRemoveScreenshot ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={shotBusy}
+                      onPress={() => onRemoveScreenshot(i)}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
           </View>
         );
       })}
@@ -209,13 +259,13 @@ const styles = StyleSheet.create({
     color: color.slate400,
     width: 18,
   },
-  fvTag: {
+  starTag: {
     paddingVertical: 3,
     paddingHorizontal: 8,
     borderRadius: radius.pill,
     backgroundColor: color.blue700,
   },
-  fvTagText: {
+  starText: {
     fontSize: type.size.micro,
     fontWeight: '800',
     color: color.white,
@@ -232,6 +282,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: color.slate400,
   },
+  shotBlock: { gap: 8, marginTop: 4 },
+  shotThumb: {
+    width: '100%',
+    height: 140,
+    borderRadius: radius.sm,
+    backgroundColor: color.fillQuiet,
+  },
+  shotActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   pointTools: {
     flexDirection: 'row',
     gap: 4,

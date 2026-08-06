@@ -69,7 +69,7 @@ export function toPostTypeShape(row: PostTypeRow): PostTypeShape {
 const JSON_CONTRACT =
   '{"claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
 
-const KILL_RULE = `KILL RATHER THAN PAD: if any required field cannot be filled with something concrete and true — no approved claim fits a required plug, the topic cannot support the point range, the search phrase would have to be invented — answer with exactly {"kill_reason": string}, one sentence naming what was missing, and nothing else. An empty slot with a reason beats a padded post.`;
+const KILL_RULE = `KILL ONLY AS LAST RESORT: almost never kill. If the topic is thin, still write the best concrete brief you can from product truth and audience. Do NOT kill because the topic is a competitor, a comparison, or feels awkward for a plug — pick the closest approved claim and angle the plug as what to do instead. Only answer {"kill_reason": string} if the search phrase is empty or pure gibberish with zero usable topic.`;
 
 const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, background claim, or playing history into the hook or any talking point. "As a former D1 player, here are five tips" is forbidden. One brief serves the whole roster; each creator's credential renders at record time from their profile, so a written one doubles up. The hook starts at the content.`;
 
@@ -87,7 +87,7 @@ function plugRule(requiresPlug: boolean): string {
   if (!requiresPlug) {
     return `PLUG: this type takes NO plug and NO credential. claim_id null, cta null, is_product false on every point. Do not mention the product.`;
   }
-  return `CLAIM AND PLUG (settle this first): pick the one approved claim from the message that fits this topic best and put its id in the top-level claim_id. The plug is ONE sentence composed from that claim — mechanism, not benefit: "writes and sends the emails and follows up", never "streamlines your outreach". Put that exact sentence in cta AND inside exactly one talking point, riding with that point's advice (set is_product true and claim_id on that point). Never the first point, never the last, never a standalone plug point — a standalone plug beat is what makes a post read as an ad. You phrase, you do not invent capability. If no approved claim fits the topic, kill.`;
+  return `CLAIM AND PLUG (settle this first): pick the one approved claim from the message that fits this topic best (or the closest useful one) and put its id in the top-level claim_id. Competitor or comparison topics still get a plug — angle it as the practical next step using a real approved capability (emails, school list, film, price), never invent competitor facts or fake positioning. The plug is ONE sentence composed from that claim — mechanism, not benefit: "writes and sends the emails and follows up", never "streamlines your outreach". Put that exact sentence in cta AND inside exactly one talking point, riding with that point's advice (set is_product true and claim_id on that point). Never the first point, never the last, never a standalone plug point.`;
 }
 
 function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | 'photo_carousel'): string {
@@ -117,6 +117,48 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
     lines.push(
       `REPLAY BAIT: one 6 to 9 second clip carrying on-screen text that takes slightly longer to read than the clip runs, so the viewer loops it. The hook options are candidates for that on-screen text. The single talking point says what the creator does on camera during the clip.`,
     );
+  }
+  // Title shape is type-native. Search phrase anchors discovery; title is
+  // what the admin scans in the grid and must read as that format.
+  switch (postType.key) {
+    case 'numbered_list':
+    case 'numbered_tips':
+      lines.push(
+        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic — e.g. "5 tips for a perfect highlight video", "8 things I wish I knew about college recruiting", "7 mistakes killing your film". Never paste the search phrase as the title.`,
+      );
+      break;
+    case 'talking_head':
+      lines.push(
+        `TITLE SHAPE: first-person or direct address story beat, e.g. "How I got my first D1 offer", "What coaches actually reply to". Not a numbered list title.`,
+      );
+      break;
+    case 'explainer':
+      lines.push(
+        `TITLE SHAPE: why/how explainer, e.g. "Why coaches skip your email", "How NCSA actually works". Clear and specific.`,
+      );
+      break;
+    case 'contrast':
+      lines.push(
+        `TITLE SHAPE: two sides with "vs" or clear opposition, e.g. "D1 commit vs D3 commit", "10 offers vs 0 offers".`,
+      );
+      break;
+    case 'replay_bait':
+      lines.push(
+        `TITLE SHAPE: short loop provocation matching the on-screen text vibe, under 8 words.`,
+      );
+      break;
+    case 'how_to':
+      lines.push(
+        `TITLE SHAPE: how-to frame, e.g. "How to email college coaches", "How to build a highlight reel".`,
+      );
+      break;
+    case 'getting_started':
+      lines.push(
+        `TITLE SHAPE: beginner start frame, e.g. "Start recruiting with zero offers", "First steps to get on a coach radar".`,
+      );
+      break;
+    default:
+      break;
   }
   if (postType.family === 'photo_carousel') {
     lines.push(
@@ -151,7 +193,7 @@ export function buildBriefSystem(
     CREDENTIAL_RULE,
     SECOND_PERSON_RULE,
     HOOK_RULES,
-    `TITLE: a short punchy brief name a creator scans in a feed, under 8 words.`,
+    `TITLE: the admin-facing name of THIS post format — never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs). Other types follow TITLE SHAPE above. Keep it under 12 words.`,
     CAPTION_RULES,
     `WHY IT WORKS: one punchy sentence a content strategist would say about why this concept performs.`,
     bannedPhrases.length
@@ -253,7 +295,7 @@ export function brandDocBlocks(brand: BrandContext): string[] {
       ? `Approved claims (the ONLY source for the plug; reference by id):\n${brand.approvedClaims
           .map((c) => `- id ${c.id}: ${c.claim} (${c.what_it_does})`)
           .join('\n')}`
-      : 'Approved claims: none exist yet. Any brief whose type requires a plug must be killed.',
+      : 'Approved claims: none exist yet. Write the brief without a product plug (cta null, is_product false).',
   );
   docBlocks.push(
     brand.hashtagBank.length
@@ -321,9 +363,28 @@ export function sortHooks(raw: RawHook[] | undefined): string[] {
     .map((h) => h.text);
 }
 
+function numberedListTitle(
+  title: string,
+  searchPhrase: string | null,
+  pointCount: number,
+): string {
+  const trimmed = title.trim();
+  const phrase = (searchPhrase ?? '').trim().toLowerCase();
+  const startsWithCount = new RegExp(`^${pointCount}\\b`).test(trimmed);
+  const isPhraseCopy =
+    Boolean(phrase) && trimmed.toLowerCase() === phrase;
+  if (startsWithCount && !isPhraseCopy) return trimmed;
+  const topic = (searchPhrase ?? 'college recruiting')
+    .replace(/^(is|are|does|do|how|why|what|when|should)\s+/i, '')
+    .replace(/\?+$/g, '')
+    .trim();
+  return `${pointCount} things to know about ${topic}`;
+}
+
 export function normalizeGenerated(
   raw: RawGenerated,
   format: 'video' | 'photo_carousel',
+  postTypeKey?: string | null,
 ): GenOutcome {
   if (typeof raw.kill_reason === 'string' && raw.kill_reason.trim()) {
     return { kill_reason: raw.kill_reason.trim() };
@@ -341,13 +402,19 @@ export function normalizeGenerated(
       ? p.overlay_label.trim()
       : null,
   );
+  const pointCount =
+    typeof raw.point_count === 'number' ? raw.point_count : points.length;
+  const searchPhrase = raw.search_phrase?.trim() || null;
+  let title = raw.title ?? '';
+  if (postTypeKey === 'numbered_list' || postTypeKey === 'numbered_tips') {
+    title = numberedListTitle(title, searchPhrase, pointCount);
+  }
   return {
     draft: {
-      title: raw.title ?? '',
-      search_phrase: raw.search_phrase?.trim() || null,
+      title,
+      search_phrase: searchPhrase,
       format,
-      point_count:
-        typeof raw.point_count === 'number' ? raw.point_count : points.length,
+      point_count: pointCount,
       target_words: typeof raw.target_words === 'number' ? raw.target_words : 380,
       hook_options: sortHooks(raw.hook_options),
       talking_points: points,

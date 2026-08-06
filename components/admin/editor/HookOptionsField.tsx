@@ -18,9 +18,25 @@ export function HookOptionsField(props: {
   onChoose: (index: number) => void;
   onChangeOption: (index: number, text: string) => void;
   onRegenerate: () => void;
+  /** When true, the free-write "Other" option is selected. */
+  useCustom?: boolean;
+  customText?: string;
+  onChooseCustom?: () => void;
+  onChangeCustom?: (text: string) => void;
 }): JSX.Element {
-  const { options, chosenIndex, stale, busy, onChoose, onChangeOption, onRegenerate } =
-    props;
+  const {
+    options,
+    chosenIndex,
+    stale,
+    busy,
+    onChoose,
+    onChangeOption,
+    onRegenerate,
+    useCustom = false,
+    customText = '',
+    onChooseCustom,
+    onChangeCustom,
+  } = props;
 
   return (
     <View style={styles.section}>
@@ -43,7 +59,7 @@ export function HookOptionsField(props: {
         </Text>
       ) : null}
       {options.map((option, i) => {
-        const selected = chosenIndex === i;
+        const selected = !useCustom && chosenIndex === i;
         return (
           <View key={`hook-${i}`} style={styles.row}>
             <PressableScale
@@ -65,6 +81,29 @@ export function HookOptionsField(props: {
           </View>
         );
       })}
+      {onChooseCustom && onChangeCustom ? (
+        <View style={styles.row}>
+          <PressableScale
+            accessibilityRole="radio"
+            accessibilityState={{ selected: useCustom }}
+            onPress={onChooseCustom}
+            style={[styles.radio, useCustom && styles.radioOn]}
+          >
+            <Text style={[styles.radioText, useCustom && styles.radioTextOn]}>
+              +
+            </Text>
+          </PressableScale>
+          <TextInput
+            multiline
+            value={customText}
+            onChangeText={onChangeCustom}
+            onFocus={onChooseCustom}
+            placeholder="Other — write your own"
+            placeholderTextColor={color.slate400}
+            style={[styles.field, useCustom && styles.fieldOn]}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }

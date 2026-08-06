@@ -568,6 +568,35 @@ export async function createWeek(params: {
   typeSplit: Record<string, number>;
   postTypes: PostType[];
 }): Promise<Campaign> {
+  // Drop empty leftover drafts so Start week never stacks two cards on the
+  // same Sunday (happened when an old campaign had no stamped posts).
+  const { data: draftCamps, error: draftError } = await supabase
+    .from('campaigns')
+    .select('id')
+    .eq('company_id', params.companyId)
+    .eq('status', 'draft');
+  if (draftError) throw draftError;
+  for (const draft of draftCamps ?? []) {
+    const { data: stamped, error: stampedError } = await supabase
+      .from('campaign_briefs')
+      .select('brief_id, briefs!inner(post_type_id)')
+      .eq('campaign_id', draft.id)
+      .not('briefs.post_type_id', 'is', null)
+      .limit(1);
+    if (stampedError) throw stampedError;
+    if ((stamped ?? []).length > 0) continue;
+    const { error: unlinkError } = await supabase
+      .from('campaign_briefs')
+      .delete()
+      .eq('campaign_id', draft.id);
+    if (unlinkError) throw unlinkError;
+    const { error: deleteError } = await supabase
+      .from('campaigns')
+      .delete()
+      .eq('id', draft.id);
+    if (deleteError) throw deleteError;
+  }
+
   const since = new Date(
     new Date(`${params.dropDate}T00:00:00`).getTime() - 28 * 86400000,
   )
@@ -674,7 +703,25 @@ export async function listCampaigns(): Promise<Campaign[]> {
     .order('drop_date', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  const all = data ?? [];
+  if (all.length === 0) return [];
+  // Hide leftover drafts that never got week-setup stamps (same drop date
+  // doubles that look like two Week cards).
+  const { data: stampedLinks, error: stampedError } = await supabase
+    .from('campaign_briefs')
+    .select('campaign_id, briefs!inner(post_type_id)')
+    .in(
+      'campaign_id',
+      all.map((c) => c.id),
+    )
+    .not('briefs.post_type_id', 'is', null);
+  if (stampedError) throw stampedError;
+  const stampedIds = new Set(
+    (stampedLinks ?? []).map((row) => row.campaign_id as string),
+  );
+  return all.filter(
+    (c) => c.status === 'published' || stampedIds.has(c.id),
+  );
 }
 
 export async function getCampaign(id: string): Promise<Campaign | null> {

@@ -1,29 +1,22 @@
-// The post editor. Nothing generates when it opens — AI assist is on
-// demand only, per field via brief-assist or fill-whole-post via
-// ingest-brief. Overlay fields live on brief_segments, not talking points.
+// Stepped post editor. Post type is locked from week setup. Nothing
+// generates on open — AI assist is on demand. Screenshots live on
+// brief_segments keyed by talking_point_index.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
-import {
-  LibraryPickerSheet,
-  type LibraryPick,
-} from '../../../components/admin/LibraryPickerSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
-import { SegmentsSection } from '../../../components/admin/editor/SegmentsSection';
-import { TypePicker } from '../../../components/admin/editor/TypePicker';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
@@ -62,6 +55,27 @@ import { color, radius, ringFocus, type } from '../../../theme/tokens';
 const CAPTION_MAX = 200;
 const HOOK_MAX_WORDS = 9;
 
+const STEPS = [
+  'title',
+  'search',
+  'hook',
+  'cta',
+  'points',
+  'caption',
+  'review',
+] as const;
+type EditorStep = (typeof STEPS)[number];
+
+const STEP_TITLES: Record<EditorStep, string> = {
+  title: 'Title',
+  search: 'Search phrase',
+  hook: 'Hook',
+  cta: 'CTA',
+  points: 'Talking points',
+  caption: 'Caption',
+  review: 'AI review',
+};
+
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -91,7 +105,9 @@ function deriveSnapshot(params: {
 export default function PostEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuth();
+  const router = useRouter();
 
+  const [step, setStep] = useState<EditorStep>('title');
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
@@ -103,6 +119,8 @@ export default function PostEditorScreen() {
   const [postTypeId, setPostTypeId] = useState<string | null>(null);
   const [hookOptions, setHookOptions] = useState<string[]>([]);
   const [chosenHookIndex, setChosenHookIndex] = useState(0);
+  const [useCustomHook, setUseCustomHook] = useState(false);
+  const [customHook, setCustomHook] = useState('');
   const [points, setPoints] = useState<TalkingPoint[]>([]);
   const [cta, setCta] = useState('');
   const [searchPhrase, setSearchPhrase] = useState('');
@@ -133,13 +151,12 @@ export default function PostEditorScreen() {
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
 
   const [fillVisible, setFillVisible] = useState(false);
-  const [libraryVisible, setLibraryVisible] = useState(false);
   const [filling, setFilling] = useState(false);
   const [regenBusy, setRegenBusy] = useState<RegenField | null>(null);
   const [regenPointIndex, setRegenPointIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
-  const [segBusy, setSegBusy] = useState<string | null>(null);
+  const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
 
   const currentType = useMemo(
@@ -186,7 +203,15 @@ export default function PostEditorScreen() {
         setTitle(brief.title);
         setPostTypeId(brief.post_type_id);
         setHookOptions(options);
-        setChosenHookIndex(chosen >= 0 ? chosen : 0);
+        if (brief.hook && chosen < 0) {
+          setUseCustomHook(true);
+          setCustomHook(brief.hook);
+          setChosenHookIndex(0);
+        } else {
+          setUseCustomHook(false);
+          setCustomHook('');
+          setChosenHookIndex(chosen >= 0 ? chosen : 0);
+        }
         setPoints(briefPoints);
         setCta(brief.cta ?? '');
         setSearchPhrase(brief.search_phrase ?? '');
@@ -339,24 +364,50 @@ export default function PostEditorScreen() {
     }
   }
 
+  function resolvedHook(): string | null {
+    if (useCustomHook) return customHook.trim() || null;
+    return hookOptions[chosenHookIndex]?.trim() || null;
+  }
+
+  function mergedCaption(): string {
+    const body = caption.replace(/#\w+/g, ' ').replace(/\s+/g, ' ').trim();
+    const tags = hashtags
+      .map((t) => (t.startsWith('#') ? t : `#${t}`))
+      .join(' ');
+    return [body, tags].filter(Boolean).join('\n\n');
+  }
+
+  function segmentForPointIndex(index: number): BriefSegment | undefined {
+    return segments.find(
+      (s) =>
+        (s.kind === 'point' || s.kind === 'slide') &&
+        s.talking_point_index === index,
+    );
+  }
+
   async function save(): Promise<boolean> {
     if (!id) return false;
     setSaving(true);
     try {
-      const chosenHook = hookOptions[chosenHookIndex]?.trim() || null;
+      const chosenHook = resolvedHook();
+      const optionsToStore = useCustomHook
+        ? [...hookOptions.filter((h) => h.trim()), customHook.trim()].filter(
+            Boolean,
+          )
+        : hookOptions;
       await updateBrief(id, {
         title: title.trim() || searchPhrase.trim() || 'Untitled post',
         format:
           currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video',
         hook: chosenHook,
-        hook_options: hookOptions,
+        hook_options: optionsToStore,
         talking_points: points,
         hashtags,
         search_phrase: searchPhrase.trim() || null,
         point_count: points.length,
         target_words: targetWords,
         script,
-        caption: caption || null,
+        caption: mergedCaption() || null,
         why_it_works: whyItWorks || null,
         cta: cta.trim() || null,
         post_type_id: postTypeId,
@@ -395,9 +446,9 @@ export default function PostEditorScreen() {
 
   function takeReviewSnapshot(): ReviewSnapshot {
     return {
-      hook: hookOptions[chosenHookIndex] ?? '',
+      hook: resolvedHook() ?? '',
       cta,
-      caption,
+      caption: mergedCaption(),
       searchPhrase,
       points: points.map((p) => ({
         id: p.id,
@@ -416,9 +467,15 @@ export default function PostEditorScreen() {
     setReviewRunning(true);
     try {
       const result = await reviewBrief({
-        draft: buildRegenPayload(),
+        draft: {
+          ...buildRegenPayload(),
+          caption: mergedCaption(),
+          hook_options: useCustomHook
+            ? [customHook.trim(), ...hookOptions].filter(Boolean)
+            : hookOptions,
+        },
         postTypeKey: currentType?.key,
-        hookIndex: chosenHookIndex,
+        hookIndex: useCustomHook ? 0 : chosenHookIndex,
       });
       setReviewResult(result);
     } catch (e) {
@@ -438,9 +495,13 @@ export default function PostEditorScreen() {
     const replacement = suggestion.replacement;
     switch (suggestion.field) {
       case 'hook':
-        setHookOptions((prev) =>
-          prev.map((h, i) => (i === chosenHookIndex ? replacement : h)),
-        );
+        if (useCustomHook) {
+          setCustomHook(replacement);
+        } else {
+          setHookOptions((prev) =>
+            prev.map((h, i) => (i === chosenHookIndex ? replacement : h)),
+          );
+        }
         break;
       case 'talking_point': {
         const index = suggestion.index ?? -1;
@@ -493,7 +554,8 @@ export default function PostEditorScreen() {
 
       // Edit diffs: what changed between opening review and confirming.
       const snapshot = reviewSnapshot;
-      const hookNow = hookOptions[chosenHookIndex] ?? '';
+      const hookNow = resolvedHook() ?? '';
+      const captionNow = mergedCaption();
       const fieldDiffs: Array<{ field: string; before: string | null; after: string | null }> = [];
       if (snapshot.hook !== hookNow) {
         fieldDiffs.push({ field: 'hook', before: snapshot.hook || null, after: hookNow || null });
@@ -501,8 +563,12 @@ export default function PostEditorScreen() {
       if (snapshot.cta !== cta) {
         fieldDiffs.push({ field: 'cta', before: snapshot.cta || null, after: cta || null });
       }
-      if (snapshot.caption !== caption) {
-        fieldDiffs.push({ field: 'caption', before: snapshot.caption || null, after: caption || null });
+      if (snapshot.caption !== captionNow) {
+        fieldDiffs.push({
+          field: 'caption',
+          before: snapshot.caption || null,
+          after: captionNow || null,
+        });
       }
       if (snapshot.searchPhrase !== searchPhrase) {
         fieldDiffs.push({
@@ -555,6 +621,7 @@ export default function PostEditorScreen() {
       await appendBannedPhrases(profile.company_id, bannedPhrases);
       setReviewedAt(new Date().toISOString());
       setReviewVisible(false);
+      router.back();
     } catch (e) {
       Alert.alert(
         'Could not confirm',
@@ -565,14 +632,46 @@ export default function PostEditorScreen() {
     }
   }
 
-  async function attachScreenshot(segment: BriefSegment) {
+  async function ensureSegmentsDerived(): Promise<BriefSegment[]> {
+    const ok = await save();
+    if (!ok || !id) return [];
+    if (segments.length > 0) return segments;
+    if (!postTypeId) return [];
+    try {
+      const rows = await assistDeriveSegments(id);
+      setSegments(rows);
+      refreshScreenshotUrls(rows);
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  async function attachScreenshotToPoint(pointIndex: number) {
     if (!profile || !id) return;
+    const rows = await ensureSegmentsDerived();
+    if (rows.length === 0) {
+      Alert.alert('Save first', 'Could not prepare clips for screenshots.');
+      return;
+    }
+    const segment =
+      rows.find(
+        (s) =>
+          (s.kind === 'point' || s.kind === 'slide') &&
+          s.talking_point_index === pointIndex,
+      ) ??
+      rows.find((s) => s.kind === 'hook') ??
+      rows[0];
+    if (!segment) {
+      Alert.alert('No clip yet', 'Save the post so clips exist, then attach.');
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
     });
     if (result.canceled || !result.assets[0]) return;
-    setSegBusy(segment.id);
+    setShotBusyIndex(pointIndex);
     try {
       const path = await uploadSegmentScreenshot({
         companyId: profile.company_id,
@@ -592,12 +691,14 @@ export default function PostEditorScreen() {
         e instanceof Error ? e.message : 'Try again',
       );
     } finally {
-      setSegBusy(null);
+      setShotBusyIndex(null);
     }
   }
 
-  async function removeScreenshot(segment: BriefSegment) {
-    setSegBusy(segment.id);
+  async function removeScreenshotFromPoint(pointIndex: number) {
+    const segment = segmentForPointIndex(pointIndex);
+    if (!segment?.screenshot_url) return;
+    setShotBusyIndex(pointIndex);
     try {
       await updateBriefSegment(segment.id, { screenshot_url: null });
       setSegments((prev) =>
@@ -611,50 +712,67 @@ export default function PostEditorScreen() {
         e instanceof Error ? e.message : 'Try again',
       );
     } finally {
-      setSegBusy(null);
+      setShotBusyIndex(null);
     }
   }
 
-  async function toggleShow(segment: BriefSegment, value: boolean) {
-    setSegments((prev) =>
-      prev.map((s) => (s.id === segment.id ? { ...s, show_on_screen: value } : s)),
-    );
-    try {
-      await updateBriefSegment(segment.id, { show_on_screen: value });
-    } catch {
-      setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segment.id ? { ...s, show_on_screen: !value } : s,
-        ),
-      );
-    }
-  }
-
-  async function saveOverlayText(segment: BriefSegment, text: string) {
-    try {
-      await updateBriefSegment(segment.id, { overlay_text: text.trim() || null });
-      setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segment.id ? { ...s, overlay_text: text.trim() || null } : s,
-        ),
-      );
-    } catch (e) {
-      Alert.alert(
-        'Could not save overlay',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    }
-  }
-
-  function handleLibraryPick(pick: LibraryPick) {
-    setLibraryVisible(false);
-    if (pick.kind === 'example') {
-      setExampleUrl(pick.url);
+  function moveScreenshotFromPoint(pointIndex: number) {
+    const from = segmentForPointIndex(pointIndex);
+    if (!from?.screenshot_url) return;
+    const targets = segments.filter((s) => s.id !== from.id);
+    if (targets.length === 0) {
+      Alert.alert('Nowhere to move', 'Only one clip exists on this post.');
       return;
     }
-    // The picker marked the item used already; feed the text straight to
-    // the whole-post fill as the query.
-    void fillFrom({ query: pick.text });
+    Alert.alert(
+      'Show screenshot on',
+      'Pick which clip or slide this screenshot pops up on.',
+      [
+        ...targets.map((target) => ({
+          text:
+            target.kind === 'hook'
+              ? 'Hook'
+              : target.kind === 'outro'
+                ? 'Outro'
+                : target.kind === 'slide'
+                  ? `Slide ${(target.talking_point_index ?? 0) + 1}`
+                  : `Point ${(target.talking_point_index ?? 0) + 1}`,
+          onPress: () => {
+            void (async () => {
+              setShotBusyIndex(pointIndex);
+              try {
+                const path = from.screenshot_url;
+                await updateBriefSegment(from.id, { screenshot_url: null });
+                await updateBriefSegment(target.id, { screenshot_url: path });
+                setSegments((prev) =>
+                  prev.map((s) => {
+                    if (s.id === from.id) return { ...s, screenshot_url: null };
+                    if (s.id === target.id) return { ...s, screenshot_url: path };
+                    return s;
+                  }),
+                );
+                if (path) {
+                  setScreenshotUrls((prev) => {
+                    const next = { ...prev };
+                    delete next[from.id];
+                    if (prev[from.id]) next[target.id] = prev[from.id];
+                    return next;
+                  });
+                }
+              } catch (e) {
+                Alert.alert(
+                  'Could not move',
+                  e instanceof Error ? e.message : 'Try again',
+                );
+              } finally {
+                setShotBusyIndex(null);
+              }
+            })();
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
   }
 
   function toggleHashtag(tag: string) {
@@ -663,6 +781,48 @@ export default function PostEditorScreen() {
       if (prev.length >= 5) return prev;
       return [...prev, tag];
     });
+  }
+
+  function stepIndex(s: EditorStep): number {
+    return STEPS.indexOf(s);
+  }
+
+  async function goNext() {
+    const idx = stepIndex(step);
+    if (step === 'cta' && cta.trim() && points.length > 0 && !points.some((p) => p.is_product)) {
+      setPoints((prev) =>
+        prev.map((p, i) => ({ ...p, is_product: i === 0 })),
+      );
+    }
+    if (step === 'points') {
+      await ensureSegmentsDerived();
+    }
+    if (step === 'caption') {
+      await save();
+      setStep('review');
+      void runReview();
+      return;
+    }
+    if (idx < STEPS.length - 1) {
+      setStep(STEPS[idx + 1]);
+    }
+  }
+
+  function goBack() {
+    const idx = stepIndex(step);
+    if (idx <= 0) {
+      router.back();
+      return;
+    }
+    if (step === 'review') setReviewVisible(false);
+    setStep(STEPS[idx - 1]);
+  }
+
+  async function saveProgress() {
+    const ok = await save();
+    if (ok) {
+      Alert.alert('Progress saved', 'You can leave and finish this post later.');
+    }
   }
 
   if (!loaded) {
@@ -680,30 +840,45 @@ export default function PostEditorScreen() {
     );
   }
 
-  const chosenHook = hookOptions[chosenHookIndex] ?? '';
+  const chosenHook = resolvedHook() ?? '';
   const hookTooLong = wordCount(chosenHook) > HOOK_MAX_WORDS;
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
-  const isCarousel = currentType?.family === 'photo_carousel';
+  const captionBody = caption.replace(/#\w+/g, ' ').replace(/\s+/g, ' ').trim();
+  const currentStepIndex = stepIndex(step);
+  const typeLabel = currentType?.label ?? 'Post';
 
   return (
-    <>
+    <View style={styles.screen}>
       <ScrollView
-        style={styles.screen}
+        style={styles.flex}
         contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {killReason ? (
+        <View style={styles.progressRow}>
+          {STEPS.map((s, i) => (
+            <View
+              key={s}
+              style={[
+                styles.progressDot,
+                i <= currentStepIndex && styles.progressDotOn,
+              ]}
+            />
+          ))}
+        </View>
+        <Text style={styles.stepMeta}>
+          {currentStepIndex + 1} of {STEPS.length} · {typeLabel}
+        </Text>
+        <Text style={styles.stepTitle}>{STEP_TITLES[step]}</Text>
+
+        {killReason && step === 'title' ? (
           <View style={styles.killCard}>
             <Text style={styles.killTitle}>Generation killed this slot</Text>
             <Text style={styles.killText}>{killReason}</Text>
-            <Text style={styles.killHint}>
-              Better empty than padded. Change the phrase or the type and
-              fill again, or write it yourself.
-            </Text>
           </View>
         ) : null}
 
-        {warnings.length > 0 ? (
+        {warnings.length > 0 && step === 'title' ? (
           <View style={styles.warnCard}>
             {warnings.map((w) => (
               <Text key={w} style={styles.warnText}>
@@ -713,269 +888,278 @@ export default function PostEditorScreen() {
           </View>
         ) : null}
 
-        <View style={styles.fillRow}>
-          <Button
-            size="md"
-            variant="primary"
-            icon="sparkles"
-            block
-            disabled={filling}
-            onPress={() => setFillVisible(true)}
-          >
-            {filling ? 'Generating…' : 'Fill with AI'}
-          </Button>
-        </View>
-
-        <TypePicker
-          postTypes={postTypes}
-          selectedId={postTypeId}
-          onSelect={(t) => setPostTypeId(t.id)}
-        />
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Title</Text>
-          <View style={[styles.fieldRing, focused === 'title' && ringFocus]}>
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              onFocus={() => setFocused('title')}
-              onBlur={() => setFocused(null)}
-              style={styles.field}
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.labelRow}>
-            <Text style={styles.label}>Search phrase</Text>
-            <Button
-              size="sm"
-              variant="tint"
-              disabled={regenBusy !== null}
-              onPress={() => void regenerate('search_phrase')}
-            >
-              {regenBusy === 'search_phrase' ? 'Regenerating…' : 'Regenerate'}
-            </Button>
-          </View>
-          <View style={[styles.fieldRing, focused === 'phrase' && ringFocus]}>
-            <TextInput
-              value={searchPhrase}
-              onChangeText={setSearchPhrase}
-              onFocus={() => setFocused('phrase')}
-              onBlur={() => setFocused(null)}
-              placeholder="Search phrase this answers"
-              placeholderTextColor={color.slate400}
-              autoCapitalize="none"
-              style={styles.field}
-            />
-          </View>
-        </View>
-
-        <HookOptionsField
-          options={hookOptions}
-          chosenIndex={chosenHookIndex}
-          stale={hookStale}
-          busy={regenBusy === 'hook'}
-          onChoose={(i) => setChosenHookIndex(i)}
-          onChangeOption={(i, text) =>
-            setHookOptions((prev) => prev.map((h, j) => (j === i ? text : h)))
-          }
-          onRegenerate={() => void regenerate('hook')}
-        />
-        {hookTooLong ? (
-          <Text style={styles.inlineWarn}>
-            The chosen hook is {wordCount(chosenHook)} words. Cap is{' '}
-            {HOOK_MAX_WORDS}.
-          </Text>
-        ) : null}
-
-        <PointsEditor
-          points={points}
-          minPoints={currentType?.min_points ?? null}
-          maxPoints={currentType?.max_points ?? null}
-          busyAll={regenBusy === 'talking_points'}
-          busyIndex={regenBusy === 'talking_point' ? regenPointIndex : null}
-          onChange={setPoints}
-          onRegenerateAll={() => void regenerate('talking_points')}
-          onRegeneratePoint={(i) => void regenerate('talking_point', i)}
-        />
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Plug sentence (CTA)</Text>
-          <Text style={styles.hint}>
-            Rides inside the FV talking point as one sentence. Never its own
-            point or clip.
-          </Text>
-          <View style={[styles.fieldRing, focused === 'cta' && ringFocus]}>
-            <TextInput
-              multiline
-              value={cta}
-              onChangeText={setCta}
-              onFocus={() => setFocused('cta')}
-              onBlur={() => setFocused(null)}
-              style={[styles.field, styles.multiline]}
-            />
-          </View>
-        </View>
-
-        {isCarousel ? (
+        {step === 'title' ? (
           <View style={styles.section}>
-            <Text style={styles.label}>Slide copy</Text>
-            <View style={[styles.fieldRing, focused === 'script' && ringFocus]}>
+            <View style={styles.fillRow}>
+              <Button
+                size="md"
+                variant="tint"
+                icon="sparkles"
+                block
+                disabled={filling}
+                onPress={() => setFillVisible(true)}
+              >
+                {filling ? 'Generating…' : 'Fill with AI'}
+              </Button>
+            </View>
+            <Text style={styles.hint}>
+              What this post is about. Keep it short and concrete.
+            </Text>
+            <View style={[styles.fieldRing, focused === 'title' && ringFocus]}>
               <TextInput
-                multiline
-                value={script ?? ''}
-                onChangeText={(text) => setScript(text || null)}
-                onFocus={() => setFocused('script')}
+                value={title}
+                onChangeText={setTitle}
+                onFocus={() => setFocused('title')}
                 onBlur={() => setFocused(null)}
-                style={[styles.field, styles.scriptField]}
+                placeholder="Post title"
+                placeholderTextColor={color.slate400}
+                style={styles.field}
+                autoFocus
               />
             </View>
           </View>
         ) : null}
 
-        <View style={styles.section}>
-          <View style={styles.labelRow}>
-            <Text style={styles.label}>Caption</Text>
-            <Button
-              size="sm"
-              variant="tint"
-              disabled={regenBusy !== null}
-              onPress={() => void regenerate('caption')}
-            >
-              {regenBusy === 'caption' ? 'Regenerating…' : 'Regenerate'}
-            </Button>
+        {step === 'search' ? (
+          <View style={styles.section}>
+            <View style={styles.labelRow}>
+              <Text style={styles.hint}>TikTok search this post answers</Text>
+              <Button
+                size="sm"
+                variant="tint"
+                disabled={regenBusy !== null}
+                onPress={() => void regenerate('search_phrase')}
+              >
+                {regenBusy === 'search_phrase' ? '…' : 'Regenerate'}
+              </Button>
+            </View>
+            <View style={[styles.fieldRing, focused === 'phrase' && ringFocus]}>
+              <TextInput
+                value={searchPhrase}
+                onChangeText={setSearchPhrase}
+                onFocus={() => setFocused('phrase')}
+                onBlur={() => setFocused(null)}
+                placeholder="e.g. is NCSA worth it"
+                placeholderTextColor={color.slate400}
+                autoCapitalize="none"
+                style={styles.field}
+                autoFocus
+              />
+            </View>
           </View>
-          <View style={[styles.fieldRing, focused === 'caption' && ringFocus]}>
-            <TextInput
-              multiline
-              value={caption}
-              onChangeText={setCaption}
-              onFocus={() => setFocused('caption')}
-              onBlur={() => setFocused(null)}
-              style={[styles.field, styles.multiline]}
+        ) : null}
+
+        {step === 'hook' ? (
+          <View style={styles.section}>
+            <HookOptionsField
+              options={hookOptions}
+              chosenIndex={chosenHookIndex}
+              stale={hookStale}
+              busy={regenBusy === 'hook'}
+              onChoose={(i) => {
+                setUseCustomHook(false);
+                setChosenHookIndex(i);
+              }}
+              onChangeOption={(i, text) =>
+                setHookOptions((prev) => prev.map((h, j) => (j === i ? text : h)))
+              }
+              onRegenerate={() => void regenerate('hook')}
+              useCustom={useCustomHook}
+              customText={customHook}
+              onChooseCustom={() => setUseCustomHook(true)}
+              onChangeCustom={(text) => {
+                setUseCustomHook(true);
+                setCustomHook(text);
+              }}
             />
-          </View>
-          <Text
-            style={[
-              styles.helper,
-              caption.length > CAPTION_MAX && styles.helperDanger,
-            ]}
-          >
-            {caption.length} of {CAPTION_MAX} characters
-          </Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text
-            style={[
-              styles.label,
-              (hashtags.length < 3 || hashtags.length > 5) && styles.labelWarn,
-            ]}
-          >
-            {`Hashtags (${hashtags.length}, pick 3–5)`}
-          </Text>
-          <View style={styles.pillRow}>
-            {bankTags.map((tag) => {
-              const selected = hashtags.includes(tag);
-              return (
-                <PressableScale
-                  key={tag}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => toggleHashtag(tag)}
-                  style={[styles.pill, selected && styles.pillSelected]}
-                >
-                  <Text
-                    style={[styles.pillText, selected && styles.pillTextSelected]}
-                  >
-                    {tag}
-                  </Text>
-                </PressableScale>
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Example</Text>
-          {exampleUrl ? (
-            <PressableScale
-              accessibilityRole="link"
-              onPress={() => void Linking.openURL(exampleUrl)}
-            >
-              <Text style={styles.exampleLink} numberOfLines={1}>
-                {exampleUrl}
+            {hookTooLong ? (
+              <Text style={styles.inlineWarn}>
+                Hook is {wordCount(chosenHook)} words. Cap is {HOOK_MAX_WORDS}.
               </Text>
-            </PressableScale>
-          ) : (
-            <Text style={styles.hint}>No example attached.</Text>
-          )}
-          <Button
-            size="sm"
-            variant="tint"
-            disabled={filling}
-            onPress={() => setLibraryVisible(true)}
-          >
-            Choose from Library
-          </Button>
-        </View>
+            ) : null}
+          </View>
+        ) : null}
 
-        <View style={styles.section}>
-          <Text style={styles.label}>Why this works</Text>
-          <View style={[styles.fieldRing, focused === 'why' && ringFocus]}>
-            <TextInput
-              multiline
-              value={whyItWorks}
-              onChangeText={setWhyItWorks}
-              onFocus={() => setFocused('why')}
-              onBlur={() => setFocused(null)}
-              style={[styles.field, styles.multiline]}
+        {step === 'cta' ? (
+          <View style={styles.section}>
+            <Text style={styles.hint}>
+              The product plug sentence. It rides inside one talking point —
+              never its own card.
+            </Text>
+            <View style={[styles.fieldRing, focused === 'cta' && ringFocus]}>
+              <TextInput
+                multiline
+                value={cta}
+                onChangeText={setCta}
+                onFocus={() => setFocused('cta')}
+                onBlur={() => setFocused(null)}
+                placeholder="One sentence plug"
+                placeholderTextColor={color.slate400}
+                style={[styles.field, styles.multiline]}
+                autoFocus
+              />
+            </View>
+          </View>
+        ) : null}
+
+        {step === 'points' ? (
+          <View style={styles.section}>
+            <Text style={styles.hint}>
+              Tap a card to attach a screenshot. Move picks which clip it
+              pops up on. The CTA card is marked with a star.
+            </Text>
+            <PointsEditor
+              points={points}
+              minPoints={currentType?.min_points ?? null}
+              maxPoints={currentType?.max_points ?? null}
+              busyAll={regenBusy === 'talking_points'}
+              busyIndex={regenBusy === 'talking_point' ? regenPointIndex : null}
+              onChange={setPoints}
+              onRegenerateAll={() => void regenerate('talking_points')}
+              onRegeneratePoint={(i) => void regenerate('talking_point', i)}
+              screenshotUrlForIndex={(i) => {
+                const seg = segmentForPointIndex(i);
+                return seg?.screenshot_url
+                  ? screenshotUrls[seg.id]
+                  : undefined;
+              }}
+              screenshotBusyIndex={shotBusyIndex}
+              onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
+              onMoveScreenshot={moveScreenshotFromPoint}
+              onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
             />
           </View>
-        </View>
+        ) : null}
 
-        <SegmentsSection
-          segments={segments}
-          screenshotUrls={screenshotUrls}
-          busySegmentId={segBusy}
-          onSaveOverlayText={(s, text) => void saveOverlayText(s, text)}
-          onToggleShow={(s, value) => void toggleShow(s, value)}
-          onAttachScreenshot={(s) => void attachScreenshot(s)}
-          onRemoveScreenshot={(s) => void removeScreenshot(s)}
-        />
+        {step === 'caption' ? (
+          <View style={styles.section}>
+            <View style={styles.labelRow}>
+              <Text style={styles.hint}>Caption body</Text>
+              <Button
+                size="sm"
+                variant="tint"
+                disabled={regenBusy !== null}
+                onPress={() => void regenerate('caption')}
+              >
+                {regenBusy === 'caption' ? '…' : 'Regenerate'}
+              </Button>
+            </View>
+            <View style={[styles.fieldRing, focused === 'caption' && ringFocus]}>
+              <TextInput
+                multiline
+                value={captionBody}
+                onChangeText={setCaption}
+                onFocus={() => setFocused('caption')}
+                onBlur={() => setFocused(null)}
+                placeholder="Caption"
+                placeholderTextColor={color.slate400}
+                style={[styles.field, styles.multiline]}
+                autoFocus
+              />
+            </View>
+            <Text
+              style={[
+                styles.helper,
+                captionBody.length > CAPTION_MAX && styles.helperDanger,
+              ]}
+            >
+              {captionBody.length} of {CAPTION_MAX} characters
+            </Text>
+            <Text
+              style={[
+                styles.label,
+                (hashtags.length < 3 || hashtags.length > 5) && styles.labelWarn,
+              ]}
+            >
+              {`Hashtags (${hashtags.length}, pick 3–5)`}
+            </Text>
+            <View style={styles.pillRow}>
+              {bankTags.map((tag) => {
+                const selected = hashtags.includes(tag);
+                return (
+                  <PressableScale
+                    key={tag}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => toggleHashtag(tag)}
+                    style={[styles.pill, selected && styles.pillSelected]}
+                  >
+                    <Text
+                      style={[
+                        styles.pillText,
+                        selected && styles.pillTextSelected,
+                      ]}
+                    >
+                      {tag}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+            <Text style={styles.hint}>
+              Instagram needs hashtags in the caption. Saved merge:
+            </Text>
+            <View style={styles.previewCard}>
+              <Text style={styles.previewText}>{mergedCaption() || '—'}</Text>
+            </View>
+          </View>
+        ) : null}
 
-        <View style={styles.footerRow}>
-          <View style={styles.footerButton}>
-            <Button
-              size="lg"
-              variant="tint"
-              block
-              disabled={saving || reviewRunning || regenBusy !== null}
-              onPress={() => void runReview()}
-            >
-              {reviewedAt ? 'Review again' : 'Review'}
-            </Button>
-          </View>
-          <View style={styles.footerButton}>
-            <Button
-              size="lg"
-              variant="primary"
-              block
-              disabled={saving}
-              onPress={() => void save()}
-            >
-              {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save post'}
-            </Button>
-          </View>
-        </View>
-        {reviewedAt ? (
+        {step === 'review' ? (
+          <ReviewSheet
+            inline
+            visible
+            running={reviewRunning}
+            confirming={reviewConfirming}
+            result={reviewResult}
+            appliedIndexes={appliedIndexes}
+            onApply={applySuggestion}
+            onClose={() => setStep('caption')}
+            onConfirm={() => void confirmReview()}
+            confirmLabel="Save post"
+          />
+        ) : null}
+
+        {reviewedAt && step !== 'review' ? (
           <Text style={styles.reviewedNote}>
-            Reviewed {new Date(reviewedAt).toLocaleDateString()}. Later edits
-            keep it complete; review again if it changed a lot.
+            Reviewed {new Date(reviewedAt).toLocaleDateString()}. You can still
+            edit and review again.
           </Text>
         ) : null}
       </ScrollView>
+
+      <View style={styles.footer}>
+        <View style={styles.footerTop}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={saving}
+            onPress={() => void saveProgress()}
+          >
+            {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
+          </Button>
+        </View>
+        <View style={styles.footerRow}>
+          <View style={styles.footerButton}>
+            <Button size="lg" variant="tint" block onPress={goBack}>
+              Back
+            </Button>
+          </View>
+          {step !== 'review' ? (
+            <View style={styles.footerButton}>
+              <Button
+                size="lg"
+                variant="primary"
+                block
+                disabled={saving || filling}
+                onPress={() => void goNext()}
+              >
+                Next
+              </Button>
+            </View>
+          ) : null}
+        </View>
+      </View>
 
       <FillSheet
         visible={fillVisible}
@@ -985,31 +1169,14 @@ export default function PostEditorScreen() {
         onFillFromPhrase={() => void fillFrom({ query: searchPhrase })}
         onFillFromLink={(url, context) => void fillFrom({ url, context })}
       />
-
-      <LibraryPickerSheet
-        visible={libraryVisible}
-        postTypeId={postTypeId}
-        onClose={() => setLibraryVisible(false)}
-        onPick={handleLibraryPick}
-      />
-
-      <ReviewSheet
-        visible={reviewVisible}
-        running={reviewRunning}
-        confirming={reviewConfirming}
-        result={reviewResult}
-        appliedIndexes={appliedIndexes}
-        onApply={applySuggestion}
-        onClose={() => setReviewVisible(false)}
-        onConfirm={() => void confirmReview()}
-      />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
-  content: { padding: 20, paddingBottom: 60 },
+  flex: { flex: 1 },
+  content: { padding: 20, paddingBottom: 24 },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -1019,6 +1186,31 @@ const styles = StyleSheet.create({
   centerText: {
     fontSize: type.size.bodySm,
     color: color.slate400,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 10,
+  },
+  progressDot: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: color.lineStrong,
+  },
+  progressDotOn: { backgroundColor: color.accent },
+  stepMeta: {
+    fontSize: type.size.meta,
+    fontWeight: '700',
+    color: color.slate400,
+    marginBottom: 4,
+  },
+  stepTitle: {
+    fontSize: type.size.titleSm,
+    fontWeight: '800',
+    color: color.ink,
+    marginBottom: 16,
+    letterSpacing: type.tracking.title,
   },
   killCard: {
     gap: 6,
@@ -1036,10 +1228,6 @@ const styles = StyleSheet.create({
     fontSize: type.size.bodySm,
     color: color.ink,
   },
-  killHint: {
-    fontSize: type.size.meta,
-    color: color.slate500,
-  },
   warnCard: {
     gap: 4,
     padding: 12,
@@ -1054,12 +1242,13 @@ const styles = StyleSheet.create({
     color: color.amber,
     fontWeight: '600',
   },
-  fillRow: { marginBottom: 16 },
-  section: { gap: 8, marginBottom: 16 },
+  fillRow: { marginBottom: 12 },
+  section: { gap: 10, marginBottom: 8 },
   labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   label: {
     fontSize: type.size.label,
@@ -1072,10 +1261,9 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: type.size.meta,
     color: color.slate400,
+    lineHeight: type.size.meta * 1.4,
   },
   inlineWarn: {
-    marginTop: -10,
-    marginBottom: 16,
     fontSize: type.size.meta,
     fontWeight: '600',
     color: color.amber,
@@ -1097,14 +1285,7 @@ const styles = StyleSheet.create({
     color: color.ink,
     backgroundColor: color.white,
   },
-  multiline: { minHeight: 72, textAlignVertical: 'top' },
-  scriptField: {
-    minHeight: 140,
-    textAlignVertical: 'top',
-    fontWeight: '400',
-    lineHeight: type.size.body * type.leading.body,
-    color: color.slate500,
-  },
+  multiline: { minHeight: 96, textAlignVertical: 'top' },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: {
     paddingVertical: 10,
@@ -1119,11 +1300,28 @@ const styles = StyleSheet.create({
     color: color.slate500,
   },
   pillTextSelected: { color: color.blue700 },
-  exampleLink: {
-    fontSize: type.size.bodySm,
-    fontWeight: '600',
-    color: color.blue700,
+  previewCard: {
+    padding: 14,
+    borderRadius: radius.sm,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.lineStrong,
   },
+  previewText: {
+    fontSize: type.size.bodySm,
+    color: color.ink,
+    lineHeight: type.size.bodySm * 1.45,
+  },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.lineStrong,
+    backgroundColor: color.offWhite,
+    gap: 8,
+  },
+  footerTop: { alignItems: 'flex-start' },
   footerRow: {
     flexDirection: 'row',
     gap: 10,

@@ -199,6 +199,7 @@ async function generateOnce(
   return normalizeGenerated(
     parseClaudeJson<RawGenerated>(raw),
     postType ? postType.family : fallbackFormat,
+    postType?.key ?? null,
   );
 }
 

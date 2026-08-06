@@ -34,13 +34,26 @@ export function ReviewSheet(props: {
   onApply: (checkIndex: number) => void;
   onClose: () => void;
   onConfirm: () => void;
+  /** Render as a page section instead of a bottom sheet. */
+  inline?: boolean;
+  confirmLabel?: string;
 }): JSX.Element {
-  const { visible, running, confirming, result, appliedIndexes, onApply, onClose, onConfirm } =
-    props;
+  const {
+    visible,
+    running,
+    confirming,
+    result,
+    appliedIndexes,
+    onApply,
+    onClose,
+    onConfirm,
+    inline = false,
+    confirmLabel,
+  } = props;
   const busy = running || confirming;
 
-  return (
-    <SheetShell visible={visible} onClose={busy ? () => undefined : onClose} pinnedTop={80}>
+  const body = (
+    <>
       <Text style={styles.h2}>AI review</Text>
       {running || !result ? (
         <Text style={styles.subtitle}>Reading the post…</Text>
@@ -140,15 +153,29 @@ export function ReviewSheet(props: {
             disabled={busy}
             onPress={onConfirm}
           >
-            {confirming ? 'Confirming…' : 'Confirm review'}
+            {confirming
+              ? 'Saving…'
+              : (confirmLabel ?? 'Confirm review')}
           </Button>
         </>
       )}
+    </>
+  );
+
+  if (inline) {
+    if (!visible) return <View />;
+    return <View style={styles.inlineWrap}>{body}</View>;
+  }
+
+  return (
+    <SheetShell visible={visible} onClose={busy ? () => undefined : onClose} pinnedTop={80}>
+      {body}
     </SheetShell>
   );
 }
 
 const styles = StyleSheet.create({
+  inlineWrap: { gap: 0, paddingBottom: 8 },
   h2: {
     fontSize: type.size.titleSm,
     fontWeight: '800',
