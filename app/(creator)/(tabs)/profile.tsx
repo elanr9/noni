@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { StatusChip } from '../../../components/StatusChip';
-import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
@@ -18,18 +17,44 @@ import {
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
 import { supabase } from '../../../lib/supabase';
+import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
 import {
-  formatCents,
-  getOrCreateWallet,
-  getStripeConnectUrl,
-} from '../../../lib/wallet-api';
-import { color, shadow, space } from '../../../theme/tokens';
+  borderWidth,
+  color,
+  radius,
+  shadow,
+  space,
+  type,
+} from '../../../theme/tokens';
 
 type AccountInfo = {
   connected: boolean;
   handle: string | null;
   followers: number | null;
 };
+
+function chatSeenKey(creatorId: string): string {
+  return `noni.chat.seenAt.${creatorId}`;
+}
+
+async function unreadAdminCount(
+  companyId: string,
+  creatorId: string,
+): Promise<number> {
+  const seenAt = await AsyncStorage.getItem(chatSeenKey(creatorId));
+  let query = supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('creator_id', creatorId)
+    .neq('author_id', creatorId);
+  if (seenAt !== null) {
+    query = query.gt('created_at', seenAt);
+  }
+  const { count, error } = await query;
+  if (error) throw error;
+  return count ?? 0;
+}
 
 function parseAccount(value: unknown): AccountInfo {
   if (!value) return { connected: false, handle: null, followers: null };
@@ -65,63 +90,16 @@ function accountSub(info: AccountInfo): string {
   if (!info.handle) return 'Connected';
   const handle = `@${info.handle.replace(/^@/, '')}`;
   return info.followers !== null
-    ? `${handle} · ${formatFollowers(info.followers)} followers`
+    ? `${handle}, ${formatFollowers(info.followers)} followers`
     : handle;
 }
 
-function Group({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <View style={styles.group}>
-      <Text style={styles.groupLabel}>{label}</Text>
-      <View style={[styles.card, shadow.shadowCard]}>{children}</View>
-    </View>
-  );
-}
-
-function Row({
-  icon,
-  label,
-  value,
-  chevron = false,
-  danger = false,
-  last = false,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  value?: string;
-  chevron?: boolean;
-  danger?: boolean;
-  last?: boolean;
-  onPress?: () => void;
-}) {
-  const fg = danger ? color.danger : undefined;
-  const body = (
-    <>
-      <Icon name={icon} size={19} color={fg ?? color.slate400} />
-      <Text style={[styles.rowLabel, styles.rowLabelFlex, fg !== undefined && { color: fg }]}>
-        {label}
-      </Text>
-      {value !== undefined && <Text style={styles.rowValue}>{value}</Text>}
-      {chevron && <Icon name="chevron-right" size={17} color={color.slate300} />}
-    </>
-  );
-  const rowStyle = [styles.row, !last && styles.rowBorder];
-  if (!onPress) return <View style={rowStyle}>{body}</View>;
-  return (
-    <PressableScale accessibilityRole="button" onPress={onPress} style={rowStyle}>
-      {body}
-    </PressableScale>
-  );
-}
-
-function ConnectRow({
+function AccountRow({
   icon,
   label,
   info,
   loading,
   busy,
-  last = false,
   onConnect,
 }: {
   icon: IconName;
@@ -129,29 +107,76 @@ function ConnectRow({
   info: AccountInfo;
   loading: boolean;
   busy: boolean;
-  last?: boolean;
   onConnect: () => void;
 }) {
   return (
-    <View style={[styles.connectRow, !last && styles.rowBorder]}>
-      <Icon name={icon} size={19} color={color.slate400} />
-      <View style={styles.connectText}>
-        <Text style={styles.rowLabel}>{label}</Text>
+    <PressableScale
+      accessibilityRole="button"
+      disabled={info.connected || loading || busy}
+      onPress={info.connected ? undefined : onConnect}
+      style={styles.accountCard}
+    >
+      <View style={styles.iconBubble}>
+        <Icon name={icon} size={18} color={color.blue600} />
+      </View>
+      <View style={styles.accountText}>
+        <Text style={styles.rowTitle}>{label}</Text>
         {loading ? (
-          <SkeletonLine width={110} height={12} radius={6} style={styles.connectSubSkeleton} />
+          <SkeletonLine width={140} height={14} radius={6} style={styles.subSkeleton} />
         ) : (
-          <Text style={styles.connectSub}>{accountSub(info)}</Text>
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {accountSub(info)}
+          </Text>
         )}
       </View>
       {!loading &&
         (info.connected ? (
-          <StatusChip status="approved" label="Connected" />
+          <Text style={styles.connected}>Connected</Text>
         ) : (
-          <Button size="sm" variant="primary" disabled={busy} onPress={onConnect}>
-            Connect
-          </Button>
+          <Text style={styles.connectCta}>Connect</Text>
         ))}
-    </View>
+    </PressableScale>
+  );
+}
+
+function NavRow({
+  icon,
+  label,
+  sub,
+  badge,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  sub?: string;
+  badge?: number;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.navCard}
+    >
+      <View style={styles.iconBubble}>
+        <Icon name={icon} size={18} color={color.blue600} />
+      </View>
+      <View style={styles.accountText}>
+        <Text style={styles.rowTitle}>{label}</Text>
+        {sub !== undefined ? (
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      {badge !== undefined && badge > 0 ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{badge > 99 ? '99+' : String(badge)}</Text>
+        </View>
+      ) : (
+        <Icon name="chevron-right" size={18} color={color.slate400} />
+      )}
+    </PressableScale>
   );
 }
 
@@ -166,8 +191,8 @@ export default function ProfileScreen() {
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
-  const [payoutBusy, setPayoutBusy] = useState(false);
-  const [walletLabel, setWalletLabel] = useState<string | null>(null);
+  const [availableCents, setAvailableCents] = useState<number | null>(null);
+  const [unread, setUnread] = useState(0);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -183,15 +208,18 @@ export default function ProfileScreen() {
     if (!profile?.id || !profile.company_id) return;
     try {
       const w = await getOrCreateWallet(profile.company_id, profile.id);
-      if (w.available_cents > 0) {
-        setWalletLabel(`${formatCents(w.available_cents)} available`);
-      } else if (w.pending_cents > 0) {
-        setWalletLabel(`${formatCents(w.pending_cents)} pending`);
-      } else {
-        setWalletLabel('Empty');
-      }
+      setAvailableCents(w.available_cents);
     } catch {
-      setWalletLabel(null);
+      setAvailableCents(null);
+    }
+  }, [profile?.id, profile?.company_id]);
+
+  const loadUnread = useCallback(async () => {
+    if (!profile?.id || !profile.company_id) return;
+    try {
+      setUnread(await unreadAdminCount(profile.company_id, profile.id));
+    } catch {
+      setUnread(0);
     }
   }, [profile?.id, profile?.company_id]);
 
@@ -199,7 +227,8 @@ export default function ProfileScreen() {
     useCallback(() => {
       void loadStatus();
       void loadWallet();
-    }, [loadStatus, loadWallet]),
+      void loadUnread();
+    }, [loadStatus, loadWallet, loadUnread]),
   );
 
   useEffect(() => {
@@ -247,21 +276,8 @@ export default function ProfileScreen() {
     }
   }
 
-  async function openPayouts() {
-    if (payoutBusy) return;
-    setPayoutBusy(true);
-    try {
-      const url = await getStripeConnectUrl();
-      await WebBrowser.openBrowserAsync(url);
-    } catch (e) {
-      Alert.alert('Payouts failed', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setPayoutBusy(false);
-    }
-  }
-
   async function editAvatar() {
-    if (!profile) return;
+    if (!profile || editBusy) return;
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Camera needed', 'Noni needs the camera for your avatar selfie.');
@@ -287,15 +303,11 @@ export default function ProfileScreen() {
     }
   }
 
-  function confirmDelete() {
-    Alert.alert(
-      'Delete account?',
-      'This signs you out on this device. To fully delete your data, contact support.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => void signOut() },
-      ],
-    );
+  function openSettings() {
+    Alert.alert('Settings', 'Notifications and privacy', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
+    ]);
   }
 
   const accounts = status?.social_accounts ?? {};
@@ -304,54 +316,55 @@ export default function ProfileScreen() {
 
   const name = profile?.full_name?.trim() || 'Creator';
   const initial = name.charAt(0).toUpperCase();
-  const subParts: string[] = [];
-  if (status?.profile) subParts.push(`@${status.profile.replace(/^@/, '')}`);
-  if (companyName) subParts.push(companyName);
+  const handle = status?.profile
+    ? `@${status.profile.replace(/^@/, '')}`
+    : null;
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
-      <Text style={styles.title}>Profile</Text>
-
+    <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
       <View style={styles.header}>
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-        ) : (
-          <View style={styles.avatar}>
-            <Text style={styles.avatarInitial}>{initial}</Text>
-          </View>
-        )}
-        <View style={styles.headerText}>
-          <Text style={styles.name}>{name}</Text>
-          {subParts.length > 0 && (
-            <Text style={styles.headerSub} numberOfLines={1}>
-              {subParts.join(' · ')}
-            </Text>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Edit avatar"
+          disabled={editBusy}
+          onPress={() => void editAvatar()}
+        >
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarInitial}>{initial}</Text>
+            </View>
           )}
+        </PressableScale>
+        <View style={styles.headerText}>
+          <Text style={styles.name} numberOfLines={1}>
+            {name}
+          </Text>
+          {handle !== null ? (
+            <Text style={styles.handle} numberOfLines={1}>
+              {handle}
+            </Text>
+          ) : null}
+          {companyName !== null ? (
+            <Text style={styles.company} numberOfLines={1}>
+              Posting for {companyName}
+            </Text>
+          ) : null}
         </View>
-        <Button size="sm" variant="outline" disabled={editBusy} onPress={() => void editAvatar()}>
-          Edit
-        </Button>
       </View>
 
-      <Group label="Balance">
-        <Row
-          icon="dollar-sign"
-          label="Wallet"
-          value={walletLabel ?? undefined}
-          chevron
-          last
-          onPress={() => router.push('/(creator)/balance' as Href)}
+      <Text style={styles.sectionLabel}>Your accounts</Text>
+      <View style={styles.stack}>
+        <AccountRow
+          icon="music-2"
+          label="TikTok"
+          info={tiktok}
+          loading={statusLoading}
+          busy={connectBusy}
+          onConnect={() => void connect()}
         />
-      </Group>
-
-      <Group label="Accounts">
-        <Row
-          icon="circle-check-big"
-          label="Account setup"
-          chevron
-          onPress={() => router.push('/(creator)/account-setup' as Href)}
-        />
-        <ConnectRow
+        <AccountRow
           icon="at-sign"
           label="Instagram"
           info={instagram}
@@ -359,45 +372,43 @@ export default function ProfileScreen() {
           busy={connectBusy}
           onConnect={() => void connect()}
         />
-        <ConnectRow
-          icon="music-2"
-          label="TikTok"
-          info={tiktok}
-          loading={statusLoading}
-          busy={connectBusy}
-          last
-          onConnect={() => void connect()}
-        />
-      </Group>
+      </View>
 
-      <Group label="Messages">
-        <Row
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Open balance"
+        onPress={() => router.push('/(creator)/balance' as Href)}
+        style={[styles.balanceCard, shadow.shadowAccent]}
+      >
+        <View style={styles.balanceText}>
+          <Text style={styles.balanceLabel}>Available to cash out</Text>
+          <Text style={styles.balanceValue}>
+            {availableCents !== null ? formatCents(availableCents) : '$0.00'}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={20} color={color.white} />
+      </PressableScale>
+
+      <View style={styles.stack}>
+        <NavRow
           icon="message-circle"
-          label="Chat with the team"
-          chevron
-          last
-          onPress={() => router.push('/(creator)/chat' as Href)}
+          label="Messages"
+          badge={unread}
+          onPress={() => router.push('/(creator)/messages' as Href)}
         />
-      </Group>
-
-      <Group label="Settings">
-        <Row
-          icon="dollar-sign"
-          label="Payouts"
-          value={payoutBusy ? 'Opening…' : undefined}
-          chevron
-          onPress={() => void openPayouts()}
+        <NavRow
+          icon="settings"
+          label="Account setup"
+          sub="Name, bio and verification"
+          onPress={() => router.push('/(creator)/account-setup' as Href)}
         />
-        <Row icon="bell" label="Notifications" value="Tasks, review" chevron />
-        <Row icon="clock" label="Posting windows" value="3 a day" chevron last />
-      </Group>
-
-      <Group label="Legal and support">
-        <Row icon="message-circle" label="Contact support" chevron />
-        <Row icon="circle-alert" label="Privacy and terms" chevron />
-        <Row icon="log-out" label="Sign out" onPress={() => void signOut()} />
-        <Row icon="trash-2" label="Delete account" danger last onPress={confirmDelete} />
-      </Group>
+        <NavRow
+          icon="circle-user-round"
+          label="Settings"
+          sub="Notifications and privacy"
+          onPress={openSettings}
+        />
+      </View>
     </View>
   );
 }
@@ -408,114 +419,156 @@ const styles = StyleSheet.create({
     backgroundColor: color.offWhite,
     paddingHorizontal: space.gutter,
     paddingBottom: 96,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-    color: color.ink,
+    gap: space[5],
   },
   header: {
-    marginTop: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: space[5],
   },
   avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 999,
+    width: 72,
+    height: 72,
+    borderRadius: radius.pill,
     backgroundColor: color.blue100,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 999,
+    width: 72,
+    height: 72,
+    borderRadius: radius.pill,
   },
   avatarInitial: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 28,
+    fontWeight: type.weight.heavy,
     color: color.blue700,
   },
   headerText: {
     flex: 1,
     minWidth: 0,
+    gap: 4,
   },
   name: {
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: -0.2,
+    fontSize: type.size.titleSm,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.title,
     color: color.ink,
   },
-  headerSub: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: '400',
+  handle: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.regular,
     color: color.slate500,
   },
-  group: {
-    paddingTop: 18,
+  company: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
+    color: color.slate400,
   },
-  groupLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.7,
+  sectionLabel: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
-    color: color.slate500,
-    marginBottom: 8,
+    color: color.slate400,
+    marginBottom: -4,
   },
-  card: {
+  stack: {
+    gap: 10,
+  },
+  accountCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: space[5],
+    paddingHorizontal: space.cardPad,
+    borderRadius: radius.lg,
     backgroundColor: color.white,
-    borderWidth: 1,
+    borderWidth: borderWidth.hair,
     borderColor: color.line,
-    borderRadius: 18,
   },
-  row: {
+  navCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
+    gap: 14,
+    paddingVertical: space[5],
+    paddingHorizontal: space.cardPad,
+    borderRadius: radius.lg,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
   },
-  rowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: color.line,
-  },
-  rowLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: color.ink,
-  },
-  rowLabelFlex: {
-    flex: 1,
-  },
-  rowValue: {
-    maxWidth: 92,
-    textAlign: 'right',
-    fontSize: 13,
-    fontWeight: '400',
-    color: color.slate500,
-  },
-  connectRow: {
-    flexDirection: 'row',
+  iconBubble: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue100,
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    justifyContent: 'center',
   },
-  connectText: {
+  accountText: {
     flex: 1,
     minWidth: 0,
+    gap: 3,
   },
-  connectSub: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: '400',
+  rowTitle: {
+    fontSize: type.size.body,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  rowSub: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
     color: color.slate500,
   },
-  connectSubSkeleton: {
-    marginTop: 4,
+  subSkeleton: {
+    marginTop: 2,
+  },
+  connected: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.green,
+  },
+  connectCta: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.accent,
+  },
+  balanceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: space.cardPad,
+    borderRadius: radius.lg,
+    backgroundColor: color.blue500,
+  },
+  balanceText: {
+    flex: 1,
+    gap: 2,
+  },
+  balanceLabel: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  balanceValue: {
+    fontSize: 30,
+    fontWeight: type.weight.heavy,
+    letterSpacing: -0.8,
+    color: color.white,
+  },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 7,
+    borderRadius: radius.pill,
+    backgroundColor: color.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    color: color.white,
   },
 });
