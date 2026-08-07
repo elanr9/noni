@@ -38,6 +38,18 @@ export function LoadingScreen({ label = 'Loading' }: { label?: string }) {
   );
 }
 
+export function ConfigErrorScreen({ missing }: { missing: string[] }) {
+  return (
+    <Screen style={styles.center}>
+      <Text style={styles.title}>Noni is not configured</Text>
+      <Text style={styles.muted}>
+        This build was made without {missing.join(' and ')}. Set them for the
+        build environment and ship a new build.
+      </Text>
+    </Screen>
+  );
+}
+
 export function BrandTitle({
   title,
   subtitle,

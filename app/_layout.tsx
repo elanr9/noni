@@ -4,15 +4,25 @@ import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+import { ConfigErrorScreen } from '../components/Screen';
 import { AuthProvider } from '../lib/auth';
 import {
   createSessionFromUrl,
   getInitialAuthUrl,
 } from '../lib/auth-session';
+import { missingSupabaseEnv } from '../lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function RootLayout() {
+  if (missingSupabaseEnv.length > 0) {
+    return <ConfigErrorScreen missing={missingSupabaseEnv} />;
+  }
+
+  return <App />;
+}
+
+function App() {
   useEffect(() => {
     void getInitialAuthUrl().then((url) => {
       if (url) void createSessionFromUrl(url).catch(console.error);

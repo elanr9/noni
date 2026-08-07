@@ -9,23 +9,32 @@ import type { Database } from './types';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    'Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY',
-  );
-}
+// EXPO_PUBLIC_ values are inlined at bundle time, so a release build made
+// without them cannot recover at runtime. Throwing here would run before the
+// first frame and kill the app with no message, so the missing names are
+// reported instead and the root layout renders them.
+export const missingSupabaseEnv = [
+  supabaseUrl ? null : 'EXPO_PUBLIC_SUPABASE_URL',
+  supabaseAnonKey ? null : 'EXPO_PUBLIC_SUPABASE_ANON_KEY',
+].filter((name): name is string => name !== null);
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  global: {
-    // Expo Go / RN fetch can reject HTTPS with "Network request failed";
-    // expo/fetch uses a WinterCG-compliant stack that works on device.
-    // On web (verification builds only) expo/fetch is unavailable — use the browser's.
-    fetch: (Platform.OS === 'web' ? fetch.bind(globalThis) : expoFetch) as typeof fetch,
+export const supabase = createClient<Database>(
+  supabaseUrl ?? 'https://unconfigured.supabase.co',
+  supabaseAnonKey ?? 'unconfigured',
+  {
+    global: {
+      // Expo Go / RN fetch can reject HTTPS with "Network request failed";
+      // expo/fetch uses a WinterCG-compliant stack that works on device.
+      // On web (verification builds only) expo/fetch is unavailable — use the browser's.
+      fetch: (Platform.OS === 'web'
+        ? fetch.bind(globalThis)
+        : expoFetch) as typeof fetch,
+    },
+    auth: {
+      storage: AsyncStorage,
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
   },
-  auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+);
