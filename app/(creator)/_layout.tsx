@@ -10,7 +10,15 @@ import { color } from '../../theme/tokens';
  * redirects to the setup checklist. Setup routes themselves, chat, and
  * profile stay reachable so the gate can never loop.
  */
-const SETUP_EXEMPT = ['/setup', '/account-setup', '/chat', '/profile', '/kitchen-sink'];
+const SETUP_EXEMPT = [
+  '/setup',
+  '/account-setup',
+  '/chat',
+  '/messages',
+  '/profile',
+  '/balance',
+  '/kitchen-sink',
+];
 
 export default function CreatorLayout() {
   const { session, profile, loading } = useAuth();
@@ -46,26 +54,9 @@ export default function CreatorLayout() {
     >
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
-      <Stack.Screen
-        name="balance"
-        options={{
-          headerShown: true,
-          title: 'Balance',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: color.offWhite },
-          headerTintColor: color.ink,
-        }}
-      />
-      <Stack.Screen
-        name="chat"
-        options={{
-          headerShown: true,
-          title: 'Messages',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: color.offWhite },
-          headerTintColor: color.ink,
-        }}
-      />
+      <Stack.Screen name="balance" options={{ headerShown: false }} />
+      <Stack.Screen name="chat" options={{ headerShown: false }} />
+      <Stack.Screen name="messages/index" options={{ headerShown: false }} />
       <Stack.Screen
         name="account-setup"
         options={{
