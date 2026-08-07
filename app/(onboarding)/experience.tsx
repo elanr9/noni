@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalOption, CalShell } from '../../components/OnboardingUI';
+import { OptionCard } from '../../components/ui/OptionCard';
 import {
   getOnboardingAnswers,
   setOnboardingAnswer,
   type UgcExperience,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 const OPTIONS: { key: UgcExperience; label: string }[] = [
   { key: 'never_heard', label: 'Never heard of it' },
@@ -23,8 +22,8 @@ export default function ExperienceScreen() {
   );
 
   return (
-    <CalShell
-      progress={4 / TOTAL}
+    <OnboardingShell
+      step={4}
       onBack={() => router.back()}
       title="What do you know about UGC?"
       primaryLabel="Continue"
@@ -36,13 +35,13 @@ export default function ExperienceScreen() {
       }}
     >
       {OPTIONS.map((o) => (
-        <CalOption
+        <OptionCard
           key={o.key}
           label={o.label}
           selected={selected === o.key}
           onPress={() => setSelected(o.key)}
         />
       ))}
-    </CalShell>
+    </OnboardingShell>
   );
 }

@@ -1,9 +1,8 @@
 import { router } from 'expo-router';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 
-import { CalOption, CalShell } from '../../components/OnboardingUI';
-
-const TOTAL = 12;
+import { OptionCard } from '../../components/ui/OptionCard';
+import { OnboardingShell } from './_shell';
 
 export default function PermissionsScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -13,8 +12,8 @@ export default function PermissionsScreen() {
   const micOn = Boolean(micPermission?.granted);
 
   return (
-    <CalShell
-      progress={11 / TOTAL}
+    <OnboardingShell
+      step={11}
       onBack={() => router.back()}
       title="Camera and microphone"
       subtitle="Both are only used while you record. Tap each to allow."
@@ -22,16 +21,16 @@ export default function PermissionsScreen() {
       primaryDisabled={!cameraOn || !micOn}
       onPrimary={() => router.push('/(onboarding)/done')}
     >
-      <CalOption
+      <OptionCard
         label={cameraOn ? 'Camera allowed' : 'Allow camera'}
         selected={cameraOn}
         onPress={() => void requestCameraPermission()}
       />
-      <CalOption
+      <OptionCard
         label={micOn ? 'Microphone allowed' : 'Allow microphone'}
         selected={micOn}
         onPress={() => void requestMicPermission()}
       />
-    </CalShell>
+    </OnboardingShell>
   );
 }

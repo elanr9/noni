@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Redirect, Stack } from 'expo-router';
 
-import { LoadingScreen } from '../../components/Screen';
+import { LoadingScreen } from '../../components/layout/Screen';
 import { useAuth } from '../../lib/auth';
 import { hydrateOnboardingAnswers } from '../../lib/onboarding';
 import { destinationForProfile } from '../../lib/profile';
