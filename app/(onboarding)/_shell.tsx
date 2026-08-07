@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { color, space, type } from '../../theme/tokens';
+import { color, radius, space, type } from '../../theme/tokens';
 
 const TOTAL_STEPS = 12;
 
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   back: {
     width: space[11],
     height: space[11],
-    borderRadius: 999,
+    borderRadius: radius.pill,
     backgroundColor: color.fillQuiet,
     alignItems: 'center',
     justifyContent: 'center',

@@ -5,7 +5,7 @@ import { Screen } from '../../components/layout/Screen';
 import { Button } from '../../components/ui/Button';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Wordmark } from '../../components/ui/Wordmark';
-import { color, space, type } from '../../theme/tokens';
+import { color, radius, space, type } from '../../theme/tokens';
 
 export default function WelcomeScreen() {
   return (
@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     left: -(space[11] * 2 + space[5]),
     width: space[11] * 10 + space[7],
     height: space[11] * 10 + space[7],
-    borderRadius: 999,
+    borderRadius: radius.pill,
     backgroundColor: color.blue50,
   },
   hero: {
