@@ -25,6 +25,8 @@ export interface MediaCardProps {
   variant: 'hero' | 'tile';
   mediaHeight?: number;
   fill?: boolean;
+  /** Solid brand tag beside the hero frame (e.g. "Talking head"). */
+  contentTypeTag?: string;
   onPlay?: () => void;
   onPress?: () => void;
   children?: ReactNode;
@@ -36,8 +38,8 @@ function PlaceholderGradient({ id }: { id: string }) {
     <Svg style={StyleSheet.absoluteFill}>
       <Defs>
         <LinearGradient id={id} x1="0%" y1="0%" x2="34%" y2="94%">
-          <Stop offset="0" stopColor="#E7F4FD" />
-          <Stop offset="1" stopColor="#DCE7F0" />
+          <Stop offset="0" stopColor={color.blue100} />
+          <Stop offset="1" stopColor={color.lineStrong} />
         </LinearGradient>
       </Defs>
       <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id})`} />
@@ -71,6 +73,7 @@ export function MediaCard({
   variant,
   mediaHeight,
   fill = false,
+  contentTypeTag,
   onPlay,
   onPress,
   children,
@@ -149,6 +152,12 @@ export function MediaCard({
           </Text>
         )}
       </View>
+
+      {contentTypeTag !== undefined && (
+        <View style={styles.contentTypeTag}>
+          <Text style={styles.contentTypeText}>{contentTypeTag}</Text>
+        </View>
+      )}
 
       {hero
         ? children !== undefined && <View style={styles.body}>{children}</View>
@@ -281,6 +290,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 27,
     letterSpacing: -0.3,
+  },
+  contentTypeTag: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: color.accent,
+  },
+  contentTypeText: {
+    color: color.white,
+    fontSize: 12,
+    fontWeight: '700',
   },
   body: {
     flexGrow: 0,

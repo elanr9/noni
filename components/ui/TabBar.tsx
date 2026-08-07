@@ -15,12 +15,28 @@ const ITEMS: Record<string, { icon: IconName; label: string }> = {
 
 type TabBarProps = BottomTabBarProps & {
   items?: Record<string, { icon: IconName; label: string }>;
+  /**
+   * Setup gate (1c): bar is visible but non-interactive.
+   * Pass route names that should look locked (Home / Posts / Analytics).
+   */
+  locked?: boolean;
+  lockedRoutes?: string[];
 };
 
 /** Floating tab bar. Pass to expo-router: `<Tabs tabBar={(p) => <TabBar {...p} />}>`. Defaults to the creator item map; pass `items` for other route groups. */
-export function TabBar({ state, descriptors, navigation, items = ITEMS }: TabBarProps) {
+export function TabBar({
+  state,
+  descriptors,
+  navigation,
+  items = ITEMS,
+  locked = false,
+  lockedRoutes = ['index', 'posts', 'analytics'],
+}: TabBarProps) {
   return (
-    <View style={[styles.wrap, shadow.shadowFloat]}>
+    <View
+      style={[styles.wrap, shadow.shadowFloat, locked && styles.locked]}
+      pointerEvents={locked ? 'none' : 'auto'}
+    >
       <View style={styles.clip}>
         <BlurView intensity={40} tint="light" style={StyleSheet.absoluteFill} />
         <View style={styles.row}>
@@ -29,8 +45,10 @@ export function TabBar({ state, descriptors, navigation, items = ITEMS }: TabBar
             if (item === undefined) return null;
             const active = state.index === index;
             const badge = descriptors[route.key]?.options.tabBarBadge;
+            const routeLocked = locked && lockedRoutes.includes(route.name);
 
             const onPress = () => {
+              if (locked) return;
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,
@@ -45,8 +63,9 @@ export function TabBar({ state, descriptors, navigation, items = ITEMS }: TabBar
               <PressableScale
                 key={route.key}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
+                accessibilityState={{ selected: active, disabled: routeLocked }}
                 accessibilityLabel={item.label}
+                disabled={routeLocked}
                 onPress={onPress}
                 style={[styles.item, active && styles.itemActive]}
               >
@@ -86,6 +105,9 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 22,
     borderRadius: 999,
+  },
+  locked: {
+    opacity: 0.4,
   },
   clip: {
     borderRadius: 999,
