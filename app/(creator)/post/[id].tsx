@@ -8,8 +8,10 @@ import {
 } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 
-import { Screen, LoadingScreen } from '../../../components/layout/Screen';
+import { Screen } from '../../../components/layout/Screen';
+import { DetailSkeleton, SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
+import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { InfoBlock } from '../../../components/ui/InfoBlock';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -80,11 +82,14 @@ export default function PostDetailScreen() {
     null,
   );
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
       setAssignment(await getAssignment(id));
+    } catch {
+      setToast('Could not load this post. Try again.');
     } finally {
       setLoading(false);
     }
@@ -100,7 +105,7 @@ export default function PostDetailScreen() {
     return (
       <>
         <Stack.Screen options={{ headerShown: false }} />
-        <LoadingScreen label="Loading" />
+        <DetailSkeleton />
       </>
     );
   }
@@ -118,6 +123,12 @@ export default function PostDetailScreen() {
           <Icon name="chevron-left" size={22} color={color.ink} />
         </PressableScale>
         <Text style={styles.missing}>Post not found.</Text>
+        <SoftToast
+          visible={toast !== null}
+          message={toast ?? ''}
+          tone="error"
+          onHide={() => setToast(null)}
+        />
       </Screen>
     );
   }
@@ -239,6 +250,15 @@ export default function PostDetailScreen() {
         </PressableScale>
       ) : null}
 
+      {status === 'submitted' ? (
+        <EmptyState
+          compact
+          icon="clock"
+          title="In review"
+          body="We are reviewing your take. You will get a message if anything needs a fix."
+        />
+      ) : null}
+
       {isSlideshow ? (
         <View style={styles.blocks}>
           {points.map((text, i) => (
@@ -257,6 +277,12 @@ export default function PostDetailScreen() {
           ) : null}
         </View>
       )}
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }

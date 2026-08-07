@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BeatPrompter, Teleprompter } from '../../../components/Teleprompter';
 import { parseChangesNote } from '../../../components/ReviewThread';
+import { KeepClipConfirm, SoftToast } from '../../../components/states';
 import { Icon } from '../../../components/ui/Icon';
 import { color, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
@@ -268,6 +269,8 @@ export default function RecordScreen() {
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const [scriptPaused, setScriptPaused] = useState(false);
   const [takeCount, setTakeCount] = useState(0);
+  const [keepConfirm, setKeepConfirm] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const recordingRef = useRef(false);
   const discardClipRef = useRef(false);
@@ -600,11 +603,13 @@ export default function RecordScreen() {
       const next = plan.findIndex((c) => nextKept[c.slotIndex] === undefined);
       setActiveIndex(next === -1 ? null : next);
       setPhase('idle');
+      setKeepConfirm(true);
     } catch (e) {
       setPhase('clipReview');
-      Alert.alert(
-        'Could not save the clip',
-        e instanceof Error ? e.message : 'Check your connection and try again.',
+      setToast(
+        e instanceof Error
+          ? e.message
+          : 'Could not save the clip. Check your connection and try again.',
       );
     }
   }
@@ -662,7 +667,7 @@ export default function RecordScreen() {
       setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
       setPhase('idle');
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Try again');
+      setToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
     }
   }
 
@@ -977,6 +982,18 @@ export default function RecordScreen() {
           </Text>
         ) : null}
       </View>
+
+      <KeepClipConfirm
+        visible={keepConfirm}
+        onDone={() => setKeepConfirm(false)}
+      />
+
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
 
       {phase === 'sent' ? (
         <View style={[styles.toast, shadow.shadowFloat]} pointerEvents="none">

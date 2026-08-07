@@ -13,6 +13,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { MonthGrid } from '../../../components/creator/MonthGrid';
 import { PostGridTile } from '../../../components/creator/PostGridTile';
 import { Screen } from '../../../components/layout/Screen';
+import { PostsSkeleton, SoftToast } from '../../../components/states';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -79,6 +80,7 @@ export default function PostsScreen() {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedKey, setSelectedKey] = useState(dayKey(new Date()));
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.id) return;
@@ -90,7 +92,7 @@ export default function PostsScreen() {
       setAssignments(mine);
       setLedger(rows);
     } catch {
-      // Pull to refresh retries; keep whatever is on screen.
+      setToast('Could not refresh Posts. Pull to try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -226,15 +228,12 @@ export default function PostsScreen() {
             />
             <Text style={styles.dayHeading}>{dayHeading}</Text>
             {loading ? (
-              <>
-                <SkeletonCard height={120} radius={radius.lg} />
-                <SkeletonCard height={120} radius={radius.lg} />
-              </>
+              <PostsSkeleton />
             ) : dayAssignments.length === 0 ? (
               <EmptyState
                 icon="calendar-days"
                 title="Nothing this day"
-                body="Posts land here when the weekly campaign drops."
+                body="Pick another day, or wait for the next campaign drop."
                 compact
               />
             ) : (
@@ -325,7 +324,7 @@ export default function PostsScreen() {
               <EmptyState
                 icon="layout-list"
                 title="No posts yet"
-                body="Posts land here when the weekly campaign drops."
+                body="Head to Home when your first post lands."
               />
             ) : (
               <View style={styles.grid}>
@@ -344,6 +343,12 @@ export default function PostsScreen() {
           </>
         )}
       </ScrollView>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }

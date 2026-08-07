@@ -6,6 +6,10 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  SoftToast,
+  UnlinkedSocials,
+} from '../../../components/states';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
@@ -193,12 +197,14 @@ export default function ProfileScreen() {
   const [editBusy, setEditBusy] = useState(false);
   const [availableCents, setAvailableCents] = useState<number | null>(null);
   const [unread, setUnread] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
       setStatus(await getSocialConnectStatus());
     } catch {
       setStatus(null);
+      setToast('Could not load connected accounts. Pull to try again.');
     } finally {
       setStatusLoading(false);
     }
@@ -270,7 +276,7 @@ export default function ProfileScreen() {
       await WebBrowser.openBrowserAsync(url);
       await loadStatus();
     } catch (e) {
-      Alert.alert('Connect failed', e instanceof Error ? e.message : 'Unknown error');
+      setToast(e instanceof Error ? e.message : 'Connect failed. Try again.');
     } finally {
       setConnectBusy(false);
     }
@@ -319,6 +325,9 @@ export default function ProfileScreen() {
   const handle = status?.profile
     ? `@${status.profile.replace(/^@/, '')}`
     : null;
+  const missingSocials: Array<'tiktok' | 'instagram'> = [];
+  if (!statusLoading && !tiktok.connected) missingSocials.push('tiktok');
+  if (!statusLoading && !instagram.connected) missingSocials.push('instagram');
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
@@ -355,24 +364,31 @@ export default function ProfileScreen() {
       </View>
 
       <Text style={styles.sectionLabel}>Your accounts</Text>
-      <View style={styles.stack}>
-        <AccountRow
-          icon="music-2"
-          label="TikTok"
-          info={tiktok}
-          loading={statusLoading}
-          busy={connectBusy}
+      {missingSocials.length >= 2 ? (
+        <UnlinkedSocials
+          missing={missingSocials}
           onConnect={() => void connect()}
         />
-        <AccountRow
-          icon="at-sign"
-          label="Instagram"
-          info={instagram}
-          loading={statusLoading}
-          busy={connectBusy}
-          onConnect={() => void connect()}
-        />
-      </View>
+      ) : (
+        <View style={styles.stack}>
+          <AccountRow
+            icon="music-2"
+            label="TikTok"
+            info={tiktok}
+            loading={statusLoading}
+            busy={connectBusy}
+            onConnect={() => void connect()}
+          />
+          <AccountRow
+            icon="at-sign"
+            label="Instagram"
+            info={instagram}
+            loading={statusLoading}
+            busy={connectBusy}
+            onConnect={() => void connect()}
+          />
+        </View>
+      )}
 
       <PressableScale
         accessibilityRole="button"
@@ -409,6 +425,12 @@ export default function ProfileScreen() {
           onPress={openSettings}
         />
       </View>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </View>
   );
 }
