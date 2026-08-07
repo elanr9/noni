@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Alert, Platform, StyleSheet } from 'react-native';
+import { Alert, Platform, StyleSheet, View } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { router } from 'expo-router';
 
-import { CalAuthButton, CalShell } from '../../components/OnboardingUI';
+import { Button } from '../../components/ui/Button';
 import {
   routeAfterSignIn,
   signInWithApple,
   signInWithGoogle,
 } from '../../lib/auth-session';
 import { finishOnboardingAuth } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { space } from '../../theme/tokens';
+import { OnboardingShell } from './_shell';
 
 export default function SaveProgressScreen() {
   const [busy, setBusy] = useState(false);
@@ -64,33 +64,44 @@ export default function SaveProgressScreen() {
   }
 
   return (
-    <CalShell
-      progress={8 / TOTAL}
+    <OnboardingShell
+      step={8}
       onBack={() => router.back()}
       title="Save your progress"
-      subtitle="Create an account so your answers and earnings are never lost."
+      titleSize="screen"
+      centerContent
     >
-      {appleAvailable ? (
-        <AppleAuthentication.AppleAuthenticationButton
-          buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-          cornerRadius={28}
-          style={styles.appleButton}
-          onPress={() => {
-            if (!busy) void handleApple();
-          }}
-        />
-      ) : null}
-      <CalAuthButton
-        label="Sign in with Google"
-        variant="outline"
-        disabled={busy}
-        onPress={() => void handleGoogle()}
-      />
-    </CalShell>
+      <View style={styles.authStack}>
+        {appleAvailable ? (
+          <Button
+            size="lg"
+            block
+            variant="secondary"
+            disabled={busy}
+            onPress={() => {
+              if (!busy) void handleApple();
+            }}
+          >
+            Sign in with Apple
+          </Button>
+        ) : null}
+        <Button
+          size="lg"
+          block
+          variant="outline"
+          disabled={busy}
+          onPress={() => void handleGoogle()}
+        >
+          Sign in with Google
+        </Button>
+      </View>
+    </OnboardingShell>
   );
 }
 
 const styles = StyleSheet.create({
-  appleButton: { height: 56 },
+  authStack: {
+    gap: space.stackGap,
+    width: '100%',
+  },
 });
