@@ -89,6 +89,7 @@ export default function CreatorLayout() {
       />
       <Stack.Screen name="record/[id]" options={{ presentation: 'fullScreenModal' }} />
       <Stack.Screen name="post/[id]" />
+      <Stack.Screen name="posts/[id]" />
     </Stack>
   );
 }
