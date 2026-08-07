@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  Animated,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,47 +8,30 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PostCard, formatViews } from '../../../components/creator/PostCard';
-import { SwapSheet } from '../../../components/creator/SwapSheet';
+import { Screen, LoadingScreen } from '../../../components/layout/Screen';
+import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
+import { MediaCard } from '../../../components/ui/MediaCard';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { SkeletonCard } from '../../../components/ui/Skeleton';
-import { StatusChip } from '../../../components/StatusChip';
-import { Wordmark } from '../../../components/ui/Wordmark';
 import { useAuth } from '../../../lib/auth';
-import { getCompany } from '../../../lib/onboarding';
 import { supabase } from '../../../lib/supabase';
-import {
-  DEFAULT_STREAK_MILESTONES,
-  fetchMyStreak,
-  parseStreakMilestones,
-  streakBonusText,
-  type StreakMilestone,
-} from '../../../lib/streaks';
+import { fetchMyStreak } from '../../../lib/streaks';
 import {
   listMyAssignments,
-  listSwapPool,
-  parseAssignmentMetrics,
-  swapAssignmentBrief,
   type AssignmentWithBrief,
-  type Brief,
 } from '../../../lib/tasks-api';
-import { color, motion, shadow } from '../../../theme/tokens';
+import { color, radius, space, type } from '../../../theme/tokens';
 
 const CLEARED = new Set(['approved', 'posted']);
+const HERO_WIDTH = 264;
+const HERO_HEIGHT = 470;
 
 function chatSeenKey(creatorId: string): string {
   return `noni.chat.seenAt.${creatorId}`;
 }
 
-/**
- * Messages carry no read state, so "unread" means the newest admin message
- * is newer than the locally stored moment the creator last opened chat
- * from the bell.
- */
 async function hasUnreadAdminMessage(
   companyId: string,
   creatorId: string,
@@ -76,62 +58,45 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${m}-${dd}`;
 }
 
+function dueLabel(scheduledDate: string): string {
+  const today = dayKey(new Date());
+  if (scheduledDate === today) return 'Due today';
+  const d = new Date(`${scheduledDate}T12:00:00`);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+  return `Due ${days[d.getDay()]}`;
+}
+
+async function fetchPostTypeLabel(
+  postTypeId: string | null,
+): Promise<string | undefined> {
+  if (postTypeId === null) return undefined;
+  const { data, error } = await supabase
+    .from('post_types')
+    .select('label')
+    .eq('id', postTypeId)
+    .maybeSingle();
+  if (error || data === null) return undefined;
+  return data.label;
+}
+
 export default function HomeScreen() {
   const { profile } = useAuth();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
 
   const [assignments, setAssignments] = useState<AssignmentWithBrief[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [swapOpen, setSwapOpen] = useState(false);
-  const [swapPool, setSwapPool] = useState<Brief[]>([]);
-  const [swapLoading, setSwapLoading] = useState(false);
   const [streak, setStreak] = useState(0);
-  const [milestones, setMilestones] = useState<StreakMilestone[]>(
-    DEFAULT_STREAK_MILESTONES,
-  );
   const [unreadAdmin, setUnreadAdmin] = useState(false);
-
-  const [toast, setToast] = useState<string | null>(null);
-  const toastAnim = useRef(new Animated.Value(0)).current;
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showToast = useCallback(
-    (message: string) => {
-      if (toastTimer.current !== null) clearTimeout(toastTimer.current);
-      setToast(message);
-      Animated.timing(toastAnim, {
-        toValue: 1,
-        duration: motion.base,
-        easing: motion.easeOut,
-        useNativeDriver: true,
-      }).start();
-      toastTimer.current = setTimeout(() => {
-        Animated.timing(toastAnim, {
-          toValue: 0,
-          duration: motion.base,
-          easing: motion.easeOut,
-          useNativeDriver: true,
-        }).start(({ finished }) => {
-          if (finished) setToast(null);
-        });
-      }, 2400);
-    },
-    [toastAnim],
-  );
+  const [contentTypeTag, setContentTypeTag] = useState<string | undefined>();
 
   const load = useCallback(async () => {
     if (!profile?.id) return;
     try {
-      const [next, streakRow, company, unread] = await Promise.all([
+      const [next, streakRow, unread] = await Promise.all([
         listMyAssignments(profile.id),
         profile.company_id
           ? fetchMyStreak(profile.company_id, profile.id).catch(() => null)
-          : Promise.resolve(null),
-        profile.company_id
-          ? getCompany(profile.company_id).catch(() => null)
           : Promise.resolve(null),
         profile.company_id
           ? hasUnreadAdminMessage(profile.company_id, profile.id).catch(
@@ -141,8 +106,17 @@ export default function HomeScreen() {
       ]);
       setAssignments(next);
       setStreak(streakRow?.current_streak ?? 0);
-      if (company) setMilestones(parseStreakMilestones(company.settings));
       setUnreadAdmin(unread);
+
+      const today = dayKey(new Date());
+      const hero = next.find(
+        (a) => a.scheduled_date === today && !CLEARED.has(a.status),
+      );
+      if (hero !== undefined) {
+        setContentTypeTag(await fetchPostTypeLabel(hero.briefs.post_type_id));
+      } else {
+        setContentTypeTag(undefined);
+      }
     } catch {
       // Pull to refresh retries; keep whatever is on screen.
     } finally {
@@ -158,27 +132,13 @@ export default function HomeScreen() {
   );
 
   const todayKey = dayKey(new Date());
-  const tomorrowKey = useMemo(() => {
-    const t = new Date();
-    t.setDate(t.getDate() + 1);
-    return dayKey(t);
-  }, []);
-
   const today = useMemo(
     () => assignments.filter((a) => a.scheduled_date === todayKey),
     [assignments, todayKey],
   );
-  const tomorrowFirst = useMemo(
-    () => assignments.find((a) => a.scheduled_date === tomorrowKey),
-    [assignments, tomorrowKey],
-  );
-
-  // The hero never leaves Home until it clears (approved or posted).
   const hero = today.find((a) => !CLEARED.has(a.status));
-  const rest = today.filter((a) => a !== hero && !CLEARED.has(a.status));
   const allClear = today.length > 0 && hero === undefined;
-
-  const firstName = profile?.full_name?.split(' ')[0] ?? 'creator';
+  const firstName = profile?.full_name?.split(' ')[0] ?? 'there';
 
   const hasRevisions = useMemo(
     () => assignments.some((a) => a.status === 'changes_requested'),
@@ -197,70 +157,42 @@ export default function HomeScreen() {
     router.push('/(creator)/chat');
   };
 
-  const openAssignment = (a: AssignmentWithBrief) => {
-    router.push(`/(creator)/assignment/${a.id}`);
+  const openPost = (a: AssignmentWithBrief) => {
+    router.push({
+      pathname: '/(creator)/post/[id]',
+      params: { id: a.id },
+    });
   };
 
-  const recordAssignment = (a: AssignmentWithBrief) => {
-    if (a.briefs.format === 'photo_carousel') {
-      openAssignment(a);
-    } else {
-      router.push(`/(creator)/record/${a.id}?assignment=1`);
-    }
-  };
+  if (loading && assignments.length === 0) {
+    return <LoadingScreen label="Loading" />;
+  }
 
-  const openSwap = async (a: AssignmentWithBrief) => {
-    setSwapOpen(true);
-    setSwapLoading(true);
-    try {
-      setSwapPool(await listSwapPool(a));
-    } catch {
-      setSwapPool([]);
-    } finally {
-      setSwapLoading(false);
-    }
-  };
-
-  const pickSwap = async (brief: Brief) => {
-    if (hero === undefined) return;
-    setSwapOpen(false);
-    try {
-      const updated = await swapAssignmentBrief(hero.id, brief.id);
-      setAssignments((prev) =>
-        prev.map((a) => (a.id === updated.id ? updated : a)),
-      );
-      showToast(`Swapped in "${updated.briefs.title}".`);
-    } catch {
-      showToast('Could not swap that in. Try again.');
-    }
-  };
-
-  const heroViews = useMemo(() => {
-    if (hero === undefined) return undefined;
-    const views = parseAssignmentMetrics(hero.metrics).views;
-    return views !== undefined ? `${formatViews(views)} views` : undefined;
-  }, [hero]);
+  const format =
+    hero?.briefs.format === 'photo_carousel' ? 'slideshow' : 'reel';
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.headerRow}>
-        <Wordmark size={19} />
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel={
-            showBellDot ? 'Open messages, new activity' : 'Open messages'
-          }
-          onPress={openChat}
-          style={styles.bellBtn}
-        >
-          <Icon name="bell" size={23} color={color.ink} />
-          {showBellDot && <View style={styles.bellDot} />}
-        </PressableScale>
-      </View>
-
+    <Screen
+      bg={color.white}
+      contentStyle={styles.screenBody}
+      footer={
+        hero !== undefined ? (
+          <View style={styles.footerPad}>
+            <Button
+              block
+              size="lg"
+              icon="eye"
+              onPress={() => openPost(hero)}
+            >
+              View post
+            </Button>
+          </View>
+        ) : undefined
+      }
+    >
       <ScrollView
-        contentContainerStyle={styles.column}
-        alwaysBounceVertical
+        style={styles.flex}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -272,302 +204,159 @@ export default function HomeScreen() {
           />
         }
       >
-        <View style={styles.greetingRow}>
-          <View style={styles.greeting}>
-            <Text style={styles.greetingTitle}>Welcome back, {firstName}.</Text>
-            <Text style={styles.greetingSub}>
-              {today.length === 0
-                ? 'Nothing queued today.'
-                : allClear
-                  ? 'All done for today.'
-                  : `${today.length - today.filter((a) => CLEARED.has(a.status)).length} to clear today.`}
-            </Text>
-          </View>
+        <View style={styles.headerRow}>
+          <Text style={styles.greeting} numberOfLines={2}>
+            Hey {firstName}.
+          </Text>
           <PressableScale
-            style={styles.streakPill}
-            onPress={() => showToast(streakBonusText(streak, milestones))}
+            accessibilityRole="button"
+            accessibilityLabel={
+              showBellDot ? 'Open messages, new activity' : 'Open messages'
+            }
+            onPress={openChat}
+            style={styles.bellBtn}
           >
-            <Icon name="flame" size={16} color={color.amber} />
-            <Text style={styles.streakCount}>{streak}</Text>
+            <Icon name="bell" size={22} color={color.ink} />
+            {showBellDot ? <View style={styles.bellDot} /> : null}
           </PressableScale>
         </View>
 
-        {loading ? (
-          <SkeletonCard height={420} radius={24} />
-        ) : today.length === 0 ? (
-          <View style={styles.emptyWrap}>
-            <EmptyState
-              icon="sparkles"
-              title="Nothing queued today"
-              body="Your next week of posts lands when the campaign drops."
-            />
-          </View>
-        ) : hero !== undefined ? (
+        <View style={styles.streakPill}>
+          <Icon name="zap" size={14} color={color.blue600} />
+          <Text style={styles.streakText}>{streak} day streak</Text>
+        </View>
+
+        {hero !== undefined ? (
           <>
-            <View style={styles.heroFrame}>
-              <PostCard
-                assignment={hero}
-                viewsLabel={heroViews}
-                showSwap={hero.status === 'assigned'}
-                onOpen={() => openAssignment(hero)}
-                onRecord={() => recordAssignment(hero)}
-                onSwap={() => void openSwap(hero)}
+            <Text style={styles.sectionLabel}>Up next today</Text>
+            <View style={styles.heroWrap}>
+              <MediaCard
+                variant="hero"
+                format={format}
+                title={hero.briefs.title}
+                time={dueLabel(hero.scheduled_date)}
+                mediaHeight={HERO_HEIGHT}
+                onPress={() => openPost(hero)}
               />
-            </View>
-
-            {rest.length > 0 && (
-              <View>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: moreOpen }}
-                  style={styles.moreRow}
-                  onPress={() => setMoreOpen((o) => !o)}
-                >
-                  <Text style={styles.moreText}>
-                    {rest.length} more today
-                  </Text>
-                  <Icon
-                    name={moreOpen ? 'chevron-up' : 'chevron-down'}
-                    size={16}
-                    color={color.slate500}
-                  />
-                </PressableScale>
-                {moreOpen &&
-                  rest.map((a) => (
-                    <PressableScale
-                      key={a.id}
-                      accessibilityRole="button"
-                      style={styles.upNextRow}
-                      onPress={() => openAssignment(a)}
-                    >
-                      <View style={styles.upNextText}>
-                        <Text style={styles.upNextTitle} numberOfLines={1}>
-                          {a.briefs.title}
-                        </Text>
-                        {a.briefs.hook ? (
-                          <Text style={styles.upNextHook} numberOfLines={1}>
-                            {a.briefs.hook}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <StatusChip status={a.status} />
-                    </PressableScale>
-                  ))}
-              </View>
-            )}
-          </>
-        ) : (
-          <View style={styles.doneCard}>
-            <Icon name="circle-check-big" size={30} color={color.green} />
-            <Text style={styles.doneTitle}>Done for today</Text>
-            <Text style={styles.doneSub}>All three posts are in. Nice.</Text>
-            {tomorrowFirst !== undefined && (
-              <PressableScale
-                accessibilityRole="button"
-                style={styles.peekRow}
-                onPress={() => openAssignment(tomorrowFirst)}
-              >
-                <View style={styles.upNextText}>
-                  <Text style={styles.peekLabel}>First up tomorrow</Text>
-                  <Text style={styles.upNextTitle} numberOfLines={1}>
-                    {tomorrowFirst.briefs.title}
-                  </Text>
+              {contentTypeTag !== undefined ? (
+                <View style={styles.contentTypeTag} pointerEvents="none">
+                  <Text style={styles.contentTypeText}>{contentTypeTag}</Text>
                 </View>
-                <Icon name="chevron-right" size={16} color={color.slate500} />
-              </PressableScale>
-            )}
-          </View>
-        )}
+              ) : null}
+            </View>
+          </>
+        ) : today.length === 0 ? (
+          <EmptyState
+            compact
+            icon="sparkles"
+            title="Nothing queued today"
+            body="Your next week of posts lands when the campaign drops."
+          />
+        ) : allClear ? (
+          <EmptyState
+            compact
+            icon="circle-check-big"
+            title="Done for today"
+            body="All of today's posts are in."
+          />
+        ) : null}
       </ScrollView>
-
-      <SwapSheet
-        visible={swapOpen}
-        briefs={swapPool}
-        loading={swapLoading}
-        onPick={(brief) => {
-          void pickSwap(brief);
-        }}
-        onClose={() => setSwapOpen(false)}
-      />
-
-      {toast !== null && (
-        <Animated.View
-          style={[styles.toast, shadow.shadowFloat, { opacity: toastAnim }]}
-          pointerEvents="none"
-        >
-          <Text style={styles.toastText}>{toast}</Text>
-        </Animated.View>
-      )}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  flex: {
     flex: 1,
-    backgroundColor: color.offWhite,
+  },
+  screenBody: {
+    paddingHorizontal: 0,
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: space.gutter,
+    paddingTop: space[2],
+    paddingBottom: space[3],
+    gap: space[4],
+    flexGrow: 1,
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    paddingTop: 6,
-    paddingHorizontal: 24,
+    gap: space[5],
+  },
+  greeting: {
+    flex: 1,
+    fontSize: type.size.titleXl,
+    lineHeight: type.size.titleXl * type.leading.title,
+    letterSpacing: type.tracking.title,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
   },
   bellBtn: {
-    padding: 4,
-    margin: -4,
+    width: space.tapMin,
+    height: space.tapMin,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bellDot: {
     position: 'absolute',
-    top: 3,
-    right: 3,
-    width: 9,
-    height: 9,
-    borderRadius: 999,
+    top: 6,
+    right: 7,
+    width: 10,
+    height: 10,
+    borderRadius: radius.pill,
     backgroundColor: color.accent,
     borderWidth: 2,
     borderColor: color.white,
   },
-  column: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 96,
-    gap: 12,
-  },
-  greetingRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-  },
-  greeting: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  greetingTitle: {
-    fontSize: 24,
-    lineHeight: 27.6,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-    color: color.ink,
-  },
-  greetingSub: {
-    marginTop: 4,
-    fontSize: 14,
-    color: color.slate500,
-  },
   streakPill: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: color.amberSoft,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  streakCount: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  heroFrame: {
-    flex: 1,
-    minHeight: 420,
-  },
-  emptyWrap: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  moreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue100,
   },
-  moreText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: color.slate500,
+  streakText: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
   },
-  upNextRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: 16,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  upNextText: {
-    flex: 1,
-    gap: 2,
-  },
-  upNextTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  upNextHook: {
-    fontSize: 13,
-    color: color.slate500,
-  },
-  doneCard: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: 24,
-    padding: 24,
-  },
-  doneTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.4,
-    color: color.ink,
-  },
-  doneSub: {
-    fontSize: 14,
-    color: color.slate500,
-  },
-  peekRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    alignSelf: 'stretch',
-    marginTop: 16,
-    backgroundColor: color.offWhite,
-    borderRadius: 16,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-  },
-  peekLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.slate400,
+  sectionLabel: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    color: color.slate400,
   },
-  toast: {
+  heroWrap: {
+    width: HERO_WIDTH,
+    alignSelf: 'center',
+    position: 'relative',
+  },
+  contentTypeTag: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 104,
-    backgroundColor: color.ink,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    top: 10,
+    left: 80,
+    zIndex: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue500,
   },
-  toastText: {
+  contentTypeText: {
     color: color.white,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
+  },
+  footerPad: {
+    // Floating TabBar (~68) + bottom offset (22)
+    paddingBottom: space.tapMin + space[11] + space[2],
   },
 });
