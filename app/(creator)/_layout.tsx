@@ -88,6 +88,8 @@ export default function CreatorLayout() {
         }}
       />
       <Stack.Screen name="record/[id]" options={{ presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="record/changes/[id]" />
+      <Stack.Screen name="upload/[id]" options={{ presentation: 'fullScreenModal' }} />
     </Stack>
   );
 }
