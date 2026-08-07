@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Dimensions,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -16,11 +17,14 @@ import {
 } from 'expo-camera';
 import * as Brightness from 'expo-brightness';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import * as WebBrowser from 'expo-web-browser';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BeatPrompter, Teleprompter } from '../../../components/Teleprompter';
-import { color, shadow } from '../../../theme/tokens';
+import { parseChangesNote } from '../../../components/ReviewThread';
+import { Icon } from '../../../components/ui/Icon';
+import { color, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
   listBriefSegments,
@@ -28,6 +32,10 @@ import {
   parseTalkingPoints,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import {
+  latestChangesNote,
+  listAssignmentReviewEvents,
+} from '../../../lib/review-events';
 import {
   getAssignment,
   getTask,
@@ -49,6 +57,7 @@ import {
   uploadClip,
 } from '../../../lib/submissions';
 import type { ContentTask } from '../../../lib/tasks';
+import { flaggedSlotIndices } from './flagged';
 
 type Phase =
   | 'idle'
@@ -59,7 +68,6 @@ type Phase =
   | 'submitting'
   | 'sent';
 
-/** One clip the creator records, in slot order. */
 type ClipPlan = {
   slotIndex: number;
   kind: DraftSegmentKind;
@@ -69,7 +77,6 @@ type ClipPlan = {
   scripted: boolean;
 };
 
-/** A kept take. Resumed drafts have no localUri; task clips have no storagePath. */
 type KeptClip = {
   slotIndex: number;
   kind: DraftSegmentKind;
@@ -80,17 +87,13 @@ type KeptClip = {
 
 type PendingClip = { uri: string; durationMs: number };
 
-/** 3-2-1 countdown steps at 800ms each (README §5). */
 const COUNTDOWN_STEP_MS = 800;
-/** Post-submit toast duration before returning Home (README §5). */
 const TOAST_MS = 2600;
-
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-// Per-clip cap. Hooks run seconds, points under a minute; 90s is headroom,
-// not a target.
 const MAX_CLIP_MS = 90_000;
 const STOP_WATCHDOG_MS = 5_000;
-
+const SHUTTER_SIZE = 76;
+const SHUTTER_BAR = 97;
 const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
 
 function splitScriptParts(script: string): string[] {
@@ -118,16 +121,7 @@ function scriptPartsPlan(script: string): ClipPlan[] {
   }));
 }
 
-/**
- * The clip plan for a brief. Segments are the source of truth (kinds
- * hook | point | outro; slides belong to the upload screen). Briefs without
- * segments derive hook / points / outro; legacy script briefs record the
- * script in parts. Hook and outro are scripted (teleprompter); points are
- * beats the creator talks around.
- */
 function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
-  // Legacy carousels (null post_type_id) still record their script as video;
-  // only new-world carousels go through the upload screen.
   if (brief.format === 'photo_carousel') {
     return scriptPartsPlan(
       brief.script?.trim() || 'No script on this post. Speak freely.',
@@ -229,10 +223,20 @@ function formatMs(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function estimateRuntimeSec(clip: ClipPlan): number {
+  if (clip.kind === 'hook') return 6;
+  if (clip.kind === 'outro') return 5;
+  const words = clip.script.split(/\s+/).filter(Boolean).length;
+  return Math.max(4, Math.min(45, Math.round(words * 0.4)));
+}
+
+function clipKindLabel(clip: ClipPlan): string {
+  if (clip.kind === 'hook') return 'hook';
+  if (clip.kind === 'outro') return 'cta';
+  return clip.label.toLowerCase();
+}
+
 export default function RecordScreen() {
-  // Same screen serves both worlds: legacy tasks and campaign assignments
-  // (routed with ?assignment=1). Both record clip by clip; only assignments
-  // persist progress to recording_drafts.
   const { id, assignment: assignmentFlag } = useLocalSearchParams<{
     id: string;
     assignment?: string;
@@ -242,6 +246,7 @@ export default function RecordScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
   const cameraRef = useRef<CameraView>(null);
+  const pulse = useRef(new Animated.Value(1)).current;
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -271,6 +276,7 @@ export default function RecordScreen() {
 
   const brief = isAssignment ? assignment?.briefs ?? null : null;
   const title = (isAssignment ? brief?.title : task?.title) ?? '';
+  const exampleUrl = brief?.example_url ?? null;
 
   const plan = useMemo<ClipPlan[]>(() => {
     if (brief) return briefPlan(brief, briefSegments);
@@ -285,7 +291,6 @@ export default function RecordScreen() {
   const activeClip = activeIndex !== null ? plan[activeIndex] ?? null : null;
   const allKept =
     plan.length > 0 && plan.every((c) => kept[c.slotIndex] !== undefined);
-  const keptCount = plan.filter((c) => kept[c.slotIndex] !== undefined).length;
   const replacing =
     activeClip !== null && kept[activeClip.slotIndex] !== undefined;
 
@@ -295,6 +300,12 @@ export default function RecordScreen() {
     if (pendingSource) p.play();
   });
 
+  const screenW = Dimensions.get('window').width;
+  const viewportH = Math.min(
+    screenW * (16 / 9),
+    Dimensions.get('window').height - insets.top - SHUTTER_BAR - insets.bottom,
+  );
+
   useEffect(() => {
     if (!id || !profile) return;
     let cancelled = false;
@@ -303,9 +314,6 @@ export default function RecordScreen() {
         if (isAssignment) {
           const a = await getAssignment(id);
           if (cancelled) return;
-          // New-world static posts pick photos instead of recording. Legacy
-          // carousels (null post_type_id) keep the old record-a-video path
-          // that post-approved still expects for them.
           if (
             a &&
             a.briefs.format === 'photo_carousel' &&
@@ -319,14 +327,31 @@ export default function RecordScreen() {
           }
           setAssignment(a);
           if (a && profile) {
-            const [segs, draft] = await Promise.all([
+            const [segs, draft, events] = await Promise.all([
               listBriefSegments(a.briefs.id),
               loadDraftSegments(profile.company_id, a.id),
+              a.status === 'changes_requested'
+                ? listAssignmentReviewEvents(a.id)
+                : Promise.resolve([]),
             ]);
             if (cancelled) return;
             setBriefSegments(segs);
+            const derivedPlan = briefPlan(a.briefs, segs);
+            let skipSlots = new Set<number>();
+            if (a.status === 'changes_requested') {
+              const note = latestChangesNote(events);
+              if (note) {
+                const flagged = flaggedSlotIndices(
+                  parseChangesNote(note),
+                  derivedPlan,
+                );
+                if (flagged) skipSlots = new Set(flagged);
+                else skipSlots = new Set(derivedPlan.map((c) => c.slotIndex));
+              }
+            }
             const resumed: Record<number, KeptClip> = {};
             for (const s of draft) {
+              if (skipSlots.has(s.slot_index)) continue;
               resumed[s.slot_index] = {
                 slotIndex: s.slot_index,
                 kind: s.kind,
@@ -353,7 +378,6 @@ export default function RecordScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAssignment, profile?.id]);
 
-  // Resume at the first missing clip; all clips kept resumes on the summary.
   useEffect(() => {
     if (loading || initialized || plan.length === 0) return;
     const first = plan.findIndex((c) => kept[c.slotIndex] === undefined);
@@ -379,12 +403,34 @@ export default function RecordScreen() {
     return () => clearInterval(t);
   }, [phase]);
 
-  // Failsafe: if maxDuration never fires (Expo Go new arch), force a stop.
   useEffect(() => {
     if (phase !== 'recording') return;
     if (elapsedMs > MAX_CLIP_MS + 5000) stopClip();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, elapsedMs]);
+
+  useEffect(() => {
+    if (phase !== 'recording') {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 0.35,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase, pulse]);
 
   useEffect(() => {
     return () => {
@@ -454,9 +500,6 @@ export default function RecordScreen() {
     }
     const startedAt = Date.now();
     try {
-      // Pin H.264 so concat at approve time never mixes codecs across clips.
-      // expo-camera 17 exposes no fps or audio sample rate control; those two
-      // are normalized server-side in post-approved's single FFmpeg job.
       const clip = await cam.recordAsync({
         maxDuration: Math.ceil(MAX_CLIP_MS / 1000),
         codec: 'avc1',
@@ -513,11 +556,6 @@ export default function RecordScreen() {
     setPhase('idle');
   }
 
-  /**
-   * Keep the take: assignments upload the clip right away and write it into
-   * recording_drafts, so a killed app loses nothing. Legacy tasks keep the
-   * clip locally and upload everything at submit, as before.
-   */
   async function keepPendingClip() {
     if (!pendingClip || !profile || activeClip === null) return;
     setPhase('saving');
@@ -572,7 +610,8 @@ export default function RecordScreen() {
   }
 
   function jumpToClip(index: number) {
-    if (phase !== 'idle') return;
+    if (phase !== 'idle' && phase !== 'clipReview') return;
+    if (phase === 'clipReview') retakePending();
     setPendingClip(null);
     setActiveIndex(index);
   }
@@ -602,7 +641,7 @@ export default function RecordScreen() {
         try {
           await clearDraft(profile.company_id, assignment.id);
         } catch {
-          // the submission is in; a stale draft row is harmless
+          // submission is in; stale draft is harmless
         }
       } else if (task) {
         const segments = plan.map((c) => {
@@ -633,7 +672,31 @@ export default function RecordScreen() {
       retakePending();
       return;
     }
+    if (phase === 'countdown') {
+      setPhase('idle');
+      return;
+    }
+    if (phase === 'recording') {
+      stopClip();
+      return;
+    }
     router.back();
+  }
+
+  function onWatchExample() {
+    if (!exampleUrl) {
+      Alert.alert(
+        'No example yet',
+        'Your team has not attached an example for this post.',
+      );
+      return;
+    }
+    void WebBrowser.openBrowserAsync(exampleUrl);
+  }
+
+  function onShutterPress() {
+    if (phase === 'idle') void beginCountdown();
+    else if (phase === 'recording') stopClip();
   }
 
   if (loading) {
@@ -656,276 +719,262 @@ export default function RecordScreen() {
     (phase === 'idle' || phase === 'countdown' || phase === 'recording');
   const frontGlow = phase === 'recording' && flashOn && facing === 'front';
   const summaryMode = activeIndex === null && phase === 'idle';
-  const chipsVisible = phase === 'idle';
+  const canRetake = phase === 'clipReview';
+  const canKeep = phase === 'clipReview';
+  const shutterRecording = phase === 'recording' || phase === 'clipReview';
 
   return (
     <View style={styles.root}>
-      {showCamera ? (
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing={facing}
-          mode="video"
-          videoQuality="1080p"
-          videoBitrate={8_000_000}
-          enableTorch={flashOn && facing === 'back'}
-          onCameraReady={() => setCameraReady(true)}
-        />
-      ) : null}
+      <View style={{ height: insets.top }} />
 
-      {phase === 'clipReview' && pendingSource ? (
-        <VideoView
-          style={StyleSheet.absoluteFill}
-          player={player}
-          contentFit="cover"
-          nativeControls={false}
-        />
-      ) : null}
+      <View style={[styles.viewport, { height: viewportH }]}>
+        {showCamera ? (
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing={facing}
+            mode="video"
+            videoQuality="1080p"
+            videoBitrate={8_000_000}
+            enableTorch={flashOn && facing === 'back'}
+            onCameraReady={() => setCameraReady(true)}
+          />
+        ) : null}
 
-      {frontGlow ? <View style={styles.frontGlow} pointerEvents="none" /> : null}
+        {phase === 'clipReview' && pendingSource ? (
+          <VideoView
+            style={StyleSheet.absoluteFill}
+            player={player}
+            contentFit="cover"
+            nativeControls={false}
+          />
+        ) : null}
 
-      <View style={[styles.progressWrap, { top: insets.top + 4 }]}>
-        {plan.map((c, i) => {
-          const isDone = kept[c.slotIndex] !== undefined;
-          const isLive = phase === 'recording' && i === activeIndex;
-          return (
-            <View key={c.slotIndex} style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  isDone && styles.progressDone,
-                  isLive && {
-                    backgroundColor: '#FFFFFF',
-                    flex: Math.min(elapsedMs / MAX_CLIP_MS, 1),
-                  },
-                  !isDone && !isLive && styles.progressEmpty,
-                ]}
-              />
-              {isLive ? (
-                <View
-                  style={{ flex: Math.max(1 - elapsedMs / MAX_CLIP_MS, 0) }}
-                />
-              ) : null}
-            </View>
-          );
-        })}
-      </View>
-
-      {showCamera && activeClip ? (
-        <View style={[styles.prompterSlot, { paddingTop: insets.top + 48 }]}>
-          {activeClip.scripted ? (
-            <Teleprompter
-              text={activeClip.script}
-              running={phase === 'recording' && !scriptPaused}
-              paused={phase === 'recording' && scriptPaused}
-              speed={speed}
-              speedLabel={`${speed}x`}
-              resetKey={takeCount}
-              onTap={() => {
-                if (phase === 'recording') setScriptPaused((p) => !p);
-              }}
-            />
-          ) : (
-            <BeatPrompter
-              label={`${activeClip.label} of ${plan.length} clips`}
-              text={activeClip.script}
-              credential={profile?.credential_line ?? null}
-            />
-          )}
-        </View>
-      ) : null}
-
-      {phase === 'countdown' ? (
-        <Pressable style={styles.countdownWrap} onPress={() => setPhase('idle')}>
-          <Text style={styles.countdown}>{countdown}</Text>
-          <Text style={styles.countdownHint}>Tap to cancel</Text>
-        </Pressable>
-      ) : null}
-
-      {phase !== 'sent' ? (
-        <View style={[styles.topBar, { paddingTop: insets.top + 14 }]}>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={styles.topBtn}>
-              {phase === 'clipReview' ? 'Back' : 'Close'}
+        {summaryMode ? (
+          <View style={styles.summaryFill}>
+            <Text style={styles.summaryTitle}>All clips recorded</Text>
+            <Text style={styles.summaryText}>
+              Your clips post as one video. Tap a segment above to record it
+              again, or send everything for review.
             </Text>
-          </Pressable>
-          <View style={styles.topCenter}>
-            <Text style={styles.topTitle} numberOfLines={1}>
-              {title}
-            </Text>
-            {activeClip && phase !== 'clipReview' ? (
-              <Text style={styles.topSub}>
-                Clip {(activeIndex ?? 0) + 1} of {plan.length}
-              </Text>
-            ) : null}
           </View>
-          <View style={{ width: 48 }} />
-        </View>
-      ) : null}
+        ) : (
+          <View style={styles.viewportShade} pointerEvents="none" />
+        )}
 
-      {showCamera ? (
-        <View style={[styles.rail, { top: insets.top + 64 }]}>
+        {frontGlow ? <View style={styles.frontGlow} pointerEvents="none" /> : null}
+
+        <View style={styles.viewportTop}>
           <Pressable
-            style={[styles.railBtn, flashOn && styles.railBtnOn]}
-            onPress={() => setFlashOn((f) => !f)}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            style={styles.roundBtn}
             hitSlop={8}
           >
-            <Text style={styles.railText}>Flash</Text>
+            <Icon name="x" size={20} color={color.white} />
           </Pressable>
-          {phase !== 'recording' ? (
-            <Pressable
-              style={styles.railBtn}
-              onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
-              hitSlop={8}
-            >
-              <Text style={styles.railText}>Flip</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
 
-      {summaryMode ? (
-        <View style={styles.summaryWrap}>
-          <Text style={styles.summaryTitle}>All clips recorded</Text>
-          <Text style={styles.summaryText}>
-            Your clips post as one video. Tap a clip below to record it again,
-            or send everything for review.
-          </Text>
-        </View>
-      ) : null}
+          <View style={styles.clipMeta}>
+            <View style={styles.clipMetaRow}>
+              <Text style={styles.clipTitle} numberOfLines={1}>
+                {activeClip
+                  ? `Clip ${(activeIndex ?? 0) + 1} of ${plan.length}, ${clipKindLabel(activeClip)}`
+                  : title}
+              </Text>
+              {phase === 'recording' ? (
+                <View style={styles.recBadge}>
+                  <Animated.View style={[styles.recDot, { opacity: pulse }]} />
+                  <Text style={styles.recTime}>{formatMs(elapsedMs)}</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.stepper}>
+              {plan.map((c, i) => {
+                const isDone = kept[c.slotIndex] !== undefined;
+                const isActive = i === activeIndex;
+                return (
+                  <Pressable
+                    key={c.slotIndex}
+                    style={styles.stepTrack}
+                    onPress={() => jumpToClip(i)}
+                    disabled={phase !== 'idle'}
+                  >
+                    <View
+                      style={[
+                        styles.stepFill,
+                        isDone && styles.stepDone,
+                        isActive && !isDone && styles.stepActive,
+                        isActive &&
+                          phase === 'recording' && {
+                            flex: Math.min(elapsedMs / MAX_CLIP_MS, 1),
+                          },
+                      ]}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
 
-      <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
-        {chipsVisible && plan.length > 0 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsRow}
-            style={styles.chipsScroll}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Switch camera"
+            onPress={() => {
+              if (phase === 'recording') return;
+              setFacing((f) => (f === 'front' ? 'back' : 'front'));
+            }}
+            style={styles.roundBtn}
+            hitSlop={8}
           >
-            {plan.map((c, i) => {
-              const isDone = kept[c.slotIndex] !== undefined;
-              const isActive = i === activeIndex;
-              return (
-                <Pressable
-                  key={c.slotIndex}
-                  style={[
-                    styles.chip,
-                    isDone && styles.chipDone,
-                    isActive && styles.chipActive,
-                  ]}
-                  onPress={() => jumpToClip(i)}
-                >
-                  <Text style={[styles.chipText, isDone && styles.chipTextDone]}>
-                    {c.chip}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        ) : null}
+            <Icon name="switch-camera" size={20} color={color.white} />
+          </Pressable>
+        </View>
 
-        {phase === 'idle' && activeClip !== null ? (
-          <>
-            {activeClip.scripted ? (
-              <View style={styles.speedRow}>
-                {SPEEDS.map((s) => (
-                  <Pressable
-                    key={s}
-                    onPress={() => setSpeed(s)}
-                    style={[styles.speedChip, speed === s && styles.speedOn]}
-                  >
-                    <Text style={styles.speedText}>{s}x</Text>
-                  </Pressable>
-                ))}
+        {activeClip && !summaryMode ? (
+          <View style={styles.exampleRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Watch example"
+              onPress={onWatchExample}
+              style={styles.examplePill}
+            >
+              <View style={styles.exampleThumb}>
+                <Icon name="play" size={13} color={color.white} />
               </View>
-            ) : null}
-            <Text style={styles.hintSmall}>
-              {replacing
-                ? 'This take replaces the clip you already kept.'
-                : activeClip.scripted
-                  ? 'Read the script. Stop when you finish this clip.'
-                  : 'Talk through the point in your own words.'}
-            </Text>
-            <View style={styles.shutterRow}>
-              <View style={styles.shutterSide}>
-                {allKept ? (
-                  <Pressable
-                    style={styles.doneBtn}
-                    onPress={() => setActiveIndex(null)}
-                  >
-                    <Text style={styles.doneText}>Done</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-              <Pressable
-                style={[styles.shutter, !cameraReady && styles.shutterOff]}
-                disabled={!cameraReady}
-                onPress={() => void beginCountdown()}
-              >
-                <View style={styles.shutterInner} />
-              </Pressable>
-              <View style={styles.shutterSide}>
-                <Text style={styles.hintSmall}>
-                  {cameraReady
-                    ? `${keptCount} of ${plan.length} kept`
-                    : 'Camera starting'}
+              <View>
+                <Text style={styles.exampleTitle}>Watch example</Text>
+                <Text style={styles.exampleSub}>
+                  {activeClip.label}, {estimateRuntimeSec(activeClip)} seconds
                 </Text>
               </View>
-            </View>
-          </>
-        ) : null}
-
-        {phase === 'countdown' ? <Text style={styles.hint}>Get ready</Text> : null}
-
-        {phase === 'recording' ? (
-          <View style={styles.recCol}>
-            <Text style={styles.timer}>
-              {formatMs(elapsedMs)} / {formatMs(MAX_CLIP_MS)}
-            </Text>
-            <Pressable style={styles.stopBtn} onPress={stopClip}>
-              <View style={styles.stopSquare} />
             </Pressable>
-            <Text style={styles.hintSmall}>Stop when you finish this clip</Text>
           </View>
         ) : null}
 
-        {phase === 'clipReview' && activeClip ? (
-          <View style={styles.reviewCol}>
-            <Text style={styles.hintSmall}>
-              {activeClip.label}. Happy with it? Keep it and move on.
-            </Text>
-            <View style={styles.reviewRow}>
-              <Pressable style={styles.secondaryBtn} onPress={retakePending}>
-                <Text style={styles.secondaryText}>Retake</Text>
-              </Pressable>
+        {showCamera && activeClip ? (
+          <View style={styles.prompterSlot}>
+            {activeClip.scripted ? (
+              <Teleprompter
+                text={activeClip.script}
+                running={phase === 'recording' && !scriptPaused}
+                paused={phase === 'recording' && scriptPaused}
+                speed={speed}
+                speedLabel={`${speed}x`}
+                resetKey={takeCount}
+                onTap={() => {
+                  if (phase === 'recording') setScriptPaused((p) => !p);
+                }}
+              />
+            ) : (
+              <BeatPrompter
+                label={`${activeClip.label} of ${plan.length} clips`}
+                text={activeClip.script}
+                credential={profile?.credential_line ?? null}
+              />
+            )}
+          </View>
+        ) : null}
+
+        {phase === 'countdown' ? (
+          <Pressable style={styles.countdownWrap} onPress={() => setPhase('idle')}>
+            <Text style={styles.countdown}>{countdown}</Text>
+            <Text style={styles.countdownHint}>Tap to cancel</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View
+        style={[
+          styles.shutterBar,
+          { paddingBottom: Math.max(insets.bottom, 10), minHeight: SHUTTER_BAR },
+        ]}
+      >
+        {phase === 'idle' && activeClip?.scripted ? (
+          <View style={styles.speedRow}>
+            {SPEEDS.map((s) => (
               <Pressable
-                style={styles.primaryBtn}
-                onPress={() => void keepPendingClip()}
+                key={s}
+                onPress={() => setSpeed(s)}
+                style={[styles.speedChip, speed === s && styles.speedOn]}
               >
-                <Text style={styles.primaryText}>Keep clip</Text>
+                <Text style={styles.speedText}>{s}x</Text>
               </Pressable>
-            </View>
-          </View>
-        ) : null}
-
-        {phase === 'saving' ? (
-          <View style={styles.recCol}>
-            <ActivityIndicator color="#FFFFFF" />
-            <Text style={styles.hint}>Saving your clip…</Text>
+            ))}
           </View>
         ) : null}
 
         {summaryMode ? (
           <Pressable
-            style={[styles.primaryBtn, styles.submitBtn]}
+            style={styles.submitBtn}
             onPress={() => void sendForReview()}
           >
-            <Text style={styles.primaryText}>Send for review</Text>
+            <Text style={styles.submitText}>Send for review</Text>
           </Pressable>
-        ) : null}
+        ) : phase === 'submitting' ? (
+          <Text style={styles.barHint}>Sending for review…</Text>
+        ) : (
+          <View style={styles.shutterRow}>
+            <Pressable
+              style={styles.sideHit}
+              onPress={canRetake ? retakePending : undefined}
+              disabled={!canRetake}
+            >
+              <Text style={[styles.sideText, !canRetake && styles.sideTextMuted]}>
+                Retake
+              </Text>
+            </Pressable>
 
-        {phase === 'submitting' ? (
-          <Text style={styles.hint}>Sending for review…</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                phase === 'recording' ? 'Stop recording' : 'Start recording'
+              }
+              style={[
+                styles.shutterRing,
+                (!cameraReady || phase === 'saving') && styles.shutterOff,
+              ]}
+              disabled={
+                !cameraReady ||
+                phase === 'saving' ||
+                phase === 'countdown' ||
+                phase === 'clipReview'
+              }
+              onPress={onShutterPress}
+            >
+              <View
+                style={[
+                  styles.shutterInner,
+                  shutterRecording && styles.shutterInnerStop,
+                ]}
+              />
+            </Pressable>
+
+            <Pressable
+              style={styles.sideHit}
+              onPress={canKeep ? () => void keepPendingClip() : undefined}
+              disabled={!canKeep}
+            >
+              <Text
+                style={[
+                  styles.sideText,
+                  styles.sideTextKeep,
+                  !canKeep && styles.sideTextMuted,
+                ]}
+              >
+                Keep
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
+        {phase === 'saving' ? (
+          <Text style={styles.barHint}>Saving your clip…</Text>
+        ) : null}
+        {phase === 'idle' && activeClip && replacing ? (
+          <Text style={styles.barHint}>
+            This take replaces the clip you already kept.
+          </Text>
         ) : null}
       </View>
 
@@ -947,231 +996,270 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.ink900,
+    paddingHorizontal: space[10],
   },
-  fallbackText: { color: 'rgba(255,255,255,0.7)', fontSize: 16 },
+  fallbackText: {
+    color: color.whiteA75,
+    fontSize: type.size.body,
+    textAlign: 'center',
+  },
+  viewport: {
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: color.ink800,
+  },
+  viewportShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: color.scrim,
+    opacity: 0.15,
+  },
   frontGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderWidth: 26,
-    borderColor: '#FFFFFF',
+    backgroundColor: color.whiteA45,
   },
-  progressWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    height: 5,
-    flexDirection: 'row',
-    gap: 3,
-    zIndex: 10,
-  },
-  progressTrack: {
-    flex: 1,
-    flexDirection: 'row',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: { flex: 1, borderRadius: 3 },
-  progressDone: { backgroundColor: color.accent },
-  progressEmpty: { backgroundColor: 'rgba(255,255,255,0.25)' },
-  prompterSlot: {
+  viewportTop: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    paddingTop: space[3],
+    paddingHorizontal: space[7],
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    zIndex: 4,
+  },
+  roundBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clipMeta: { flex: 1, gap: space[2], paddingTop: 2 },
+  clipMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  clipTitle: {
+    flex: 1,
+    color: color.white,
+    fontSize: type.size.meta,
+    fontWeight: type.weight.heavy,
+  },
+  recBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: color.scrim,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radius.pill,
+    backgroundColor: color.danger,
+  },
+  recTime: {
+    color: color.white,
+    fontSize: type.size.chip,
+    fontWeight: type.weight.heavy,
+  },
+  stepper: { flexDirection: 'row', gap: 6 },
+  stepTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA28,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  stepFill: { flex: 1, borderRadius: radius.pill },
+  stepDone: { backgroundColor: color.blue300 },
+  stepActive: { backgroundColor: color.blue300 },
+  exampleRow: {
+    position: 'absolute',
+    top: 72,
+    right: space[7],
+    zIndex: 4,
+  },
+  examplePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+    paddingVertical: 9,
+    paddingLeft: 9,
+    paddingRight: 14,
+    borderRadius: radius.pill,
+    backgroundColor: color.scrimStrong,
+    borderWidth: 1,
+    borderColor: color.whiteA16,
+  },
+  exampleThumb: {
+    width: 26,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: color.whiteA16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exampleTitle: {
+    color: color.white,
+    fontSize: type.size.meta,
+    fontWeight: type.weight.heavy,
+  },
+  exampleSub: {
+    color: color.whiteA60,
+    fontSize: type.size.label,
+    marginTop: 1,
+  },
+  prompterSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 3,
   },
   countdownWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 20,
+    backgroundColor: color.scrimStrong,
+    zIndex: 6,
   },
-  countdown: { fontSize: 96, fontWeight: '800', color: '#fff' },
-  countdownHint: { color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    zIndex: 15,
+  countdown: {
+    color: color.white,
+    fontSize: 96,
+    fontWeight: type.weight.heavy,
   },
-  topBtn: { color: '#fff', fontWeight: '700', fontSize: 16, width: 48 },
-  topCenter: { flex: 1, alignItems: 'center', gap: 1 },
-  topTitle: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
-    textAlign: 'center',
+  countdownHint: {
+    color: color.whiteA75,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    marginTop: space[2],
   },
-  topSub: {
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  rail: {
-    position: 'absolute',
-    right: 12,
-    gap: 10,
-    alignItems: 'flex-end',
-    zIndex: 15,
-  },
-  railBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,32,0.55)',
-    alignItems: 'center',
-  },
-  railBtnOn: { backgroundColor: color.accent },
-  railText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  summaryWrap: {
-    flex: 1,
+  summaryFill: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 10,
+    paddingHorizontal: space[8],
+    gap: space[3],
   },
-  summaryTitle: { color: '#fff', fontWeight: '800', fontSize: 24 },
-  summaryText: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 15,
-    lineHeight: 21,
+  summaryTitle: {
+    color: color.white,
+    fontSize: type.size.titleSm,
+    fontWeight: type.weight.heavy,
     textAlign: 'center',
   },
-  bottom: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 20,
+  summaryText: {
+    color: color.whiteA75,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    textAlign: 'center',
   },
-  chipsScroll: { maxHeight: 44, flexGrow: 0 },
-  chipsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 4,
-    alignItems: 'center',
+  shutterBar: {
+    backgroundColor: color.ink900,
+    paddingHorizontal: space[8],
+    paddingTop: space[3],
+    justifyContent: 'center',
+    gap: space[2],
   },
-  chip: {
-    minWidth: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderWidth: 2,
-    borderColor: 'transparent',
-    alignItems: 'center',
-  },
-  chipDone: { backgroundColor: color.accent },
-  chipActive: { borderColor: '#FFFFFF' },
-  chipText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  chipTextDone: { color: '#fff' },
-  speedRow: { flexDirection: 'row', gap: 8 },
-  speedChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  speedOn: { backgroundColor: color.accent },
-  speedText: { color: '#fff', fontWeight: '700' },
   shutterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
-    justifyContent: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
   },
-  shutterSide: { flex: 1, alignItems: 'center' },
-  shutter: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+  sideHit: {
+    width: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: space.tapMin,
+  },
+  sideText: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.white,
+  },
+  sideTextKeep: { fontWeight: type.weight.heavy },
+  sideTextMuted: { color: color.whiteA45 },
+  shutterRing: {
+    width: SHUTTER_SIZE,
+    height: SHUTTER_SIZE,
+    borderRadius: radius.pill,
     borderWidth: 4,
-    borderColor: '#fff',
+    borderColor: color.whiteA90,
     alignItems: 'center',
     justifyContent: 'center',
   },
   shutterOff: { opacity: 0.4 },
   shutterInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: color.accent,
+    width: 58,
+    height: 58,
+    borderRadius: radius.pill,
+    backgroundColor: color.danger,
   },
-  doneBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+  shutterInnerStop: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: color.danger,
   },
-  doneText: { color: '#000', fontWeight: '800', fontSize: 15 },
-  recCol: { alignItems: 'center', gap: 10 },
-  timer: { color: '#fff', fontWeight: '800', fontSize: 18 },
-  stopBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 4,
-    borderColor: '#fff',
-    alignItems: 'center',
+  speedRow: {
+    flexDirection: 'row',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    gap: space[2],
   },
-  stopSquare: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: color.accent,
+  speedChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA16,
   },
-  reviewCol: { width: '100%', alignItems: 'center', gap: 10 },
-  reviewRow: { flexDirection: 'row', gap: 12, width: '100%' },
-  secondaryBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  speedOn: { backgroundColor: color.accent },
+  speedText: {
+    color: color.white,
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
   },
-  secondaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  primaryBtn: {
-    flex: 1.4,
-    height: 48,
-    borderRadius: 999,
-    backgroundColor: color.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitBtn: { flex: 0, alignSelf: 'stretch' },
-  primaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  hint: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  hintSmall: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '600',
+  barHint: {
     textAlign: 'center',
+    color: color.whiteA60,
+    fontSize: type.size.chip,
+    fontWeight: type.weight.semibold,
+  },
+  submitBtn: {
+    height: space.tapPrimary,
+    borderRadius: radius.pill,
+    backgroundColor: color.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitText: {
+    color: color.white,
+    fontSize: type.size.action,
+    fontWeight: type.weight.heavy,
   },
   toast: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 104,
-    borderRadius: 16,
+    left: space[7],
+    right: space[7],
+    bottom: 120,
+    borderRadius: radius.md,
     backgroundColor: color.ink,
-    paddingHorizontal: 16,
+    paddingHorizontal: space[5],
     paddingVertical: 14,
     alignItems: 'center',
     zIndex: 30,
   },
   toastText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+    color: color.white,
+    fontWeight: type.weight.semibold,
+    fontSize: type.size.meta,
     textAlign: 'center',
   },
 });

@@ -139,6 +139,11 @@ export default function AssignmentDetailScreen() {
 
   function onRecord() {
     if (!assignment) return;
+    // Changes-requested opens the Wave 3 1f surface; happy-path detail stays Agent B.
+    if (needsChanges) {
+      router.push(`/(creator)/record/changes/${assignment.id}`);
+      return;
+    }
     if (usesUpload) {
       router.push(`/(creator)/upload/${assignment.id}`);
       return;
