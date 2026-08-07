@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalShell, DateWheel, type WheelDate } from '../../components/OnboardingUI';
+import {
+  DateWheel,
+  type WheelDate,
+} from '../../components/OnboardingUI';
 import {
   getOnboardingAnswers,
   setOnboardingAnswer,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 function initialDate(): WheelDate {
   const saved = getOnboardingAnswers().birthday;
@@ -28,8 +30,8 @@ export default function BirthdayScreen() {
   const [date, setDate] = useState<WheelDate>(initialDate);
 
   return (
-    <CalShell
-      progress={2 / TOTAL}
+    <OnboardingShell
+      step={2}
       onBack={() => router.back()}
       title="When were you born?"
       subtitle="This helps us personalize Noni for you."
@@ -40,6 +42,6 @@ export default function BirthdayScreen() {
       }}
     >
       <DateWheel value={date} onChange={setDate} />
-    </CalShell>
+    </OnboardingShell>
   );
 }

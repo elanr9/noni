@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalOption, CalShell } from '../../components/OnboardingUI';
+import { OptionCard } from '../../components/ui/OptionCard';
 import {
   getOnboardingAnswers,
   setOnboardingAnswer,
   type HoursPerWeek,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 const OPTIONS: { key: HoursPerWeek; label: string }[] = [
   { key: '2', label: 'About 2 hours' },
@@ -23,8 +22,8 @@ export default function HoursScreen() {
   );
 
   return (
-    <CalShell
-      progress={6 / TOTAL}
+    <OnboardingShell
+      step={6}
       onBack={() => router.back()}
       title="How many hours a week will you put into Noni?"
       primaryLabel="Continue"
@@ -36,13 +35,13 @@ export default function HoursScreen() {
       }}
     >
       {OPTIONS.map((o) => (
-        <CalOption
+        <OptionCard
           key={o.key}
           label={o.label}
           selected={selected === o.key}
           onPress={() => setSelected(o.key)}
         />
       ))}
-    </CalShell>
+    </OnboardingShell>
   );
 }

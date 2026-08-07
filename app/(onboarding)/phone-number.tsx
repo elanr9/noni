@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalShell, CalTextField } from '../../components/OnboardingUI';
+import { TextField } from '../../components/ui/TextField';
 import {
   formatUsPhone,
   getOnboardingAnswers,
   setOnboardingAnswer,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 export default function PhoneNumberScreen() {
   const [digits, setDigits] = useState(getOnboardingAnswers().phoneDigits);
 
   return (
-    <CalShell
-      progress={3 / TOTAL}
+    <OnboardingShell
+      step={3}
       onBack={() => router.back()}
       title="What's your phone number?"
       subtitle="So we can reach you about your posts and payouts."
@@ -26,7 +25,7 @@ export default function PhoneNumberScreen() {
         router.push('/(onboarding)/experience');
       }}
     >
-      <CalTextField
+      <TextField
         value={formatUsPhone(digits)}
         onChangeText={(t) => setDigits(t.replace(/\D/g, '').slice(0, 10))}
         placeholder="(555) 123 4567"
@@ -34,6 +33,6 @@ export default function PhoneNumberScreen() {
         keyboardType="number-pad"
         textContentType="telephoneNumber"
       />
-    </CalShell>
+    </OnboardingShell>
   );
 }

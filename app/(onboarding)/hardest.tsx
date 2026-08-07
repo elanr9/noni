@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalOption, CalShell } from '../../components/OnboardingUI';
+import { OptionCard } from '../../components/ui/OptionCard';
 import {
   getOnboardingAnswers,
   setOnboardingAnswer,
   type HardestPart,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 const OPTIONS: { key: HardestPart; label: string }[] = [
   { key: 'getting_views', label: 'Getting views' },
@@ -23,8 +22,8 @@ export default function HardestScreen() {
   );
 
   return (
-    <CalShell
-      progress={5 / TOTAL}
+    <OnboardingShell
+      step={5}
       onBack={() => router.back()}
       title="What's been hardest about making money online?"
       primaryLabel="Continue"
@@ -36,13 +35,13 @@ export default function HardestScreen() {
       }}
     >
       {OPTIONS.map((o) => (
-        <CalOption
+        <OptionCard
           key={o.key}
           label={o.label}
           selected={selected === o.key}
           onPress={() => setSelected(o.key)}
         />
       ))}
-    </CalShell>
+    </OnboardingShell>
   );
 }

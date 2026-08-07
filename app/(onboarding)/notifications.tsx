@@ -1,19 +1,17 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
-import { cal, CalShell } from '../../components/OnboardingUI';
+import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../lib/auth';
 import { registerPushToken } from '../../lib/notifications';
-
-const TOTAL = 12;
+import { borderWidth, color, radius, space, type } from '../../theme/tokens';
+import { OnboardingShell } from './_shell';
 
 export default function NotificationsScreen() {
   const { session } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  // registerPushToken asks for permission and stores the Expo push token on
-  // the profile. It never throws and no-ops on simulators.
   async function allow() {
     setBusy(true);
     if (session) await registerPushToken(session.user.id);
@@ -22,22 +20,24 @@ export default function NotificationsScreen() {
   }
 
   return (
-    <CalShell
-      progress={10 / TOTAL}
+    <OnboardingShell
+      step={10}
       onBack={() => router.back()}
       title="Turn on notifications"
       subtitle="We ping you when a post is ready to record and when you get paid."
       primaryLabel={busy ? 'One moment' : 'Allow notifications'}
       primaryDisabled={busy}
       onPrimary={() => void allow()}
-      footer={
-        <Pressable
-          style={styles.skip}
-          onPress={() => router.push('/(onboarding)/permissions')}
+      footerExtra={
+        <Button
+          size="md"
+          variant="ghost"
+          block
           disabled={busy}
+          onPress={() => router.push('/(onboarding)/permissions')}
         >
-          <Text style={styles.skipText}>Not now</Text>
-        </Pressable>
+          Not now
+        </Button>
       }
     >
       <View style={styles.card}>
@@ -47,20 +47,28 @@ export default function NotificationsScreen() {
           keep both on your radar without you checking the app.
         </Text>
       </View>
-    </CalShell>
+    </OnboardingShell>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: cal.field,
-    borderRadius: 16,
-    padding: 20,
-    gap: 6,
-    marginTop: 8,
+    backgroundColor: color.fillQuiet,
+    borderRadius: radius.md,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+    padding: space[7],
+    gap: space[2],
+    marginTop: space[2],
   },
-  cardTitle: { fontSize: 17, fontWeight: '700', color: cal.ink },
-  cardBody: { fontSize: 15, lineHeight: 22, color: cal.sub },
-  skip: { alignItems: 'center', paddingVertical: 4 },
-  skipText: { fontSize: 16, fontWeight: '600', color: cal.sub },
+  cardTitle: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  cardBody: {
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.slate500,
+  },
 });
