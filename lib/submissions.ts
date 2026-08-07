@@ -29,7 +29,7 @@ const PROBE_TIMEOUT_MS = 4_000;
  * record screen includes camera start latency; overlay timing on the render
  * timeline is absolute, so probe the file itself and fall back to wall clock.
  */
-async function probeDurationMs(uri: string, fallbackMs: number): Promise<number> {
+export async function probeDurationMs(uri: string, fallbackMs: number): Promise<number> {
   const player = createVideoPlayer(uri);
   try {
     const seconds = await new Promise<number>((resolve) => {
@@ -62,7 +62,7 @@ async function insertSubmissionSegments(params: {
   submissionId: string;
   briefId: string | null;
   paths: string[];
-  durationsMs: number[];
+  durationsMs: (number | null)[];
 }): Promise<void> {
   const { companyId, submissionId, briefId, paths, durationsMs } = params;
 
@@ -91,7 +91,7 @@ async function insertSubmissionSegments(params: {
   if (error) throw error;
 }
 
-async function uploadClip(localUri: string, path: string): Promise<void> {
+export async function uploadClip(localUri: string, path: string): Promise<void> {
   const response = await fetch(localUri);
   if (!response.ok) {
     throw new Error('Could not read the recorded video');
@@ -103,6 +103,19 @@ async function uploadClip(localUri: string, path: string): Promise<void> {
     upsert: false,
   });
   if (error) throw error;
+}
+
+/**
+ * Path for a kept clip uploaded between takes. Same videos bucket and
+ * company/assignment folder the submit paths use; the draft prefix and
+ * timestamp keep retakes from ever colliding with a versioned submit path.
+ */
+export function draftClipPath(
+  companyId: string,
+  assignmentId: string,
+  slotIndex: number,
+): string {
+  return `${companyId}/${assignmentId}/draft-${slotIndex}-${Date.now()}.mp4`;
 }
 
 export async function submitRecording(params: {
@@ -174,41 +187,17 @@ export async function submitRecording(params: {
   return updated;
 }
 
-/**
- * Assignment flavor of submitRecording: same storage layout keyed on the
- * assignment id, submission linked via assignment_id, and every status hop
- * through transitionAssignment.
- */
-export async function submitAssignmentRecording(params: {
+async function createAssignmentSubmission(params: {
   assignment: Assignment;
   companyId: string;
   creatorId: string;
-  segments: RecordedSegment[];
+  version: number;
+  paths: string[];
+  durationsMs: (number | null)[];
+  durationSeconds: number | null;
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId, segments } = params;
-  if (segments.length === 0) {
-    throw new Error('Nothing recorded yet');
-  }
-  const version = await nextVersion('assignment_id', assignment.id);
-
-  const paths =
-    segments.length === 1
-      ? [`${companyId}/${assignment.id}/${version}.mp4`]
-      : segments.map(
-          (_s, i) => `${companyId}/${assignment.id}/${version}-${i + 1}.mp4`,
-        );
-
-  for (let i = 0; i < segments.length; i++) {
-    await uploadClip(segments[i].uri, paths[i]);
-  }
-
-  const durationsMs = await Promise.all(
-    segments.map((s) => probeDurationMs(s.uri, s.durationMs)),
-  );
-  const durationSeconds = Math.max(
-    1,
-    Math.round(durationsMs.reduce((sum, d) => sum + d, 0) / 1000),
-  );
+  const { assignment, companyId, creatorId, version, paths, durationsMs, durationSeconds } =
+    params;
 
   const { data: submission, error: insertError } = await supabase
     .from('submissions')
@@ -252,4 +241,112 @@ export async function submitAssignmentRecording(params: {
   }
 
   return updated;
+}
+
+/** A kept clip that already lives in the videos bucket (drafted per clip). */
+export type UploadedClip = {
+  slotIndex: number;
+  storagePath: string;
+  durationMs: number;
+};
+
+/**
+ * Submit an assignment recording from clips uploaded clip by clip during the
+ * per-clip flow. Nothing is re-uploaded: segment_paths point at the drafted
+ * files. Status hops go through transitionAssignment as always.
+ */
+export async function submitAssignmentClips(params: {
+  assignment: Assignment;
+  companyId: string;
+  creatorId: string;
+  clips: UploadedClip[];
+}): Promise<Assignment> {
+  const { assignment, companyId, creatorId } = params;
+  const clips = [...params.clips].sort((a, b) => a.slotIndex - b.slotIndex);
+  if (clips.length === 0) {
+    throw new Error('Nothing recorded yet');
+  }
+
+  const version = await nextVersion('assignment_id', assignment.id);
+  const paths = clips.map((c) => c.storagePath);
+  const durationsMs = clips.map((c) => c.durationMs);
+  const durationSeconds = Math.max(
+    1,
+    Math.round(durationsMs.reduce((sum, d) => sum + d, 0) / 1000),
+  );
+
+  return createAssignmentSubmission({
+    assignment,
+    companyId,
+    creatorId,
+    version,
+    paths,
+    durationsMs,
+    durationSeconds,
+  });
+}
+
+export type PickedPhoto = {
+  uri: string;
+  mimeType: string | null;
+};
+
+function photoExtension(mimeType: string | null): string {
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+async function uploadPhoto(photo: PickedPhoto, path: string): Promise<void> {
+  const response = await fetch(photo.uri);
+  if (!response.ok) {
+    throw new Error('Could not read the selected photo');
+  }
+  const blob = await response.blob();
+
+  const { error } = await supabase.storage
+    .from('videos')
+    .upload(path, blob, {
+      contentType: photo.mimeType ?? 'image/jpeg',
+      upsert: false,
+    });
+  if (error) throw error;
+}
+
+/**
+ * Static post submit: one photo per slide, in slide order, uploaded to the
+ * videos bucket beside the video segments (migration 034 allows image mime
+ * types there). segment_paths carry the image paths; new-world carousels
+ * never reach post-approved's video path (it 409s them by design).
+ */
+export async function submitAssignmentPhotos(params: {
+  assignment: Assignment;
+  companyId: string;
+  creatorId: string;
+  photos: PickedPhoto[];
+}): Promise<Assignment> {
+  const { assignment, companyId, creatorId, photos } = params;
+  if (photos.length === 0) {
+    throw new Error('No photos picked yet');
+  }
+
+  const version = await nextVersion('assignment_id', assignment.id);
+  const paths = photos.map(
+    (p, i) =>
+      `${companyId}/${assignment.id}/${version}-slide-${i + 1}.${photoExtension(p.mimeType)}`,
+  );
+
+  for (let i = 0; i < photos.length; i++) {
+    await uploadPhoto(photos[i], paths[i]);
+  }
+
+  return createAssignmentSubmission({
+    assignment,
+    companyId,
+    creatorId,
+    version,
+    paths,
+    durationsMs: paths.map(() => null),
+    durationSeconds: null,
+  });
 }

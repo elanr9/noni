@@ -39,6 +39,10 @@ export type BriefSegmentRow = {
   overlay_text: string | null;
   show_on_screen: boolean;
   screenshot_url: string | null;
+  /** Admin-placed overlay position; null falls back to the defaults below. */
+  screenshot_x: number | null;
+  screenshot_y: number | null;
+  screenshot_width: number | null;
 };
 
 /** Matches the -ss 0.15 input seek on clip 0 in post-approved's FFmpeg pass. */
@@ -91,9 +95,9 @@ export function buildRenderTimeline(params: {
           screenshot_path: segment.screenshot_url,
           start_ms: cursorMs,
           duration_ms: effectiveMs,
-          x: 0.5,
-          y: IMAGE_Y,
-          width: IMAGE_WIDTH,
+          x: segment.screenshot_x ?? 0.5,
+          y: segment.screenshot_y ?? IMAGE_Y,
+          width: segment.screenshot_width ?? IMAGE_WIDTH,
         });
       }
     }

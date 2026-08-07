@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { supabase } from './supabase';
 import type { Database, Json } from './types';
 
@@ -192,4 +194,188 @@ export async function completeOnboarding(userId: string): Promise<void> {
     .update({ onboarded: true })
     .eq('id', userId);
   if (error) throw error;
+}
+
+// ——— Creator pre-auth onboarding (Cal AI flow) ———
+
+export type UgcExperience =
+  | 'never_heard'
+  | 'seen_around'
+  | 'made_some'
+  | 'do_ugc';
+export type HardestPart =
+  | 'getting_views'
+  | 'knowing_what_to_post'
+  | 'staying_consistent'
+  | 'getting_paid';
+export type HoursPerWeek = '2' | '5' | '10' | '15+';
+export type HeardFrom = 'tiktok' | 'instagram' | 'friend' | 'other';
+
+export type CreatorOnboardingAnswers = {
+  firstName: string;
+  /** ISO date, YYYY-MM-DD */
+  birthday: string | null;
+  /** US number, digits only, max 10 */
+  phoneDigits: string;
+  ugcExperience: UgcExperience | null;
+  hardestPart: HardestPart | null;
+  hoursPerWeek: HoursPerWeek | null;
+  heardFrom: HeardFrom | null;
+};
+
+export const HOURS_TO_MONTHLY_ESTIMATE: Record<HoursPerWeek, number> = {
+  '2': 1000,
+  '5': 1500,
+  '10': 2200,
+  '15+': 3000,
+};
+
+const ANSWERS_KEY = 'noni.onboarding.answers';
+const ONBOARDED_LOCALLY_KEY = 'noni.onboarding.completed';
+
+function emptyAnswers(): CreatorOnboardingAnswers {
+  return {
+    firstName: '',
+    birthday: null,
+    phoneDigits: '',
+    ugcExperience: null,
+    hardestPart: null,
+    hoursPerWeek: null,
+    heardFrom: null,
+  };
+}
+
+// Steps 0 to 7 run before a session exists, so answers live in this
+// module-level store, mirrored to AsyncStorage so a killed app resumes.
+let answers = emptyAnswers();
+
+export function getOnboardingAnswers(): CreatorOnboardingAnswers {
+  return answers;
+}
+
+export function setOnboardingAnswer<K extends keyof CreatorOnboardingAnswers>(
+  key: K,
+  value: CreatorOnboardingAnswers[K],
+): void {
+  answers = { ...answers, [key]: value };
+  void AsyncStorage.setItem(ANSWERS_KEY, JSON.stringify(answers)).catch(
+    () => undefined,
+  );
+}
+
+export async function hydrateOnboardingAnswers(): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(ANSWERS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<CreatorOnboardingAnswers>;
+    answers = { ...emptyAnswers(), ...parsed };
+  } catch {
+    answers = emptyAnswers();
+  }
+}
+
+export async function clearOnboardingAnswers(): Promise<void> {
+  answers = emptyAnswers();
+  try {
+    await AsyncStorage.removeItem(ANSWERS_KEY);
+  } catch {
+    // storage failure only means a stale draft sticks around
+  }
+}
+
+/** True once someone has finished onboarding or signed in on this device. */
+export async function hasOnboardedLocally(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(ONBOARDED_LOCALLY_KEY)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export async function markOnboardedLocally(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(ONBOARDED_LOCALLY_KEY, 'true');
+  } catch {
+    // worst case the welcome screen shows again on next launch
+  }
+}
+
+export function formatUsPhone(digits: string): string {
+  const d = digits.replace(/\D/g, '').slice(0, 10);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)} ${d.slice(6)}`;
+}
+
+/**
+ * Writes the locally held answers onto the signed-in creator's profile row
+ * (created by the auth trigger). Merges into onboarding_answers so keys
+ * written later, like warmup_tutorial_seen, are never clobbered.
+ */
+export async function saveOnboardingAnswersToProfile(
+  userId: string,
+): Promise<void> {
+  const a = answers;
+
+  const { data: row, error: readError } = await supabase
+    .from('profiles')
+    .select('onboarding_answers')
+    .eq('id', userId)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  const current =
+    row?.onboarding_answers &&
+    typeof row.onboarding_answers === 'object' &&
+    !Array.isArray(row.onboarding_answers)
+      ? row.onboarding_answers
+      : {};
+
+  const merged: Json = {
+    ...current,
+    ...(a.ugcExperience ? { ugc_experience: a.ugcExperience } : {}),
+    ...(a.hardestPart ? { hardest_part: a.hardestPart } : {}),
+    ...(a.hoursPerWeek ? { hours_per_week: a.hoursPerWeek } : {}),
+    ...(a.heardFrom ? { heard_from: a.heardFrom } : {}),
+  };
+
+  const update: Database['public']['Tables']['profiles']['Update'] = {
+    onboarding_answers: merged,
+  };
+  if (a.firstName.trim()) update.full_name = a.firstName.trim();
+  if (a.birthday) update.birthday = a.birthday;
+  if (a.phoneDigits.length === 10) update.phone = `+1${a.phoneDigits}`;
+
+  const { error } = await supabase
+    .from('profiles')
+    .update(update)
+    .eq('id', userId);
+  if (error) throw error;
+}
+
+export type OnboardingAuthOutcome = 'continue' | 'existing';
+
+/**
+ * Step 8: a session was just created mid-flow. Existing onboarded users get
+ * routed to their app; new users get their answers written and continue.
+ */
+export async function finishOnboardingAuth(): Promise<OnboardingAuthOutcome> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  if (!data.user) throw new Error('Sign in did not finish. Try again.');
+
+  const { data: row, error: profileError } = await supabase
+    .from('profiles')
+    .select('onboarded')
+    .eq('id', data.user.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+
+  if (row?.onboarded) {
+    await markOnboardedLocally();
+    return 'existing';
+  }
+
+  await saveOnboardingAnswersToProfile(data.user.id);
+  return 'continue';
 }

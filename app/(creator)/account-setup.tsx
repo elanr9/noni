@@ -22,66 +22,42 @@ import {
 } from '../../lib/account-template';
 import {
   getCreatorAccount,
+  saveCreatorAccountDraft,
   signedVerificationUrl,
-  submitCreatorAccount,
   uploadVerificationAsset,
   type CreatorAccount,
-  type VerificationUploadKind,
 } from '../../lib/creator-accounts-api';
 import { borderWidth, color, radius, shadow, space, type } from '../../theme/tokens';
 
+type ScreenshotKind = 'instagram-screenshot' | 'tiktok-screenshot';
+
 type UploadSlot = {
-  kind: VerificationUploadKind;
+  kind: ScreenshotKind;
   label: string;
   hint: string;
-  video: boolean;
-  minSeconds?: number;
 };
 
 const SLOTS: UploadSlot[] = [
   {
-    kind: 'instagram-recording',
-    label: 'Instagram screen recording',
-    hint: '20 seconds scrolling home, then explore, then reels',
-    video: true,
-    minSeconds: 20,
-  },
-  {
-    kind: 'tiktok-recording',
-    label: 'TikTok screen recording',
-    hint: '15 seconds minimum of continuous For You scrolling',
-    video: true,
-    minSeconds: 15,
-  },
-  {
     kind: 'instagram-screenshot',
     label: 'Instagram profile screenshot',
     hint: 'Your full profile page',
-    video: false,
   },
   {
     kind: 'tiktok-screenshot',
     label: 'TikTok profile screenshot',
     hint: 'Your full profile page',
-    video: false,
   },
 ];
 
 function existingPath(
   account: CreatorAccount | null,
-  kind: VerificationUploadKind,
+  kind: ScreenshotKind,
 ): string | null {
   if (account === null) return null;
-  switch (kind) {
-    case 'instagram-recording':
-      return account.instagram_recording_path;
-    case 'tiktok-recording':
-      return account.tiktok_recording_path;
-    case 'instagram-screenshot':
-      return account.instagram_screenshot_path;
-    case 'tiktok-screenshot':
-      return account.tiktok_screenshot_path;
-  }
+  return kind === 'instagram-screenshot'
+    ? account.instagram_screenshot_path
+    : account.tiktok_screenshot_path;
 }
 
 export default function AccountSetupScreen() {
@@ -91,7 +67,7 @@ export default function AccountSetupScreen() {
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [tiktokHandle, setTiktokHandle] = useState('');
   const [instagramHandle, setInstagramHandle] = useState('');
-  const [picked, setPicked] = useState<Partial<Record<VerificationUploadKind, string>>>({});
+  const [picked, setPicked] = useState<Partial<Record<ScreenshotKind, string>>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -134,26 +110,16 @@ export default function AccountSetupScreen() {
 
   const pickSlot = async (slot: UploadSlot) => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: slot.video ? ['videos'] : ['images'],
+      mediaTypes: ['images'],
       quality: 0.85,
     });
     if (result.canceled) return;
     const asset = result.assets[0];
     if (asset === undefined) return;
-    if (slot.video && slot.minSeconds !== undefined) {
-      const seconds = (asset.duration ?? 0) / 1000;
-      if (seconds > 0 && seconds < slot.minSeconds - 1) {
-        Alert.alert(
-          'Recording too short',
-          `${slot.label} needs at least ${slot.minSeconds} seconds.`,
-        );
-        return;
-      }
-    }
     setPicked((prev) => ({ ...prev, [slot.kind]: asset.uri }));
   };
 
-  const submit = async () => {
+  const save = async () => {
     if (!profile) return;
     if (tiktokHandle.trim().length === 0 || instagramHandle.trim().length === 0) {
       Alert.alert('Handles required', 'Add both your new TikTok and Instagram handles.');
@@ -163,14 +129,12 @@ export default function AccountSetupScreen() {
       (slot) => picked[slot.kind] === undefined && existingPath(account, slot.kind) === null,
     );
     if (missing.length > 0) {
-      Alert.alert('Uploads missing', missing.map((s) => s.label).join('\n'));
+      Alert.alert('Screenshots missing', missing.map((s) => s.label).join('\n'));
       return;
     }
     setBusy(true);
     try {
-      const paths: Record<VerificationUploadKind, string> = {
-        'instagram-recording': '',
-        'tiktok-recording': '',
+      const paths: Record<ScreenshotKind, string> = {
         'instagram-screenshot': '',
         'tiktok-screenshot': '',
       };
@@ -183,25 +147,26 @@ export default function AccountSetupScreen() {
                 creatorId: profile.id,
                 kind: slot.kind,
                 localUri: local,
-                contentType: slot.video ? 'video/mp4' : 'image/jpeg',
+                contentType: 'image/jpeg',
               })
             : existingPath(account, slot.kind) ?? '';
       }
-      await submitCreatorAccount({
+      await saveCreatorAccountDraft({
         companyId: profile.company_id,
         creatorId: profile.id,
         tiktokHandle: tiktokHandle.trim().replace(/^@/, ''),
         instagramHandle: instagramHandle.trim().replace(/^@/, ''),
-        instagramRecordingPath: paths['instagram-recording'],
-        tiktokRecordingPath: paths['tiktok-recording'],
         instagramScreenshotPath: paths['instagram-screenshot'],
         tiktokScreenshotPath: paths['tiktok-screenshot'],
       });
       setPicked({});
       await load();
-      Alert.alert('Submitted', 'Your accounts are in review. You will hear back soon.');
+      Alert.alert(
+        'Accounts saved',
+        'Next up: connect them, then warm them up and submit proof.',
+      );
     } catch (e) {
-      Alert.alert('Could not submit', e instanceof Error ? e.message : 'Try again');
+      Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
     } finally {
       setBusy(false);
     }
@@ -238,20 +203,20 @@ export default function AccountSetupScreen() {
               body="Your accounts are submitted. You will hear back soon."
             />
           )}
-          {status === 'needs_changes' && (
+          {status === 'needs_changes' && account?.reason != null && (
             <StatusCard
               icon="circle-alert"
               tint={color.amber}
               bg={color.amberSoft}
               title="Changes needed"
-              body={account?.reason ?? 'Fix the items below and resubmit.'}
+              body={account.reason}
             />
           )}
 
           <Text style={styles.body}>
-            Create a fresh TikTok and Instagram account and warm both up with
-            college soccer and recruiting content. Match the template below,
-            then upload proof.
+            Create a fresh TikTok and Instagram account that match the
+            template below. Save your handles and a screenshot of each
+            profile. Warming up and proof come in the next step.
           </Text>
 
           <Text style={styles.section}>Name ideas</Text>
@@ -378,7 +343,7 @@ export default function AccountSetupScreen() {
                 autoCorrect={false}
               />
 
-              <Text style={styles.section}>Proof uploads</Text>
+              <Text style={styles.section}>Profile screenshots</Text>
               {SLOTS.map((slot) => {
                 const chosen = picked[slot.kind] !== undefined;
                 const already = existingPath(account, slot.kind) !== null;
@@ -392,7 +357,7 @@ export default function AccountSetupScreen() {
                     style={[styles.slot, shadow.shadowCard]}
                   >
                     <Icon
-                      name={slot.video ? 'video' : 'images'}
+                      name="images"
                       size={19}
                       color={chosen || already ? color.green : color.slate400}
                     />
@@ -402,7 +367,7 @@ export default function AccountSetupScreen() {
                         {chosen
                           ? 'Ready to upload'
                           : already
-                            ? 'Uploaded — tap to replace'
+                            ? 'Uploaded. Tap to replace'
                             : slot.hint}
                       </Text>
                     </View>
@@ -418,13 +383,9 @@ export default function AccountSetupScreen() {
                 variant="primary"
                 block
                 disabled={busy}
-                onPress={() => void submit()}
+                onPress={() => void save()}
               >
-                {busy
-                  ? 'Uploading…'
-                  : status === 'needs_changes'
-                    ? 'Resubmit for review'
-                    : 'Submit for review'}
+                {busy ? 'Uploading…' : 'Save accounts'}
               </Button>
             </>
           )}

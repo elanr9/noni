@@ -1,4 +1,5 @@
 import { RELEVANCE_THRESHOLD } from '../supabase/functions/_shared/relevance';
+import { clearDraft } from './recording-drafts';
 import { supabase } from './supabase';
 import {
   type Assignment,
@@ -113,7 +114,13 @@ export async function swapAssignmentBrief(
     .single();
 
   if (error) throw error;
-  return data as AssignmentWithBrief;
+  const updated = data as AssignmentWithBrief;
+
+  // Clips drafted against the old brief must not resume against the new
+  // one; a stale draft would submit the wrong clips under this brief.
+  await clearDraft(updated.company_id, assignmentId).catch(() => undefined);
+
+  return updated;
 }
 
 export type InspirationTrend = {

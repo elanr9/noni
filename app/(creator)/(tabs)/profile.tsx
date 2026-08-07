@@ -18,7 +18,11 @@ import {
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
 import { supabase } from '../../../lib/supabase';
-import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
+import {
+  formatCents,
+  getOrCreateWallet,
+  getStripeConnectUrl,
+} from '../../../lib/wallet-api';
 import { color, shadow, space } from '../../../theme/tokens';
 
 type AccountInfo = {
@@ -162,6 +166,7 @@ export default function ProfileScreen() {
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [payoutBusy, setPayoutBusy] = useState(false);
   const [walletLabel, setWalletLabel] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -239,6 +244,19 @@ export default function ProfileScreen() {
       Alert.alert('Connect failed', e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setConnectBusy(false);
+    }
+  }
+
+  async function openPayouts() {
+    if (payoutBusy) return;
+    setPayoutBusy(true);
+    try {
+      const url = await getStripeConnectUrl();
+      await WebBrowser.openBrowserAsync(url);
+    } catch (e) {
+      Alert.alert('Payouts failed', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setPayoutBusy(false);
     }
   }
 
@@ -363,6 +381,13 @@ export default function ProfileScreen() {
       </Group>
 
       <Group label="Settings">
+        <Row
+          icon="dollar-sign"
+          label="Payouts"
+          value={payoutBusy ? 'Opening…' : undefined}
+          chevron
+          onPress={() => void openPayouts()}
+        />
         <Row icon="bell" label="Notifications" value="Tasks, review" chevron />
         <Row icon="clock" label="Posting windows" value="3 a day" chevron last />
       </Group>

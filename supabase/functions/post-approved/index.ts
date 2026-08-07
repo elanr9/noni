@@ -467,7 +467,9 @@ Deno.serve(async (req) => {
     if (target.briefId) {
       const { data: segmentRows } = await admin
         .from('brief_segments')
-        .select('slot_index, kind, overlay_text, show_on_screen, screenshot_url')
+        .select(
+          'slot_index, kind, overlay_text, show_on_screen, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+        )
         .eq('brief_id', target.briefId)
         .eq('company_id', target.companyId)
         .order('slot_index', { ascending: true });

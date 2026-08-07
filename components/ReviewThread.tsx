@@ -2,15 +2,43 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
-import { colors } from './Screen';
+import { borderWidth, color, radius, type } from '../theme/tokens';
+import { PressableScale } from './ui/PressableScale';
 import type { ReviewEvent } from '../lib/review-events';
+
+/**
+ * One section of an admin revision note. The admin's RevisionMode flattens
+ * per-section notes into "Label: text" blocks separated by blank lines;
+ * this is the parsed shape.
+ */
+export type ChangesNoteSection = {
+  label: string | null;
+  text: string;
+};
+
+const SECTION_LABEL = /^(Hook|Outro|Cover|Close|Caption|Clip \d+|Slide \d+):\s*([\s\S]*)$/;
+
+/**
+ * Split a changes_requested note back into its sections. A note written as
+ * one whole-post paragraph comes back as a single section with no label.
+ */
+export function parseChangesNote(note: string): ChangesNoteSection[] {
+  const blocks = note
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0);
+  return blocks.map((block) => {
+    const match = SECTION_LABEL.exec(block);
+    if (match) return { label: match[1], text: match[2].trim() };
+    return { label: null, text: block };
+  });
+}
 
 function actionLabel(action: ReviewEvent['action']): string {
   switch (action) {
@@ -20,6 +48,17 @@ function actionLabel(action: ReviewEvent['action']): string {
       return 'Requested changes';
     case 'comment':
       return 'Comment';
+  }
+}
+
+function actionTone(action: ReviewEvent['action']): { fg: string; bg: string } {
+  switch (action) {
+    case 'approved':
+      return { fg: color.green, bg: color.greenSoft };
+    case 'changes_requested':
+      return { fg: color.amber, bg: color.amberSoft };
+    case 'comment':
+      return { fg: color.blue700, bg: color.blue100 };
   }
 }
 
@@ -73,6 +112,7 @@ export function ReviewThread({
           {events.map((e) => {
             const name = e.profiles?.full_name?.trim() || 'Someone';
             const role = e.profiles?.role === 'admin' ? 'Admin' : 'Creator';
+            const tone = actionTone(e.action);
             return (
               <View key={e.id} style={styles.item}>
                 <View style={styles.itemMeta}>
@@ -83,7 +123,11 @@ export function ReviewThread({
                     {e.created_at ? formatWhen(e.created_at) : ''}
                   </Text>
                 </View>
-                <Text style={styles.itemAction}>{actionLabel(e.action)}</Text>
+                <View style={[styles.actionChip, { backgroundColor: tone.bg }]}>
+                  <Text style={[styles.actionText, { color: tone.fg }]}>
+                    {actionLabel(e.action)}
+                  </Text>
+                </View>
                 {e.note?.trim() ? (
                   <Text style={styles.itemNote}>{e.note.trim()}</Text>
                 ) : null}
@@ -98,23 +142,25 @@ export function ReviewThread({
           <TextInput
             style={styles.input}
             placeholder="Write a comment"
-            placeholderTextColor="#9A9AA3"
+            placeholderTextColor={color.slate400}
             value={draft}
             onChangeText={setDraft}
             multiline
             editable={!sending}
           />
-          <Pressable
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Send comment"
             style={[styles.send, (sending || !draft.trim()) && styles.disabled]}
             disabled={sending || !draft.trim()}
             onPress={() => void send()}
           >
             {sending ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={color.white} />
             ) : (
               <Text style={styles.sendText}>Send</Text>
             )}
-          </Pressable>
+          </PressableScale>
         </View>
       ) : null}
     </View>
@@ -124,21 +170,24 @@ export function ReviewThread({
 const styles = StyleSheet.create({
   wrap: { gap: 12 },
   heading: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.muted,
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
+    color: color.slate400,
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    letterSpacing: type.tracking.label,
   },
-  empty: { fontSize: 15, color: colors.muted },
+  empty: {
+    fontSize: type.size.bodySm,
+    color: color.textMuted,
+  },
   list: { gap: 10 },
   item: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: color.white,
+    borderRadius: radius.cell,
     padding: 14,
-    borderWidth: 1,
-    borderColor: '#E6E2DA',
-    gap: 4,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+    gap: 6,
   },
   itemMeta: {
     flexDirection: 'row',
@@ -146,30 +195,54 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
-  itemWho: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  itemWhen: { fontSize: 12, color: colors.muted },
-  itemAction: { fontSize: 12, fontWeight: '600', color: colors.accent },
-  itemNote: { fontSize: 15, lineHeight: 22, color: colors.ink, marginTop: 2 },
+  itemWho: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  itemWhen: {
+    fontSize: type.size.label,
+    color: color.slate400,
+  },
+  actionChip: {
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+    paddingVertical: 3,
+    paddingHorizontal: 9,
+  },
+  actionText: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
+  },
+  itemNote: {
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.ink,
+  },
   composer: { gap: 10 },
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
-    borderRadius: 14,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.field,
+    borderColor: color.lineStrong,
+    borderRadius: radius.cell,
     padding: 14,
     minHeight: 64,
-    fontSize: 15,
-    color: colors.ink,
+    fontSize: type.size.bodySm,
+    color: color.ink,
   },
   send: {
     alignSelf: 'flex-end',
-    backgroundColor: colors.ink,
-    borderRadius: 12,
+    backgroundColor: color.ink,
+    borderRadius: radius.sm,
     paddingHorizontal: 18,
     paddingVertical: 12,
     minWidth: 88,
     alignItems: 'center',
   },
-  sendText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  sendText: {
+    color: color.white,
+    fontWeight: type.weight.bold,
+    fontSize: type.size.bodySm,
+  },
   disabled: { opacity: 0.45 },
 });

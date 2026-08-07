@@ -338,6 +338,9 @@ export async function updateBriefSegment(
     overlay_text?: string | null;
     show_on_screen?: boolean;
     screenshot_url?: string | null;
+    screenshot_x?: number | null;
+    screenshot_y?: number | null;
+    screenshot_width?: number | null;
   },
 ): Promise<void> {
   const { error } = await supabase

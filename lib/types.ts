@@ -422,6 +422,9 @@ export type Database = {
           kind: string
           overlay_text: string | null
           screenshot_url: string | null
+          screenshot_width: number | null
+          screenshot_x: number | null
+          screenshot_y: number | null
           show_on_screen: boolean
           slot_index: number
           talking_point_index: number | null
@@ -434,6 +437,9 @@ export type Database = {
           kind: string
           overlay_text?: string | null
           screenshot_url?: string | null
+          screenshot_width?: number | null
+          screenshot_x?: number | null
+          screenshot_y?: number | null
           show_on_screen?: boolean
           slot_index: number
           talking_point_index?: number | null
@@ -446,6 +452,9 @@ export type Database = {
           kind?: string
           overlay_text?: string | null
           screenshot_url?: string | null
+          screenshot_width?: number | null
+          screenshot_x?: number | null
+          screenshot_y?: number | null
           show_on_screen?: boolean
           slot_index?: number
           talking_point_index?: number | null
@@ -2016,6 +2025,7 @@ export type Database = {
           baseline_primary_signal: number | null
           baseline_updated_at: string | null
           bio_facts: Json
+          birthday: string | null
           can_film_with_second_person: boolean
           company_id: string
           created_at: string | null
@@ -2029,6 +2039,8 @@ export type Database = {
           lives_the_identity: boolean
           on_camera_comfortable: boolean
           onboarded: boolean | null
+          onboarding_answers: Json
+          phone: string | null
           role: string
           script_mode: string
           upload_post_profile: string | null
@@ -2039,6 +2051,7 @@ export type Database = {
           baseline_primary_signal?: number | null
           baseline_updated_at?: string | null
           bio_facts?: Json
+          birthday?: string | null
           can_film_with_second_person?: boolean
           company_id: string
           created_at?: string | null
@@ -2052,6 +2065,8 @@ export type Database = {
           lives_the_identity?: boolean
           on_camera_comfortable?: boolean
           onboarded?: boolean | null
+          onboarding_answers?: Json
+          phone?: string | null
           role: string
           script_mode?: string
           upload_post_profile?: string | null
@@ -2062,6 +2077,7 @@ export type Database = {
           baseline_primary_signal?: number | null
           baseline_updated_at?: string | null
           bio_facts?: Json
+          birthday?: string | null
           can_film_with_second_person?: boolean
           company_id?: string
           created_at?: string | null
@@ -2075,6 +2091,8 @@ export type Database = {
           lives_the_identity?: boolean
           on_camera_comfortable?: boolean
           onboarded?: boolean | null
+          onboarding_answers?: Json
+          phone?: string | null
           role?: string
           script_mode?: string
           upload_post_profile?: string | null
@@ -2085,6 +2103,55 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recording_drafts: {
+        Row: {
+          assignment_id: string
+          company_id: string
+          creator_id: string
+          id: string
+          segments: Json
+          updated_at: string
+        }
+        Insert: {
+          assignment_id: string
+          company_id: string
+          creator_id: string
+          id?: string
+          segments?: Json
+          updated_at?: string
+        }
+        Update: {
+          assignment_id?: string
+          company_id?: string
+          creator_id?: string
+          id?: string
+          segments?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recording_drafts_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: true
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recording_drafts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recording_drafts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -2841,6 +2908,9 @@ export type Database = {
           kind: string
           overlay_text: string | null
           screenshot_url: string | null
+          screenshot_width: number | null
+          screenshot_x: number | null
+          screenshot_y: number | null
           show_on_screen: boolean
           slot_index: number
           talking_point_index: number | null

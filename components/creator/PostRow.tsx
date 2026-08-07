@@ -2,8 +2,11 @@ import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { earningsForViews, formatCount } from '../../lib/earnings';
+import type { TaskStatus } from '../../lib/tasks';
 import { color, shadow } from '../../theme/tokens';
-import { Icon } from '../ui/Icon';
+import { StatusChip } from '../StatusChip';
+import { Button } from '../ui/Button';
+import { Icon, type IconName } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 
 export interface PostRowProps {
@@ -18,6 +21,14 @@ export interface PostRowProps {
   /** Static photo/carousel posts show the images glyph instead of play. */
   isPhoto: boolean;
   onPress?: () => void;
+  /** When set, a status chip renders on the trailing edge of the meta row. */
+  status?: TaskStatus;
+  /** Set false to hide the stats and earnings rows (posts with no live numbers). */
+  showMetrics?: boolean;
+  /** With onAction, renders a small primary button under the row body. */
+  actionLabel?: string;
+  actionIcon?: IconName;
+  onAction?: () => void;
 }
 
 export function PostRow({
@@ -29,6 +40,11 @@ export function PostRow({
   likes,
   isPhoto,
   onPress,
+  status,
+  showMetrics,
+  actionLabel,
+  actionIcon,
+  onAction,
 }: PostRowProps) {
   const { earned, next, toGo } = earningsForViews(views);
   const fillPercent = ((earned % 20) / 20) * 100;
@@ -60,29 +76,45 @@ export function PostRow({
             color={color.slate400}
           />
           <Text style={styles.meta}>{date !== undefined ? `${date} · ${time}` : time}</Text>
+          {status !== undefined && (
+            <View style={styles.chipSlot}>
+              <StatusChip status={status} />
+            </View>
+          )}
         </View>
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <View style={styles.statsRow}>
-          <View style={styles.stat}>
-            <Icon name="eye" size={13} color={color.slate500} />
-            <Text style={styles.statText}>{formatCount(views)}</Text>
+        {showMetrics !== false && (
+          <>
+            <View style={styles.statsRow}>
+              <View style={styles.stat}>
+                <Icon name="eye" size={13} color={color.slate500} />
+                <Text style={styles.statText}>{formatCount(views)}</Text>
+              </View>
+              <View style={styles.stat}>
+                <Icon name="zap" size={13} color={color.slate500} />
+                <Text style={styles.statText}>{formatCount(likes)}</Text>
+              </View>
+            </View>
+            <View style={styles.earningsRow}>
+              <Text style={styles.amount}>{`$${earned.toFixed(2)}`}</Text>
+              <View style={styles.track}>
+                <View style={[styles.fill, { width: `${fillPercent}%` }]} />
+              </View>
+              <Text style={styles.toGo} numberOfLines={1}>
+                {`${formatCount(toGo)} views to $${next}`}
+              </Text>
+            </View>
+          </>
+        )}
+        {actionLabel !== undefined && onAction !== undefined && (
+          <View style={styles.actionRow}>
+            <Button variant="primary" size="sm" icon={actionIcon} onPress={onAction}>
+              {actionLabel}
+            </Button>
           </View>
-          <View style={styles.stat}>
-            <Icon name="zap" size={13} color={color.slate500} />
-            <Text style={styles.statText}>{formatCount(likes)}</Text>
-          </View>
-        </View>
-        <View style={styles.earningsRow}>
-          <Text style={styles.amount}>{`$${earned.toFixed(2)}`}</Text>
-          <View style={styles.track}>
-            <View style={[styles.fill, { width: `${fillPercent}%` }]} />
-          </View>
-          <Text style={styles.toGo} numberOfLines={1}>
-            {`${formatCount(toGo)} views to $${next}`}
-          </Text>
-        </View>
+        )}
       </View>
     </PressableScale>
   );
@@ -114,6 +146,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+  },
+  chipSlot: {
+    marginLeft: 'auto',
+  },
+  actionRow: {
+    marginTop: 4,
   },
   meta: {
     fontSize: 12,

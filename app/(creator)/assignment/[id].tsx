@@ -8,13 +8,19 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { ReviewThread } from '../../../components/ReviewThread';
+import { parseChangesNote, ReviewThread } from '../../../components/ReviewThread';
 import { StatusChip } from '../../../components/StatusChip';
 import { color } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
@@ -114,7 +120,10 @@ export default function AssignmentDetailScreen() {
     assignment.status === 'changes_requested' ||
     assignment.status === 'recorded';
   const done = assignment.status === 'approved' || assignment.status === 'posted';
+  const needsChanges = assignment.status === 'changes_requested';
   const changesNote = latestChangesNote(events);
+  const changesSections =
+    needsChanges && changesNote !== null ? parseChangesNote(changesNote) : [];
   const metrics = parseAssignmentMetrics(assignment.metrics);
   const bountyPaid = assignment.bounty_credited_at !== null;
   // Slideshow music loop: live post -> creator adds the song in each app ->
@@ -123,16 +132,18 @@ export default function AssignmentDetailScreen() {
     !isVideo && assignment.status === 'posted' && assignment.music_approved_at === null;
   const musicMarked = assignment.music_marked_by_creator_at !== null;
 
+  // Legacy carousels (null post_type_id) still record their script as video;
+  // post-approved expects that path for them. Only new-world carousels pick
+  // photos on the upload screen.
+  const usesUpload = !isVideo && brief.post_type_id !== null;
+
   function onRecord() {
     if (!assignment) return;
-    if (isVideo) {
-      router.push(`/(creator)/record/${assignment.id}?assignment=1`);
+    if (usesUpload) {
+      router.push(`/(creator)/upload/${assignment.id}`);
       return;
     }
-    Alert.alert(
-      'Create slides',
-      'Photo carousel posting is coming soon. Open the example above and shoot the slides to match.',
-    );
+    router.push(`/(creator)/record/${assignment.id}?assignment=1`);
   }
 
   async function onMusicAdded() {
@@ -195,6 +206,37 @@ export default function AssignmentDetailScreen() {
         </View>
 
         <Text style={styles.title}>{brief.title}</Text>
+
+        {needsChanges ? (
+          <View style={styles.changesCard}>
+            <View style={styles.changesHeader}>
+              <Icon name="rotate-ccw" size={15} color={color.amber} />
+              <Text style={styles.changesLabel}>Changes requested</Text>
+            </View>
+            {changesSections.length > 0 ? (
+              <View style={styles.changesList}>
+                {changesSections.map((section, i) => (
+                  <View key={`${section.label ?? 'note'}-${i}`} style={styles.changesItem}>
+                    {section.label !== null ? (
+                      <Text style={styles.changesItemLabel}>{section.label}</Text>
+                    ) : null}
+                    <Text style={styles.changesBody}>{section.text}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.changesBody}>
+                Your reviewer asked for another take. Check the feedback below.
+              </Text>
+            )}
+            <Text style={styles.changesHint}>
+              {isVideo
+                ? 'Fix what is called out, then record again below.'
+                : 'Fix what is called out, then redo your slides below.'}
+            </Text>
+          </View>
+        ) : null}
+
         {brief.hook ? <Text style={styles.hook}>{brief.hook}</Text> : null}
         {brief.why_it_works ? (
           <Text style={styles.why}>{brief.why_it_works}</Text>
@@ -205,7 +247,9 @@ export default function AssignmentDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel="Watch the example"
             style={styles.exampleBtn}
-            onPress={() => void Linking.openURL(brief.example_url as string)}
+            onPress={() =>
+              void WebBrowser.openBrowserAsync(brief.example_url as string)
+            }
           >
             <Icon name="play" size={16} color={color.ink} />
             <Text style={styles.exampleText}>Watch the example</Text>
@@ -303,13 +347,6 @@ export default function AssignmentDetailScreen() {
           </View>
         ) : null}
 
-        {changesNote !== null && assignment.status === 'changes_requested' ? (
-          <View style={styles.changesBanner}>
-            <Text style={styles.changesLabel}>Changes requested</Text>
-            <Text style={styles.changesBody}>{changesNote}</Text>
-          </View>
-        ) : null}
-
         <ReviewThread
           events={events}
           onSendComment={sendComment}
@@ -323,15 +360,23 @@ export default function AssignmentDetailScreen() {
             variant="primary"
             size="lg"
             block
-            icon={isVideo ? 'video' : 'images'}
+            icon={usesUpload ? 'images' : 'video'}
             onPress={onRecord}
           >
-            {isVideo ? 'Record' : 'Create'}
+            {needsChanges
+              ? usesUpload
+                ? 'Redo your slides'
+                : 'Record again'
+              : usesUpload
+                ? 'Create'
+                : 'Record'}
           </Button>
           <Text style={styles.caption}>
-            {brief.script?.trim()
-              ? 'Your script runs in the teleprompter.'
-              : 'No script here. Say it your way.'}
+            {needsChanges
+              ? 'Only redo what the note calls out.'
+              : brief.script?.trim()
+                ? 'Your script runs in the teleprompter.'
+                : 'No script here. Say it your way.'}
           </Text>
         </View>
       ) : null}
@@ -477,11 +522,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: color.slate400,
   },
-  changesBanner: {
+  changesCard: {
     backgroundColor: color.amberSoft,
     borderRadius: 16,
     padding: 16,
-    gap: 6,
+    gap: 10,
+  },
+  changesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
   changesLabel: {
     fontSize: 12,
@@ -490,10 +540,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },
+  changesList: {
+    gap: 10,
+  },
+  changesItem: {
+    gap: 2,
+  },
+  changesItemLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: color.ink,
+  },
   changesBody: {
     fontSize: 15,
     lineHeight: 22.5,
     color: color.ink,
+  },
+  changesHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: color.amber,
   },
   cta: {
     paddingTop: 14,

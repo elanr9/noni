@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -18,23 +19,66 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BeatsPrompter, Teleprompter } from '../../../components/Teleprompter';
+import { BeatPrompter, Teleprompter } from '../../../components/Teleprompter';
 import { color, shadow } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
-import { parseHookOptions, parseTalkingPoints } from '../../../lib/briefs-api';
+import {
+  listBriefSegments,
+  parseHookOptions,
+  parseTalkingPoints,
+  type BriefSegment,
+} from '../../../lib/briefs-api';
 import {
   getAssignment,
   getTask,
   type AssignmentWithBrief,
+  type Brief,
 } from '../../../lib/tasks-api';
 import {
-  submitAssignmentRecording,
+  clearDraft,
+  loadDraftSegments,
+  saveDraftSegment,
+  type DraftSegment,
+  type DraftSegmentKind,
+} from '../../../lib/recording-drafts';
+import {
+  draftClipPath,
+  probeDurationMs,
+  submitAssignmentClips,
   submitRecording,
-  type RecordedSegment,
+  uploadClip,
 } from '../../../lib/submissions';
 import type { ContentTask } from '../../../lib/tasks';
 
-type Phase = 'idle' | 'countdown' | 'recording' | 'review' | 'uploading' | 'sent';
+type Phase =
+  | 'idle'
+  | 'countdown'
+  | 'recording'
+  | 'clipReview'
+  | 'saving'
+  | 'submitting'
+  | 'sent';
+
+/** One clip the creator records, in slot order. */
+type ClipPlan = {
+  slotIndex: number;
+  kind: DraftSegmentKind;
+  label: string;
+  chip: string;
+  script: string;
+  scripted: boolean;
+};
+
+/** A kept take. Resumed drafts have no localUri; task clips have no storagePath. */
+type KeptClip = {
+  slotIndex: number;
+  kind: DraftSegmentKind;
+  durationMs: number;
+  storagePath: string | null;
+  localUri: string | null;
+};
+
+type PendingClip = { uri: string; durationMs: number };
 
 /** 3-2-1 countdown steps at 800ms each (README §5). */
 const COUNTDOWN_STEP_MS = 800;
@@ -42,9 +86,12 @@ const COUNTDOWN_STEP_MS = 800;
 const TOAST_MS = 2600;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-// 240s makes real post length (300-450 words) possible; it is not a target.
-const MAX_TOTAL_MS = 240_000;
+// Per-clip cap. Hooks run seconds, points under a minute; 90s is headroom,
+// not a target.
+const MAX_CLIP_MS = 90_000;
 const STOP_WATCHDOG_MS = 5_000;
+
+const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
 
 function splitScriptParts(script: string): string[] {
   const byMarker = script
@@ -59,6 +106,122 @@ function splitScriptParts(script: string): string[] {
   return byParagraph.length > 0 ? byParagraph : [script];
 }
 
+function scriptPartsPlan(script: string): ClipPlan[] {
+  const parts = splitScriptParts(script);
+  return parts.map((part, i) => ({
+    slotIndex: i,
+    kind: 'point',
+    label: parts.length === 1 ? 'Script' : `Part ${i + 1}`,
+    chip: parts.length === 1 ? 'Script' : String(i + 1),
+    script: part,
+    scripted: true,
+  }));
+}
+
+/**
+ * The clip plan for a brief. Segments are the source of truth (kinds
+ * hook | point | outro; slides belong to the upload screen). Briefs without
+ * segments derive hook / points / outro; legacy script briefs record the
+ * script in parts. Hook and outro are scripted (teleprompter); points are
+ * beats the creator talks around.
+ */
+function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
+  // Legacy carousels (null post_type_id) still record their script as video;
+  // only new-world carousels go through the upload screen.
+  if (brief.format === 'photo_carousel') {
+    return scriptPartsPlan(
+      brief.script?.trim() || 'No script on this post. Speak freely.',
+    );
+  }
+  const talkingPoints = parseTalkingPoints(brief.talking_points);
+  const pointTexts = talkingPoints
+    .map((p) => p.text?.trim() ?? '')
+    .filter((t) => t.length > 0);
+  const hookLine =
+    brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || '';
+  const ctaLine = brief.cta?.trim() || '';
+
+  const videoSegments = segments.filter((s) => s.kind !== 'slide');
+  if (videoSegments.length > 0) {
+    let pointNumber = 0;
+    return videoSegments.map((s) => {
+      if (s.kind === 'hook') {
+        return {
+          slotIndex: s.slot_index,
+          kind: 'hook' as const,
+          label: 'Hook',
+          chip: 'Hook',
+          script: hookLine || s.overlay_text?.trim() || '',
+          scripted: true,
+        };
+      }
+      if (s.kind === 'outro') {
+        return {
+          slotIndex: s.slot_index,
+          kind: 'outro' as const,
+          label: 'CTA',
+          chip: 'CTA',
+          script: ctaLine || OUTRO_FALLBACK,
+          scripted: true,
+        };
+      }
+      pointNumber += 1;
+      const pointIndex = s.talking_point_index ?? pointNumber - 1;
+      const text =
+        talkingPoints[pointIndex]?.text?.trim() ||
+        s.overlay_text?.trim() ||
+        '';
+      return {
+        slotIndex: s.slot_index,
+        kind: 'point' as const,
+        label: `Point ${pointNumber}`,
+        chip: String(pointNumber),
+        script: text,
+        scripted: false,
+      };
+    });
+  }
+
+  if (pointTexts.length > 0) {
+    const plan: ClipPlan[] = [];
+    if (hookLine) {
+      plan.push({
+        slotIndex: plan.length,
+        kind: 'hook',
+        label: 'Hook',
+        chip: 'Hook',
+        script: hookLine,
+        scripted: true,
+      });
+    }
+    pointTexts.forEach((text, i) => {
+      plan.push({
+        slotIndex: plan.length,
+        kind: 'point',
+        label: `Point ${i + 1}`,
+        chip: String(i + 1),
+        script: text,
+        scripted: false,
+      });
+    });
+    if (ctaLine) {
+      plan.push({
+        slotIndex: plan.length,
+        kind: 'outro',
+        label: 'CTA',
+        chip: 'CTA',
+        script: ctaLine,
+        scripted: true,
+      });
+    }
+    return plan;
+  }
+
+  return scriptPartsPlan(
+    brief.script?.trim() || 'No script on this post. Speak freely.',
+  );
+}
+
 function formatMs(ms: number): string {
   const total = Math.round(ms / 1000);
   const m = Math.floor(total / 60);
@@ -68,7 +231,8 @@ function formatMs(ms: number): string {
 
 export default function RecordScreen() {
   // Same screen serves both worlds: legacy tasks and campaign assignments
-  // (routed with ?assignment=1). The teleprompter flow is identical.
+  // (routed with ?assignment=1). Both record clip by clip; only assignments
+  // persist progress to recording_drafts.
   const { id, assignment: assignmentFlag } = useLocalSearchParams<{
     id: string;
     assignment?: string;
@@ -84,106 +248,123 @@ export default function RecordScreen() {
 
   const [task, setTask] = useState<ContentTask | null>(null);
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
+  const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
   const [countdown, setCountdown] = useState(3);
   const [cameraReady, setCameraReady] = useState(false);
   const [facing, setFacing] = useState<CameraType>('front');
   const [flashOn, setFlashOn] = useState(false);
-  const [segments, setSegments] = useState<RecordedSegment[]>([]);
+  const [kept, setKept] = useState<Record<number, KeptClip>>({});
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [initialized, setInitialized] = useState(false);
+  const [pendingClip, setPendingClip] = useState<PendingClip | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const [scriptPaused, setScriptPaused] = useState(false);
   const [takeCount, setTakeCount] = useState(0);
-  const [reviewIndex, setReviewIndex] = useState(0);
 
   const recordingRef = useRef(false);
   const discardClipRef = useRef(false);
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
 
-  // Structured briefs branch on the creator's script_mode: beats get the
-  // static beats view (segment per beat), full gets the points joined into
-  // the scrolling teleprompter. Legacy briefs (points empty, script present)
-  // and content_tasks keep the old script path untouched.
   const brief = isAssignment ? assignment?.briefs ?? null : null;
-  const talkingPoints = useMemo(
-    () => (brief ? parseTalkingPoints(brief.talking_points) : []),
-    [brief],
-  );
-  const pointTexts = useMemo(
-    () =>
-      talkingPoints
-        .map((p) => p.text?.trim() ?? '')
-        .filter((t) => t.length > 0),
-    [talkingPoints],
-  );
-  const hookLine = brief
-    ? brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || ''
-    : '';
-  const structured =
-    brief !== null && brief.format !== 'photo_carousel' && pointTexts.length > 0;
-  const beatsMode = structured && profile?.script_mode !== 'full';
+  const title = (isAssignment ? brief?.title : task?.title) ?? '';
 
-  const rawScript = isAssignment
-    ? structured
-      ? [hookLine, ...pointTexts.map((t, i) => `${i + 1}. ${t}`)]
-          .filter(Boolean)
-          .join('\n\n')
-      : assignment?.briefs.script
-    : task?.script;
-  const title = (isAssignment ? assignment?.briefs.title : task?.title) ?? '';
-  const script = rawScript?.trim() || 'No script on this task. Speak freely.';
-  const beatsParts = useMemo(
-    () => (hookLine ? [hookLine, ...pointTexts] : pointTexts),
-    [hookLine, pointTexts],
-  );
-  const parts = useMemo(
-    () => (beatsMode ? beatsParts : splitScriptParts(script)),
-    [beatsMode, beatsParts, script],
-  );
-  const partIndex = Math.min(segments.length, parts.length - 1);
-  const totalRecordedMs = segments.reduce((sum, s) => sum + s.durationMs, 0);
-  const remainingMs = MAX_TOTAL_MS - totalRecordedMs;
-  const maxReached = remainingMs < 1000;
-  const nextPartCard =
-    phase === 'idle' &&
-    segments.length > 0 &&
-    parts.length > 1 &&
-    segments.length < parts.length;
+  const plan = useMemo<ClipPlan[]>(() => {
+    if (brief) return briefPlan(brief, briefSegments);
+    if (task) {
+      return scriptPartsPlan(
+        task.script?.trim() || 'No script on this task. Speak freely.',
+      );
+    }
+    return [];
+  }, [brief, briefSegments, task]);
 
-  const reviewSource =
-    phase === 'review' ? (segments[reviewIndex]?.uri ?? null) : null;
-  const player = useVideoPlayer(reviewSource, (p) => {
-    p.loop = segments.length === 1;
-    if (reviewSource) p.play();
+  const activeClip = activeIndex !== null ? plan[activeIndex] ?? null : null;
+  const allKept =
+    plan.length > 0 && plan.every((c) => kept[c.slotIndex] !== undefined);
+  const keptCount = plan.filter((c) => kept[c.slotIndex] !== undefined).length;
+  const replacing =
+    activeClip !== null && kept[activeClip.slotIndex] !== undefined;
+
+  const pendingSource = phase === 'clipReview' ? (pendingClip?.uri ?? null) : null;
+  const player = useVideoPlayer(pendingSource, (p) => {
+    p.loop = true;
+    if (pendingSource) p.play();
   });
 
   useEffect(() => {
-    if (!id) return;
-    if (isAssignment) {
-      void getAssignment(id)
-        .then(setAssignment)
-        .finally(() => setLoading(false));
-    } else {
-      void getTask(id)
-        .then(setTask)
-        .finally(() => setLoading(false));
+    if (!id || !profile) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        if (isAssignment) {
+          const a = await getAssignment(id);
+          if (cancelled) return;
+          // New-world static posts pick photos instead of recording. Legacy
+          // carousels (null post_type_id) keep the old record-a-video path
+          // that post-approved still expects for them.
+          if (
+            a &&
+            a.briefs.format === 'photo_carousel' &&
+            a.briefs.post_type_id !== null
+          ) {
+            router.replace({
+              pathname: '/(creator)/upload/[id]',
+              params: { id },
+            });
+            return;
+          }
+          setAssignment(a);
+          if (a && profile) {
+            const [segs, draft] = await Promise.all([
+              listBriefSegments(a.briefs.id),
+              loadDraftSegments(profile.company_id, a.id),
+            ]);
+            if (cancelled) return;
+            setBriefSegments(segs);
+            const resumed: Record<number, KeptClip> = {};
+            for (const s of draft) {
+              resumed[s.slot_index] = {
+                slotIndex: s.slot_index,
+                kind: s.kind,
+                durationMs: s.duration_ms,
+                storagePath: s.storage_path,
+                localUri: null,
+              };
+            }
+            setKept(resumed);
+          }
+        } else {
+          const t = await getTask(id);
+          if (cancelled) return;
+          setTask(t);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  }, [id, isAssignment]);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isAssignment, profile?.id]);
 
+  // Resume at the first missing clip; all clips kept resumes on the summary.
   useEffect(() => {
-    if (phase !== 'review' || segments.length < 2) return;
-    const sub = player.addListener('playToEnd', () => {
-      setReviewIndex((i) => (i + 1) % segments.length);
-    });
-    return () => sub.remove();
-  }, [player, phase, segments.length]);
+    if (loading || initialized || plan.length === 0) return;
+    const first = plan.findIndex((c) => kept[c.slotIndex] === undefined);
+    setActiveIndex(first === -1 ? null : first);
+    setInitialized(true);
+  }, [loading, initialized, plan, kept]);
 
   useEffect(() => {
     if (phase !== 'countdown') return;
     if (countdown <= 0) {
-      void startSegment();
+      void startClip();
       return;
     }
     const t = setTimeout(() => setCountdown((c) => c - 1), COUNTDOWN_STEP_MS);
@@ -201,9 +382,9 @@ export default function RecordScreen() {
   // Failsafe: if maxDuration never fires (Expo Go new arch), force a stop.
   useEffect(() => {
     if (phase !== 'recording') return;
-    if (totalRecordedMs + elapsedMs > MAX_TOTAL_MS + 5000) stopSegment();
+    if (elapsedMs > MAX_CLIP_MS + 5000) stopClip();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, elapsedMs, totalRecordedMs]);
+  }, [phase, elapsedMs]);
 
   useEffect(() => {
     return () => {
@@ -234,7 +415,7 @@ export default function RecordScreen() {
   }
 
   async function beginCountdown() {
-    if (recordingRef.current || maxReached) return;
+    if (recordingRef.current || activeClip === null) return;
     const ok = await ensurePermissions();
     if (!ok) {
       Alert.alert(
@@ -253,17 +434,7 @@ export default function RecordScreen() {
     setPhase('countdown');
   }
 
-  function finishSegment() {
-    recordingRef.current = false;
-    if (stopWatchdogRef.current) {
-      clearTimeout(stopWatchdogRef.current);
-      stopWatchdogRef.current = null;
-    }
-    setPhase((p) => (p === 'recording' ? 'idle' : p));
-    void restoreBrightness();
-  }
-
-  async function startSegment() {
+  async function startClip() {
     const cam = cameraRef.current;
     if (!cam || recordingRef.current) {
       setPhase('idle');
@@ -287,35 +458,48 @@ export default function RecordScreen() {
       // expo-camera 17 exposes no fps or audio sample rate control; those two
       // are normalized server-side in post-approved's single FFmpeg job.
       const clip = await cam.recordAsync({
-        maxDuration: Math.max(1, Math.ceil(remainingMs / 1000)),
+        maxDuration: Math.ceil(MAX_CLIP_MS / 1000),
         codec: 'avc1',
       });
       if (discardClipRef.current) {
         discardClipRef.current = false;
+        setPhase('idle');
       } else if (clip?.uri) {
-        const durationMs = Math.max(500, Date.now() - startedAt);
-        setSegments((s) => [...s, { uri: clip.uri, durationMs }]);
+        setPendingClip({
+          uri: clip.uri,
+          durationMs: Math.max(500, Date.now() - startedAt),
+        });
+        setPhase('clipReview');
       } else {
+        setPhase('idle');
         Alert.alert('Clip not saved', 'That take did not save. Record it again.');
       }
     } catch (e) {
+      setPhase('idle');
       Alert.alert(
         'Recording failed',
         e instanceof Error ? e.message : 'Try again',
       );
     } finally {
-      finishSegment();
+      recordingRef.current = false;
+      if (stopWatchdogRef.current) {
+        clearTimeout(stopWatchdogRef.current);
+        stopWatchdogRef.current = null;
+      }
+      void restoreBrightness();
     }
   }
 
-  function stopSegment() {
+  function stopClip() {
     if (!recordingRef.current) return;
     cameraRef.current?.stopRecording();
     if (stopWatchdogRef.current) clearTimeout(stopWatchdogRef.current);
     stopWatchdogRef.current = setTimeout(() => {
       if (recordingRef.current) {
         discardClipRef.current = true;
-        finishSegment();
+        recordingRef.current = false;
+        setPhase('idle');
+        void restoreBrightness();
         Alert.alert(
           'Camera stalled',
           'That clip could not be saved. Record it again.',
@@ -324,30 +508,110 @@ export default function RecordScreen() {
     }, STOP_WATCHDOG_MS);
   }
 
-  function deleteLastSegment() {
-    setSegments((s) => s.slice(0, -1));
-  }
-
-  function retakeAll() {
-    setSegments([]);
-    setReviewIndex(0);
-    setScriptPaused(false);
+  function retakePending() {
+    setPendingClip(null);
     setPhase('idle');
   }
 
+  /**
+   * Keep the take: assignments upload the clip right away and write it into
+   * recording_drafts, so a killed app loses nothing. Legacy tasks keep the
+   * clip locally and upload everything at submit, as before.
+   */
+  async function keepPendingClip() {
+    if (!pendingClip || !profile || activeClip === null) return;
+    setPhase('saving');
+    try {
+      const durationMs = await probeDurationMs(
+        pendingClip.uri,
+        pendingClip.durationMs,
+      );
+      let storagePath: string | null = null;
+      if (assignment) {
+        storagePath = draftClipPath(
+          profile.company_id,
+          assignment.id,
+          activeClip.slotIndex,
+        );
+        await uploadClip(pendingClip.uri, storagePath);
+        const segment: DraftSegment = {
+          slot_index: activeClip.slotIndex,
+          kind: activeClip.kind,
+          storage_path: storagePath,
+          duration_ms: durationMs,
+        };
+        await saveDraftSegment({
+          companyId: profile.company_id,
+          assignmentId: assignment.id,
+          creatorId: profile.id,
+          segment,
+        });
+      }
+      const nextKept: Record<number, KeptClip> = {
+        ...kept,
+        [activeClip.slotIndex]: {
+          slotIndex: activeClip.slotIndex,
+          kind: activeClip.kind,
+          durationMs,
+          storagePath,
+          localUri: pendingClip.uri,
+        },
+      };
+      setKept(nextKept);
+      setPendingClip(null);
+      const next = plan.findIndex((c) => nextKept[c.slotIndex] === undefined);
+      setActiveIndex(next === -1 ? null : next);
+      setPhase('idle');
+    } catch (e) {
+      setPhase('clipReview');
+      Alert.alert(
+        'Could not save the clip',
+        e instanceof Error ? e.message : 'Check your connection and try again.',
+      );
+    }
+  }
+
+  function jumpToClip(index: number) {
+    if (phase !== 'idle') return;
+    setPendingClip(null);
+    setActiveIndex(index);
+  }
+
   async function sendForReview() {
-    if (!profile || segments.length === 0) return;
-    if (isAssignment ? !assignment : !task) return;
-    setPhase('uploading');
+    if (!profile || !allKept) return;
+    setPhase('submitting');
     try {
       if (assignment) {
-        await submitAssignmentRecording({
+        const clips = plan.map((c) => {
+          const k = kept[c.slotIndex];
+          if (k === undefined || k.storagePath === null) {
+            throw new Error('A clip is missing. Record it again.');
+          }
+          return {
+            slotIndex: k.slotIndex,
+            storagePath: k.storagePath,
+            durationMs: k.durationMs,
+          };
+        });
+        await submitAssignmentClips({
           assignment,
           companyId: profile.company_id,
           creatorId: profile.id,
-          segments,
+          clips,
         });
+        try {
+          await clearDraft(profile.company_id, assignment.id);
+        } catch {
+          // the submission is in; a stale draft row is harmless
+        }
       } else if (task) {
+        const segments = plan.map((c) => {
+          const k = kept[c.slotIndex];
+          if (k === undefined || k.localUri === null) {
+            throw new Error('A clip is missing. Record it again.');
+          }
+          return { uri: k.localUri, durationMs: k.durationMs };
+        });
         await submitRecording({
           task,
           companyId: profile.company_id,
@@ -358,16 +622,15 @@ export default function RecordScreen() {
       setPhase('sent');
       setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
-      setPhase('review');
+      setPhase('idle');
       Alert.alert('Upload failed', e instanceof Error ? e.message : 'Try again');
     }
   }
 
   function onClose() {
-    if (phase === 'sent') return;
-    if (phase === 'review') {
-      setReviewIndex(0);
-      setPhase('idle');
+    if (phase === 'sent' || phase === 'saving' || phase === 'submitting') return;
+    if (phase === 'clipReview') {
+      retakePending();
       return;
     }
     router.back();
@@ -388,8 +651,12 @@ export default function RecordScreen() {
     );
   }
 
-  const showCamera = phase === 'idle' || phase === 'countdown' || phase === 'recording';
+  const showCamera =
+    activeClip !== null &&
+    (phase === 'idle' || phase === 'countdown' || phase === 'recording');
   const frontGlow = phase === 'recording' && flashOn && facing === 'front';
+  const summaryMode = activeIndex === null && phase === 'idle';
+  const chipsVisible = phase === 'idle';
 
   return (
     <View style={styles.root}>
@@ -406,7 +673,7 @@ export default function RecordScreen() {
         />
       ) : null}
 
-      {phase === 'review' && reviewSource ? (
+      {phase === 'clipReview' && pendingSource ? (
         <VideoView
           style={StyleSheet.absoluteFill}
           player={player}
@@ -418,48 +685,37 @@ export default function RecordScreen() {
       {frontGlow ? <View style={styles.frontGlow} pointerEvents="none" /> : null}
 
       <View style={[styles.progressWrap, { top: insets.top + 4 }]}>
-        {segments.map((s, i) => (
-          <View
-            key={`${i}-${s.uri}`}
-            style={[
-              styles.progressSeg,
-              { flex: s.durationMs / MAX_TOTAL_MS },
-            ]}
-          />
-        ))}
-        {phase === 'recording' ? (
-          <View
-            style={[
-              styles.progressSeg,
-              styles.progressLive,
-              { flex: Math.min(elapsedMs, remainingMs) / MAX_TOTAL_MS },
-            ]}
-          />
-        ) : null}
-        <View
-          style={{
-            flex: Math.max(
-              MAX_TOTAL_MS -
-                totalRecordedMs -
-                (phase === 'recording' ? Math.min(elapsedMs, remainingMs) : 0),
-              0,
-            ) / MAX_TOTAL_MS,
-          }}
-        />
+        {plan.map((c, i) => {
+          const isDone = kept[c.slotIndex] !== undefined;
+          const isLive = phase === 'recording' && i === activeIndex;
+          return (
+            <View key={c.slotIndex} style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  isDone && styles.progressDone,
+                  isLive && {
+                    backgroundColor: '#FFFFFF',
+                    flex: Math.min(elapsedMs / MAX_CLIP_MS, 1),
+                  },
+                  !isDone && !isLive && styles.progressEmpty,
+                ]}
+              />
+              {isLive ? (
+                <View
+                  style={{ flex: Math.max(1 - elapsedMs / MAX_CLIP_MS, 0) }}
+                />
+              ) : null}
+            </View>
+          );
+        })}
       </View>
 
-      {showCamera ? (
+      {showCamera && activeClip ? (
         <View style={[styles.prompterSlot, { paddingTop: insets.top + 48 }]}>
-          {beatsMode ? (
-            <BeatsPrompter
-              credential={profile?.credential_line ?? null}
-              hook={hookLine}
-              points={pointTexts}
-              activeIndex={partIndex}
-            />
-          ) : (
+          {activeClip.scripted ? (
             <Teleprompter
-              text={parts[partIndex] ?? script}
+              text={activeClip.script}
               running={phase === 'recording' && !scriptPaused}
               paused={phase === 'recording' && scriptPaused}
               speed={speed}
@@ -468,6 +724,12 @@ export default function RecordScreen() {
               onTap={() => {
                 if (phase === 'recording') setScriptPaused((p) => !p);
               }}
+            />
+          ) : (
+            <BeatPrompter
+              label={`${activeClip.label} of ${plan.length} clips`}
+              text={activeClip.script}
+              credential={profile?.credential_line ?? null}
             />
           )}
         </View>
@@ -484,18 +746,25 @@ export default function RecordScreen() {
         <View style={[styles.topBar, { paddingTop: insets.top + 14 }]}>
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.topBtn}>
-              {phase === 'review' ? 'Back' : 'Close'}
+              {phase === 'clipReview' ? 'Back' : 'Close'}
             </Text>
           </Pressable>
-          <Text style={styles.topTitle} numberOfLines={1}>
-            {title}
-          </Text>
+          <View style={styles.topCenter}>
+            <Text style={styles.topTitle} numberOfLines={1}>
+              {title}
+            </Text>
+            {activeClip && phase !== 'clipReview' ? (
+              <Text style={styles.topSub}>
+                Clip {(activeIndex ?? 0) + 1} of {plan.length}
+              </Text>
+            ) : null}
+          </View>
           <View style={{ width: 48 }} />
         </View>
       ) : null}
 
       {showCamera ? (
-        <View style={[styles.rail, { top: insets.top + 56 }]}>
+        <View style={[styles.rail, { top: insets.top + 64 }]}>
           <Pressable
             style={[styles.railBtn, flashOn && styles.railBtnOn]}
             onPress={() => setFlashOn((f) => !f)}
@@ -515,42 +784,49 @@ export default function RecordScreen() {
         </View>
       ) : null}
 
+      {summaryMode ? (
+        <View style={styles.summaryWrap}>
+          <Text style={styles.summaryTitle}>All clips recorded</Text>
+          <Text style={styles.summaryText}>
+            Your clips post as one video. Tap a clip below to record it again,
+            or send everything for review.
+          </Text>
+        </View>
+      ) : null}
+
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
-        {phase === 'idle' && segments.length > 0 ? (
-          <View style={styles.pillsRow}>
-            {segments.map((s, i) => (
-              <View key={`${i}-${s.uri}`} style={styles.pill}>
-                <Text style={styles.pillText}>
-                  {i + 1} · {formatMs(s.durationMs)}
-                </Text>
-              </View>
-            ))}
-            <Pressable style={styles.deletePill} onPress={deleteLastSegment}>
-              <Text style={styles.deleteText}>Delete last</Text>
-            </Pressable>
-          </View>
+        {chipsVisible && plan.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsRow}
+            style={styles.chipsScroll}
+          >
+            {plan.map((c, i) => {
+              const isDone = kept[c.slotIndex] !== undefined;
+              const isActive = i === activeIndex;
+              return (
+                <Pressable
+                  key={c.slotIndex}
+                  style={[
+                    styles.chip,
+                    isDone && styles.chipDone,
+                    isActive && styles.chipActive,
+                  ]}
+                  onPress={() => jumpToClip(i)}
+                >
+                  <Text style={[styles.chipText, isDone && styles.chipTextDone]}>
+                    {c.chip}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         ) : null}
 
-        {nextPartCard ? (
-          <View style={styles.partCard}>
-            <Text style={styles.partTitle}>
-              Part {segments.length + 1} of {parts.length}
-            </Text>
-            <Text style={styles.partPreview} numberOfLines={2}>
-              {parts[segments.length]}
-            </Text>
-            <Pressable
-              style={styles.partFlip}
-              onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
-            >
-              <Text style={styles.partFlipText}>Flip camera</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {phase === 'idle' || phase === 'countdown' ? (
+        {phase === 'idle' && activeClip !== null ? (
           <>
-            {!beatsMode ? (
+            {activeClip.scripted ? (
               <View style={styles.speedRow}>
                 {SPEEDS.map((s) => (
                   <Pressable
@@ -563,85 +839,93 @@ export default function RecordScreen() {
                 ))}
               </View>
             ) : null}
-            {phase === 'idle' && segments.length === 0 && parts.length > 1 ? (
-              <Text style={styles.hintSmall}>
-                {parts.length} parts. Stop between each to cut and continue.
-              </Text>
-            ) : null}
-            {phase === 'idle' ? (
-              <View style={styles.shutterRow}>
-                <View style={styles.shutterSide}>
-                  {segments.length > 0 ? (
-                    <Pressable style={styles.doneBtn} onPress={() => setPhase('review')}>
-                      <Text style={styles.doneText}>Done</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-                <Pressable
-                  style={[
-                    styles.shutter,
-                    (!cameraReady || maxReached) && styles.shutterOff,
-                  ]}
-                  disabled={!cameraReady || maxReached}
-                  onPress={() => void beginCountdown()}
-                >
-                  <View style={styles.shutterInner} />
-                </Pressable>
-                <View style={styles.shutterSide}>
-                  <Text style={styles.hintSmall}>
-                    {!cameraReady
-                      ? 'Camera starting'
-                      : maxReached
-                        ? 'Max length'
-                        : formatMs(remainingMs) + ' left'}
-                  </Text>
-                </View>
+            <Text style={styles.hintSmall}>
+              {replacing
+                ? 'This take replaces the clip you already kept.'
+                : activeClip.scripted
+                  ? 'Read the script. Stop when you finish this clip.'
+                  : 'Talk through the point in your own words.'}
+            </Text>
+            <View style={styles.shutterRow}>
+              <View style={styles.shutterSide}>
+                {allKept ? (
+                  <Pressable
+                    style={styles.doneBtn}
+                    onPress={() => setActiveIndex(null)}
+                  >
+                    <Text style={styles.doneText}>Done</Text>
+                  </Pressable>
+                ) : null}
               </View>
-            ) : (
-              <Text style={styles.hint}>Get ready</Text>
-            )}
+              <Pressable
+                style={[styles.shutter, !cameraReady && styles.shutterOff]}
+                disabled={!cameraReady}
+                onPress={() => void beginCountdown()}
+              >
+                <View style={styles.shutterInner} />
+              </Pressable>
+              <View style={styles.shutterSide}>
+                <Text style={styles.hintSmall}>
+                  {cameraReady
+                    ? `${keptCount} of ${plan.length} kept`
+                    : 'Camera starting'}
+                </Text>
+              </View>
+            </View>
           </>
         ) : null}
+
+        {phase === 'countdown' ? <Text style={styles.hint}>Get ready</Text> : null}
 
         {phase === 'recording' ? (
           <View style={styles.recCol}>
             <Text style={styles.timer}>
-              {formatMs(totalRecordedMs + elapsedMs)} / {formatMs(MAX_TOTAL_MS)}
+              {formatMs(elapsedMs)} / {formatMs(MAX_CLIP_MS)}
             </Text>
-            <Pressable style={styles.stopBtn} onPress={stopSegment}>
+            <Pressable style={styles.stopBtn} onPress={stopClip}>
               <View style={styles.stopSquare} />
             </Pressable>
-            <Text style={styles.hintSmall}>Stop saves this clip</Text>
+            <Text style={styles.hintSmall}>Stop when you finish this clip</Text>
           </View>
         ) : null}
 
-        {phase === 'review' ? (
+        {phase === 'clipReview' && activeClip ? (
           <View style={styles.reviewCol}>
             <Text style={styles.hintSmall}>
-              {segments.length === 1
-                ? 'One clip'
-                : `Clip ${reviewIndex + 1} of ${segments.length}. Clips post as one video.`}
+              {activeClip.label}. Happy with it? Keep it and move on.
             </Text>
             <View style={styles.reviewRow}>
-              <Pressable style={styles.secondaryBtn} onPress={retakeAll}>
-                <Text style={styles.secondaryText}>Retake all</Text>
+              <Pressable style={styles.secondaryBtn} onPress={retakePending}>
+                <Text style={styles.secondaryText}>Retake</Text>
               </Pressable>
               <Pressable
                 style={styles.primaryBtn}
-                onPress={() => void sendForReview()}
+                onPress={() => void keepPendingClip()}
               >
-                <Text style={styles.primaryText}>Send for review</Text>
+                <Text style={styles.primaryText}>Keep clip</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
 
-        {phase === 'uploading' ? (
-          <Text style={styles.hint}>
-            {segments.length > 1
-              ? `Uploading ${segments.length} clips…`
-              : 'Uploading your take…'}
-          </Text>
+        {phase === 'saving' ? (
+          <View style={styles.recCol}>
+            <ActivityIndicator color="#FFFFFF" />
+            <Text style={styles.hint}>Saving your clip…</Text>
+          </View>
+        ) : null}
+
+        {summaryMode ? (
+          <Pressable
+            style={[styles.primaryBtn, styles.submitBtn]}
+            onPress={() => void sendForReview()}
+          >
+            <Text style={styles.primaryText}>Send for review</Text>
+          </Pressable>
+        ) : null}
+
+        {phase === 'submitting' ? (
+          <Text style={styles.hint}>Sending for review…</Text>
         ) : null}
       </View>
 
@@ -679,11 +963,15 @@ const styles = StyleSheet.create({
     gap: 3,
     zIndex: 10,
   },
-  progressSeg: {
-    backgroundColor: color.accent,
+  progressTrack: {
+    flex: 1,
+    flexDirection: 'row',
     borderRadius: 3,
+    overflow: 'hidden',
   },
-  progressLive: { backgroundColor: '#FFFFFF' },
+  progressFill: { flex: 1, borderRadius: 3 },
+  progressDone: { backgroundColor: color.accent },
+  progressEmpty: { backgroundColor: 'rgba(255,255,255,0.25)' },
   prompterSlot: {
     position: 'absolute',
     top: 0,
@@ -710,12 +998,17 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
   topBtn: { color: '#fff', fontWeight: '700', fontSize: 16, width: 48 },
+  topCenter: { flex: 1, alignItems: 'center', gap: 1 },
   topTitle: {
-    flex: 1,
-    textAlign: 'center',
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+    textAlign: 'center',
+  },
+  topSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '600',
+    fontSize: 12,
   },
   rail: {
     position: 'absolute',
@@ -733,6 +1026,20 @@ const styles = StyleSheet.create({
   },
   railBtnOn: { backgroundColor: color.accent },
   railText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  summaryWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 10,
+  },
+  summaryTitle: { color: '#fff', fontWeight: '800', fontSize: 24 },
+  summaryText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
   bottom: {
     position: 'absolute',
     left: 0,
@@ -742,53 +1049,27 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingHorizontal: 20,
   },
-  pillsRow: {
+  chipsScroll: { maxHeight: 44, flexGrow: 0 },
+  chipsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
-    justifyContent: 'center',
-  },
-  pill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  deletePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
-  },
-  deleteText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  partCard: {
-    width: '100%',
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    padding: 14,
-    gap: 6,
+    paddingHorizontal: 4,
     alignItems: 'center',
   },
-  partTitle: { color: color.accentTint, fontWeight: '800', fontSize: 15 },
-  partPreview: {
-    color: '#fff',
-    fontSize: 14,
-    textAlign: 'center',
-    opacity: 0.9,
-  },
-  partFlip: {
-    marginTop: 4,
-    paddingHorizontal: 16,
+  chip: {
+    minWidth: 40,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    alignItems: 'center',
   },
-  partFlipText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  chipDone: { backgroundColor: color.accent },
+  chipActive: { borderColor: '#FFFFFF' },
+  chipText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  chipTextDone: { color: '#fff' },
   speedRow: { flexDirection: 'row', gap: 8 },
   speedChip: {
     paddingHorizontal: 12,
@@ -866,6 +1147,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  submitBtn: { flex: 0, alignSelf: 'stretch' },
   primaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   hint: { color: '#fff', fontSize: 16, fontWeight: '600' },
   hintSmall: {

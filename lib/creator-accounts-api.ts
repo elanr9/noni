@@ -80,6 +80,37 @@ export async function uploadVerificationAsset(params: {
 }
 
 /**
+ * Setup step 1: save handles and profile screenshots without entering the
+ * admin queue (the queue lists pending rows only, and status is constrained
+ * to pending / needs_changes / approved, so needs_changes doubles as the
+ * draft state). The warm-up proof submit flips the row to pending. A real
+ * admin send-back keeps its reason; drafts never set one.
+ */
+export async function saveCreatorAccountDraft(params: {
+  companyId: string;
+  creatorId: string;
+  tiktokHandle: string;
+  instagramHandle: string;
+  instagramScreenshotPath: string;
+  tiktokScreenshotPath: string;
+}): Promise<void> {
+  const { error } = await supabase.from('creator_accounts').upsert(
+    {
+      company_id: params.companyId,
+      creator_id: params.creatorId,
+      status: 'needs_changes',
+      tiktok_handle: params.tiktokHandle,
+      instagram_handle: params.instagramHandle,
+      instagram_screenshot_path: params.instagramScreenshotPath,
+      tiktok_screenshot_path: params.tiktokScreenshotPath,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,creator_id' },
+  );
+  if (error) throw error;
+}
+
+/**
  * Creator submit and resubmit. Upsert on (company_id, creator_id); status
  * returns to pending so the row lands back in the admin queue.
  */

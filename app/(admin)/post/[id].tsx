@@ -1,8 +1,8 @@
 // Stepped post editor. Post type is locked from week setup. Nothing
 // generates on open — AI assist is on demand. Screenshots live on
 // brief_segments keyed by talking_point_index.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,6 +12,7 @@ import { CtaCard } from '../../../components/admin/editor/CtaCard';
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import { MoveSheet, type MoveSlot } from '../../../components/admin/editor/MoveSheet';
+import { PlacementSheet } from '../../../components/admin/editor/PlacementSheet';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
@@ -56,7 +57,7 @@ import {
   type TalkingPoint,
 } from '../../../lib/briefs-api';
 import { supabase } from '../../../lib/supabase';
-import { color, radius, type } from '../../../theme/tokens';
+import { color, motion, radius, type } from '../../../theme/tokens';
 
 const STEPS = [
   'title',
@@ -121,6 +122,35 @@ export default function PostEditorScreen() {
   const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState<EditorStep>('title');
+  // Direction-aware step transition: Next slides in from the right,
+  // Back from the left, with a fade. Driven by index delta so every
+  // setStep caller gets it for free.
+  const stepOpacity = useRef(new Animated.Value(1)).current;
+  const stepShift = useRef(new Animated.Value(0)).current;
+  const prevStepIndexRef = useRef(0);
+
+  useEffect(() => {
+    const idx = STEPS.indexOf(step);
+    const delta = idx - prevStepIndexRef.current;
+    prevStepIndexRef.current = idx;
+    if (delta === 0) return;
+    stepOpacity.setValue(0);
+    stepShift.setValue(delta > 0 ? 28 : -28);
+    Animated.parallel([
+      Animated.timing(stepOpacity, {
+        toValue: 1,
+        duration: motion.base,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+      Animated.timing(stepShift, {
+        toValue: 0,
+        duration: motion.base,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [step, stepOpacity, stepShift]);
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
   const [postNumber, setPostNumber] = useState<number | null>(null);
@@ -179,6 +209,9 @@ export default function PostEditorScreen() {
   const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
   /** Which point's screenshot the Move sheet is placing; null means closed. */
   const [moveIndex, setMoveIndex] = useState<number | null>(null);
+  /** Which point's screenshot the Placement sheet is positioning; null means closed. */
+  const [placeIndex, setPlaceIndex] = useState<number | null>(null);
+  const [placeSaving, setPlaceSaving] = useState(false);
   /** The brand account shown on the merged caption preview. */
   const [accountName, setAccountName] = useState('');
 
@@ -794,6 +827,45 @@ export default function PostEditorScreen() {
     }
   }
 
+  /** Placement sheet save: normalized center + width onto the segment. */
+  async function savePlacement(pos: { x: number; y: number; width: number }) {
+    const pointIndex = placeIndex;
+    if (pointIndex === null) return;
+    const segment = segmentForPointIndex(pointIndex);
+    if (!segment?.screenshot_url) {
+      setPlaceIndex(null);
+      return;
+    }
+    setPlaceSaving(true);
+    try {
+      await updateBriefSegment(segment.id, {
+        screenshot_x: pos.x,
+        screenshot_y: pos.y,
+        screenshot_width: pos.width,
+      });
+      setSegments((prev) =>
+        prev.map((s) =>
+          s.id === segment.id
+            ? {
+                ...s,
+                screenshot_x: pos.x,
+                screenshot_y: pos.y,
+                screenshot_width: pos.width,
+              }
+            : s,
+        ),
+      );
+      setPlaceIndex(null);
+    } catch (e) {
+      Alert.alert(
+        'Could not save placement',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setPlaceSaving(false);
+    }
+  }
+
   function moveScreenshotFromPoint(pointIndex: number) {
     const from = segmentForPointIndex(pointIndex);
     if (!from?.screenshot_url) return;
@@ -954,6 +1026,8 @@ export default function PostEditorScreen() {
   }));
   const movingFrom =
     moveIndex !== null ? (segmentForPointIndex(moveIndex) ?? null) : null;
+  const placingSegment =
+    placeIndex !== null ? (segmentForPointIndex(placeIndex) ?? null) : null;
 
   // Clip and slide counts are derived from the type, never entered.
   const pointCount =
@@ -1008,6 +1082,12 @@ export default function PostEditorScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <Animated.View
+          style={{
+            opacity: stepOpacity,
+            transform: [{ translateX: stepShift }],
+          }}
+        >
         <Text style={styles.h1}>{STEP_TITLES[step]}</Text>
         <Text style={styles.intent}>{stepIntent}</Text>
 
@@ -1104,6 +1184,7 @@ export default function PostEditorScreen() {
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onMoveScreenshot={moveScreenshotFromPoint}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
+              onPlaceScreenshot={setPlaceIndex}
             />
           </View>
         ) : null}
@@ -1148,6 +1229,7 @@ export default function PostEditorScreen() {
             edit and review again.
           </Text>
         ) : null}
+        </Animated.View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
@@ -1206,6 +1288,19 @@ export default function PostEditorScreen() {
         currentSegmentId={movingFrom?.id ?? null}
         onClose={() => setMoveIndex(null)}
         onPick={(segmentId) => void placeScreenshot(segmentId)}
+      />
+
+      <PlacementSheet
+        visible={placeIndex !== null}
+        imageUrl={
+          placingSegment ? (screenshotUrls[placingSegment.id] ?? null) : null
+        }
+        initialX={placingSegment?.screenshot_x ?? null}
+        initialY={placingSegment?.screenshot_y ?? null}
+        initialWidth={placingSegment?.screenshot_width ?? null}
+        saving={placeSaving}
+        onClose={() => setPlaceIndex(null)}
+        onSave={(pos) => void savePlacement(pos)}
       />
 
       <LibraryPickerSheet

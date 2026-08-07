@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { router } from 'expo-router';
 
+import { markOnboardedLocally } from './onboarding';
 import { destinationForProfile } from './profile';
 import { supabase } from './supabase';
 import type { Profile } from './profile';
@@ -57,6 +58,10 @@ export async function routeAfterSignIn(): Promise<void> {
       .eq('id', data.user.id)
       .maybeSingle();
     profile = row;
+  }
+
+  if (profile?.onboarded) {
+    await markOnboardedLocally();
   }
 
   router.replace(destinationForProfile(profile, true));

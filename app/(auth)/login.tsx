@@ -1,15 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { router } from 'expo-router';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 
 import { BrandTitle, Screen, colors } from '../../components/Screen';
@@ -18,11 +8,8 @@ import {
   signInWithApple,
   signInWithGoogle,
 } from '../../lib/auth-session';
-import { supabase } from '../../lib/supabase';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
 
@@ -32,30 +19,6 @@ export default function LoginScreen() {
       .then(setAppleAvailable)
       .catch(() => setAppleAvailable(false));
   }, []);
-
-  async function signInWithPassword() {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed.includes('@') || password.length < 1) {
-      Alert.alert('Check details', 'Enter email and password.');
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: trimmed,
-        password,
-      });
-      if (error) {
-        Alert.alert('Sign in failed', error.message);
-        return;
-      }
-
-      await routeAfterSignIn();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function handleGoogle() {
     setBusy(true);
@@ -89,138 +52,36 @@ export default function LoginScreen() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <BrandTitle
-          title="Sign in"
-          subtitle="Email and password."
-        />
+      <BrandTitle title="Sign in" subtitle="Pick up where you left off." />
 
-        <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            placeholder="you@company.com"
-            placeholderTextColor="#9A9AA3"
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            editable={!busy}
+      <View style={styles.form}>
+        {appleAvailable ? (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={16}
+            style={styles.appleButton}
+            onPress={() => {
+              if (!busy) void handleApple();
+            }}
           />
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-            placeholder="Password"
-            placeholderTextColor="#9A9AA3"
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            editable={!busy}
-            onSubmitEditing={() => void signInWithPassword()}
-          />
-          <Pressable
-            style={[styles.button, busy && styles.buttonDisabled]}
-            onPress={() => void signInWithPassword()}
-            disabled={busy}
-          >
-            <Text style={styles.buttonText}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </Text>
-          </Pressable>
+        ) : null}
 
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {appleAvailable ? (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={
-                AppleAuthentication.AppleAuthenticationButtonType.CONTINUE
-              }
-              buttonStyle={
-                AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-              }
-              cornerRadius={16}
-              style={styles.appleButton}
-              onPress={() => void handleApple()}
-            />
-          ) : null}
-
-          <Pressable
-            style={[styles.altButton, busy && styles.buttonDisabled]}
-            onPress={() => void handleGoogle()}
-            disabled={busy}
-          >
-            <Text style={styles.altButtonText}>Continue with Google</Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.altButton, busy && styles.buttonDisabled]}
-            onPress={() => router.push('/(auth)/phone')}
-            disabled={busy}
-          >
-            <Text style={styles.altButtonText}>Continue with phone</Text>
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
+        <Pressable
+          style={[styles.altButton, busy && styles.buttonDisabled]}
+          onPress={() => void handleGoogle()}
+          disabled={busy}
+        >
+          <Text style={styles.altButtonText}>Sign in with Google</Text>
+        </Pressable>
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  form: { gap: 12 },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderColor: '#D9D6D0',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 18,
-    color: colors.ink,
-  },
-  button: {
-    marginTop: 8,
-    backgroundColor: colors.ink,
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
+  form: { gap: 12, marginTop: 24 },
   buttonDisabled: { opacity: 0.5 },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginVertical: 4,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#D9D6D0',
-  },
-  dividerText: {
-    fontSize: 14,
-    color: colors.muted,
-  },
   appleButton: {
     height: 56,
   },

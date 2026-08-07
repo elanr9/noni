@@ -76,18 +76,3 @@ export function statusColor(status: TaskStatus): string {
     }
   }
 }
-
-/** Creator-side transitions only. Admin approve/post live in admin packages. */
-export function nextCreatorAction(
-  status: TaskStatus,
-): { to: TaskStatus; label: string } | null {
-  switch (status) {
-    case 'assigned':
-    case 'changes_requested':
-      return { to: 'recorded', label: 'Mark recorded' };
-    case 'recorded':
-      return { to: 'submitted', label: 'Send for review' };
-    default:
-      return null;
-  }
-}

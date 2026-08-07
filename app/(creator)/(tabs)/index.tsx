@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,11 +20,8 @@ import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { StatusChip } from '../../../components/StatusChip';
 import { Wordmark } from '../../../components/ui/Wordmark';
 import { useAuth } from '../../../lib/auth';
-import {
-  getCreatorAccount,
-  type CreatorAccountStatus,
-} from '../../../lib/creator-accounts-api';
 import { getCompany } from '../../../lib/onboarding';
+import { supabase } from '../../../lib/supabase';
 import {
   DEFAULT_STREAK_MILESTONES,
   fetchMyStreak,
@@ -42,6 +40,35 @@ import {
 import { color, motion, shadow } from '../../../theme/tokens';
 
 const CLEARED = new Set(['approved', 'posted']);
+
+function chatSeenKey(creatorId: string): string {
+  return `noni.chat.seenAt.${creatorId}`;
+}
+
+/**
+ * Messages carry no read state, so "unread" means the newest admin message
+ * is newer than the locally stored moment the creator last opened chat
+ * from the bell.
+ */
+async function hasUnreadAdminMessage(
+  companyId: string,
+  creatorId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('company_id', companyId)
+    .eq('creator_id', creatorId)
+    .neq('author_id', creatorId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return false;
+  const seenAt = await AsyncStorage.getItem(chatSeenKey(creatorId));
+  if (seenAt === null) return true;
+  return new Date(data.created_at).getTime() > new Date(seenAt).getTime();
+}
 
 function dayKey(d: Date): string {
   const m = `${d.getMonth() + 1}`.padStart(2, '0');
@@ -65,9 +92,7 @@ export default function HomeScreen() {
   const [milestones, setMilestones] = useState<StreakMilestone[]>(
     DEFAULT_STREAK_MILESTONES,
   );
-  const [accountStatus, setAccountStatus] = useState<
-    CreatorAccountStatus | 'none' | null
-  >(null);
+  const [unreadAdmin, setUnreadAdmin] = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
@@ -100,7 +125,7 @@ export default function HomeScreen() {
   const load = useCallback(async () => {
     if (!profile?.id) return;
     try {
-      const [next, streakRow, company, account] = await Promise.all([
+      const [next, streakRow, company, unread] = await Promise.all([
         listMyAssignments(profile.id),
         profile.company_id
           ? fetchMyStreak(profile.company_id, profile.id).catch(() => null)
@@ -109,13 +134,15 @@ export default function HomeScreen() {
           ? getCompany(profile.company_id).catch(() => null)
           : Promise.resolve(null),
         profile.company_id
-          ? getCreatorAccount(profile.company_id, profile.id).catch(() => null)
-          : Promise.resolve(null),
+          ? hasUnreadAdminMessage(profile.company_id, profile.id).catch(
+              () => false,
+            )
+          : Promise.resolve(false),
       ]);
       setAssignments(next);
       setStreak(streakRow?.current_streak ?? 0);
       if (company) setMilestones(parseStreakMilestones(company.settings));
-      setAccountStatus((account?.status as CreatorAccountStatus | undefined) ?? 'none');
+      setUnreadAdmin(unread);
     } catch {
       // Pull to refresh retries; keep whatever is on screen.
     } finally {
@@ -152,6 +179,23 @@ export default function HomeScreen() {
   const allClear = today.length > 0 && hero === undefined;
 
   const firstName = profile?.full_name?.split(' ')[0] ?? 'creator';
+
+  const hasRevisions = useMemo(
+    () => assignments.some((a) => a.status === 'changes_requested'),
+    [assignments],
+  );
+  const showBellDot = hasRevisions || unreadAdmin;
+
+  const openChat = () => {
+    if (profile?.id) {
+      void AsyncStorage.setItem(
+        chatSeenKey(profile.id),
+        new Date().toISOString(),
+      ).catch(() => undefined);
+    }
+    setUnreadAdmin(false);
+    router.push('/(creator)/chat');
+  };
 
   const openAssignment = (a: AssignmentWithBrief) => {
     router.push(`/(creator)/assignment/${a.id}`);
@@ -201,10 +245,17 @@ export default function HomeScreen() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.headerRow}>
         <Wordmark size={19} />
-        <View>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={
+            showBellDot ? 'Open messages, new activity' : 'Open messages'
+          }
+          onPress={openChat}
+          style={styles.bellBtn}
+        >
           <Icon name="bell" size={23} color={color.ink} />
-          <View style={styles.bellDot} />
-        </View>
+          {showBellDot && <View style={styles.bellDot} />}
+        </PressableScale>
       </View>
 
       <ScrollView
@@ -240,36 +291,6 @@ export default function HomeScreen() {
             <Text style={styles.streakCount}>{streak}</Text>
           </PressableScale>
         </View>
-
-        {accountStatus !== null && accountStatus !== 'approved' && (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Open account setup"
-            onPress={() => router.push('/(creator)/account-setup')}
-            style={[styles.accountBanner, shadow.shadowCard]}
-          >
-            <Icon
-              name={accountStatus === 'pending' ? 'clock' : 'circle-alert'}
-              size={19}
-              color={accountStatus === 'pending' ? color.blue700 : color.amber}
-            />
-            <View style={styles.accountBannerText}>
-              <Text style={styles.accountBannerTitle}>
-                {accountStatus === 'none'
-                  ? 'Set up your accounts'
-                  : accountStatus === 'pending'
-                    ? 'Accounts in review'
-                    : 'Changes needed on your accounts'}
-              </Text>
-              <Text style={styles.accountBannerSub}>
-                {accountStatus === 'pending'
-                  ? 'You will hear back soon.'
-                  : 'Approval unlocks your first posts.'}
-              </Text>
-            </View>
-            <Icon name="chevron-right" size={17} color={color.slate400} />
-          </PressableScale>
-        )}
 
         {loading ? (
           <SkeletonCard height={420} radius={24} />
@@ -393,10 +414,14 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingHorizontal: 24,
   },
+  bellBtn: {
+    padding: 4,
+    margin: -4,
+  },
   bellDot: {
     position: 'absolute',
-    top: -1,
-    right: -1,
+    top: 3,
+    right: 3,
     width: 9,
     height: 9,
     borderRadius: 999,
@@ -430,26 +455,6 @@ const styles = StyleSheet.create({
   greetingSub: {
     marginTop: 4,
     fontSize: 14,
-    color: color.slate500,
-  },
-  accountBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: color.white,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-  },
-  accountBannerText: { flex: 1, gap: 1 },
-  accountBannerTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  accountBannerSub: {
-    fontSize: 12,
-    fontWeight: '600',
     color: color.slate500,
   },
   streakPill: {

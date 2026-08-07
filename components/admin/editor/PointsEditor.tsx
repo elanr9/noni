@@ -29,6 +29,8 @@ export function PointsEditor(props: {
   onAttachScreenshot: (index: number) => void;
   onMoveScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
+  /** Opens the drag-to-place sheet for this point's screenshot. */
+  onPlaceScreenshot: (index: number) => void;
 }): JSX.Element {
   const {
     points,
@@ -45,6 +47,7 @@ export function PointsEditor(props: {
     onAttachScreenshot,
     onMoveScreenshot,
     onRemoveScreenshot,
+    onPlaceScreenshot,
   } = props;
 
   const slotNoun = family === 'photo_carousel' ? 'Slide' : 'Clip';
@@ -195,10 +198,23 @@ export function PointsEditor(props: {
 
             {shotUrl !== undefined ? (
               <View style={styles.shotRow}>
-                <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
-                <Text style={styles.shotName} numberOfLines={1}>
-                  Screenshot
-                </Text>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={`Position the screenshot on point ${i + 1}`}
+                  disabled={shotBusy}
+                  onPress={() => onPlaceScreenshot(i)}
+                  style={styles.shotPress}
+                >
+                  <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
+                  <View style={styles.shotText}>
+                    <Text style={styles.shotName} numberOfLines={1}>
+                      Screenshot
+                    </Text>
+                    <Text style={styles.shotHint} numberOfLines={1}>
+                      Tap to position
+                    </Text>
+                  </View>
+                </PressableScale>
                 <PressableScale
                   accessibilityRole="button"
                   accessibilityLabel={`Move the screenshot on point ${i + 1}`}
@@ -354,17 +370,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  shotPress: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   shotThumb: {
     width: 30,
     height: 40,
     borderRadius: radiusAdmin.sm,
     backgroundColor: color.fillQuiet,
   },
-  shotName: {
+  shotText: {
     flex: 1,
+    gap: 1,
+  },
+  shotName: {
     fontSize: 13,
     fontWeight: '600',
     color: color.slate500,
+  },
+  shotHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: color.blue600,
   },
   movePill: {
     flexDirection: 'row',

@@ -110,84 +110,61 @@ export function Teleprompter({
 }
 
 /**
- * Static beats view for video briefs with talking points (script_mode beats):
- * the creator's credential line, the chosen hook in full, then the numbered
- * points, all on screen at once. No scrolling prose; the creator talks, they
- * do not recite. activeIndex highlights the segment being recorded
- * (0 = hook, then one per point).
+ * Per-clip beat view for point clips: one talking point, large, on screen
+ * for the whole take. The creator talks around the beat, they do not recite
+ * a script. Credential shows when the profile carries one so it gets said
+ * out loud at record time.
  */
-export function BeatsPrompter({
+export function BeatPrompter({
+  label,
+  text,
   credential,
-  hook,
-  points,
-  activeIndex,
 }: {
+  label: string;
+  text: string;
   credential: string | null;
-  hook: string;
-  points: string[];
-  activeIndex: number;
 }) {
-  const hasHook = hook.trim().length > 0;
   return (
-    <View style={beatsStyles.wrap}>
+    <View style={beatStyles.wrap}>
       {credential?.trim() ? (
-        <Text style={beatsStyles.credential}>{credential.trim()}</Text>
+        <Text style={beatStyles.credential}>{credential.trim()}</Text>
       ) : null}
-      {hasHook ? (
-        <Text
-          style={[beatsStyles.hook, activeIndex === 0 && beatsStyles.active]}
-        >
-          {hook.trim()}
-        </Text>
-      ) : null}
-      {points.map((point, i) => {
-        const index = hasHook ? i + 1 : i;
-        return (
-          <Text
-            key={`${i}-${point.slice(0, 16)}`}
-            style={[beatsStyles.point, activeIndex === index && beatsStyles.active]}
-          >
-            {i + 1}. {point}
-          </Text>
-        );
-      })}
+      <Text style={beatStyles.label}>{label}</Text>
+      <Text style={beatStyles.text}>{text}</Text>
     </View>
   );
 }
 
-const beatsStyles = StyleSheet.create({
+const beatStyles = StyleSheet.create({
   wrap: {
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 16,
     gap: 8,
     backgroundColor: color.scrim,
   },
   credential: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.7)',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  hook: {
-    fontSize: 22,
-    lineHeight: 28,
+  label: {
+    fontSize: 13,
     fontWeight: '800',
-    color: 'rgba(255,255,255,0.85)',
+    color: color.accentTint,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  text: {
+    fontSize: 26,
+    lineHeight: 34,
+    fontWeight: '800',
+    color: '#FFFFFF',
     textShadowColor: 'rgba(0,0,0,0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  point: {
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.85)',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  active: { color: color.accentTint },
 });
 
 const styles = StyleSheet.create({
