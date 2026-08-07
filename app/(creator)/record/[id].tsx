@@ -908,10 +908,11 @@ export default function RecordScreen() {
           <Pressable
             style={styles.submitBtn}
             onPress={() => void sendForReview()}
-            disabled={phase === 'submitting'}
           >
             <Text style={styles.submitText}>Send for review</Text>
           </Pressable>
+        ) : phase === 'submitting' ? (
+          <Text style={styles.barHint}>Sending for review…</Text>
         ) : (
           <View style={styles.shutterRow}>
             <Pressable
@@ -931,13 +932,11 @@ export default function RecordScreen() {
               }
               style={[
                 styles.shutterRing,
-                (!cameraReady || phase === 'saving' || phase === 'submitting') &&
-                  styles.shutterOff,
+                (!cameraReady || phase === 'saving') && styles.shutterOff,
               ]}
               disabled={
                 !cameraReady ||
                 phase === 'saving' ||
-                phase === 'submitting' ||
                 phase === 'countdown' ||
                 phase === 'clipReview'
               }
@@ -971,9 +970,6 @@ export default function RecordScreen() {
 
         {phase === 'saving' ? (
           <Text style={styles.barHint}>Saving your clip…</Text>
-        ) : null}
-        {phase === 'submitting' ? (
-          <Text style={styles.barHint}>Sending for review…</Text>
         ) : null}
         {phase === 'idle' && activeClip && replacing ? (
           <Text style={styles.barHint}>
