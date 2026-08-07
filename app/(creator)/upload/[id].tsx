@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DetailSkeleton, SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -97,6 +97,7 @@ export default function UploadScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -203,16 +204,12 @@ export default function UploadScreen() {
       setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
       setPhase('idle');
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Try again');
+      setToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
     }
   }
 
   if (loading) {
-    return (
-      <View style={styles.fallback}>
-        <ActivityIndicator size="large" color={color.accent} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
   if (!assignment || !brief) {
     return (
@@ -349,6 +346,13 @@ export default function UploadScreen() {
           </Button>
         )}
       </View>
+
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
 
       {phase === 'sent' ? (
         <View style={[styles.toast, shadow.shadowFloat]} pointerEvents="none">

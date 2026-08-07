@@ -11,11 +11,11 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { AreaChart } from '../../../components/creator/AreaChart';
 import { Screen } from '../../../components/layout/Screen';
+import { AnalyticsSkeleton, SoftToast } from '../../../components/states';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { Segmented } from '../../../components/ui/Segmented';
-import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { StatCard } from '../../../components/ui/StatCard';
 import { useAuth } from '../../../lib/auth';
 import { formatCount } from '../../../lib/earnings';
@@ -25,13 +25,7 @@ import {
   type AssignmentWithBrief,
 } from '../../../lib/tasks-api';
 import { formatCents, listLedger, type WalletLedgerRow } from '../../../lib/wallet-api';
-import {
-  borderWidth,
-  color,
-  radius,
-  space,
-  type,
-} from '../../../theme/tokens';
+import { borderWidth, color, radius, space, type } from '../../../theme/tokens';
 
 const DAYS = 30;
 const PLATFORMS = ['TikTok', 'Instagram'] as const;
@@ -95,6 +89,7 @@ export default function AnalyticsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [platformIndex, setPlatformIndex] = useState(0);
   const [metric, setMetric] = useState<ChartMetric>('views');
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.id) return;
@@ -106,7 +101,7 @@ export default function AnalyticsScreen() {
       setAssignments(mine);
       setLedger(rows);
     } catch {
-      // Pull to refresh retries; keep whatever is on screen.
+      setToast('Could not refresh Analytics. Pull to try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -232,19 +227,12 @@ export default function AnalyticsScreen() {
         }
       >
         {loading ? (
-          <>
-            <View style={styles.statsRow}>
-              <SkeletonCard height={110} radius={radius.lg} style={styles.flex} />
-              <SkeletonCard height={110} radius={radius.lg} style={styles.flex} />
-            </View>
-            <SkeletonCard height={120} radius={radius.lg} />
-            <SkeletonCard height={80} radius={radius.lg} />
-          </>
+          <AnalyticsSkeleton />
         ) : posted.length === 0 ? (
           <EmptyState
             icon="chart-column"
             title="No numbers yet"
-            body="Your numbers show up after your first post goes live."
+            body="Record and post from Home to unlock your numbers."
           />
         ) : (
           <>
@@ -376,6 +364,12 @@ export default function AnalyticsScreen() {
           </>
         )}
       </ScrollView>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }

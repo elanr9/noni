@@ -9,7 +9,8 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 
-import { Screen, LoadingScreen } from '../../../components/layout/Screen';
+import { Screen } from '../../../components/layout/Screen';
+import { HomeSkeleton, SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
@@ -89,6 +90,7 @@ export default function HomeScreen() {
   const [streak, setStreak] = useState(0);
   const [unreadAdmin, setUnreadAdmin] = useState(false);
   const [contentTypeTag, setContentTypeTag] = useState<string | undefined>();
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.id) return;
@@ -118,7 +120,7 @@ export default function HomeScreen() {
         setContentTypeTag(undefined);
       }
     } catch {
-      // Pull to refresh retries; keep whatever is on screen.
+      setToast('Could not refresh Home. Pull to try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -165,7 +167,7 @@ export default function HomeScreen() {
   };
 
   if (loading && assignments.length === 0) {
-    return <LoadingScreen label="Loading" />;
+    return <HomeSkeleton />;
   }
 
   const format =
@@ -250,17 +252,23 @@ export default function HomeScreen() {
             compact
             icon="sparkles"
             title="Nothing queued today"
-            body="Your next week of posts lands when the campaign drops."
+            body="Open Posts to see what is coming, or pull to refresh."
           />
         ) : allClear ? (
           <EmptyState
             compact
             icon="circle-check-big"
             title="Done for today"
-            body="All of today's posts are in."
+            body="Open Posts to review what is live."
           />
         ) : null}
       </ScrollView>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }

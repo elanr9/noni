@@ -1,32 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
+import { CountUp } from '../../components/states';
 import {
   getOnboardingAnswers,
   HOURS_TO_MONTHLY_ESTIMATE,
 } from '../../lib/onboarding';
-import { color, motion, space, type } from '../../theme/tokens';
+import { color, space, type } from '../../theme/tokens';
 import { OnboardingShell } from './_shell';
 
 export default function EstimateScreen() {
   const hours = getOnboardingAnswers().hoursPerWeek ?? '5';
   const target = HOURS_TO_MONTHLY_ESTIMATE[hours];
   const hoursLabel = hours === '15+' ? '15 or more' : hours;
-
-  const anim = useRef(new Animated.Value(0)).current;
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const sub = anim.addListener(({ value }) => setDisplay(Math.round(value)));
-    Animated.timing(anim, {
-      toValue: target,
-      duration: motion.shimmer,
-      easing: motion.easeOut,
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(sub);
-  }, [anim, target]);
 
   return (
     <OnboardingShell
@@ -37,7 +23,7 @@ export default function EstimateScreen() {
       onPrimary={() => router.push('/(onboarding)/save')}
     >
       <View style={styles.payoff}>
-        <Text style={styles.amount}>${display.toLocaleString('en-US')}</Text>
+        <CountUp value={target} prefix="$" style={styles.amount} />
         <Text style={styles.perMonth}>per month</Text>
         <Text style={styles.copy}>
           Creators posting {hoursLabel} hours a week average $

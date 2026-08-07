@@ -1,4 +1,5 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { color, motion, radius, space } from '../../theme/tokens';
 
@@ -43,10 +44,35 @@ export function ProgressBar({
           ? Math.min(1, Math.max(0, step / total))
           : 0;
 
+  return <AnimatedBar fraction={fraction} style={style} />;
+}
+
+function AnimatedBar({
+  fraction,
+  style,
+}: {
+  fraction: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const fill = useRef(new Animated.Value(fraction)).current;
+
+  useEffect(() => {
+    Animated.timing(fill, {
+      toValue: fraction,
+      duration: motion.base,
+      easing: motion.easeOut,
+      useNativeDriver: false,
+    }).start();
+  }, [fraction, fill]);
+
+  const width = fill.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
+
   return (
     <View style={[styles.track, style]}>
-      <View style={[styles.fill, { flex: Math.max(fraction, 0.02) }]} />
-      <View style={{ flex: Math.max(1 - fraction, 0) }} />
+      <Animated.View style={[styles.fill, { width }]} />
     </View>
   );
 }
@@ -56,11 +82,11 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: radius.pill,
     backgroundColor: color.fillQuiet,
-    flexDirection: 'row',
     overflow: 'hidden',
     width: '100%',
   },
   fill: {
+    height: '100%',
     backgroundColor: color.blue300,
     borderRadius: radius.pill,
   },
@@ -82,5 +108,5 @@ const styles = StyleSheet.create({
   },
 });
 
-/** Duration token for progress fill animations (Wave 3 wires motion). */
+/** Duration token for progress fill animations. */
 export const PROGRESS_FILL_MS = motion.base;

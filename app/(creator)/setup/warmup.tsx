@@ -15,6 +15,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { SentBackCard } from '../../../components/states';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { useAuth } from '../../../lib/auth';
 import {
@@ -298,12 +299,9 @@ export default function WarmupScreen() {
             </View>
           ) : (
             <>
-              {account.reason != null && (
-                <View style={[styles.noticeCard, { backgroundColor: color.amberSoft }]}>
-                  <Icon name="circle-alert" size={19} color={color.amber} />
-                  <Text style={styles.noticeText}>{account.reason}</Text>
-                </View>
-              )}
+              {account.reason != null ? (
+                <SentBackCard reason={account.reason} />
+              ) : null}
               {RECORDING_SLOTS.map((slot) => {
                 const chosen = picked[slot.kind] !== undefined;
                 const already = existingRecordingPath(slot.kind) !== null;

@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,7 +10,9 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { LoadingScreen, Screen } from '../../components/layout/Screen';
+import { SoftToast, SuccessState } from '../../components/states';
 import { Button } from '../../components/ui/Button';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { SheetShell } from '../../components/ui/SheetShell';
@@ -104,6 +105,7 @@ export default function CreatorBalanceScreen() {
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [successCents, setSuccessCents] = useState<number | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.id || !profile.company_id) return;
@@ -117,9 +119,8 @@ export default function CreatorBalanceScreen() {
       setLedger(rows);
       setConnect(status);
     } catch (e) {
-      Alert.alert(
-        'Could not load balance',
-        e instanceof Error ? e.message : 'Unknown error',
+      setToast(
+        e instanceof Error ? e.message : 'Could not load balance. Try again.',
       );
     } finally {
       setLoading(false);
@@ -140,10 +141,7 @@ export default function CreatorBalanceScreen() {
       await WebBrowser.openBrowserAsync(url);
       await load();
     } catch (e) {
-      Alert.alert(
-        'Setup failed',
-        e instanceof Error ? e.message : 'Unknown error',
-      );
+      setToast(e instanceof Error ? e.message : 'Bank setup failed. Try again.');
     } finally {
       setBusy(false);
     }
@@ -157,10 +155,7 @@ export default function CreatorBalanceScreen() {
       setSuccessCents(result.amount_cents);
       await load();
     } catch (e) {
-      Alert.alert(
-        'Cash out failed',
-        e instanceof Error ? e.message : 'Unknown error',
-      );
+      setToast(e instanceof Error ? e.message : 'Cash out failed. Try again.');
     } finally {
       setBusy(false);
     }
@@ -202,14 +197,10 @@ export default function CreatorBalanceScreen() {
           </Button>
         }
       >
-        <View style={styles.successIcon}>
-          <Icon name="check" size={28} color={color.green} />
-        </View>
-        <Text style={styles.successTitle}>Cash out started</Text>
-        <Text style={styles.successBodyText}>
-          {formatCents(successCents)} is on the way to your bank. Stripe usually
-          finishes in one to three business days.
-        </Text>
+        <SuccessState
+          title="Cash out started"
+          body={`${formatCents(successCents)} is on the way to your bank. Stripe usually finishes in one to three business days.`}
+        />
       </Screen>
     );
   }
@@ -292,7 +283,12 @@ export default function CreatorBalanceScreen() {
 
         <Text style={styles.sectionLabel}>Recent</Text>
         {ledger.length === 0 ? (
-          <Text style={styles.empty}>No payouts yet. Post to start earning.</Text>
+          <EmptyState
+            compact
+            icon="dollar-sign"
+            title="No payouts yet"
+            body="Post from Home to start earning."
+          />
         ) : (
           <View>
             {ledger.map((row) => (
@@ -348,6 +344,12 @@ export default function CreatorBalanceScreen() {
           </Text>
         </View>
       </SheetShell>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }
