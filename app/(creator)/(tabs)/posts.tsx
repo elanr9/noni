@@ -7,7 +7,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { MonthGrid } from '../../../components/creator/MonthGrid';
@@ -166,12 +166,9 @@ export default function PostsScreen() {
 
   const openAssignment = (a: AssignmentWithBrief) => {
     if (DONE_STATUSES.has(a.status as TaskStatus)) {
-      router.push({ pathname: '/(creator)/posts/[id]', params: { id: a.id } });
+      router.push(`/(creator)/posts/${a.id}` as Href);
     } else {
-      router.push({
-        pathname: '/(creator)/assignment/[id]',
-        params: { id: a.id },
-      });
+      router.push(`/(creator)/assignment/${a.id}`);
     }
   };
 

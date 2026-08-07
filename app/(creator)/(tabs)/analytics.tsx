@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { AreaChart } from '../../../components/creator/AreaChart';
@@ -196,7 +196,7 @@ export default function AnalyticsScreen() {
     metric === 'views' ? 'Views, last 30 days' : 'Likes, last 30 days';
 
   const openPosted = (a: AssignmentWithBrief) => {
-    router.push({ pathname: '/(creator)/posts/[id]', params: { id: a.id } });
+    router.push(`/(creator)/posts/${a.id}` as Href);
   };
 
   return (
