@@ -442,6 +442,40 @@ export default function RecordScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Ask for camera + mic as soon as the record screen opens, and only mount
+  // CameraView after both are granted. Mounting without permission leaves a
+  // black preview and onCameraReady never fires, so the shutter stays dead.
+  useEffect(() => {
+    void (async () => {
+      if (!cameraPermission?.granted) await requestCameraPermission();
+      if (!micPermission?.granted) await requestMicPermission();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const permissionsGranted = Boolean(
+    cameraPermission?.granted && micPermission?.granted,
+  );
+
+  const cameraActive =
+    permissionsGranted &&
+    activeClip !== null &&
+    (phase === 'idle' || phase === 'countdown' || phase === 'recording');
+
+  useEffect(() => {
+    if (!permissionsGranted) setCameraReady(false);
+  }, [permissionsGranted]);
+
+  useEffect(() => {
+    setCameraReady(false);
+  }, [facing]);
+
+  // Camera unmounts during clip review / summary; clear ready so the next
+  // mount must fire onCameraReady before the shutter works again.
+  useEffect(() => {
+    if (!cameraActive) setCameraReady(false);
+  }, [cameraActive]);
+
   async function restoreBrightness() {
     const prev = prevBrightnessRef.current;
     prevBrightnessRef.current = null;
@@ -719,14 +753,17 @@ export default function RecordScreen() {
     );
   }
 
-  const showCamera =
-    activeClip !== null &&
-    (phase === 'idle' || phase === 'countdown' || phase === 'recording');
+  const showCamera = cameraActive;
   const frontGlow = phase === 'recording' && flashOn && facing === 'front';
   const summaryMode = activeIndex === null && phase === 'idle';
   const canRetake = phase === 'clipReview';
   const canKeep = phase === 'clipReview';
   const shutterRecording = phase === 'recording' || phase === 'clipReview';
+  const needsPermissionGate =
+    activeClip !== null &&
+    !summaryMode &&
+    phase !== 'clipReview' &&
+    !permissionsGranted;
 
   return (
     <View style={styles.root}>
@@ -735,15 +772,41 @@ export default function RecordScreen() {
       <View style={[styles.viewport, { height: viewportH }]}>
         {showCamera ? (
           <CameraView
+            key={facing}
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
             facing={facing}
             mode="video"
+            mute={false}
             videoQuality="1080p"
             videoBitrate={8_000_000}
             enableTorch={flashOn && facing === 'back'}
             onCameraReady={() => setCameraReady(true)}
+            onMountError={(e) => {
+              setCameraReady(false);
+              Alert.alert(
+                'Camera failed',
+                e.message ||
+                  'Could not start the camera. Close and open this screen again.',
+              );
+            }}
           />
+        ) : null}
+
+        {needsPermissionGate ? (
+          <View style={styles.permissionGate}>
+            <Text style={styles.permissionTitle}>Camera and mic needed</Text>
+            <Text style={styles.permissionBody}>
+              Allow both so you can record each clip in Noni with the
+              teleprompter.
+            </Text>
+            <Pressable
+              style={styles.permissionBtn}
+              onPress={() => void ensurePermissions()}
+            >
+              <Text style={styles.permissionBtnText}>Allow access</Text>
+            </Pressable>
+          </View>
         ) : null}
 
         {phase === 'clipReview' && pendingSource ? (
@@ -1029,6 +1092,38 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: color.scrim,
     opacity: 0.15,
+  },
+  permissionGate: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space[10],
+    backgroundColor: color.ink800,
+    gap: space[4],
+  },
+  permissionTitle: {
+    color: color.white,
+    fontSize: type.size.titleSm,
+    fontWeight: type.weight.heavy,
+    textAlign: 'center',
+  },
+  permissionBody: {
+    color: color.whiteA75,
+    fontSize: type.size.body,
+    textAlign: 'center',
+    lineHeight: type.size.body * 1.4,
+  },
+  permissionBtn: {
+    marginTop: space[4],
+    backgroundColor: color.white,
+    borderRadius: radius.lg,
+    paddingHorizontal: space[8],
+    paddingVertical: space[5],
+  },
+  permissionBtnText: {
+    color: color.ink900,
+    fontSize: type.size.body,
+    fontWeight: type.weight.heavy,
   },
   frontGlow: {
     ...StyleSheet.absoluteFillObject,

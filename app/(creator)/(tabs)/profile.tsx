@@ -6,6 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AccountSwitcherCaret } from '../../../components/AccountSwitcherCaret';
 import {
   SoftToast,
   UnlinkedSocials,
@@ -331,6 +332,8 @@ export default function ProfileScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
+      <AccountSwitcherCaret name={name} style={styles.caret} />
+
       <View style={styles.header}>
         <PressableScale
           accessibilityRole="button"
@@ -347,9 +350,6 @@ export default function ProfileScreen() {
           )}
         </PressableScale>
         <View style={styles.headerText}>
-          <Text style={styles.name} numberOfLines={1}>
-            {name}
-          </Text>
           {handle !== null ? (
             <Text style={styles.handle} numberOfLines={1}>
               {handle}
@@ -419,7 +419,7 @@ export default function ProfileScreen() {
           onPress={() => router.push('/(creator)/account-setup' as Href)}
         />
         <NavRow
-          icon="circle-user-round"
+          icon="settings"
           label="Settings"
           sub="Notifications and privacy"
           onPress={openSettings}
@@ -442,6 +442,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingBottom: 96,
     gap: space[5],
+  },
+  caret: {
+    marginBottom: 4,
   },
   header: {
     flexDirection: 'row',
@@ -470,12 +473,6 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 4,
-  },
-  name: {
-    fontSize: type.size.titleSm,
-    fontWeight: type.weight.heavy,
-    letterSpacing: type.tracking.title,
-    color: color.ink,
   },
   handle: {
     fontSize: type.size.bodySm,
