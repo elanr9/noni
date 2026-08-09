@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Keyboard,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -75,7 +76,13 @@ export function Screen({
       {children}
     </ScrollView>
   ) : (
-    <View style={[styles.flex, styles.gutter, contentStyle]}>{children}</View>
+    <Pressable
+      accessible={false}
+      onPress={Keyboard.dismiss}
+      style={[styles.flex, styles.gutter, contentStyle]}
+    >
+      {children}
+    </Pressable>
   );
 
   return (

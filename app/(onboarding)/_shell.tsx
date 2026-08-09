@@ -1,12 +1,12 @@
-import type { ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 
 import { Screen } from '../../components/layout/Screen';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { color, radius, space, type } from '../../theme/tokens';
+import { color, motion, radius, space, type } from '../../theme/tokens';
 
 const TOTAL_STEPS = 12;
 
@@ -47,6 +47,27 @@ export function OnboardingShell({
   const titleStyle =
     titleSize === 'screen' ? styles.titleScreen : styles.titleQuestion;
 
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: motion.base,
+      easing: motion.easeOut,
+      useNativeDriver: true,
+    }).start();
+  }, [enter]);
+  const enterStyle = {
+    opacity: enter,
+    transform: [
+      {
+        translateY: enter.interpolate({
+          inputRange: [0, 1],
+          outputRange: [10, 0],
+        }),
+      },
+    ],
+  };
+
   const footer =
     primaryLabel !== undefined && onPrimary !== undefined ? (
       <>
@@ -84,19 +105,24 @@ export function OnboardingShell({
         </View>
       </View>
 
-      <Text style={titleStyle}>{title}</Text>
-      {subtitle !== undefined ? (
-        <Text style={styles.subtitle}>{subtitle}</Text>
-      ) : null}
+      <Animated.View style={[styles.flex, enterStyle]}>
+        <Text style={titleStyle}>{title}</Text>
+        {subtitle !== undefined ? (
+          <Text style={styles.subtitle}>{subtitle}</Text>
+        ) : null}
 
-      <View style={[styles.body, centerContent && styles.bodyCentered]}>
-        {children}
-      </View>
+        <View style={[styles.body, centerContent && styles.bodyCentered]}>
+          {children}
+        </View>
+      </Animated.View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   content: {
     flex: 1,
     paddingTop: space[3],
