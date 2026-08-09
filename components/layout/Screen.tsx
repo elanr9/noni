@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +13,34 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { color, space, type } from '../../theme/tokens';
+
+// The footer is pinned to the bottom of the screen, so an open keyboard would
+// cover it. Some keyboards (the number pad on the phone step) have no return
+// key, which leaves no way to reach the CTA at all. Measuring the keyboard is
+// more reliable than KeyboardAvoidingView, which infers the overlap from its
+// own onLayout frame and gets it wrong once a SafeAreaView insets the view.
+// metrics() seeds the height for a screen that mounts with the keyboard open.
+function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(() => Keyboard.metrics()?.height ?? 0);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow',
+      (event) => setHeight(event.endCoordinates.height),
+    );
+    const hidden = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setHeight(0),
+    );
+
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
+
+  return height;
+}
 
 export interface ScreenProps {
   children: ReactNode;
@@ -32,11 +62,14 @@ export function Screen({
   edges = ['top', 'left', 'right'],
   bg = color.white,
 }: ScreenProps) {
+  const keyboardHeight = useKeyboardHeight();
+
   const body = scroll ? (
     <ScrollView
       style={styles.flex}
       contentContainerStyle={[styles.gutter, styles.scrollContent, contentStyle]}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
       showsVerticalScrollIndicator={false}
     >
       {children}
@@ -46,7 +79,14 @@ export function Screen({
   );
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: bg }, style]} edges={edges}>
+    <SafeAreaView
+      style={[
+        styles.safe,
+        { backgroundColor: bg, paddingBottom: keyboardHeight },
+        style,
+      ]}
+      edges={edges}
+    >
       {body}
       {footer !== undefined && (
         <View style={[styles.footer, styles.gutter]}>{footer}</View>
