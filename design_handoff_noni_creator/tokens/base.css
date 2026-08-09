@@ -1,0 +1,5 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);color:var(--text-body);background:var(--surface);-webkit-font-smoothing:antialiased;text-wrap:pretty}
+a{color:var(--blue-600);text-decoration:none}
+a:hover{color:var(--blue-500)}
+button{font-family:inherit}

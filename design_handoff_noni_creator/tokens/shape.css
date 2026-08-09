@@ -1,0 +1,19 @@
+:root{
+  --radius-sm:12px;
+  --radius-md:16px;
+  --radius-lg:18px;
+  --radius-xl:20px;
+  --radius-2xl:24px;
+  --radius-pill:999px;
+
+  --border-hair:1px;
+  --border-field:1.5px;
+  --border-select:2px;
+
+  --shadow-card:0 1px 2px rgba(15,23,32,0.04),0 6px 16px rgba(15,23,32,0.05);
+  --shadow-raised:0 2px 6px rgba(15,23,32,0.06),0 12px 28px rgba(15,23,32,0.08);
+  --shadow-float:0 6px 24px rgba(15,23,32,0.14);
+  --shadow-media:0 4px 18px rgba(15,23,32,0.10);
+  --shadow-accent:0 8px 20px rgba(27,166,238,0.28);
+  --ring-focus:0 0 0 3px rgba(27,166,238,0.30);
+}

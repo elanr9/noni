@@ -29,8 +29,13 @@ export function PointsEditor(props: {
   onAttachScreenshot: (index: number) => void;
   onMoveScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
-  /** Opens the drag-to-place sheet for this point's screenshot. */
+  /** Opens the drag-to-place sheet for this point's screenshot and text. */
   onPlaceScreenshot: (index: number) => void;
+  /** Whether this point's segment shows on-screen text (placeable). */
+  hasTextForIndex: (index: number) => boolean;
+  /** Recording layout for this point's segment; toggles green screen. */
+  layoutForIndex: (index: number) => 'standard' | 'green_screen';
+  onToggleLayout: (index: number) => void;
 }): JSX.Element {
   const {
     points,
@@ -48,6 +53,9 @@ export function PointsEditor(props: {
     onMoveScreenshot,
     onRemoveScreenshot,
     onPlaceScreenshot,
+    hasTextForIndex,
+    layoutForIndex,
+    onToggleLayout,
   } = props;
 
   const slotNoun = family === 'photo_carousel' ? 'Slide' : 'Clip';
@@ -113,6 +121,7 @@ export function PointsEditor(props: {
         const busy = busyIndex === i;
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
+        const greenScreen = layoutForIndex(i) === 'green_screen';
         const plug = point.is_product;
         return (
           <View
@@ -237,7 +246,33 @@ export function PointsEditor(props: {
                   <Icon name="x" size={13} color={color.slate400} />
                 </PressableScale>
               </View>
-            ) : (
+            ) : null}
+            {shotUrl !== undefined ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Toggle green screen on point ${i + 1}`}
+                disabled={shotBusy}
+                onPress={() => onToggleLayout(i)}
+                style={[styles.gsRow, greenScreen && styles.gsRowOn]}
+              >
+                <Icon
+                  name={greenScreen ? 'circle-check-big' : 'switch-camera'}
+                  size={14}
+                  color={greenScreen ? color.blue600 : color.slate400}
+                />
+                <View style={styles.gsText}>
+                  <Text style={[styles.gsLabel, greenScreen && styles.gsLabelOn]}>
+                    Green screen
+                  </Text>
+                  <Text style={styles.gsHint}>
+                    {greenScreen
+                      ? 'Screenshot becomes the background and the creator is cut out over it'
+                      : 'Screenshot floats as a card over the creator'}
+                  </Text>
+                </View>
+              </PressableScale>
+            ) : null}
+            {shotUrl === undefined ? (
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel={`Add a screenshot to point ${i + 1}`}
@@ -250,7 +285,21 @@ export function PointsEditor(props: {
                   {shotBusy ? 'Uploading…' : 'Add screenshot'}
                 </Text>
               </PressableScale>
-            )}
+            ) : null}
+            {shotUrl === undefined && hasTextForIndex(i) ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Position the on-screen text for point ${i + 1}`}
+                onPress={() => onPlaceScreenshot(i)}
+                style={styles.gsRow}
+              >
+                <Icon name="pencil" size={14} color={color.slate400} />
+                <View style={styles.gsText}>
+                  <Text style={styles.gsLabel}>On screen text</Text>
+                  <Text style={styles.gsHint}>Tap to position it on the video</Text>
+                </View>
+              </PressableScale>
+            ) : null}
           </View>
         );
       })}
@@ -416,6 +465,35 @@ const styles = StyleSheet.create({
     borderRadius: radiusAdmin.pill,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  gsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: radiusAdmin.md,
+    backgroundColor: color.fillQuiet,
+  },
+  gsRowOn: {
+    backgroundColor: color.blue100,
+  },
+  gsText: {
+    flex: 1,
+    gap: 1,
+  },
+  gsLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  gsLabelOn: {
+    color: color.blue700,
+  },
+  gsHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: color.slate400,
   },
   addShot: {
     flexDirection: 'row',

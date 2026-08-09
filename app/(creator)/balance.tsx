@@ -1,8 +1,5 @@
 import { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,9 +7,15 @@ import {
   View,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
-import { LoadingScreen, Screen, colors } from '../../components/Screen';
+import { LoadingScreen, Screen } from '../../components/layout/Screen';
+import { SoftToast, SuccessState } from '../../components/states';
+import { Button } from '../../components/ui/Button';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { Icon } from '../../components/ui/Icon';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { SheetShell } from '../../components/ui/SheetShell';
 import { useAuth } from '../../lib/auth';
 import {
   formatCents,
@@ -26,15 +29,83 @@ import {
   type StripeConnectStatus,
   type WalletLedgerRow,
 } from '../../lib/wallet-api';
+import {
+  borderWidth,
+  color,
+  radius,
+  space,
+  type,
+} from '../../theme/tokens';
+
+function isPendingKind(kind: string): boolean {
+  return kind === 'payout_hold' || kind === 'payout_pending';
+}
+
+function isCashOutKind(kind: string): boolean {
+  return (
+    kind === 'payout_hold' ||
+    kind === 'payout_paid' ||
+    kind === 'payout_failed' ||
+    kind === 'payout_pending'
+  );
+}
+
+function formatLedgerDate(iso: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function ledgerSubtitle(row: WalletLedgerRow): string {
+  if (isPendingKind(row.kind)) {
+    return row.note?.trim() || 'In review';
+  }
+  const date = formatLedgerDate(row.created_at);
+  if (isCashOutKind(row.kind)) return date;
+  const label = row.note?.trim();
+  if (label && date) return `${date}, ${label}`;
+  if (label) return label;
+  return date;
+}
+
+function ledgerTitle(row: WalletLedgerRow): string {
+  if (isCashOutKind(row.kind)) {
+    return row.note?.trim() || 'Cash out to bank';
+  }
+  return row.note?.trim() || ledgerKindLabel(row.kind);
+}
+
+function LedgerAmount({ row }: { row: WalletLedgerRow }) {
+  if (isPendingKind(row.kind)) {
+    return (
+      <Text style={styles.amountPending}>
+        {formatCents(Math.abs(row.amount_cents))} pending
+      </Text>
+    );
+  }
+  const debit = row.amount_cents < 0;
+  return (
+    <Text style={[styles.amount, debit && styles.amountDebit]}>
+      {row.amount_cents > 0 ? '+' : ''}
+      {formatCents(row.amount_cents)}
+    </Text>
+  );
+}
 
 export default function CreatorBalanceScreen() {
   const { profile } = useAuth();
+  const router = useRouter();
   const [wallet, setWallet] = useState<CreatorWallet | null>(null);
   const [ledger, setLedger] = useState<WalletLedgerRow[]>([]);
   const [connect, setConnect] = useState<StripeConnectStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [successCents, setSuccessCents] = useState<number | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.id || !profile.company_id) return;
@@ -48,9 +119,8 @@ export default function CreatorBalanceScreen() {
       setLedger(rows);
       setConnect(status);
     } catch (e) {
-      Alert.alert(
-        'Could not load balance',
-        e instanceof Error ? e.message : 'Unknown error',
+      setToast(
+        e instanceof Error ? e.message : 'Could not load balance. Try again.',
       );
     } finally {
       setLoading(false);
@@ -71,47 +141,24 @@ export default function CreatorBalanceScreen() {
       await WebBrowser.openBrowserAsync(url);
       await load();
     } catch (e) {
-      Alert.alert(
-        'Setup failed',
-        e instanceof Error ? e.message : 'Unknown error',
-      );
+      setToast(e instanceof Error ? e.message : 'Bank setup failed. Try again.');
     } finally {
       setBusy(false);
     }
   }
 
-  async function cashOut() {
-    if (!wallet || wallet.available_cents <= 0) return;
-    Alert.alert(
-      'Cash out',
-      `Send ${formatCents(wallet.available_cents)} to your bank via Stripe?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Cash out',
-          onPress: () => {
-            void (async () => {
-              setBusy(true);
-              try {
-                const result = await requestPayout();
-                Alert.alert(
-                  'Cash out started',
-                  `${formatCents(result.amount_cents)} is pending until Stripe confirms.`,
-                );
-                await load();
-              } catch (e) {
-                Alert.alert(
-                  'Cash out failed',
-                  e instanceof Error ? e.message : 'Unknown error',
-                );
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+  async function confirmCashOut() {
+    setBusy(true);
+    try {
+      const result = await requestPayout();
+      setConfirmOpen(false);
+      setSuccessCents(result.amount_cents);
+      await load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Cash out failed. Try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (loading) return <LoadingScreen label="Loading balance" />;
@@ -119,10 +166,89 @@ export default function CreatorBalanceScreen() {
   const onboarded = connect?.onboarded === true;
   const available = wallet?.available_cents ?? 0;
   const pending = wallet?.pending_cents ?? 0;
+  const canCashOut = onboarded && available > 0 && !busy;
+
+  const clearingLine =
+    pending > 0
+      ? `${formatCents(pending)} more clears when posts finish review`
+      : 'Nothing clearing right now';
+
+  const bankLabel = onboarded
+    ? 'Bank account connected'
+    : connect?.account_id
+      ? 'Finish bank setup'
+      : 'Connect a bank account';
+
+  if (successCents !== null) {
+    return (
+      <Screen
+        bg={color.white}
+        contentStyle={styles.successBody}
+        footer={
+          <Button
+            block
+            size="lg"
+            onPress={() => {
+              setSuccessCents(null);
+              router.back();
+            }}
+          >
+            Done
+          </Button>
+        }
+      >
+        <SuccessState
+          title="Cash out started"
+          body={`${formatCents(successCents)} is on the way to your bank. Stripe usually finishes in one to three business days.`}
+        />
+      </Screen>
+    );
+  }
 
   return (
-    <Screen style={styles.screen}>
+    <Screen
+      bg={color.white}
+      edges={['top', 'left', 'right']}
+      contentStyle={styles.content}
+      footer={
+        onboarded ? (
+          <Button
+            block
+            size="lg"
+            icon="download"
+            disabled={!canCashOut}
+            onPress={() => setConfirmOpen(true)}
+          >
+            {available > 0
+              ? `Cash out ${formatCents(available)}`
+              : 'Nothing to cash out'}
+          </Button>
+        ) : (
+          <Button
+            block
+            size="lg"
+            disabled={busy}
+            onPress={() => void setupConnect()}
+          >
+            {connect?.account_id ? 'Finish payout setup' : 'Set up payouts'}
+          </Button>
+        )
+      }
+    >
+      <View style={styles.topBar}>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          style={styles.backBtn}
+          onPress={() => router.back()}
+        >
+          <Icon name="chevron-left" size={22} color={color.ink} />
+        </PressableScale>
+      </View>
+
       <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -134,168 +260,258 @@ export default function CreatorBalanceScreen() {
           />
         }
       >
-        <Text style={styles.body}>
-          Bounties land here when posts hit the view threshold. Cash out to your
-          bank when you are ready.
-        </Text>
-
-        <View style={styles.balances}>
-          <View style={styles.balanceBox}>
-            <Text style={styles.balanceLabel}>Available</Text>
-            <Text style={styles.balanceValue}>{formatCents(available)}</Text>
-          </View>
-          <View style={styles.balanceBox}>
-            <Text style={styles.balanceLabel}>Pending</Text>
-            <Text style={styles.balanceValue}>{formatCents(pending)}</Text>
-          </View>
+        <View style={styles.hero}>
+          <Text style={styles.heroLabel}>Available to cash out</Text>
+          <Text style={styles.heroValue}>{formatCents(available)}</Text>
+          <Text style={styles.heroClearing}>{clearingLine}</Text>
         </View>
 
-        <View style={styles.box}>
-          <Text style={styles.label}>Payout account</Text>
-          <Text style={styles.value}>
-            {onboarded
-              ? 'Ready — cash outs go to your bank'
-              : connect?.account_id
-                ? 'Almost done — finish Stripe setup'
-                : 'One time setup with Stripe (ID + bank)'}
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Edit payout account"
+          style={styles.bankRow}
+          onPress={() => void setupConnect()}
+        >
+          <View style={styles.bankIcon}>
+            <Icon name="dollar-sign" size={18} color={color.ink} />
+          </View>
+          <Text style={styles.bankLabel} numberOfLines={1}>
+            {bankLabel}
           </Text>
-          {!onboarded ? (
-            <Text style={styles.hint}>
-              Takes about two minutes. Stripe collects your identity and bank
-              account so we can pay you. Noni never sees your bank login.
-            </Text>
-          ) : null}
-        </View>
+          <Icon name="pencil" size={18} color={color.slate400} />
+        </PressableScale>
 
-        {!onboarded ? (
-          <Pressable
-            style={[styles.btn, busy && styles.disabled]}
-            disabled={busy}
-            onPress={() => void setupConnect()}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.btnText}>
-                {connect?.account_id ? 'Finish payout setup' : 'Set up payouts'}
-              </Text>
-            )}
-          </Pressable>
-        ) : (
-          <Pressable
-            style={[
-              styles.btn,
-              (busy || available <= 0) && styles.disabled,
-            ]}
-            disabled={busy || available <= 0}
-            onPress={() => void cashOut()}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.btnText}>
-                {available > 0
-                  ? `Cash out ${formatCents(available)}`
-                  : 'Nothing to cash out'}
-              </Text>
-            )}
-          </Pressable>
-        )}
-
-        <Text style={styles.sectionTitle}>History</Text>
+        <Text style={styles.sectionLabel}>Recent</Text>
         {ledger.length === 0 ? (
-          <Text style={styles.empty}>No ledger entries yet.</Text>
+          <EmptyState
+            compact
+            icon="dollar-sign"
+            title="No payouts yet"
+            body="Post from Home to start earning."
+          />
         ) : (
-          ledger.map((row) => (
-            <View key={row.id} style={styles.ledgerRow}>
-              <View style={styles.ledgerLeft}>
-                <Text style={styles.ledgerKind}>
-                  {ledgerKindLabel(row.kind)}
-                </Text>
-                {row.note ? (
-                  <Text style={styles.ledgerNote} numberOfLines={1}>
-                    {row.note}
+          <View>
+            {ledger.map((row) => (
+              <View key={row.id} style={styles.ledgerRow}>
+                <View style={styles.ledgerText}>
+                  <Text style={styles.ledgerTitle} numberOfLines={1}>
+                    {ledgerTitle(row)}
                   </Text>
-                ) : null}
-                {row.created_at ? (
-                  <Text style={styles.ledgerDate}>
-                    {new Date(row.created_at).toLocaleDateString()}
+                  <Text style={styles.ledgerSub} numberOfLines={1}>
+                    {ledgerSubtitle(row)}
                   </Text>
-                ) : null}
+                </View>
+                <LedgerAmount row={row} />
               </View>
-              <Text
-                style={[
-                  styles.ledgerAmount,
-                  row.amount_cents < 0 ? styles.debit : styles.credit,
-                ]}
-              >
-                {row.amount_cents > 0 ? '+' : ''}
-                {formatCents(row.amount_cents)}
-              </Text>
-            </View>
-          ))
+            ))}
+          </View>
         )}
       </ScrollView>
+
+      <SheetShell
+        visible={confirmOpen}
+        onClose={() => {
+          if (!busy) setConfirmOpen(false);
+        }}
+        footer={
+          <View style={styles.sheetFooter}>
+            <Button
+              block
+              size="lg"
+              icon="download"
+              disabled={busy}
+              onPress={() => void confirmCashOut()}
+            >
+              Cash out {formatCents(available)}
+            </Button>
+            <Button
+              block
+              size="md"
+              variant="ghost"
+              disabled={busy}
+              onPress={() => setConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+          </View>
+        }
+      >
+        <View style={styles.sheetBody}>
+          <Text style={styles.sheetTitle}>Cash out?</Text>
+          <Text style={styles.sheetCopy}>
+            Send {formatCents(available)} to your connected bank via Stripe.
+            Noni never sees your bank login.
+          </Text>
+        </View>
+      </SheetShell>
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 20 },
-  h1: { fontSize: 28, fontWeight: '700', color: colors.ink, marginBottom: 6 },
-  body: { fontSize: 15, color: colors.muted, marginBottom: 16 },
-  balances: { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  balanceBox: {
+  content: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E6E2DC',
+    paddingHorizontal: 0,
+    paddingTop: space[2],
   },
-  balanceLabel: { fontSize: 12, color: colors.muted, marginBottom: 4 },
-  balanceValue: { fontSize: 24, fontWeight: '700', color: colors.ink },
-  box: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#E6E2DC',
-    marginBottom: 12,
+  flex: { flex: 1 },
+  scroll: {
+    paddingHorizontal: space.gutter,
+    paddingBottom: space[9],
+    gap: space[6],
   },
-  label: { fontSize: 12, color: colors.muted },
-  value: { fontSize: 16, color: colors.ink, fontWeight: '600' },
-  hint: { fontSize: 13, color: colors.muted, marginTop: 6, lineHeight: 18 },
-  btn: {
-    backgroundColor: colors.ink,
-    paddingVertical: 16,
-    borderRadius: 12,
+  topBar: {
+    paddingHorizontal: space.gutter,
+    marginBottom: space[2],
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
     alignItems: 'center',
-    marginBottom: 24,
+    justifyContent: 'center',
   },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  disabled: { opacity: 0.5 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.ink,
-    marginBottom: 10,
+  hero: {
+    gap: 6,
   },
-  empty: { color: colors.muted, fontSize: 14 },
+  heroLabel: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
+  },
+  heroValue: {
+    fontSize: type.size.hero,
+    lineHeight: type.size.hero * type.leading.tight,
+    letterSpacing: type.tracking.hero,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
+  },
+  heroClearing: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.regular,
+    color: color.slate400,
+  },
+  bankRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: space[5],
+    paddingHorizontal: space.cardPad,
+    borderRadius: radius.lg,
+    backgroundColor: color.offWhite,
+  },
+  bankIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bankLabel: {
+    flex: 1,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  sectionLabel: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+    color: color.slate400,
+    marginBottom: -8,
+  },
+  empty: {
+    fontSize: type.size.meta,
+    color: color.slate500,
+  },
   ledgerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E6E2DC',
+    gap: space[3],
+    paddingVertical: 14,
+    borderBottomWidth: borderWidth.hair,
+    borderBottomColor: color.line,
   },
-  ledgerLeft: { flex: 1, paddingRight: 12, gap: 2 },
-  ledgerKind: { fontSize: 15, fontWeight: '600', color: colors.ink },
-  ledgerNote: { fontSize: 13, color: colors.muted },
-  ledgerDate: { fontSize: 12, color: colors.muted },
-  ledgerAmount: { fontSize: 15, fontWeight: '700' },
-  credit: { color: '#1B7F4E' },
-  debit: { color: colors.ink },
+  ledgerText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  ledgerTitle: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  ledgerSub: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
+    color: color.slate400,
+  },
+  amount: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
+  },
+  amountDebit: {
+    color: color.slate500,
+  },
+  amountPending: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.heavy,
+    color: color.amber,
+  },
+  sheetBody: {
+    gap: space[3],
+  },
+  sheetTitle: {
+    fontSize: type.size.titleSm,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.title,
+    color: color.ink,
+  },
+  sheetCopy: {
+    fontSize: type.size.body,
+    lineHeight: type.size.body * type.leading.body,
+    color: color.slate500,
+  },
+  sheetFooter: {
+    gap: space[2],
+  },
+  successBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[4],
+    paddingHorizontal: space[4],
+  },
+  successIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.pill,
+    backgroundColor: color.greenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successTitle: {
+    fontSize: type.size.titleSm,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.title,
+    color: color.ink,
+    textAlign: 'center',
+  },
+  successBodyText: {
+    fontSize: type.size.body,
+    lineHeight: type.size.body * type.leading.body,
+    color: color.slate500,
+    textAlign: 'center',
+  },
 });

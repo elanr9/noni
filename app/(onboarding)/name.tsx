@@ -1,20 +1,19 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 
-import { CalShell, CalTextField } from '../../components/OnboardingUI';
+import { TextField } from '../../components/ui/TextField';
 import {
   getOnboardingAnswers,
   setOnboardingAnswer,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 export default function NameScreen() {
   const [name, setName] = useState(getOnboardingAnswers().firstName);
 
   return (
-    <CalShell
-      progress={1 / TOTAL}
+    <OnboardingShell
+      step={1}
       onBack={() => router.back()}
       title="What's your first name?"
       primaryLabel="Continue"
@@ -24,7 +23,7 @@ export default function NameScreen() {
         router.push('/(onboarding)/birthday');
       }}
     >
-      <CalTextField
+      <TextField
         value={name}
         onChangeText={setName}
         placeholder="First name"
@@ -33,6 +32,6 @@ export default function NameScreen() {
         autoCorrect={false}
         returnKeyType="done"
       />
-    </CalShell>
+    </OnboardingShell>
   );
 }

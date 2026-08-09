@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { AccountSwitcherCaret } from '../../../components/AccountSwitcherCaret';
 import {
   AdminHeader,
   AdminScreen,
@@ -64,13 +65,15 @@ function CompanyRow({
 }
 
 export default function SettingsScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, accounts, signOut, addAccount } = useAuth();
   const router = useRouter();
   const [members, setMembers] = useState<CreatorSocialStatus[]>([]);
   const [docCount, setDocCount] = useState<number | null>(null);
   const [approvedCount, setApprovedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const hasCreatorAccount = accounts.some((a) => a.role === 'creator');
 
   const load = useCallback(async () => {
     try {
@@ -176,11 +179,38 @@ export default function SettingsScreen() {
       </View>
 
       <SectionLabel style={styles.section}>Account</SectionLabel>
+      <AccountSwitcherCaret
+        name={profile?.full_name?.trim() || 'Admin'}
+        style={styles.caret}
+        textStyle={styles.caretName}
+        iconSize={20}
+      />
       <View style={styles.rows}>
-        <View style={[styles.row, shadow.shadowCard]}>
-          <Text style={styles.rowTitle}>{profile?.full_name ?? 'Admin'}</Text>
-          <Text style={styles.rowValue}>Signed in as admin</Text>
-        </View>
+        {!hasCreatorAccount ? (
+          <PressableScale
+            accessibilityRole="button"
+            onPress={() => {
+              Alert.alert(
+                'Become a creator',
+                'You will sign up with a different email for your creator account. Your admin account stays saved so you can switch back anytime.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Continue',
+                    onPress: () => void addAccount(),
+                  },
+                ],
+              );
+            }}
+            style={[styles.row, shadow.shadowCard]}
+          >
+            <View style={styles.rowIcon}>
+              <Icon name="plus" size={16} color={color.blue600} />
+            </View>
+            <Text style={styles.rowTitle}>Become a creator</Text>
+            <Icon name="chevron-right" size={16} color={color.slate300} />
+          </PressableScale>
+        ) : null}
 
         <PressableScale
           accessibilityRole="button"
@@ -206,6 +236,13 @@ const styles = StyleSheet.create({
   section: {
     marginTop: 24,
     marginBottom: 10,
+  },
+  caret: {
+    marginBottom: 14,
+  },
+  caretName: {
+    fontSize: 22,
+    fontWeight: '700',
   },
   rows: {
     gap: 10,

@@ -17,7 +17,6 @@ type Props = {
   speed: number;
   resetKey: number;
   onTap?: () => void;
-  speedLabel?: string;
 };
 
 /** One word advances every 250/speed ms (README §5). */
@@ -30,7 +29,6 @@ export function Teleprompter({
   speed,
   resetKey,
   onTap,
-  speedLabel,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
   const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
@@ -95,11 +93,6 @@ export function Teleprompter({
           ))}
         </Text>
       </ScrollView>
-      {speedLabel ? (
-        <View style={styles.speedChip}>
-          <Text style={styles.speedText}>{speedLabel}</Text>
-        </View>
-      ) : null}
       {paused ? (
         <View style={styles.pausedChip}>
           <Text style={styles.pausedText}>Script paused. Tap to resume.</Text>
@@ -140,7 +133,6 @@ const beatStyles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     gap: 8,
-    backgroundColor: color.scrim,
   },
   credential: {
     fontSize: 13,
@@ -172,7 +164,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: color.scrim,
   },
   line: {
     fontSize: 26,
@@ -186,16 +177,6 @@ const styles = StyleSheet.create({
   spoken: { color: 'rgba(255,255,255,0.45)' },
   current: { color: color.accentTint, fontWeight: '800' },
   upcoming: { color: '#FFFFFF' },
-  speedChip: {
-    position: 'absolute',
-    top: 12,
-    right: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,32,0.55)',
-  },
-  speedText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   pausedChip: {
     position: 'absolute',
     bottom: 12,

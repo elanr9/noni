@@ -12,6 +12,8 @@ export type TimelineText = {
   text: string;
   start_ms: number;
   duration_ms: number;
+  /** Normalized 0-1 vertical center, admin-placed; defaults to TEXT_Y. */
+  y: number;
 };
 
 export type TimelineImage = {
@@ -25,9 +27,26 @@ export type TimelineImage = {
   width: number;
 };
 
+/** Mirror of the client TextOverlay config stored on briefs.text_overlay. */
+export type TimelineTextOverlay = {
+  enabled: boolean;
+  mode: string;
+  text_color: string;
+  accent_color: string;
+};
+
+export const DEFAULT_TEXT_OVERLAY: TimelineTextOverlay = {
+  enabled: true,
+  mode: 'box',
+  text_color: '#FFFFFF',
+  accent_color: '#EA403F',
+};
+
 export type RenderTimeline = {
   width: number;
   height: number;
+  /** Admin-configured on-screen text look for the whole post. */
+  text_overlay: TimelineTextOverlay;
   clips: TimelineClip[];
   texts: TimelineText[];
   images: TimelineImage[];
@@ -36,8 +55,12 @@ export type RenderTimeline = {
 export type BriefSegmentRow = {
   slot_index: number;
   kind: string;
+  /** 'standard' or 'green_screen' (screenshot big, creator in a bubble). */
+  layout: string;
   overlay_text: string | null;
   show_on_screen: boolean;
+  /** Admin-placed text position; null falls back to TEXT_Y. */
+  text_y: number | null;
   screenshot_url: string | null;
   /** Admin-placed overlay position; null falls back to the defaults below. */
   screenshot_x: number | null;
@@ -53,7 +76,7 @@ export const TEXT_HOLD_MS = 3000;
 /** Mid-frame text box position, used by the render adapter. */
 export const TEXT_Y = 0.45;
 const IMAGE_Y = 0.62;
-const IMAGE_WIDTH = 0.72;
+const IMAGE_WIDTH = 0.85;
 
 /**
  * Build the timeline from the brief's render manifest and the real clip
@@ -65,10 +88,12 @@ const IMAGE_WIDTH = 0.72;
 export function buildRenderTimeline(params: {
   briefSegments: BriefSegmentRow[];
   durationsMs: number[];
+  textOverlay?: TimelineTextOverlay;
   width?: number;
   height?: number;
 }): RenderTimeline {
   const { briefSegments, durationsMs } = params;
+  const textOverlay = params.textOverlay ?? DEFAULT_TEXT_OVERLAY;
   const ordered = [...briefSegments].sort((a, b) => a.slot_index - b.slot_index);
 
   const clips: TimelineClip[] = [];
@@ -83,14 +108,17 @@ export function buildRenderTimeline(params: {
     const segment = ordered[i];
     if (segment) {
       const text = segment.overlay_text?.trim() ?? '';
-      if (segment.show_on_screen && text.length > 0) {
+      if (textOverlay.enabled && segment.show_on_screen && text.length > 0) {
         texts.push({
           text,
           start_ms: cursorMs,
           duration_ms: Math.min(TEXT_HOLD_MS, effectiveMs),
+          y: segment.text_y ?? TEXT_Y,
         });
       }
-      if (segment.screenshot_url) {
+      // Green screen screenshots are composited into the clip itself before
+      // stitching, so they never join the overlay pass.
+      if (segment.screenshot_url && segment.layout !== 'green_screen') {
         images.push({
           screenshot_path: segment.screenshot_url,
           start_ms: cursorMs,
@@ -108,6 +136,7 @@ export function buildRenderTimeline(params: {
   return {
     width: params.width ?? 1080,
     height: params.height ?? 1920,
+    text_overlay: textOverlay,
     clips,
     texts,
     images,

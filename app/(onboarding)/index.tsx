@@ -1,6 +1,6 @@
 import { Redirect } from 'expo-router';
 
-import { LoadingScreen } from '../../components/Screen';
+import { LoadingScreen } from '../../components/layout/Screen';
 import { useAuth } from '../../lib/auth';
 
 export default function OnboardingIndex() {

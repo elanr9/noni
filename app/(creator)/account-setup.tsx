@@ -11,9 +11,11 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 
+import { SentBackCard } from '../../components/states';
 import { Button } from '../../components/ui/Button';
 import { Icon, type IconName } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { SkeletonLine } from '../../components/ui/Skeleton';
 import { useAuth } from '../../lib/auth';
 import {
   getAccountTemplate,
@@ -182,7 +184,11 @@ export default function AccountSetupScreen() {
       showsVerticalScrollIndicator={false}
     >
       {loading ? (
-        <Text style={styles.empty}>Loading…</Text>
+        <View style={styles.loadingStack}>
+          <SkeletonLine width="100%" height={72} radius={radius.lg} />
+          <SkeletonLine width="100%" height={120} radius={radius.lg} />
+          <SkeletonLine width="100%" height={120} radius={radius.lg} />
+        </View>
       ) : (
         <>
           {status === 'approved' && (
@@ -203,15 +209,9 @@ export default function AccountSetupScreen() {
               body="Your accounts are submitted. You will hear back soon."
             />
           )}
-          {status === 'needs_changes' && account?.reason != null && (
-            <StatusCard
-              icon="circle-alert"
-              tint={color.amber}
-              bg={color.amberSoft}
-              title="Changes needed"
-              body={account.reason}
-            />
-          )}
+          {status === 'needs_changes' && account?.reason != null ? (
+            <SentBackCard reason={account.reason} />
+          ) : null}
 
           <Text style={styles.body}>
             Create a fresh TikTok and Instagram account that match the
@@ -416,10 +416,8 @@ function StatusCard(props: {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
   content: { paddingHorizontal: space.gutter, paddingVertical: 12, gap: 10, paddingBottom: 48 },
-  empty: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-    fontWeight: '600',
+  loadingStack: {
+    gap: space[4],
   },
   statusCard: {
     flexDirection: 'row',

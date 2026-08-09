@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { color, shadow } from '../../../theme/tokens';
+import { DetailSkeleton, SoftToast } from '../../../components/states';
+import { Button } from '../../../components/ui/Button';
+import { Icon } from '../../../components/ui/Icon';
+import { PressableScale } from '../../../components/ui/PressableScale';
+import { color, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
   listBriefSegments,
@@ -25,14 +28,62 @@ import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissio
 
 type Phase = 'idle' | 'submitting' | 'sent';
 
-/** One slide of the static post: the text the photo has to carry. */
 type Slide = {
   slotIndex: number;
   text: string;
 };
 
-/** Post-submit toast duration before returning Home. */
 const TOAST_MS = 2600;
+
+function draftKey(assignmentId: string): string {
+  return `noni:slideshow-draft:${assignmentId}`;
+}
+
+type StoredDraft = Record<string, PickedPhoto>;
+
+async function loadPhotoDraft(
+  assignmentId: string,
+): Promise<Record<number, PickedPhoto>> {
+  try {
+    const raw = await AsyncStorage.getItem(draftKey(assignmentId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as StoredDraft;
+    const out: Record<number, PickedPhoto> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const slot = Number(k);
+      if (
+        !Number.isFinite(slot) ||
+        !v ||
+        typeof v.uri !== 'string' ||
+        v.uri.length === 0
+      ) {
+        continue;
+      }
+      out[slot] = {
+        uri: v.uri,
+        mimeType: typeof v.mimeType === 'string' ? v.mimeType : null,
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function savePhotoDraft(
+  assignmentId: string,
+  photos: Record<number, PickedPhoto>,
+): Promise<void> {
+  const stored: StoredDraft = {};
+  for (const [k, v] of Object.entries(photos)) {
+    stored[k] = v;
+  }
+  await AsyncStorage.setItem(draftKey(assignmentId), JSON.stringify(stored));
+}
+
+async function clearPhotoDraft(assignmentId: string): Promise<void> {
+  await AsyncStorage.removeItem(draftKey(assignmentId));
+}
 
 export default function UploadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -46,6 +97,7 @@ export default function UploadScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -56,8 +108,13 @@ export default function UploadScreen() {
         if (cancelled) return;
         setAssignment(a);
         if (a) {
-          const segs = await listBriefSegments(a.briefs.id);
-          if (!cancelled) setBriefSegments(segs);
+          const [segs, draft] = await Promise.all([
+            listBriefSegments(a.briefs.id),
+            loadPhotoDraft(a.id),
+          ]);
+          if (cancelled) return;
+          setBriefSegments(segs);
+          setPhotos(draft);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -71,8 +128,6 @@ export default function UploadScreen() {
 
   const brief = assignment?.briefs ?? null;
 
-  // Slides come from brief_segments (kind slide); briefs without segments
-  // fall back to one slide per talking point, matching the derivation rule.
   const slides = useMemo<Slide[]>(() => {
     if (!brief) return [];
     const talkingPoints = parseTalkingPoints(brief.talking_points);
@@ -97,9 +152,12 @@ export default function UploadScreen() {
 
   const pickedCount = slides.filter((s) => photos[s.slotIndex] !== undefined).length;
   const allPicked = slides.length > 0 && pickedCount === slides.length;
+  const activeSlideIndex = slides.findIndex(
+    (s) => photos[s.slotIndex] === undefined,
+  );
 
   async function pickPhoto(slotIndex: number) {
-    if (picking || phase !== 'idle') return;
+    if (picking || phase !== 'idle' || !assignment) return;
     setPicking(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -108,10 +166,12 @@ export default function UploadScreen() {
       });
       const asset = result.canceled ? null : result.assets[0];
       if (asset) {
-        setPhotos((prev) => ({
-          ...prev,
+        const next = {
+          ...photos,
           [slotIndex]: { uri: asset.uri, mimeType: asset.mimeType ?? null },
-        }));
+        };
+        setPhotos(next);
+        await savePhotoDraft(assignment.id, next);
       }
     } finally {
       setPicking(false);
@@ -135,20 +195,21 @@ export default function UploadScreen() {
         creatorId: profile.id,
         photos: ordered,
       });
+      try {
+        await clearPhotoDraft(assignment.id);
+      } catch {
+        // submission succeeded
+      }
       setPhase('sent');
       setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
     } catch (e) {
       setPhase('idle');
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Try again');
+      setToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
     }
   }
 
   if (loading) {
-    return (
-      <View style={styles.fallback}>
-        <ActivityIndicator size="large" color={color.accent} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
   if (!assignment || !brief) {
     return (
@@ -168,20 +229,44 @@ export default function UploadScreen() {
   }
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.topBar, { paddingTop: insets.top + 14 }]}>
-        <Pressable
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <View style={styles.topBar}>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Close"
           onPress={() => {
             if (phase === 'idle') router.back();
           }}
-          hitSlop={12}
+          style={styles.backBtn}
         >
-          <Text style={styles.topBtn}>Close</Text>
-        </Pressable>
-        <Text style={styles.topTitle} numberOfLines={1}>
-          {brief.title}
-        </Text>
-        <View style={{ width: 48 }} />
+          <Icon name="x" size={20} color={color.ink} />
+        </PressableScale>
+        <View style={styles.topMeta}>
+          <Text style={styles.topTitle} numberOfLines={1}>
+            Add pictures
+          </Text>
+          <Text style={styles.topSub}>
+            {pickedCount} of {slides.length} slides
+          </Text>
+        </View>
+        <View style={styles.backBtnSpacer} />
+      </View>
+
+      <View style={styles.stepper}>
+        {slides.map((slide, i) => {
+          const done = photos[slide.slotIndex] !== undefined;
+          const active = i === activeSlideIndex || (allPicked && i === slides.length - 1);
+          return (
+            <View
+              key={slide.slotIndex}
+              style={[
+                styles.stepTrack,
+                done && styles.stepDone,
+                active && !done && styles.stepActive,
+              ]}
+            />
+          );
+        })}
       </View>
 
       <ScrollView
@@ -191,10 +276,10 @@ export default function UploadScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.heading}>Pick your photos</Text>
+        <Text style={styles.heading}>Pick a photo for each slide</Text>
         <Text style={styles.subheading}>
-          One photo per slide. The slide text gets added for you, so pick shots
-          that fit what each slide says.
+          Slide text is added for you. Choose shots that match what each slide
+          says. Your picks stay saved if you leave.
         </Text>
 
         {slides.map((slide, i) => {
@@ -209,8 +294,12 @@ export default function UploadScreen() {
                   {slide.text || 'No text on this slide'}
                 </Text>
               </View>
-              <Pressable
-                style={[styles.photoSlot, photo && styles.photoSlotFilled]}
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={
+                  photo ? `Swap photo for slide ${i + 1}` : `Add photo for slide ${i + 1}`
+                }
+                style={[styles.photoSlot, photo ? styles.photoSlotFilled : null]}
                 onPress={() => void pickPhoto(slide.slotIndex)}
                 disabled={phase !== 'idle'}
               >
@@ -226,34 +315,44 @@ export default function UploadScreen() {
                     </View>
                   </>
                 ) : (
-                  <Text style={styles.addText}>Add photo</Text>
+                  <View style={styles.addCol}>
+                    <Icon name="images" size={22} color={color.blue600} />
+                    <Text style={styles.addText}>Add photo</Text>
+                  </View>
                 )}
-              </Pressable>
+              </PressableScale>
             </View>
           );
         })}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[styles.footer, { paddingBottom: Math.max(30, insets.bottom + 12) }]}>
         {phase === 'submitting' ? (
           <View style={styles.submittingRow}>
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={color.white} />
             <Text style={styles.hint}>Uploading your photos…</Text>
           </View>
         ) : (
-          <Pressable
-            style={[styles.submitBtn, !allPicked && styles.submitBtnOff]}
+          <Button
+            variant="primary"
+            size="lg"
+            block
             disabled={!allPicked || phase !== 'idle'}
             onPress={() => void submit()}
           >
-            <Text style={styles.submitText}>
-              {allPicked
-                ? 'Send for review'
-                : `${pickedCount} of ${slides.length} photos picked`}
-            </Text>
-          </Pressable>
+            {allPicked
+              ? 'Send for review'
+              : `${pickedCount} of ${slides.length} photos picked`}
+          </Button>
         )}
       </View>
+
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="error"
+        onHide={() => setToast(null)}
+      />
 
       {phase === 'sent' ? (
         <View style={[styles.toast, shadow.shadowFloat]} pointerEvents="none">
@@ -267,133 +366,182 @@ export default function UploadScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.ink900 },
+  root: { flex: 1, backgroundColor: color.offWhite },
   fallback: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.ink900,
-    paddingHorizontal: 32,
+    backgroundColor: color.offWhite,
+    paddingHorizontal: space.gutter,
   },
   fallbackText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 16,
+    color: color.textMuted,
+    fontSize: type.size.body,
     textAlign: 'center',
   },
   topBar: {
-    paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingHorizontal: space.gutter,
+    paddingBottom: space[3],
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: space[3],
   },
-  topBtn: { color: '#fff', fontWeight: '700', fontSize: 16, width: 48 },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnSpacer: { width: 40, height: 40 },
+  topMeta: { flex: 1, alignItems: 'center', gap: 2 },
   topTitle: {
-    flex: 1,
-    textAlign: 'center',
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
+    fontSize: type.size.action,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
   },
-  scroll: { paddingHorizontal: 20, gap: 14 },
-  heading: { color: '#fff', fontWeight: '800', fontSize: 24, marginTop: 6 },
+  topSub: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.slate400,
+  },
+  stepper: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: space.gutter,
+    marginBottom: space[3],
+  },
+  stepTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: color.line,
+  },
+  stepDone: { backgroundColor: color.blue300 },
+  stepActive: { backgroundColor: color.accent },
+  scroll: {
+    paddingHorizontal: space.gutter,
+    gap: space.stackGap,
+  },
+  heading: {
+    color: color.ink,
+    fontWeight: type.weight.heavy,
+    fontSize: type.size.titleSm,
+    letterSpacing: type.tracking.title,
+    marginTop: space[2],
+  },
   subheading: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
+    color: color.textMuted,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    marginBottom: space[2],
   },
   slideCard: {
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: radius.lg,
+    backgroundColor: color.white,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    padding: 14,
-    gap: 12,
+    borderColor: color.line,
+    padding: space.cardPad,
+    gap: space[3],
+    ...shadow.shadowCard,
   },
   slideHeader: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   slideBadge: {
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: color.accent,
+    backgroundColor: color.blue100,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  slideBadgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  slideBadgeText: {
+    color: color.blue700,
+    fontWeight: type.weight.heavy,
+    fontSize: type.size.chip,
+  },
   slideText: {
     flex: 1,
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-    lineHeight: 21,
+    color: color.ink,
+    fontWeight: type.weight.semibold,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
   },
   photoSlot: {
-    height: 180,
-    borderRadius: 12,
+    height: 200,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: color.lineStrong,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: color.offWhite,
   },
-  photoSlotFilled: { borderStyle: 'solid', borderColor: 'rgba(255,255,255,0.12)' },
+  photoSlotFilled: {
+    borderStyle: 'solid',
+    borderColor: color.line,
+  },
   photo: { ...StyleSheet.absoluteFillObject },
-  addText: { color: color.accentTint, fontWeight: '700', fontSize: 15 },
+  addCol: { alignItems: 'center', gap: 8 },
+  addText: {
+    color: color.blue600,
+    fontWeight: type.weight.bold,
+    fontSize: type.size.bodySm,
+  },
   swapChip: {
     position: 'absolute',
     bottom: 10,
     alignSelf: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: radius.pill,
+    backgroundColor: color.scrimStrong,
   },
-  swapChipText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  swapChipText: {
+    color: color.white,
+    fontWeight: type.weight.bold,
+    fontSize: type.size.chip,
+  },
   footer: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    backgroundColor: 'rgba(11,15,20,0.92)',
+    paddingHorizontal: space.gutter,
+    paddingTop: space[5],
+    backgroundColor: color.offWhite,
   },
   submittingRow: {
     flexDirection: 'row',
     gap: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52,
-  },
-  submitBtn: {
-    height: 52,
-    borderRadius: 999,
+    height: space.tapPrimary,
+    borderRadius: radius.pill,
     backgroundColor: color.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  submitBtnOff: { backgroundColor: 'rgba(255,255,255,0.16)' },
-  submitText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  hint: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  hint: {
+    color: color.white,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.semibold,
+  },
   toast: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 104,
-    borderRadius: 16,
+    left: space[7],
+    right: space[7],
+    bottom: 112,
+    borderRadius: radius.md,
     backgroundColor: color.ink,
-    paddingHorizontal: 16,
+    paddingHorizontal: space[5],
     paddingVertical: 14,
     alignItems: 'center',
     zIndex: 30,
   },
   toastText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+    color: color.white,
+    fontWeight: type.weight.semibold,
+    fontSize: type.size.meta,
     textAlign: 'center',
   },
 });

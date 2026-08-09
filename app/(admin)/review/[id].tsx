@@ -16,8 +16,10 @@ import { SentConfirmation } from '../../../components/admin/review/SentConfirmat
 import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
 import { Button } from '../../../components/ui/Button';
 import {
+  getSubmissionRenderState,
   latestSubmissionsByAssignment,
   listAssignmentQueue,
+  restartRender,
   reviewAssignment,
   signedVideoUrl,
   type AssignmentQueueItem,
@@ -81,6 +83,8 @@ export default function ReviewScreen() {
 
   const signedUrlFor = useCallback(async (item: ReviewItem): Promise<string | null> => {
     if (item.row.format !== 'video' || !item.submission?.video_path) return null;
+    // The finished edit is what gets reviewed; raw clips never play here.
+    if (item.submission.render_status !== 'ready') return null;
     const cached = urlCache.current.get(item.assignment.id);
     if (cached !== undefined) return cached;
     const url = await signedVideoUrl(item.submission.video_path);
@@ -137,6 +141,57 @@ export default function ReviewScreen() {
 
   const current = queue[index] as ReviewItem | undefined;
   const currentId = current?.assignment.id;
+  const submissionId = current?.submission?.id;
+  const renderStatus =
+    current?.row.format === 'video'
+      ? current?.submission?.render_status ?? 'ready'
+      : 'ready';
+
+  // The edit job runs right after the creator submits. While it is still
+  // going, poll until the finished video lands, then the load effect below
+  // picks it up.
+  useEffect(() => {
+    if (submissionId === undefined) return;
+    if (renderStatus === 'ready' || renderStatus === 'failed') return;
+    const timer = setInterval(() => {
+      void getSubmissionRenderState(submissionId)
+        .then((fresh) => {
+          if (!fresh) return;
+          setQueue((q) =>
+            q.map((it) =>
+              it.submission && it.submission.id === submissionId
+                ? { ...it, submission: { ...it.submission, ...fresh } }
+                : it,
+            ),
+          );
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [submissionId, renderStatus]);
+
+  const restartEdit = useCallback(async () => {
+    if (submissionId === undefined) return;
+    try {
+      await restartRender(submissionId);
+      setQueue((q) =>
+        q.map((it) =>
+          it.submission && it.submission.id === submissionId
+            ? {
+                ...it,
+                submission: {
+                  ...it.submission,
+                  render_status: 'rendering',
+                  render_error: null,
+                },
+              }
+            : it,
+        ),
+      );
+    } catch (e) {
+      Alert.alert('Could not restart', e instanceof Error ? e.message : 'Try again');
+    }
+  }, [submissionId]);
 
   // Load the current item's video and segments, autoplay, prefetch the next one.
   useEffect(() => {
@@ -167,7 +222,7 @@ export default function ReviewScreen() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
+  }, [currentId, renderStatus]);
 
   const durationSec = current?.submission?.duration_seconds ?? 0;
 
@@ -199,6 +254,8 @@ export default function ReviewScreen() {
   const { assignment, row, submission } = current;
   const briefRow = assignment.briefs;
   const isReel = row.format === 'video';
+  const editPending = isReel && submission !== null && submission.render_status !== 'ready';
+  const editFailed = isReel && submission?.render_status === 'failed';
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
   const caption = briefRow.caption ?? '';
   const attempt = submission?.version ?? 1;
@@ -252,6 +309,13 @@ export default function ReviewScreen() {
     if (!profile || !current) return false;
     if (!current.submission) {
       Alert.alert('Missing submission', 'This post has no video to review yet.');
+      return false;
+    }
+    if (action === 'approved' && editPending) {
+      Alert.alert(
+        'Still editing',
+        'The final video is not ready yet. It gets posted the moment you approve so wait for the edit to finish.',
+      );
       return false;
     }
     setBusy(true);
@@ -323,6 +387,37 @@ export default function ReviewScreen() {
           />
         )}
 
+        {editPending && (
+          <View style={styles.editOverlay}>
+            {editFailed ? (
+              <>
+                <Text style={styles.editTitle}>Edit failed</Text>
+                <Text style={styles.editDetail}>
+                  {submission?.render_error ??
+                    'Something went wrong while putting this video together.'}
+                </Text>
+                <Button size="md" variant="primary" onPress={() => void restartEdit()}>
+                  Retry edit
+                </Button>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator color={color.white} />
+                <Text style={styles.editTitle}>Editing the final video</Text>
+                <Text style={styles.editDetail}>
+                  Clips are being stitched and captions added. This can take a
+                  couple of minutes.
+                </Text>
+                {submission?.render_status === 'queued' && (
+                  <Button size="md" variant="outline" onPress={() => void restartEdit()}>
+                    Restart edit
+                  </Button>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
         <ReviewMetaOverlay
           creatorName={row.creator.name}
           handle={null}
@@ -360,7 +455,7 @@ export default function ReviewScreen() {
           variant="primary"
           size="md"
           icon="check"
-          disabled={busy}
+          disabled={busy || editPending}
           style={styles.approve}
           onPress={() => void approve()}
         >
@@ -413,6 +508,25 @@ const styles = StyleSheet.create({
   media: {
     flex: 1,
     overflow: 'hidden',
+  },
+  editOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    paddingHorizontal: 40,
+    backgroundColor: 'rgba(10, 10, 14, 0.88)',
+  },
+  editTitle: {
+    fontSize: type.size.body,
+    fontWeight: type.weight.semibold,
+    color: color.white,
+    textAlign: 'center',
+  },
+  editDetail: {
+    fontSize: type.size.bodySm,
+    color: color.slate500,
+    textAlign: 'center',
   },
   actionStrip: {
     flexDirection: 'row',

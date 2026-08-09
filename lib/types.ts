@@ -420,6 +420,7 @@ export type Database = {
           created_at: string
           id: string
           kind: string
+          layout: string
           overlay_text: string | null
           screenshot_url: string | null
           screenshot_width: number | null
@@ -428,6 +429,7 @@ export type Database = {
           show_on_screen: boolean
           slot_index: number
           talking_point_index: number | null
+          text_y: number | null
         }
         Insert: {
           brief_id: string
@@ -435,6 +437,7 @@ export type Database = {
           created_at?: string
           id?: string
           kind: string
+          layout?: string
           overlay_text?: string | null
           screenshot_url?: string | null
           screenshot_width?: number | null
@@ -443,6 +446,7 @@ export type Database = {
           show_on_screen?: boolean
           slot_index: number
           talking_point_index?: number | null
+          text_y?: number | null
         }
         Update: {
           brief_id?: string
@@ -450,6 +454,7 @@ export type Database = {
           created_at?: string
           id?: string
           kind?: string
+          layout?: string
           overlay_text?: string | null
           screenshot_url?: string | null
           screenshot_width?: number | null
@@ -458,6 +463,7 @@ export type Database = {
           show_on_screen?: boolean
           slot_index?: number
           talking_point_index?: number | null
+          text_y?: number | null
         }
         Relationships: [
           {
@@ -552,6 +558,7 @@ export type Database = {
           search_phrase: string | null
           talking_points: Json
           target_words: number
+          text_overlay: Json
           title: string
           why_it_works: string | null
         }
@@ -579,6 +586,7 @@ export type Database = {
           search_phrase?: string | null
           talking_points?: Json
           target_words?: number
+          text_overlay?: Json
           title: string
           why_it_works?: string | null
         }
@@ -606,6 +614,7 @@ export type Database = {
           search_phrase?: string | null
           talking_points?: Json
           target_words?: number
+          text_overlay?: Json
           title?: string
           why_it_works?: string | null
         }
@@ -2450,6 +2459,8 @@ export type Database = {
           creator_id: string
           duration_seconds: number | null
           id: string
+          render_error: string | null
+          render_status: string
           render_timeline: Json | null
           segment_paths: string[] | null
           task_id: string | null
@@ -2462,6 +2473,8 @@ export type Database = {
           creator_id: string
           duration_seconds?: number | null
           id?: string
+          render_error?: string | null
+          render_status?: string
           render_timeline?: Json | null
           segment_paths?: string[] | null
           task_id?: string | null
@@ -2474,6 +2487,8 @@ export type Database = {
           creator_id?: string
           duration_seconds?: number | null
           id?: string
+          render_error?: string | null
+          render_status?: string
           render_timeline?: Json | null
           segment_paths?: string[] | null
           task_id?: string | null
@@ -2906,6 +2921,7 @@ export type Database = {
           created_at: string
           id: string
           kind: string
+          layout: string
           overlay_text: string | null
           screenshot_url: string | null
           screenshot_width: number | null
@@ -2914,6 +2930,7 @@ export type Database = {
           show_on_screen: boolean
           slot_index: number
           talking_point_index: number | null
+          text_y: number | null
         }[]
         SetofOptions: {
           from: "*"

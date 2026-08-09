@@ -98,6 +98,27 @@ export async function latestSubmissionsByAssignment(
   return map;
 }
 
+/** Live edit-job state for a submission, polled while the review screen waits. */
+export async function getSubmissionRenderState(
+  submissionId: string,
+): Promise<Pick<Submission, 'render_status' | 'render_error' | 'video_path'> | null> {
+  const { data, error } = await supabase
+    .from('submissions')
+    .select('render_status, render_error, video_path')
+    .eq('id', submissionId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Restart the edit pass for a submission whose job failed or never landed. */
+export async function restartRender(submissionId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('render-submission', {
+    body: { submission_id: submissionId },
+  });
+  if (error) throw error;
+}
+
 /**
  * Review an assignment submission. Status moves through transitionAssignment
  * only; notify and the post-approved pipeline are assignment-keyed.

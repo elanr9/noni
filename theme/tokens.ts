@@ -57,6 +57,8 @@ export const color = {
   borderAccent: '#1BA6EE',
   statusTodoFg: '#0B76AD',
   statusTodoBg: '#E7F4FD',
+  statusProgressFg: '#0B76AD',
+  statusProgressBg: '#E7F4FD',
   statusPendingFg: '#E08A16',
   statusPendingBg: '#FDF2DF',
   statusDoneFg: '#1F8F5F',
@@ -125,9 +127,16 @@ export const type = {
   },
   weight: {
     regular: '400',
+    medium: '500',
     semibold: '600',
     bold: '700',
     heavy: '800',
+  },
+  /** iOS uses SF Pro; web handoff substitutes Figtree / Nunito. */
+  font: {
+    ui: 'System',
+    display: 'System',
+    rounded: 'System',
   },
 } as const;
 
@@ -238,7 +247,11 @@ export const motion = {
   fast: 160,
   base: 240,
   slow: 420,
+  stream: 1600,
   shimmer: 1400,
   pressScale: 0.97,
   easeOut: Easing.bezier(0.22, 0.61, 0.36, 1),
+  easeInOut: Easing.bezier(0.4, 0, 0.2, 1),
+  /** Design token includes overshoot; product rule is no bounce — prefer easeOut in UI. */
+  easeSpring: Easing.bezier(0.34, 1.32, 0.64, 1),
 } as const;

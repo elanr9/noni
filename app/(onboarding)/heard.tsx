@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
 
-import { CalOption, CalShell } from '../../components/OnboardingUI';
+import { OptionCard } from '../../components/ui/OptionCard';
 import { useAuth } from '../../lib/auth';
 import {
   getOnboardingAnswers,
@@ -10,8 +10,7 @@ import {
   setOnboardingAnswer,
   type HeardFrom,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 const OPTIONS: { key: HeardFrom; label: string }[] = [
   { key: 'tiktok', label: 'TikTok' },
@@ -42,21 +41,21 @@ export default function HeardScreen() {
   }
 
   return (
-    <CalShell
-      progress={9 / TOTAL}
+    <OnboardingShell
+      step={9}
       title="How did you hear about Noni?"
       primaryLabel="Continue"
       primaryDisabled={!selected || busy}
       onPrimary={() => void next()}
     >
       {OPTIONS.map((o) => (
-        <CalOption
+        <OptionCard
           key={o.key}
           label={o.label}
           selected={selected === o.key}
           onPress={() => setSelected(o.key)}
         />
       ))}
-    </CalShell>
+    </OnboardingShell>
   );
 }

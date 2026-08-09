@@ -1,40 +1,31 @@
 import type { ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  View,
-  type ViewStyle,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, Text, View } from 'react-native';
 
-const colors = {
-  bg: '#F7F5F2',
-  ink: '#0B0B0F',
-  muted: '#5C5C66',
-  accent: '#E85D04',
+import { color, type } from '../theme/tokens';
+
+export {
+  LoadingScreen,
+  Screen,
+  type ScreenProps,
+} from './layout/Screen';
+
+/** Legacy auth/onboarding palette still imported by a few pre-redesign screens. */
+export const colors = {
+  bg: color.white,
+  ink: color.ink,
+  muted: color.textMuted,
+  accent: color.accent,
 };
 
-export function Screen({
-  children,
-  style,
-}: {
-  children: ReactNode;
-  style?: ViewStyle;
-}) {
+export function ConfigErrorScreen({ missing }: { missing: string[] }) {
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={[styles.inner, style]}>{children}</View>
-    </SafeAreaView>
-  );
-}
-
-export function LoadingScreen({ label = 'Loading' }: { label?: string }) {
-  return (
-    <Screen style={styles.center}>
-      <ActivityIndicator size="large" color={colors.accent} />
-      <Text style={styles.muted}>{label}</Text>
-    </Screen>
+    <View style={styles.center}>
+      <Text style={styles.title}>Noni is not configured</Text>
+      <Text style={styles.muted}>
+        This build was made without {missing.join(' and ')}. Set them for the
+        build environment and ship a new build.
+      </Text>
+    </View>
   );
 }
 
@@ -54,23 +45,13 @@ export function BrandTitle({
   );
 }
 
-export { colors };
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  inner: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
   center: {
-    alignItems: 'center',
+    flex: 1,
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
+    paddingHorizontal: 32,
+    backgroundColor: color.white,
   },
   brandBlock: {
     gap: 8,
@@ -79,18 +60,18 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.accent,
+    color: color.accent,
     letterSpacing: 0.5,
   },
   title: {
-    fontSize: 34,
+    fontSize: type.size.titleXl,
     fontWeight: '700',
-    color: colors.ink,
-    letterSpacing: -0.5,
+    color: color.ink,
+    letterSpacing: type.tracking.title,
   },
   muted: {
-    fontSize: 16,
+    fontSize: type.size.body,
     lineHeight: 22,
-    color: colors.muted,
+    color: color.textMuted,
   },
 });

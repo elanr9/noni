@@ -2,15 +2,13 @@ import { useState } from 'react';
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
 
-import { CalShell } from '../../components/OnboardingUI';
 import { useAuth } from '../../lib/auth';
 import {
   clearOnboardingAnswers,
   completeOnboarding,
   markOnboardedLocally,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { OnboardingShell } from './_shell';
 
 export default function DoneScreen() {
   const { session, refreshProfile } = useAuth();
@@ -32,8 +30,8 @@ export default function DoneScreen() {
   }
 
   return (
-    <CalShell
-      progress={1}
+    <OnboardingShell
+      step={12}
       onBack={() => router.back()}
       title="You're in."
       subtitle="Next: set up your accounts."

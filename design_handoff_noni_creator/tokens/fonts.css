@@ -1,0 +1,12 @@
+/* Noni ships no font binaries. The product targets iOS and uses the system
+   SF Pro / SF Pro Rounded stack on device; on the web we substitute the
+   nearest Google Fonts match (Figtree for UI + display, Nunito for the
+   rounded wordmark). See readme.md > Typography for the substitution note. */
+@import url("https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&family=Nunito:ital,wght@0,400..900;1,400..900&display=swap");
+
+:root{
+  --font-ui:"Figtree","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --font-display:"Figtree","SF Pro Display",-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-rounded:"Nunito","SF Pro Rounded",-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}

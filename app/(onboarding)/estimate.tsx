@@ -1,69 +1,62 @@
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
-import { cal, CalShell } from '../../components/OnboardingUI';
+import { CountUp } from '../../components/states';
 import {
   getOnboardingAnswers,
   HOURS_TO_MONTHLY_ESTIMATE,
 } from '../../lib/onboarding';
-
-const TOTAL = 12;
+import { color, space, type } from '../../theme/tokens';
+import { OnboardingShell } from './_shell';
 
 export default function EstimateScreen() {
   const hours = getOnboardingAnswers().hoursPerWeek ?? '5';
   const target = HOURS_TO_MONTHLY_ESTIMATE[hours];
   const hoursLabel = hours === '15+' ? '15 or more' : hours;
 
-  const anim = useRef(new Animated.Value(0)).current;
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const sub = anim.addListener(({ value }) => setDisplay(Math.round(value)));
-    Animated.timing(anim, {
-      toValue: target,
-      duration: 1400,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(sub);
-  }, [anim, target]);
-
   return (
-    <CalShell
-      progress={7 / TOTAL}
+    <OnboardingShell
+      step={7}
       onBack={() => router.back()}
       title="Here's what that's worth"
       primaryLabel="Continue"
       onPrimary={() => router.push('/(onboarding)/save')}
     >
       <View style={styles.payoff}>
-        <Text style={styles.amount}>${display.toLocaleString('en-US')}</Text>
+        <CountUp value={target} prefix="$" style={styles.amount} />
         <Text style={styles.perMonth}>per month</Text>
         <Text style={styles.copy}>
           Creators posting {hoursLabel} hours a week average $
           {target.toLocaleString('en-US')}/month.
         </Text>
       </View>
-    </CalShell>
+    </OnboardingShell>
   );
 }
 
 const styles = StyleSheet.create({
-  payoff: { alignItems: 'center', paddingTop: 48, gap: 6 },
-  amount: {
-    fontSize: 72,
-    fontWeight: '800',
-    color: cal.ink,
-    letterSpacing: -2,
+  payoff: {
+    alignItems: 'center',
+    paddingTop: space.sectionGap,
+    gap: space[2],
   },
-  perMonth: { fontSize: 18, fontWeight: '600', color: cal.sub },
+  amount: {
+    fontSize: type.size.hero,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
+    letterSpacing: type.tracking.hero,
+  },
+  perMonth: {
+    fontSize: type.size.card,
+    fontWeight: type.weight.semibold,
+    color: color.slate500,
+  },
   copy: {
-    marginTop: 24,
-    fontSize: 17,
-    lineHeight: 25,
-    color: cal.ink,
+    marginTop: space[8],
+    fontSize: type.size.action,
+    lineHeight: type.size.action * type.leading.body,
+    color: color.ink,
     textAlign: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: space[3],
   },
 });

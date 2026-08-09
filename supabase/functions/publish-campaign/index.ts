@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
 
   const { data: campaignBriefs, error: briefsError } = await db
     .from('campaign_briefs')
-    .select('brief_id, created_at')
+    .select('brief_id, created_at, briefs(format)')
     .eq('campaign_id', campaign.id)
     .order('created_at', { ascending: true })
     .order('brief_id', { ascending: true });
@@ -92,6 +92,8 @@ Deno.serve(async (req) => {
   const briefs: CampaignBrief[] = campaignBriefs.map((b) => ({
     brief_id: b.brief_id,
     pinned_day: null,
+    format:
+      (b.briefs as unknown as { format?: string } | null)?.format ?? 'video',
   }));
 
   const rows: Array<{
