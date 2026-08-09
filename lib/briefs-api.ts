@@ -21,6 +21,52 @@ export type BriefSegment = Database['public']['Tables']['brief_segments']['Row']
 
 export type BriefFormat = 'video' | 'photo_carousel';
 
+/** How on-screen text is drawn: rounded box, outlined letters, or plain. */
+export type TextOverlayMode = 'box' | 'outline' | 'plain';
+
+/**
+ * Admin-configured on-screen text for the whole post. Burned in by the
+ * render pass and previewed live on the record screen. accent_color is
+ * the box fill in box mode and the outline color in outline mode.
+ */
+export type TextOverlay = {
+  enabled: boolean;
+  mode: TextOverlayMode;
+  text_color: string;
+  accent_color: string;
+};
+
+export const DEFAULT_TEXT_OVERLAY: TextOverlay = {
+  enabled: true,
+  mode: 'box',
+  text_color: '#FFFFFF',
+  accent_color: '#EA403F',
+};
+
+/** Reads the text_overlay jsonb column back into a typed config. */
+export function parseTextOverlay(value: Json | null | undefined): TextOverlay {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return DEFAULT_TEXT_OVERLAY;
+  }
+  const raw = value as Record<string, Json | undefined>;
+  const mode = raw.mode;
+  return {
+    enabled: raw.enabled !== false,
+    mode:
+      mode === 'box' || mode === 'outline' || mode === 'plain'
+        ? mode
+        : DEFAULT_TEXT_OVERLAY.mode,
+    text_color:
+      typeof raw.text_color === 'string'
+        ? raw.text_color
+        : DEFAULT_TEXT_OVERLAY.text_color,
+    accent_color:
+      typeof raw.accent_color === 'string'
+        ? raw.accent_color
+        : DEFAULT_TEXT_OVERLAY.accent_color,
+  };
+}
+
 export type BriefDraft = {
   title: string;
   format: BriefFormat;
@@ -61,6 +107,7 @@ export type BriefInput = {
   generation_id: string | null;
   example_url: string | null;
   example_transcript: string | null;
+  text_overlay?: TextOverlay;
 };
 
 export type BriefWithType = Brief & { post_types: PostType | null };
@@ -338,9 +385,11 @@ export async function updateBriefSegment(
     overlay_text?: string | null;
     show_on_screen?: boolean;
     screenshot_url?: string | null;
+    text_y?: number | null;
     screenshot_x?: number | null;
     screenshot_y?: number | null;
     screenshot_width?: number | null;
+    layout?: 'standard' | 'green_screen';
   },
 ): Promise<void> {
   const { error } = await supabase

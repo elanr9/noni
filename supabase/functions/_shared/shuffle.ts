@@ -40,6 +40,8 @@ export type CampaignBrief = {
   brief_id: string;
   /** 0-6 offset from the campaign drop date, or null when not pinned. */
   pinned_day: number | null;
+  /** 'video' or 'photo_carousel'; drives the per-day format mix. */
+  format: string;
 };
 
 export type Slot = {
@@ -60,9 +62,67 @@ export const DAYS_PER_WEEK = 7;
 export const SLOTS_PER_DAY = 3;
 
 /**
+ * The week's format sequence: one 'video' | 'slideshow' entry per open slot,
+ * shuffled so the daily mix varies (some days 2 videos 1 slideshow, some
+ * 1 and 2), then lightly rebalanced so no multi-slot day is all slideshows
+ * while another day hoards videos. The week total keeps the pool's ratio.
+ */
+function buildFormatMix(params: {
+  videosWanted: number;
+  slidesWanted: number;
+  capacities: readonly number[];
+  seed: string;
+}): string[] {
+  const { videosWanted, slidesWanted, capacities, seed } = params;
+  const mix = seededShuffle(
+    [
+      ...new Array<string>(videosWanted).fill('video'),
+      ...new Array<string>(slidesWanted).fill('slideshow'),
+    ],
+    seed,
+  );
+
+  // Chunk boundaries follow each day's open capacity.
+  const dayStart: number[] = [];
+  let cursor = 0;
+  for (const cap of capacities) {
+    dayStart.push(cursor);
+    cursor += cap;
+  }
+  const countVideos = (day: number): number => {
+    let n = 0;
+    const end = Math.min(dayStart[day] + capacities[day], mix.length);
+    for (let i = dayStart[day]; i < end; i++) if (mix[i] === 'video') n += 1;
+    return n;
+  };
+  const swapIn = (day: number, from: number) => {
+    const end = Math.min(dayStart[day] + capacities[day], mix.length);
+    const fromEnd = Math.min(dayStart[from] + capacities[from], mix.length);
+    for (let i = dayStart[day]; i < end; i++) {
+      if (mix[i] !== 'slideshow') continue;
+      for (let j = dayStart[from]; j < fromEnd; j++) {
+        if (mix[j] !== 'video') continue;
+        [mix[i], mix[j]] = [mix[j], mix[i]];
+        return;
+      }
+    }
+  };
+  for (let day = 0; day < capacities.length; day++) {
+    if (capacities[day] < 2 || countVideos(day) > 0) continue;
+    const donor = capacities.findIndex(
+      (cap, d) => cap > 0 && countVideos(d) >= 2,
+    );
+    if (donor >= 0) swapIn(day, donor);
+  }
+  return mix;
+}
+
+/**
  * Lay out one creator's week. Pinned briefs land on their pinned day first,
- * then the seeded shuffle fills remaining slots three per day across seven
- * days. Whatever does not fit becomes the swap pool.
+ * then seeded shuffles fill the remaining slots three per day across seven
+ * days with a randomized per-day format mix: the week keeps the campaign's
+ * video-to-slideshow ratio, but which briefs land where, and each day's mix,
+ * is randomized per creator. Whatever does not fit becomes the swap pool.
  */
 export function buildCreatorWeek(
   briefs: readonly CampaignBrief[],
@@ -86,16 +146,45 @@ export function buildCreatorWeek(
     filled[day] += 1;
   }
 
-  const shuffled = seededShuffle(rest, campaignId + creatorId);
-  let day = 0;
-  for (const brief of shuffled) {
-    while (day < DAYS_PER_WEEK && filled[day] >= SLOTS_PER_DAY) day += 1;
-    if (day >= DAYS_PER_WEEK) {
-      pool.push(brief.brief_id);
-      continue;
+  const seed = campaignId + creatorId;
+  const videos = seededShuffle(
+    rest.filter((b) => b.format !== 'photo_carousel'),
+    seed + ':video',
+  );
+  const slides = seededShuffle(
+    rest.filter((b) => b.format === 'photo_carousel'),
+    seed + ':slides',
+  );
+
+  const capacities = filled.map((n) => SLOTS_PER_DAY - n);
+  const totalFree = capacities.reduce((sum, n) => sum + n, 0);
+  const take = Math.min(rest.length, totalFree);
+  // Week ratio mirrors the pool ratio, clamped to what each format can supply.
+  let videosWanted = Math.round((take * videos.length) / Math.max(1, rest.length));
+  videosWanted = Math.max(take - slides.length, Math.min(videosWanted, videos.length));
+  const slidesWanted = take - videosWanted;
+
+  const mix = buildFormatMix({
+    videosWanted,
+    slidesWanted,
+    capacities,
+    seed: seed + ':mix',
+  });
+
+  let cursor = 0;
+  for (let day = 0; day < DAYS_PER_WEEK && cursor < mix.length; day++) {
+    while (filled[day] < SLOTS_PER_DAY && cursor < mix.length) {
+      const source = mix[cursor] === 'video' ? videos : slides;
+      const brief = source.shift();
+      cursor += 1;
+      if (!brief) continue;
+      slots.push({ brief_id: brief.brief_id, day, slot_index: filled[day] });
+      filled[day] += 1;
     }
-    slots.push({ brief_id: brief.brief_id, day, slot_index: filled[day] });
-    filled[day] += 1;
+  }
+
+  for (const leftover of [...videos, ...slides]) {
+    pool.push(leftover.brief_id);
   }
 
   return { slots, pool };

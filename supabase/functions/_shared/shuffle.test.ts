@@ -9,7 +9,25 @@ const ids = (n: number): string[] =>
   Array.from({ length: n }, (_, i) => `brief-${i}`);
 
 const briefs = (n: number, pins: Record<number, number> = {}): CampaignBrief[] =>
-  ids(n).map((id, i) => ({ brief_id: id, pinned_day: pins[i] ?? null }));
+  ids(n).map((id, i) => ({
+    brief_id: id,
+    pinned_day: pins[i] ?? null,
+    format: 'video',
+  }));
+
+/** The standard week pool: videos first, then slideshows. */
+const mixedBriefs = (videos: number, slides: number): CampaignBrief[] => [
+  ...ids(videos).map((id) => ({
+    brief_id: `v-${id}`,
+    pinned_day: null,
+    format: 'video',
+  })),
+  ...ids(slides).map((id) => ({
+    brief_id: `s-${id}`,
+    pinned_day: null,
+    format: 'photo_carousel',
+  })),
+];
 
 describe('seededShuffle', () => {
   it('same seed gives the same order', () => {
@@ -82,5 +100,39 @@ describe('buildCreatorWeek', () => {
     const { slots, pool } = buildCreatorWeek(briefs(10), 'c', 'x');
     expect(slots).toHaveLength(10);
     expect(pool).toHaveLength(0);
+  });
+
+  it('keeps the pool ratio: 20 videos + 10 slideshows fill 14 + 7', () => {
+    const input = mixedBriefs(20, 10);
+    const { slots } = buildCreatorWeek(input, 'camp', 'creator');
+    const videos = slots.filter((s) => s.brief_id.startsWith('v-'));
+    const slides = slots.filter((s) => s.brief_id.startsWith('s-'));
+    expect(videos).toHaveLength(14);
+    expect(slides).toHaveLength(7);
+  });
+
+  it('gives every full day at least one video and varies the daily mix', () => {
+    const perDayVideoCounts = new Set<number>();
+    for (const creator of ['a', 'b', 'c', 'd', 'e']) {
+      const { slots } = buildCreatorWeek(mixedBriefs(20, 10), 'camp', creator);
+      for (let day = 0; day < 7; day++) {
+        const dayVideos = slots.filter(
+          (s) => s.day === day && s.brief_id.startsWith('v-'),
+        ).length;
+        expect(dayVideos).toBeGreaterThanOrEqual(1);
+        perDayVideoCounts.add(dayVideos);
+      }
+    }
+    // Not every day is the same 2-videos-1-slideshow pattern.
+    expect(perDayVideoCounts.size).toBeGreaterThan(1);
+  });
+
+  it('randomizes which briefs each creator gets', () => {
+    const input = mixedBriefs(20, 10);
+    const a = buildCreatorWeek(input, 'camp', 'creator-a');
+    const b = buildCreatorWeek(input, 'camp', 'creator-b');
+    expect(a.slots.map((s) => s.brief_id)).not.toEqual(
+      b.slots.map((s) => s.brief_id),
+    );
   });
 });

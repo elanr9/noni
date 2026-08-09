@@ -91,6 +91,18 @@ async function insertSubmissionSegments(params: {
   if (error) throw error;
 }
 
+/**
+ * Kick the edit pass (stitch + overlays) for a freshly submitted video so the
+ * finished file is ready by the time the admin reviews it. Fire and forget:
+ * the function claims the job and keeps working after it responds, and the
+ * admin review screen can restart a job that never landed.
+ */
+function startRender(submissionId: string): void {
+  void supabase.functions
+    .invoke('render-submission', { body: { submission_id: submissionId } })
+    .catch(() => undefined);
+}
+
 export async function uploadClip(localUri: string, path: string): Promise<void> {
   const response = await fetch(localUri);
   if (!response.ok) {
@@ -131,7 +143,7 @@ export async function submitRecording(params: {
   const version = await nextVersion('task_id', task.id);
 
   // Single clip keeps the spec path. Multi-segment clips get an ordered
-  // suffix; post-approved stitches them into one video at approve time.
+  // suffix; render-submission stitches them into one video right after submit.
   const paths =
     segments.length === 1
       ? [`${companyId}/${task.id}/${version}.mp4`]
@@ -184,6 +196,7 @@ export async function submitRecording(params: {
     updated = await transitionTask(task.id, 'recorded', 'submitted');
   }
 
+  startRender(submission.id);
   return updated;
 }
 
@@ -195,6 +208,7 @@ async function createAssignmentSubmission(params: {
   paths: string[];
   durationsMs: (number | null)[];
   durationSeconds: number | null;
+  format: 'video' | 'photo';
 }): Promise<Assignment> {
   const { assignment, companyId, creatorId, version, paths, durationsMs, durationSeconds } =
     params;
@@ -208,6 +222,9 @@ async function createAssignmentSubmission(params: {
       segment_paths: paths,
       duration_seconds: durationSeconds,
       version,
+      // Photos have nothing to stitch; videos start queued and the edit job
+      // is kicked below once the status hops land.
+      render_status: params.format === 'photo' ? 'ready' : 'queued',
     })
     .select('id')
     .single();
@@ -240,6 +257,9 @@ async function createAssignmentSubmission(params: {
     updated = await transitionAssignment(assignment.id, 'recorded', 'submitted');
   }
 
+  if (params.format === 'video') {
+    startRender(submission.id);
+  }
   return updated;
 }
 
@@ -283,6 +303,7 @@ export async function submitAssignmentClips(params: {
     paths,
     durationsMs,
     durationSeconds,
+    format: 'video',
   });
 }
 
@@ -316,8 +337,8 @@ async function uploadPhoto(photo: PickedPhoto, path: string): Promise<void> {
 /**
  * Static post submit: one photo per slide, in slide order, uploaded to the
  * videos bucket beside the video segments (migration 034 allows image mime
- * types there). segment_paths carry the image paths; new-world carousels
- * never reach post-approved's video path (it 409s them by design).
+ * types there). segment_paths carry the image paths; post-approved posts
+ * them as a photo carousel via Upload-Post's upload_photos endpoint.
  */
 export async function submitAssignmentPhotos(params: {
   assignment: Assignment;
@@ -348,5 +369,6 @@ export async function submitAssignmentPhotos(params: {
     paths,
     durationsMs: paths.map(() => null),
     durationSeconds: null,
+    format: 'photo',
   });
 }

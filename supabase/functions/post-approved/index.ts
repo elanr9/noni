@@ -1,11 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import {
-  buildRenderTimeline,
-  timelineHasOverlays,
-  type BriefSegmentRow,
-} from '../_shared/renderTimeline.ts';
-import { renderOverlays } from '../_shared/renderAdapter.ts';
+  assembleSubmission,
+  uploadPostKey,
+  type AdminClient,
+} from '../_shared/assemble.ts';
 
 type PostApprovedBody = { assignment_id?: string; task_id?: string };
 
@@ -22,6 +21,8 @@ type PostTarget = {
   taskId: string | null;
   /** Set on assignment targets; overlays render only when the brief has segments. */
   briefId: string | null;
+  /** Photo carousel briefs post their slides via upload_photos, not video. */
+  isSlideshow: boolean;
 };
 
 type PlatformResult = {
@@ -30,187 +31,6 @@ type PlatformResult = {
   error?: string;
   post_id?: string;
 };
-
-function uploadPostKey(): string {
-  const key = Deno.env.get('UPLOAD_POST_API_KEY');
-  if (!key) throw new Error('UPLOAD_POST_API_KEY missing');
-  return key;
-}
-
-type AdminClient = ReturnType<typeof createClient>;
-
-// Run an FFmpeg job on Upload-Post (docs.upload-post.com/api/ffmpeg-editor),
-// download the result, and store it in the videos bucket.
-async function runFfmpegJob(params: {
-  admin: AdminClient;
-  apiKey: string;
-  files: string[];
-  fullCommand: string;
-  outputPath: string;
-  label: string;
-}): Promise<void> {
-  const { admin, apiKey, files, fullCommand, outputPath, label } = params;
-
-  const jobRes = await fetch(
-    'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/upload',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Apikey ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        files,
-        full_command: fullCommand,
-        output_extension: 'mp4',
-      }),
-    },
-  );
-  const jobJson = (await jobRes.json()) as {
-    success?: boolean;
-    job_id?: string;
-    message?: string;
-    error?: string;
-  };
-  if (!jobRes.ok || !jobJson.job_id) {
-    throw new Error(
-      `ffmpeg ${label} create failed: ${jobJson.message ?? jobJson.error ?? jobRes.status}`,
-    );
-  }
-
-  let finished = false;
-  for (let i = 0; i < 50; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const statusRes = await fetch(
-      `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}`,
-      { headers: { Authorization: `Apikey ${apiKey}` } },
-    );
-    const statusJson = (await statusRes.json()) as { status?: string };
-    if (statusJson.status === 'FINISHED') {
-      finished = true;
-      break;
-    }
-    if (statusJson.status === 'ERROR') {
-      throw new Error(`ffmpeg ${label} job errored`);
-    }
-  }
-  if (!finished) throw new Error(`ffmpeg ${label} timed out`);
-
-  const download = await fetch(
-    `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}/download`,
-    { headers: { Authorization: `Apikey ${apiKey}` } },
-  );
-  if (!download.ok) {
-    throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
-  }
-  const bytes = new Uint8Array(await download.arrayBuffer());
-
-  const { error: uploadError } = await admin.storage
-    .from('videos')
-    .upload(outputPath, bytes, { contentType: 'video/mp4', upsert: true });
-  if (uploadError) {
-    throw new Error(`could not store ${label} video: ${uploadError.message}`);
-  }
-}
-
-async function signVideoUrls(
-  admin: AdminClient,
-  paths: string[],
-): Promise<string[]> {
-  const urls: string[] = [];
-  for (const path of paths) {
-    const { data, error } = await admin.storage
-      .from('videos')
-      .createSignedUrl(path, 3600);
-    if (error || !data?.signedUrl) {
-      throw new Error(`could not sign ${path}: ${error?.message}`);
-    }
-    urls.push(data.signedUrl);
-  }
-  return urls;
-}
-
-// Stitch and the WP9 basic pass merged into ONE job: one re-encode instead of
-// two, one poll against the wall clock. Every input is normalized first
-// (fps 30, 1080x1920, 48k stereo) so concat never sees mismatched clips —
-// capture pins codec and resolution, but expo-camera cannot pin fps or audio
-// sample rate, and front/back camera flips can change frame size.
-// Head: -ss 0.15 on input 0 only (sync-safe). Tail: silenceremove + -shortest.
-// Works for N=1 (replaces the old standalone edit pass).
-async function stitchAndEditPass(params: {
-  admin: AdminClient;
-  apiKey: string;
-  segmentPaths: string[];
-  outputPath: string;
-}): Promise<void> {
-  const { admin, apiKey, segmentPaths, outputPath } = params;
-  const files = await signVideoUrls(admin, segmentPaths);
-
-  const n = segmentPaths.length;
-  const inputs = segmentPaths.map((_p, i) => `-i {input${i}}`).join(' ');
-  const normalize = segmentPaths
-    .map(
-      (_p, i) =>
-        `[${i}:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,` +
-        `crop=1080:1920,setsar=1[v${i}];` +
-        `[${i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`,
-    )
-    .join(';');
-  const streams = segmentPaths.map((_p, i) => `[v${i}][a${i}]`).join('');
-  const fullCommand =
-    `ffmpeg -y -hide_banner -ss 0.15 ${inputs} ` +
-    `-filter_complex "${normalize};${streams}concat=n=${n}:v=1:a=1[cv][ca];` +
-    `[ca]silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-45dB:detection=peak,` +
-    `loudnorm=I=-16:TP=-1.5:LRA=11[outa]" ` +
-    `-map "[cv]" -map "[outa]" -c:v h264_nvenc -preset p5 -cq 23 ` +
-    `-c:a aac -b:a 128k -shortest {output}`;
-
-  await runFfmpegJob({
-    admin,
-    apiKey,
-    files,
-    fullCommand,
-    outputPath,
-    label: 'stitch-edit',
-  });
-}
-
-type SegmentClips = { paths: string[]; durationsMs: number[] | null };
-
-// Clips for a submission in slot order, latest attempt per slot, from
-// submission_segments. Falls back to null so callers can use the legacy
-// submissions.segment_paths array. Durations are null unless every clip has
-// one (legacy backfilled rows have none) — overlay timing needs all of them.
-async function resolveSegmentClips(
-  admin: AdminClient,
-  submissionId: string,
-): Promise<SegmentClips | null> {
-  const { data } = await admin
-    .from('submission_segments')
-    .select('slot_index, attempt, storage_path, duration_ms')
-    .eq('submission_id', submissionId)
-    .order('slot_index', { ascending: true })
-    .order('attempt', { ascending: false });
-  if (!data || data.length === 0) return null;
-
-  const bySlot = new Map<number, { storage_path: string; duration_ms: number | null }>();
-  for (const row of data) {
-    const slot = row.slot_index as number;
-    if (!bySlot.has(slot)) {
-      bySlot.set(slot, {
-        storage_path: row.storage_path as string,
-        duration_ms: (row.duration_ms ?? null) as number | null,
-      });
-    }
-  }
-  const slots = [...bySlot.keys()].sort((a, b) => a - b);
-  const paths = slots.map((s) => bySlot.get(s)!.storage_path);
-  const durations = slots.map((s) => bySlot.get(s)!.duration_ms);
-  const durationsMs = durations.every((d): d is number => d !== null)
-    ? durations
-    : null;
-  return { paths, durationsMs };
-}
 
 async function pollStatus(
   requestId: string,
@@ -264,17 +84,6 @@ async function resolveTarget(
       .select('title, caption, format, post_type_id')
       .eq('id', assignment.brief_id)
       .maybeSingle();
-    // New-world slideshows are held until the Instagram Replace Audio path is
-    // verified; legacy carousels (null post_type_id) keep the old behavior.
-    if (brief?.format === 'photo_carousel' && brief.post_type_id) {
-      return jsonResponse(
-        {
-          error:
-            'Slideshow posting is not wired yet. The video pipeline posts videos only for now.',
-        },
-        409,
-      );
-    }
     return {
       id: assignment.id as string,
       companyId: assignment.company_id as string,
@@ -284,6 +93,7 @@ async function resolveTarget(
       assignmentId: assignment.id as string,
       taskId: (assignment.task_id ?? null) as string | null,
       briefId: assignment.brief_id as string,
+      isSlideshow: brief?.format === 'photo_carousel',
     };
   }
 
@@ -321,6 +131,7 @@ async function resolveTarget(
     assignmentId: (mirror?.id ?? null) as string | null,
     taskId: task.id as string,
     briefId: null,
+    isSlideshow: false,
   };
 }
 
@@ -329,12 +140,13 @@ async function resolveTarget(
 async function resolveSubmission(
   admin: AdminClient,
   target: PostTarget,
-): Promise<{ id: string; video_path: string | null; segment_paths: string[] | null; version: number | null } | null> {
+): Promise<{ id: string; video_path: string | null; segment_paths: string[] | null; version: number | null; render_status: string | null } | null> {
   type Row = {
     id: string;
     video_path: string | null;
     segment_paths: string[] | null;
     version: number | null;
+    render_status: string | null;
   };
   if (target.assignmentId) {
     const { data: assignment } = await admin
@@ -345,14 +157,14 @@ async function resolveSubmission(
     if (assignment?.submission_id) {
       const { data } = await admin
         .from('submissions')
-        .select('id, video_path, segment_paths, version')
+        .select('id, video_path, segment_paths, version, render_status')
         .eq('id', assignment.submission_id)
         .maybeSingle();
       if (data) return data as Row;
     }
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version')
+      .select('id, video_path, segment_paths, version, render_status')
       .eq('assignment_id', target.assignmentId)
       .order('version', { ascending: false })
       .limit(1)
@@ -362,7 +174,7 @@ async function resolveSubmission(
   if (target.taskId) {
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version')
+      .select('id, video_path, segment_paths, version, render_status')
       .eq('task_id', target.taskId)
       .order('version', { ascending: false })
       .limit(1)
@@ -429,133 +241,6 @@ Deno.serve(async (req) => {
 
     const apiKey = uploadPostKey();
 
-    // Clips in slot order: submission_segments when present (new recordings),
-    // legacy segment_paths otherwise, the single video_path as last resort.
-    const clips = await resolveSegmentClips(admin, submission.id as string);
-    const legacyPaths = (submission.segment_paths ?? []) as string[];
-    const segmentPaths =
-      clips?.paths ??
-      (legacyPaths.length > 0 ? legacyPaths : [submission.video_path as string]);
-    const durationsMs = clips?.durationsMs ?? null;
-    const version = submission.version ?? 1;
-
-    // One FFmpeg job on Upload-Post: normalize each clip, concat, trim,
-    // loudnorm, conform 1080x1920. Single re-encode for any clip count.
-    let videoPath = `${target.companyId}/${target.id}/${version}-edited.mp4`;
-    try {
-      await stitchAndEditPass({
-        admin,
-        apiKey,
-        segmentPaths,
-        outputPath: videoPath,
-      });
-    } catch (stitchError) {
-      const detail =
-        stitchError instanceof Error ? stitchError.message : String(stitchError);
-      return jsonResponse({ error: 'stitch-edit pass failed', detail }, 502);
-    }
-    await admin
-      .from('submissions')
-      .update({ video_path: videoPath })
-      .eq('id', submission.id);
-
-    // On-screen text and screenshots from brief_segments, rendered through
-    // the adapter. Overlay timing needs every clip's duration; legacy
-    // submissions without them post un-overlaid with a warning instead of
-    // guessing.
-    let overlayWarning: string | null = null;
-    if (target.briefId) {
-      const { data: segmentRows } = await admin
-        .from('brief_segments')
-        .select(
-          'slot_index, kind, overlay_text, show_on_screen, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
-        )
-        .eq('brief_id', target.briefId)
-        .eq('company_id', target.companyId)
-        .order('slot_index', { ascending: true });
-      const briefSegments = (segmentRows ?? []) as BriefSegmentRow[];
-
-      if (briefSegments.length > 0) {
-        if (!durationsMs) {
-          overlayWarning =
-            'overlays skipped: this submission has no per-clip durations';
-        } else {
-          const timeline = buildRenderTimeline({ briefSegments, durationsMs });
-          await admin
-            .from('submissions')
-            .update({ render_timeline: timeline })
-            .eq('id', submission.id);
-
-          if (timelineHasOverlays(timeline)) {
-            const renderKey = Deno.env.get('CREATOMATE_API_KEY');
-            if (!renderKey) {
-              return jsonResponse(
-                {
-                  error:
-                    'This post has on-screen text or screenshots but CREATOMATE_API_KEY is not set in the edge function env.',
-                },
-                502,
-              );
-            }
-            try {
-              const [videoUrl] = await signVideoUrls(admin, [videoPath]);
-              const imageUrls: Record<string, string> = {};
-              for (const img of timeline.images) {
-                const { data: signedImg, error: imgError } = await admin.storage
-                  .from('brief-assets')
-                  .createSignedUrl(img.screenshot_path, 3600);
-                if (imgError || !signedImg?.signedUrl) {
-                  throw new Error(
-                    `could not sign screenshot ${img.screenshot_path}: ${imgError?.message}`,
-                  );
-                }
-                imageUrls[img.screenshot_path] = signedImg.signedUrl;
-              }
-              const rendered = await renderOverlays({
-                apiKey: renderKey,
-                videoUrl,
-                timeline,
-                imageUrls,
-              });
-              const renderedPath = `${target.companyId}/${target.id}/${version}-rendered.mp4`;
-              const { error: renderUploadError } = await admin.storage
-                .from('videos')
-                .upload(renderedPath, rendered, {
-                  contentType: 'video/mp4',
-                  upsert: true,
-                });
-              if (renderUploadError) {
-                throw new Error(
-                  `could not store rendered video: ${renderUploadError.message}`,
-                );
-              }
-              videoPath = renderedPath;
-              await admin
-                .from('submissions')
-                .update({ video_path: renderedPath })
-                .eq('id', submission.id);
-            } catch (renderError) {
-              const detail =
-                renderError instanceof Error
-                  ? renderError.message
-                  : String(renderError);
-              return jsonResponse({ error: 'overlay render failed', detail }, 502);
-            }
-          }
-        }
-      }
-    }
-
-    const { data: signed, error: signError } = await admin.storage
-      .from('videos')
-      .createSignedUrl(videoPath, 3600);
-    if (signError || !signed?.signedUrl) {
-      return jsonResponse(
-        { error: 'could not sign video url', detail: signError?.message },
-        500,
-      );
-    }
-
     const platforms = target.platforms;
     if (platforms.length === 0) {
       return jsonResponse({ error: 'no platforms to post to' }, 400);
@@ -564,11 +249,77 @@ Deno.serve(async (req) => {
     const form = new FormData();
     form.append('user', creator.upload_post_profile);
     form.append('title', target.caption);
-    form.append('video', signed.signedUrl);
     form.append('async_upload', 'true');
     for (const p of platforms) form.append('platform[]', p);
 
-    const uploadRes = await fetch('https://api.upload-post.com/api/upload', {
+    let overlayWarning: string | null = null;
+    let uploadUrl = 'https://api.upload-post.com/api/upload';
+
+    if (target.isSlideshow) {
+      // Slideshow: the slides in segment_paths post as a photo carousel
+      // (TikTok photo post + Instagram carousel). Trending music is layered
+      // on afterwards through the existing music approval loop.
+      uploadUrl = 'https://api.upload-post.com/api/upload_photos';
+      const slidePaths = (submission.segment_paths ?? []) as string[];
+      if (slidePaths.length === 0) {
+        return jsonResponse({ error: 'submission has no slides' }, 400);
+      }
+      for (const path of slidePaths) {
+        const { data: slide, error: slideError } = await admin.storage
+          .from('videos')
+          .createSignedUrl(path, 3600);
+        if (slideError || !slide?.signedUrl) {
+          return jsonResponse(
+            { error: 'could not sign slide url', detail: slideError?.message },
+            500,
+          );
+        }
+        form.append('photos[]', slide.signedUrl);
+      }
+    } else {
+      // The edit pass (stitch + overlays) runs at submit time now, via the
+      // render-submission function, so the admin approved the finished file.
+      // Assemble here only as a fallback for legacy submissions that were
+      // never rendered.
+      let videoPath = submission.video_path as string;
+      if (submission.render_status !== 'ready') {
+        try {
+          const assembled = await assembleSubmission({
+            admin,
+            submission: {
+              id: submission.id as string,
+              video_path: submission.video_path as string,
+              segment_paths: (submission.segment_paths ?? null) as string[] | null,
+              version: (submission.version ?? null) as number | null,
+            },
+            targetId: target.id,
+            companyId: target.companyId,
+            briefId: target.briefId,
+          });
+          videoPath = assembled.videoPath;
+          overlayWarning = assembled.overlayWarning;
+        } catch (assembleError) {
+          const detail =
+            assembleError instanceof Error
+              ? assembleError.message
+              : String(assembleError);
+          return jsonResponse({ error: 'edit pass failed', detail }, 502);
+        }
+      }
+
+      const { data: signed, error: signError } = await admin.storage
+        .from('videos')
+        .createSignedUrl(videoPath, 3600);
+      if (signError || !signed?.signedUrl) {
+        return jsonResponse(
+          { error: 'could not sign video url', detail: signError?.message },
+          500,
+        );
+      }
+      form.append('video', signed.signedUrl);
+    }
+
+    const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
       headers: { Authorization: `Apikey ${apiKey}` },
       body: form,

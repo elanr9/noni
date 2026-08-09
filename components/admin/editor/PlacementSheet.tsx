@@ -1,8 +1,9 @@
-// Screenshot placement. A 9:16 camera-style canvas stands in for the
-// creator's recording; the admin drags the screenshot to where it should
-// sit on the finished video and sizes it with the slider. Coordinates are
-// normalized 0-1 center + width fraction, the same shape TimelineImage
-// uses, so what is saved here is exactly what the render places.
+// Screenshot and text placement. A 9:16 camera-style canvas stands in for
+// the creator's recording; the admin drags the screenshot (and the text
+// bubble, when the segment has on-screen text) to where they should sit on
+// the finished video, and sizes the screenshot with the slider. Coordinates
+// are normalized 0-1 center + width fraction, the same shape the render
+// timeline uses, so what is saved here is exactly what the render places.
 import { useEffect, useRef, useState } from 'react';
 import {
   Image,
@@ -12,7 +13,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import {
+  TikTokSans_700Bold,
+  useFonts,
+} from '@expo-google-fonts/tiktok-sans';
 
+import type { TextOverlay } from '../../../lib/briefs-api';
 import { color, radiusAdmin } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
 import { Sheet } from '../shared';
@@ -20,7 +26,8 @@ import { Sheet } from '../shared';
 /** Render defaults, mirrored from renderTimeline.ts. */
 const DEFAULT_X = 0.5;
 const DEFAULT_Y = 0.62;
-const DEFAULT_WIDTH = 0.72;
+const DEFAULT_WIDTH = 0.85;
+const DEFAULT_TEXT_Y = 0.45;
 const MIN_WIDTH = 0.3;
 const MAX_WIDTH = 1;
 
@@ -28,35 +35,52 @@ export interface PlacementSheetProps {
   visible: boolean;
   /** Signed URL of the screenshot being placed. */
   imageUrl: string | null;
+  /** The segment's on-screen text; null hides the draggable bubble. */
+  overlayText: string | null;
+  textOverlay: TextOverlay;
   initialX: number | null;
   initialY: number | null;
   initialWidth: number | null;
+  initialTextY: number | null;
   saving: boolean;
   onClose: () => void;
-  onSave: (pos: { x: number; y: number; width: number }) => void;
+  onSave: (pos: {
+    x: number;
+    y: number;
+    width: number;
+    textY: number | null;
+  }) => void;
 }
 
 export function PlacementSheet({
   visible,
   imageUrl,
+  overlayText,
+  textOverlay,
   initialX,
   initialY,
   initialWidth,
+  initialTextY,
   saving,
   onClose,
   onSave,
 }: PlacementSheetProps) {
   const { width: screenWidth } = useWindowDimensions();
+  const [fontLoaded] = useFonts({ TikTokSans_700Bold });
 
   const [pos, setPos] = useState({ x: DEFAULT_X, y: DEFAULT_Y });
   const [shotWidth, setShotWidth] = useState(DEFAULT_WIDTH);
+  const [textY, setTextY] = useState(DEFAULT_TEXT_Y);
   /** Screenshot width / height, measured once the URL is known. */
   const [aspect, setAspect] = useState(0.75);
 
   // Refs mirror state so the PanResponders, created once, read live values.
   const posRef = useRef(pos);
   posRef.current = pos;
+  const textYRef = useRef(textY);
+  textYRef.current = textY;
   const dragStartRef = useRef({ x: 0, y: 0 });
+  const textDragStartRef = useRef(0);
   const canvasRef = useRef({ w: 1, h: 1 });
   const trackWidthRef = useRef(1);
 
@@ -64,7 +88,8 @@ export function PlacementSheet({
     if (!visible) return;
     setPos({ x: initialX ?? DEFAULT_X, y: initialY ?? DEFAULT_Y });
     setShotWidth(initialWidth ?? DEFAULT_WIDTH);
-  }, [visible, initialX, initialY, initialWidth]);
+    setTextY(initialTextY ?? DEFAULT_TEXT_Y);
+  }, [visible, initialX, initialY, initialWidth, initialTextY]);
 
   useEffect(() => {
     if (!imageUrl) return;
@@ -90,6 +115,20 @@ export function PlacementSheet({
           x: clamp01(dragStartRef.current.x + gesture.dx / w),
           y: clamp01(dragStartRef.current.y + gesture.dy / h),
         });
+      },
+    }),
+  ).current;
+
+  const textResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        textDragStartRef.current = textYRef.current;
+      },
+      onPanResponderMove: (_evt, gesture) => {
+        const { h } = canvasRef.current;
+        setTextY(clamp01(textDragStartRef.current + gesture.dy / h));
       },
     }),
   ).current;
@@ -126,17 +165,30 @@ export function PlacementSheet({
           size="lg"
           variant="primary"
           block
-          disabled={saving || !imageUrl}
-          onPress={() => onSave({ x: pos.x, y: pos.y, width: shotWidth })}
+          disabled={saving || (!imageUrl && !overlayText)}
+          onPress={() =>
+            onSave({
+              x: pos.x,
+              y: pos.y,
+              width: shotWidth,
+              textY: overlayText ? textY : null,
+            })
+          }
         >
           {saving ? 'Saving…' : 'Save placement'}
         </Button>
       }
     >
-      <Text style={styles.title}>Place screenshot</Text>
+      <Text style={styles.title}>
+        {imageUrl ? 'Place screenshot' : 'Place text'}
+      </Text>
       <Text style={styles.subtitle}>
-        Drag it to where it should sit on the finished video. The frame below
-        stands in for the creator's camera.
+        {overlayText && imageUrl
+          ? 'Drag the screenshot and the text to where they should sit on the finished video.'
+          : overlayText
+            ? 'Drag the text to where it should sit on the finished video.'
+            : 'Drag it to where it should sit on the finished video.'}{' '}
+        The frame below stands in for the creator's camera.
       </Text>
 
       <View style={styles.canvasWrap}>
@@ -163,21 +215,67 @@ export function PlacementSheet({
               <Image source={{ uri: imageUrl }} style={styles.shotImage} />
             </View>
           ) : null}
+
+          {overlayText ? (
+            <View
+              {...textResponder.panHandlers}
+              style={[styles.textRow, { top: textY * canvasH }]}
+            >
+              <Text
+                style={[
+                  styles.bubbleText,
+                  {
+                    fontSize: canvasW * 0.044,
+                    lineHeight: canvasW * 0.058,
+                    fontFamily: fontLoaded ? 'TikTokSans_700Bold' : undefined,
+                  },
+                  textOverlay.mode === 'box'
+                    ? {
+                        color: textOverlay.text_color,
+                        backgroundColor: textOverlay.accent_color,
+                        paddingHorizontal: canvasW * 0.022,
+                        paddingVertical: canvasW * 0.014,
+                        borderRadius: canvasW * 0.02,
+                        overflow: 'hidden',
+                      }
+                    : textOverlay.mode === 'outline'
+                      ? {
+                          color: textOverlay.text_color,
+                          textShadowColor: textOverlay.accent_color,
+                          textShadowOffset: { width: 0, height: 0 },
+                          textShadowRadius: 2,
+                        }
+                      : {
+                          color: textOverlay.text_color,
+                          textShadowColor: 'rgba(0,0,0,0.6)',
+                          textShadowOffset: { width: 0, height: 1 },
+                          textShadowRadius: 3,
+                        },
+                ]}
+              >
+                {overlayText}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
-      <Text style={styles.sizeLabel}>Size</Text>
-      <View
-        {...sliderResponder.panHandlers}
-        style={styles.track}
-        onLayout={(e) => {
-          trackWidthRef.current = e.nativeEvent.layout.width;
-        }}
-      >
-        <View style={styles.trackLine} />
-        <View style={[styles.trackFill, { width: `${thumbLeft}%` }]} />
-        <View style={[styles.thumb, { left: `${thumbLeft}%` }]} />
-      </View>
+      {imageUrl ? (
+        <>
+          <Text style={styles.sizeLabel}>Size</Text>
+          <View
+            {...sliderResponder.panHandlers}
+            style={styles.track}
+            onLayout={(e) => {
+              trackWidthRef.current = e.nativeEvent.layout.width;
+            }}
+          >
+            <View style={styles.trackLine} />
+            <View style={[styles.trackFill, { width: `${thumbLeft}%` }]} />
+            <View style={[styles.thumb, { left: `${thumbLeft}%` }]} />
+          </View>
+        </>
+      ) : null}
     </Sheet>
   );
 }
@@ -247,6 +345,20 @@ const styles = StyleSheet.create({
   shotImage: {
     width: '100%',
     height: '100%',
+  },
+  // Full-width hit row so the small bubble is easy to grab; the transform
+  // centers the row's content on the normalized textY like the render.
+  textRow: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    alignItems: 'center',
+    transform: [{ translateY: '-50%' }],
+  },
+  bubbleText: {
+    fontWeight: '700',
+    textAlign: 'center',
+    maxWidth: '92%',
   },
   sizeLabel: {
     marginTop: 16,

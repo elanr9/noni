@@ -3,7 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -31,8 +31,14 @@ import {
   listBriefSegments,
   parseHookOptions,
   parseTalkingPoints,
+  parseTextOverlay,
+  signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import {
+  SegmentOverlayPreview,
+  type ShotPreview,
+} from '../../../components/creator/SegmentOverlayPreview';
 import {
   latestChangesNote,
   listAssignmentReviewEvents,
@@ -90,11 +96,11 @@ type PendingClip = { uri: string; durationMs: number };
 
 const COUNTDOWN_STEP_MS = 800;
 const TOAST_MS = 2600;
-const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5] as const;
 const MAX_CLIP_MS = 90_000;
 const STOP_WATCHDOG_MS = 5_000;
-const SHUTTER_SIZE = 76;
-const SHUTTER_BAR = 97;
+const RECORD_ARM_MS = 350;
+const SHUTTER_SIZE = 84;
 const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
 
 function splitScriptParts(script: string): string[] {
@@ -271,9 +277,12 @@ export default function RecordScreen() {
   const [takeCount, setTakeCount] = useState(0);
   const [keepConfirm, setKeepConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+  const [shots, setShots] = useState<Record<string, ShotPreview>>({});
 
   const recordingRef = useRef(false);
   const discardClipRef = useRef(false);
+  const recordStartedRef = useRef(false);
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
 
@@ -292,6 +301,12 @@ export default function RecordScreen() {
   }, [brief, briefSegments, task]);
 
   const activeClip = activeIndex !== null ? plan[activeIndex] ?? null : null;
+  const activeSegment = activeClip
+    ? briefSegments.find((s) => s.slot_index === activeClip.slotIndex) ?? null
+    : null;
+  const activeShot = activeSegment ? shots[activeSegment.id] ?? null : null;
+  const greenScreenActive =
+    activeSegment?.layout === 'green_screen' && activeShot !== null;
   const allKept =
     plan.length > 0 && plan.every((c) => kept[c.slotIndex] !== undefined);
   const replacing =
@@ -302,12 +317,6 @@ export default function RecordScreen() {
     p.loop = true;
     if (pendingSource) p.play();
   });
-
-  const screenW = Dimensions.get('window').width;
-  const viewportH = Math.min(
-    screenW * (16 / 9),
-    Dimensions.get('window').height - insets.top - SHUTTER_BAR - insets.bottom,
-  );
 
   useEffect(() => {
     if (!id || !profile) return;
@@ -388,6 +397,34 @@ export default function RecordScreen() {
     setInitialized(true);
   }, [loading, initialized, plan, kept]);
 
+  // Sign the brief's screenshots so the live preview can show them exactly
+  // where the final edit will place them.
+  useEffect(() => {
+    const withShots = briefSegments.filter((s) => s.screenshot_url);
+    if (withShots.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      withShots.map(async (s) => {
+        const url = await signedScreenshotUrl(s.screenshot_url as string);
+        const aspect = await new Promise<number>((resolve) => {
+          Image.getSize(
+            url,
+            (w, h) => resolve(h > 0 ? w / h : 9 / 16),
+            () => resolve(9 / 16),
+          );
+        });
+        return [s.id, { url, aspect }] as const;
+      }),
+    )
+      .then((entries) => {
+        if (!cancelled) setShots(Object.fromEntries(entries));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [briefSegments]);
+
   useEffect(() => {
     if (phase !== 'countdown') return;
     if (countdown <= 0) {
@@ -457,10 +494,13 @@ export default function RecordScreen() {
     cameraPermission?.granted && micPermission?.granted,
   );
 
-  const cameraActive =
+  // Keep CameraView mounted across idle → record → review so the session
+  // stays warm. Unmounting for review was a common black-preview cause.
+  const cameraMounted =
     permissionsGranted &&
     activeClip !== null &&
-    (phase === 'idle' || phase === 'countdown' || phase === 'recording');
+    phase !== 'submitting' &&
+    phase !== 'sent';
 
   useEffect(() => {
     if (!permissionsGranted) setCameraReady(false);
@@ -470,11 +510,9 @@ export default function RecordScreen() {
     setCameraReady(false);
   }, [facing]);
 
-  // Camera unmounts during clip review / summary; clear ready so the next
-  // mount must fire onCameraReady before the shutter works again.
   useEffect(() => {
-    if (!cameraActive) setCameraReady(false);
-  }, [cameraActive]);
+    if (!cameraMounted) setCameraReady(false);
+  }, [cameraMounted]);
 
   async function restoreBrightness() {
     const prev = prevBrightnessRef.current;
@@ -523,8 +561,14 @@ export default function RecordScreen() {
       setPhase('idle');
       return;
     }
+    if (!cameraReady) {
+      setPhase('idle');
+      Alert.alert('Camera warming up', 'Give it a second, then tap again.');
+      return;
+    }
     recordingRef.current = true;
     discardClipRef.current = false;
+    recordStartedRef.current = false;
     setElapsedMs(0);
     setPhase('recording');
     if (flashOn && facing === 'front') {
@@ -535,11 +579,19 @@ export default function RecordScreen() {
         prevBrightnessRef.current = null;
       }
     }
+    // onCameraReady can fire before AVCaptureSession will accept recordAsync.
+    await new Promise<void>((resolve) => setTimeout(resolve, RECORD_ARM_MS));
+    if (!recordingRef.current || discardClipRef.current) {
+      recordingRef.current = false;
+      setPhase('idle');
+      void restoreBrightness();
+      return;
+    }
     const startedAt = Date.now();
     try {
+      recordStartedRef.current = true;
       const clip = await cam.recordAsync({
         maxDuration: Math.ceil(MAX_CLIP_MS / 1000),
-        codec: 'avc1',
       });
       if (discardClipRef.current) {
         discardClipRef.current = false;
@@ -572,6 +624,13 @@ export default function RecordScreen() {
 
   function stopClip() {
     if (!recordingRef.current) return;
+    if (!recordStartedRef.current) {
+      discardClipRef.current = true;
+      recordingRef.current = false;
+      setPhase('idle');
+      void restoreBrightness();
+      return;
+    }
     cameraRef.current?.stopRecording();
     if (stopWatchdogRef.current) clearTimeout(stopWatchdogRef.current);
     stopWatchdogRef.current = setTimeout(() => {
@@ -753,44 +812,70 @@ export default function RecordScreen() {
     );
   }
 
-  const showCamera = cameraActive;
+  const showCamera = cameraMounted;
   const frontGlow = phase === 'recording' && flashOn && facing === 'front';
   const summaryMode = activeIndex === null && phase === 'idle';
   const canRetake = phase === 'clipReview';
   const canKeep = phase === 'clipReview';
-  const shutterRecording = phase === 'recording' || phase === 'clipReview';
+  const shutterRecording = phase === 'recording';
   const needsPermissionGate =
     activeClip !== null &&
     !summaryMode &&
     phase !== 'clipReview' &&
     !permissionsGranted;
+  const showLiveChrome =
+    !summaryMode && phase !== 'clipReview' && phase !== 'saving';
+
+  // Green screen, TikTok style: the screenshot is the background and the
+  // creator gets cut out over it in the final edit. Live we cannot cut the
+  // background out, so the camera shows ghosted over the image; where you
+  // stand in frame is exactly where you land in the final video.
+  const ghostStyle = greenScreenActive
+    ? [StyleSheet.absoluteFill, { opacity: 0.68 }]
+    : StyleSheet.absoluteFill;
 
   return (
     <View style={styles.root}>
-      <View style={{ height: insets.top }} />
-
-      <View style={[styles.viewport, { height: viewportH }]}>
-        {showCamera ? (
-          <CameraView
-            key={facing}
-            ref={cameraRef}
+      <View
+        style={styles.stage}
+        onLayout={(e) =>
+          setStageSize({
+            w: e.nativeEvent.layout.width,
+            h: e.nativeEvent.layout.height,
+          })
+        }
+      >
+        {greenScreenActive && activeShot ? (
+          <Image
+            source={{ uri: activeShot.url }}
             style={StyleSheet.absoluteFill}
-            facing={facing}
-            mode="video"
-            mute={false}
-            videoQuality="1080p"
-            videoBitrate={8_000_000}
-            enableTorch={flashOn && facing === 'back'}
-            onCameraReady={() => setCameraReady(true)}
-            onMountError={(e) => {
-              setCameraReady(false);
-              Alert.alert(
-                'Camera failed',
-                e.message ||
-                  'Could not start the camera. Close and open this screen again.',
-              );
-            }}
+            resizeMode="cover"
           />
+        ) : null}
+
+        {showCamera ? (
+          <View style={ghostStyle}>
+            <CameraView
+              key={facing}
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing={facing}
+              mode="video"
+              mute={false}
+              mirror={facing === 'front'}
+              videoQuality="720p"
+              enableTorch={flashOn && facing === 'back'}
+              onCameraReady={() => setCameraReady(true)}
+              onMountError={(e) => {
+                setCameraReady(false);
+                Alert.alert(
+                  'Camera failed',
+                  e.message ||
+                    'Could not start the camera. Close and open this screen again.',
+                );
+              }}
+            />
+          </View>
         ) : null}
 
         {needsPermissionGate ? (
@@ -810,12 +895,14 @@ export default function RecordScreen() {
         ) : null}
 
         {phase === 'clipReview' && pendingSource ? (
-          <VideoView
-            style={StyleSheet.absoluteFill}
-            player={player}
-            contentFit="cover"
-            nativeControls={false}
-          />
+          <View style={ghostStyle}>
+            <VideoView
+              style={StyleSheet.absoluteFill}
+              player={player}
+              contentFit="cover"
+              nativeControls={false}
+            />
+          </View>
         ) : null}
 
         {summaryMode ? (
@@ -826,13 +913,23 @@ export default function RecordScreen() {
               again, or send everything for review.
             </Text>
           </View>
-        ) : (
-          <View style={styles.viewportShade} pointerEvents="none" />
-        )}
+        ) : null}
 
         {frontGlow ? <View style={styles.frontGlow} pointerEvents="none" /> : null}
 
-        <View style={styles.viewportTop}>
+        {activeSegment &&
+        stageSize &&
+        (showLiveChrome || phase === 'clipReview') ? (
+          <SegmentOverlayPreview
+            segment={activeSegment}
+            shot={activeShot}
+            stageWidth={stageSize.w}
+            stageHeight={stageSize.h}
+            overlay={parseTextOverlay(brief?.text_overlay)}
+          />
+        ) : null}
+
+        <View style={[styles.topBar, { paddingTop: insets.top + space[2] }]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close"
@@ -887,20 +984,24 @@ export default function RecordScreen() {
 
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Switch camera"
+            accessibilityLabel={flashOn ? 'Flash on' : 'Flash off'}
             onPress={() => {
               if (phase === 'recording') return;
-              setFacing((f) => (f === 'front' ? 'back' : 'front'));
+              setFlashOn((v) => !v);
             }}
-            style={styles.roundBtn}
+            style={[styles.roundBtn, flashOn && styles.roundBtnOn]}
             hitSlop={8}
           >
-            <Icon name="switch-camera" size={20} color={color.white} />
+            <Icon
+              name="zap"
+              size={18}
+              color={flashOn ? color.ink900 : color.white}
+            />
           </Pressable>
         </View>
 
-        {activeClip && !summaryMode ? (
-          <View style={styles.exampleRow}>
+        {activeClip && showLiveChrome ? (
+          <View style={[styles.exampleRow, { top: insets.top + 64 }]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Watch example"
@@ -920,15 +1021,14 @@ export default function RecordScreen() {
           </View>
         ) : null}
 
-        {showCamera && activeClip ? (
-          <View style={styles.prompterSlot}>
+        {showCamera && activeClip && showLiveChrome ? (
+          <View style={[styles.prompterSlot, { top: insets.top + 120 }]}>
             {activeClip.scripted ? (
               <Teleprompter
                 text={activeClip.script}
                 running={phase === 'recording' && !scriptPaused}
                 paused={phase === 'recording' && scriptPaused}
                 speed={speed}
-                speedLabel={`${speed}x`}
                 resetKey={takeCount}
                 onTap={() => {
                   if (phase === 'recording') setScriptPaused((p) => !p);
@@ -936,7 +1036,7 @@ export default function RecordScreen() {
               />
             ) : (
               <BeatPrompter
-                label={`${activeClip.label} of ${plan.length} clips`}
+                label="Talking point"
                 text={activeClip.script}
                 credential={profile?.credential_line ?? null}
               />
@@ -955,7 +1055,7 @@ export default function RecordScreen() {
       <View
         style={[
           styles.shutterBar,
-          { paddingBottom: Math.max(insets.bottom, 10), minHeight: SHUTTER_BAR },
+          { paddingBottom: Math.max(insets.bottom, 14) },
         ]}
       >
         {phase === 'idle' && activeClip?.scripted ? (
@@ -970,7 +1070,9 @@ export default function RecordScreen() {
               </Pressable>
             ))}
           </View>
-        ) : null}
+        ) : (
+          <Text style={styles.modeLabel}>VIDEO</Text>
+        )}
 
         {summaryMode ? (
           <Pressable
@@ -988,9 +1090,11 @@ export default function RecordScreen() {
               onPress={canRetake ? retakePending : undefined}
               disabled={!canRetake}
             >
-              <Text style={[styles.sideText, !canRetake && styles.sideTextMuted]}>
-                Retake
-              </Text>
+              {canRetake ? (
+                <Text style={styles.sideText}>Retake</Text>
+              ) : (
+                <View style={styles.sideGhost} />
+              )}
             </Pressable>
 
             <Pressable
@@ -1018,21 +1122,27 @@ export default function RecordScreen() {
               />
             </Pressable>
 
-            <Pressable
-              style={styles.sideHit}
-              onPress={canKeep ? () => void keepPendingClip() : undefined}
-              disabled={!canKeep}
-            >
-              <Text
-                style={[
-                  styles.sideText,
-                  styles.sideTextKeep,
-                  !canKeep && styles.sideTextMuted,
-                ]}
+            {canKeep ? (
+              <Pressable
+                style={styles.sideHit}
+                onPress={() => void keepPendingClip()}
               >
-                Keep
-              </Text>
-            </Pressable>
+                <Text style={[styles.sideText, styles.sideTextKeep]}>Keep</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Switch camera"
+                style={styles.flipBtn}
+                onPress={() => {
+                  if (phase === 'recording') return;
+                  setFacing((f) => (f === 'front' ? 'back' : 'front'));
+                }}
+                disabled={phase === 'recording' || phase === 'countdown'}
+              >
+                <Icon name="switch-camera" size={22} color={color.white} />
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -1043,6 +1153,9 @@ export default function RecordScreen() {
           <Text style={styles.barHint}>
             This take replaces the clip you already kept.
           </Text>
+        ) : null}
+        {phase === 'idle' && activeClip && !cameraReady && permissionsGranted ? (
+          <Text style={styles.barHint}>Camera starting…</Text>
         ) : null}
       </View>
 
@@ -1083,15 +1196,11 @@ const styles = StyleSheet.create({
     fontSize: type.size.body,
     textAlign: 'center',
   },
-  viewport: {
+  stage: {
+    flex: 1,
     width: '100%',
     overflow: 'hidden',
     backgroundColor: color.ink800,
-  },
-  viewportShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: color.scrim,
-    opacity: 0.15,
   },
   permissionGate: {
     ...StyleSheet.absoluteFillObject,
@@ -1129,12 +1238,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: color.whiteA45,
   },
-  viewportTop: {
+  topBar: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: space[3],
     paddingHorizontal: space[7],
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1148,6 +1256,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.whiteA16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  roundBtnOn: {
+    backgroundColor: color.accent,
   },
   clipMeta: { flex: 1, gap: space[2], paddingTop: 2 },
   clipMetaRow: {
@@ -1196,7 +1307,6 @@ const styles = StyleSheet.create({
   stepActive: { backgroundColor: color.blue300 },
   exampleRow: {
     position: 'absolute',
-    top: 72,
     right: space[7],
     zIndex: 4,
   },
@@ -1234,7 +1344,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
     zIndex: 3,
   },
   countdownWrap: {
@@ -1261,6 +1370,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: space[8],
     gap: space[3],
+    backgroundColor: color.ink800,
   },
   summaryTitle: {
     color: color.white,
@@ -1277,9 +1387,16 @@ const styles = StyleSheet.create({
   shutterBar: {
     backgroundColor: color.ink900,
     paddingHorizontal: space[8],
-    paddingTop: space[3],
+    paddingTop: space[4],
     justifyContent: 'center',
-    gap: space[2],
+    gap: space[3],
+  },
+  modeLabel: {
+    textAlign: 'center',
+    color: color.amber,
+    fontSize: type.size.chip,
+    fontWeight: type.weight.heavy,
+    letterSpacing: 1.2,
   },
   shutterRow: {
     flexDirection: 'row',
@@ -1287,10 +1404,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sideHit: {
-    width: 64,
+    width: 72,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: space.tapMin,
+  },
+  sideGhost: {
+    width: 44,
+    height: 44,
   },
   sideText: {
     fontSize: type.size.bodySm,
@@ -1298,26 +1419,33 @@ const styles = StyleSheet.create({
     color: color.white,
   },
   sideTextKeep: { fontWeight: type.weight.heavy },
-  sideTextMuted: { color: color.whiteA45 },
+  flipBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   shutterRing: {
     width: SHUTTER_SIZE,
     height: SHUTTER_SIZE,
     borderRadius: radius.pill,
     borderWidth: 4,
-    borderColor: color.whiteA90,
+    borderColor: color.white,
     alignItems: 'center',
     justifyContent: 'center',
   },
   shutterOff: { opacity: 0.4 },
   shutterInner: {
-    width: 58,
-    height: 58,
+    width: 68,
+    height: 68,
     borderRadius: radius.pill,
     backgroundColor: color.danger,
   },
   shutterInnerStop: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     borderRadius: 8,
     backgroundColor: color.danger,
   },

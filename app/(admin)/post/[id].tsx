@@ -17,6 +17,7 @@ import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { StepDots } from '../../../components/admin/editor/StepDots';
+import { TextStyleSheet } from '../../../components/admin/editor/TextStyleSheet';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
 import {
   LibraryPickerSheet,
@@ -25,6 +26,7 @@ import {
 import { PushHeader } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { Segmented } from '../../../components/admin/shared/Segmented';
 import { useAuth } from '../../../lib/auth';
 import {
   appendBannedPhrases,
@@ -47,6 +49,7 @@ import {
   updateBrief,
   updateBriefSegment,
   uploadSegmentScreenshot,
+  parseTextOverlay,
   type BriefReviewEventInput,
   type BriefReviewResult,
   type BriefSegment,
@@ -55,6 +58,7 @@ import {
   type RegenDraftPayload,
   type RegenField,
   type TalkingPoint,
+  type TextOverlay,
 } from '../../../lib/briefs-api';
 import { supabase } from '../../../lib/supabase';
 import { color, motion, radius, type } from '../../../theme/tokens';
@@ -177,6 +181,11 @@ export default function PostEditorScreen() {
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [exampleUrl, setExampleUrl] = useState<string | null>(null);
   const [killReason, setKillReason] = useState<string | null>(null);
+  const [textOverlay, setTextOverlay] = useState<TextOverlay>(
+    parseTextOverlay(null),
+  );
+  const [textStyleVisible, setTextStyleVisible] = useState(false);
+  const [textStyleSaving, setTextStyleSaving] = useState(false);
 
   const [pendingOverlayLabels, setPendingOverlayLabels] = useState<
     (string | null)[] | null
@@ -301,6 +310,7 @@ export default function PostEditorScreen() {
         setGenerationId(brief.generation_id);
         setExampleUrl(brief.example_url);
         setKillReason(brief.kill_reason);
+        setTextOverlay(parseTextOverlay(brief.text_overlay));
         setBaseline(
           deriveSnapshot({
             hook: brief.hook,
@@ -827,33 +837,78 @@ export default function PostEditorScreen() {
     }
   }
 
-  /** Placement sheet save: normalized center + width onto the segment. */
-  async function savePlacement(pos: { x: number; y: number; width: number }) {
+  /** Brief-level on-screen text config; saves immediately like segment edits. */
+  async function saveTextOverlay(next: TextOverlay) {
+    if (!id) return;
+    const prev = textOverlay;
+    setTextOverlay(next);
+    setTextStyleSaving(true);
+    try {
+      await updateBrief(id, { text_overlay: next });
+      setTextStyleVisible(false);
+    } catch (e) {
+      setTextOverlay(prev);
+      Alert.alert(
+        'Could not save text style',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setTextStyleSaving(false);
+    }
+  }
+
+  /** Flip a point's recording layout between standard and green screen. */
+  async function toggleLayoutForPoint(pointIndex: number) {
+    const segment = segmentForPointIndex(pointIndex);
+    if (!segment?.screenshot_url) return;
+    const next = segment.layout === 'green_screen' ? 'standard' : 'green_screen';
+    setShotBusyIndex(pointIndex);
+    try {
+      await updateBriefSegment(segment.id, { layout: next });
+      setSegments((prev) =>
+        prev.map((s) => (s.id === segment.id ? { ...s, layout: next } : s)),
+      );
+    } catch (e) {
+      Alert.alert(
+        'Could not switch layout',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setShotBusyIndex(null);
+    }
+  }
+
+  /** Placement sheet save: normalized screenshot + text positions. */
+  async function savePlacement(pos: {
+    x: number;
+    y: number;
+    width: number;
+    textY: number | null;
+  }) {
     const pointIndex = placeIndex;
     if (pointIndex === null) return;
     const segment = segmentForPointIndex(pointIndex);
-    if (!segment?.screenshot_url) {
+    if (!segment) {
       setPlaceIndex(null);
       return;
     }
     setPlaceSaving(true);
     try {
-      await updateBriefSegment(segment.id, {
-        screenshot_x: pos.x,
-        screenshot_y: pos.y,
-        screenshot_width: pos.width,
-      });
+      const patch: {
+        screenshot_x?: number;
+        screenshot_y?: number;
+        screenshot_width?: number;
+        text_y?: number;
+      } = {};
+      if (segment.screenshot_url) {
+        patch.screenshot_x = pos.x;
+        patch.screenshot_y = pos.y;
+        patch.screenshot_width = pos.width;
+      }
+      if (pos.textY !== null) patch.text_y = pos.textY;
+      await updateBriefSegment(segment.id, patch);
       setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segment.id
-            ? {
-                ...s,
-                screenshot_x: pos.x,
-                screenshot_y: pos.y,
-                screenshot_width: pos.width,
-              }
-            : s,
-        ),
+        prev.map((s) => (s.id === segment.id ? { ...s, ...patch } : s)),
       );
       setPlaceIndex(null);
     } catch (e) {
@@ -1164,6 +1219,27 @@ export default function PostEditorScreen() {
 
         {step === 'points' ? (
           <View style={styles.section}>
+            <View style={styles.textStyleBlock}>
+              <View style={styles.textStyleRow}>
+                <Text style={styles.textStyleLabel}>On screen text</Text>
+                {textOverlay.enabled ? (
+                  <PressableScale
+                    accessibilityRole="button"
+                    onPress={() => setTextStyleVisible(true)}
+                    style={styles.textStyleEdit}
+                  >
+                    <Text style={styles.textStyleEditLabel}>Edit style</Text>
+                  </PressableScale>
+                ) : null}
+              </View>
+              <Segmented
+                options={[{ label: 'On' }, { label: 'Off' }]}
+                value={textOverlay.enabled ? 0 : 1}
+                onChange={(i) =>
+                  void saveTextOverlay({ ...textOverlay, enabled: i === 0 })
+                }
+              />
+            </View>
             <PointsEditor
               points={points}
               minPoints={currentType?.min_points ?? null}
@@ -1185,6 +1261,20 @@ export default function PostEditorScreen() {
               onMoveScreenshot={moveScreenshotFromPoint}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
               onPlaceScreenshot={setPlaceIndex}
+              hasTextForIndex={(i) => {
+                const s = segmentForPointIndex(i);
+                return Boolean(
+                  textOverlay.enabled &&
+                    s?.show_on_screen &&
+                    s.overlay_text?.trim(),
+                );
+              }}
+              layoutForIndex={(i) =>
+                segmentForPointIndex(i)?.layout === 'green_screen'
+                  ? 'green_screen'
+                  : 'standard'
+              }
+              onToggleLayout={(i) => void toggleLayoutForPoint(i)}
             />
           </View>
         ) : null}
@@ -1295,12 +1385,27 @@ export default function PostEditorScreen() {
         imageUrl={
           placingSegment ? (screenshotUrls[placingSegment.id] ?? null) : null
         }
+        overlayText={
+          placingSegment?.show_on_screen && textOverlay.enabled
+            ? placingSegment.overlay_text?.trim() || null
+            : null
+        }
+        textOverlay={textOverlay}
         initialX={placingSegment?.screenshot_x ?? null}
         initialY={placingSegment?.screenshot_y ?? null}
         initialWidth={placingSegment?.screenshot_width ?? null}
+        initialTextY={placingSegment?.text_y ?? null}
         saving={placeSaving}
         onClose={() => setPlaceIndex(null)}
         onSave={(pos) => void savePlacement(pos)}
+      />
+
+      <TextStyleSheet
+        visible={textStyleVisible}
+        initial={textOverlay}
+        saving={textStyleSaving}
+        onClose={() => setTextStyleVisible(false)}
+        onSave={(next) => void saveTextOverlay(next)}
       />
 
       <LibraryPickerSheet
@@ -1392,6 +1497,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   section: { gap: 10, marginBottom: 8 },
+  textStyleBlock: { gap: 8 },
+  textStyleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  textStyleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  textStyleEdit: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: color.fillQuiet,
+  },
+  textStyleEditLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: color.blue500,
+  },
   footer: {
     flexDirection: 'row',
     gap: 10,

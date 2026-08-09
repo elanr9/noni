@@ -17,6 +17,18 @@ export const colors = {
   accent: color.accent,
 };
 
+export function ConfigErrorScreen({ missing }: { missing: string[] }) {
+  return (
+    <View style={styles.center}>
+      <Text style={styles.title}>Noni is not configured</Text>
+      <Text style={styles.muted}>
+        This build was made without {missing.join(' and ')}. Set them for the
+        build environment and ship a new build.
+      </Text>
+    </View>
+  );
+}
+
 export function BrandTitle({
   title,
   subtitle,
@@ -34,6 +46,13 @@ export function BrandTitle({
 }
 
 const styles = StyleSheet.create({
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 32,
+    backgroundColor: color.white,
+  },
   brandBlock: {
     gap: 8,
     marginBottom: 32,
