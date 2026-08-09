@@ -55,7 +55,8 @@
         {
           "savePhotosPermission": "Noni saves the account template profile picture to your photos so you can set it on TikTok and Instagram."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Keyboard,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,7 +26,7 @@ function useKeyboardHeight(): number {
   useEffect(() => {
     const shown = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow',
-      (event) => setHeight(event.endCoordinates.height),
+      (event) => setHeight(event.endCoordinates?.height ?? 0),
     );
     const hidden = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
@@ -70,19 +69,13 @@ export function Screen({
       style={styles.flex}
       contentContainerStyle={[styles.gutter, styles.scrollContent, contentStyle]}
       keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
+      keyboardDismissMode="interactive"
       showsVerticalScrollIndicator={false}
     >
       {children}
     </ScrollView>
   ) : (
-    <Pressable
-      accessible={false}
-      onPress={Keyboard.dismiss}
-      style={[styles.flex, styles.gutter, contentStyle]}
-    >
-      {children}
-    </Pressable>
+    <View style={[styles.flex, styles.gutter, contentStyle]}>{children}</View>
   );
 
   return (
