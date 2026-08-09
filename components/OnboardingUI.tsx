@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,7 +11,7 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 
 import { colors } from './Screen';
@@ -133,6 +134,33 @@ export const cal = {
   disabled: '#D1D1D6',
 } as const;
 
+// KeyboardAvoidingView compares its own onLayout frame against screen space
+// keyboard coordinates, which only lines up when the view starts at the top of
+// the screen. Inside a SafeAreaView it under-shoots and leaves the CTA behind
+// the keyboard, so measure the keyboard directly instead. metrics() seeds the
+// height for a step that mounts while the keyboard is already open.
+function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(() => Keyboard.metrics()?.height ?? 0);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow',
+      (event) => setHeight(event.endCoordinates.height),
+    );
+    const hidden = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setHeight(0),
+    );
+
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
+
+  return height;
+}
+
 export function CalShell({
   progress,
   onBack,
@@ -156,11 +184,16 @@ export function CalShell({
   /** Rendered above the pill button, for skip links and legal text. */
   footer?: ReactNode;
 }) {
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+
   return (
-    <SafeAreaView style={calStyles.safe}>
-      <KeyboardAvoidingView
-        style={calStyles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <SafeAreaView style={calStyles.safe} edges={['top', 'left', 'right']}>
+      <View
+        style={[
+          calStyles.flex,
+          { paddingBottom: keyboardHeight || insets.bottom },
+        ]}
       >
         <View style={calStyles.header}>
           <Pressable
@@ -182,6 +215,7 @@ export function CalShell({
           style={calStyles.flex}
           contentContainerStyle={calStyles.body}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           {title ? <Text style={calStyles.title}>{title}</Text> : null}
           {subtitle ? <Text style={calStyles.subtitle}>{subtitle}</Text> : null}
@@ -200,7 +234,7 @@ export function CalShell({
             </Pressable>
           ) : null}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
