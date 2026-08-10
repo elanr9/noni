@@ -1,67 +1,23 @@
-import { useId } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
+import Svg, { Circle, G, Path } from 'react-native-svg';
 
 import { color } from '../../theme/tokens';
 
-const SEGMENTS = ['M168 372V140', 'M344 372V140', 'M170 156L342 356'] as const;
-
-/** The Noni bubble "N" mark (assets/logo.svg, gloss approximated by the top stroke only). */
+/** Flat marlin mark from Claude design handoff. One blue, no gradients. */
 export function BubbleMark({ size }: { size: number }) {
-  const id = useId().replace(/[^a-zA-Z0-9]/g, '');
-  const bodyId = `noniBody${id}`;
-  const rimId = `noniRim${id}`;
-
   return (
-    <Svg width={size} height={size} viewBox="0 0 512 512">
-      <Defs>
-        <LinearGradient
-          id={bodyId}
-          gradientUnits="userSpaceOnUse"
-          x1="120"
-          y1="70"
-          x2="420"
-          y2="440"
-        >
-          <Stop offset="0" stopColor="#9AD4F9" />
-          <Stop offset="0.36" stopColor="#4FB6F2" />
-          <Stop offset="0.72" stopColor="#1189CC" />
-          <Stop offset="1" stopColor="#08557F" />
-        </LinearGradient>
-        <LinearGradient
-          id={rimId}
-          gradientUnits="userSpaceOnUse"
-          x1="256"
-          y1="60"
-          x2="256"
-          y2="300"
-        >
-          <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.95" />
-          <Stop offset="0.55" stopColor="#FFFFFF" stopOpacity="0.2" />
-          <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
-        </LinearGradient>
-      </Defs>
-      {SEGMENTS.map((d) => (
-        <Path
-          key={d}
-          d={d}
-          stroke={`url(#${bodyId})`}
-          strokeWidth={118}
-          strokeLinecap="round"
-          fill="none"
-        />
-      ))}
-      <G transform="translate(-8,-40)">
-        {SEGMENTS.map((d) => (
-          <Path
-            key={d}
-            d={d}
-            stroke={`url(#${rimId})`}
-            strokeWidth={18}
-            strokeLinecap="round"
-            fill="none"
-          />
-        ))}
+    <Svg width={size} height={size} viewBox="0 0 120 120" fill="none">
+      <G fill={color.accent}>
+        <Path d="M36 90L8 74c6 10 9 18 9 25 0 7-2 14-6 21L36 90z" />
+        <Path d="M44 72C44 48 50 28 58 18c8 12 12 28 12 42z" />
+        <G stroke={color.white} strokeWidth={2.4} strokeLinecap="round" fill="none">
+          <Path d="M50 64c0-16 2-28 6-36" />
+          <Path d="M57 63c1-13 3-23 6-30" />
+          <Path d="M64 63c2-10 3-17 5-22" />
+        </G>
+        <Path d="M30 96C26 76 40 54 60 41c10-6 20-10 28-11l26-18-19 27c-1 8-6 17-15 26C68 78 48 94 30 96z" />
+        <Path d="M60 68c8-1 15 3 19 9-8 3-17 1-23-4z" />
+        <Circle cx={80} cy={38} r={3} fill={color.white} />
       </G>
     </Svg>
   );

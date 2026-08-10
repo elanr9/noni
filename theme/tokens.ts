@@ -9,7 +9,7 @@ export const color = {
   blue200: '#A7D3F7',
   blue300: '#8EC9F5',
   blue400: '#4FBAF2',
-  blue500: '#1BA6EE',
+  blue500: '#4FBAF2',
   blue600: '#0F8FD1',
   blue700: '#0B76AD',
 
@@ -48,13 +48,13 @@ export const color = {
   textOnDark: '#FFFFFF',
   textOnAccent: '#FFFFFF',
   textBrand: '#0F8FD1',
-  accent: '#1BA6EE',
-  accentHover: '#4FBAF2',
+  accent: '#4FBAF2',
+  accentHover: '#8EC9F5',
   accentPress: '#0F8FD1',
   accentTint: '#8EC9F5',
   border: '#E6EEF6',
   borderStrong: '#D6E3EF',
-  borderAccent: '#1BA6EE',
+  borderAccent: '#4FBAF2',
   statusTodoFg: '#0B76AD',
   statusTodoBg: '#E7F4FD',
   statusProgressFg: '#0B76AD',
@@ -226,9 +226,9 @@ export const shadow: Record<
     shadowOpacity: 0.1,
     elevation: 5,
   },
-  // 0 8px 20px rgba(27,166,238,0.28)
+  // 0 12px 24px -12px rgba(79,186,242,.85)
   shadowAccent: {
-    shadowColor: '#1BA6EE',
+    shadowColor: '#4FBAF2',
     shadowOffset: { width: 0, height: 8 },
     shadowRadius: 10,
     shadowOpacity: 0.28,
@@ -236,10 +236,10 @@ export const shadow: Record<
   },
 };
 
-// ring-focus: 0 0 0 3px rgba(27,166,238,0.30) — RN has no outline, so a 3px border recipe.
+// ring-focus: 0 0 0 3px rgba(79,186,242,0.30) — RN has no outline, so a 3px border recipe.
 export const ringFocus: ViewStyle = {
   borderWidth: 3,
-  borderColor: 'rgba(27,166,238,0.30)',
+  borderColor: 'rgba(79,186,242,0.30)',
 };
 
 export const motion = {
