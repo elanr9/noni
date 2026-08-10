@@ -178,7 +178,7 @@ async function notifyBountyEarned(
     );
     await sendExpoPush(tokens, {
       title: 'Bounty earned',
-      body: `You earned ${formatCentsDollars(params.creatorNet)}`,
+      body: `You hit the views goal and earned ${formatCentsDollars(params.creatorNet)}!`,
       data: {
         event: 'bounty_earned',
         assignment_id: params.assignmentId,
@@ -188,6 +188,88 @@ async function notifyBountyEarned(
     });
   } catch (e) {
     console.error(`bounty_earned push ${params.postId}:`, e);
+  }
+}
+
+type MilestoneClaim = {
+  postId: string;
+  platform: string | null;
+  creatorId: string | null;
+  assignmentId: string | null;
+  threshold: number;
+};
+
+/** Creator push for highest new threshold per post; append bounty if credited. */
+async function notifyCreatorMilestones(
+  admin: SupabaseClient,
+  companyId: string,
+  milestoneClaims: MilestoneClaim[],
+  assignmentById: Map<string, AssignmentRow>,
+): Promise<void> {
+  if (milestoneClaims.length === 0) return;
+
+  const topByPost = new Map<string, MilestoneClaim>();
+  for (const claim of milestoneClaims) {
+    const current = topByPost.get(claim.postId);
+    if (!current || claim.threshold > current.threshold) {
+      topByPost.set(claim.postId, claim);
+    }
+  }
+
+  const earnedByPost = new Map<string, number>();
+  const legacyPostIds: string[] = [];
+  for (const claim of topByPost.values()) {
+    if (claim.assignmentId) {
+      const a = assignmentById.get(claim.assignmentId);
+      if (
+        a?.bounty_credited_at != null &&
+        a.bounty_amount_cents != null &&
+        a.bounty_amount_cents > 0
+      ) {
+        earnedByPost.set(claim.postId, a.bounty_amount_cents);
+      }
+    } else {
+      legacyPostIds.push(claim.postId);
+    }
+  }
+  if (legacyPostIds.length > 0) {
+    const { data: ledger } = await admin
+      .from('wallet_ledger')
+      .select('post_id, amount_cents')
+      .in('post_id', legacyPostIds)
+      .eq('kind', 'bounty_credit');
+    for (const row of ledger ?? []) {
+      if (row.post_id == null) continue;
+      earnedByPost.set(row.post_id as string, asInt(row.amount_cents));
+    }
+  }
+
+  for (const claim of topByPost.values()) {
+    if (!claim.creatorId) continue;
+    let body = `Your post just hit ${milestoneLabel(claim.threshold)} views`;
+    const earned = earnedByPost.get(claim.postId);
+    if (earned != null && earned > 0) {
+      body += `, you've earned ${formatCentsDollars(earned)}!`;
+    }
+    try {
+      const creatorTokens = await creatorPushTokens(
+        admin,
+        claim.creatorId,
+        companyId,
+      );
+      await sendExpoPush(creatorTokens, {
+        title: 'Views milestone',
+        body,
+        data: {
+          event: 'milestone',
+          post_id: claim.postId,
+          assignment_id: claim.assignmentId,
+          threshold: String(claim.threshold),
+        },
+      });
+    } catch (e) {
+      console.error(`creator milestone push ${claim.postId}:`, e);
+    }
   }
 }
 
@@ -259,7 +341,7 @@ async function creditAssignmentBounty(
     amountCents: number;
     viewThreshold: number;
   },
-): Promise<BountyCreditOutcome> {
+): Promise<{ outcome: BountyCreditOutcome; creatorNet: number }> {
   const spend = await spendCompanyCreditsForEarning(admin, {
     companyId: params.companyId,
     creatorId: params.creatorId,
@@ -273,10 +355,10 @@ async function creditAssignmentBounty(
       console.warn(
         `bounty insufficient_credits company=${params.companyId} assignment=${params.assignmentId} gross=${params.amountCents}`,
       );
-      return 'insufficient';
+      return { outcome: 'insufficient', creatorNet: 0 };
     }
     console.error(`assignment bounty spend ${params.assignmentId}:`, spend.reason);
-    return 'skipped';
+    return { outcome: 'skipped', creatorNet: 0 };
   }
 
   const { data: claimed, error: claimError } = await admin
@@ -289,7 +371,7 @@ async function creditAssignmentBounty(
     .is('bounty_credited_at', null)
     .select('id');
   if (claimError) throw claimError;
-  if (!claimed?.length) return 'skipped';
+  if (!claimed?.length) return { outcome: 'skipped', creatorNet: 0 };
 
   if (!spend.idempotent) {
     await notifyBountyEarned(admin, {
@@ -300,7 +382,7 @@ async function creditAssignmentBounty(
       creatorNet: spend.creator_net,
     });
   }
-  return 'credited';
+  return { outcome: 'credited', creatorNet: spend.creator_net };
 }
 
 type AssignmentRow = {
@@ -310,6 +392,7 @@ type AssignmentRow = {
   brief_id: string | null;
   post_url: string | null;
   bounty_credited_at: string | null;
+  bounty_amount_cents: number | null;
   music_approved_at: string | null;
   metrics: Record<string, unknown> | null;
 };
@@ -378,7 +461,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   const { data: assignments, error: assignmentsError } = await admin
     .from('assignments')
     .select(
-      'id, creator_id, task_id, brief_id, post_url, bounty_credited_at, music_approved_at, metrics',
+      'id, creator_id, task_id, brief_id, post_url, bounty_credited_at, bounty_amount_cents, music_approved_at, metrics',
     )
     .eq('company_id', companyId);
   if (assignmentsError) throw assignmentsError;
@@ -488,13 +571,6 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   let skipped = 0;
   let creditsLowNotified = false;
   const rollups = new Map<string, AssignmentRollup>();
-  type MilestoneClaim = {
-    postId: string;
-    platform: string | null;
-    creatorId: string | null;
-    assignmentId: string | null;
-    threshold: number;
-  };
   const milestoneClaims: MilestoneClaim[] = [];
 
   for (const post of pending) {
@@ -641,9 +717,13 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
         console.error(`milestone push ${claim.postId}:`, e);
       }
     }
+
   }
 
-  if (rollups.size === 0) return { polled, credited, skipped };
+  if (rollups.size === 0) {
+    await notifyCreatorMilestones(admin, companyId, milestoneClaims, assignmentById);
+    return { polled, credited, skipped };
+  }
 
   const revenue = await revenueByAssignment(admin, companyId, assignmentByTask);
 
@@ -690,7 +770,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       continue;
     }
     if (assignment.bounty_credited_at === null && bountyViews >= bounty.viewThreshold) {
-      const outcome = await creditAssignmentBounty(admin, {
+      const { outcome, creatorNet } = await creditAssignmentBounty(admin, {
         companyId,
         creatorId: rollup.creatorId,
         assignmentId,
@@ -698,13 +778,19 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
         amountCents: bounty.amountCents,
         viewThreshold: bounty.viewThreshold,
       });
-      if (outcome === 'credited') credited += 1;
+      if (outcome === 'credited') {
+        credited += 1;
+        assignment.bounty_credited_at = new Date().toISOString();
+        assignment.bounty_amount_cents = creatorNet;
+      }
       if (outcome === 'insufficient' && !creditsLowNotified) {
         creditsLowNotified = true;
         await notifyCreditsLow(admin, companyId);
       }
     }
   }
+
+  await notifyCreatorMilestones(admin, companyId, milestoneClaims, assignmentById);
 
   return { polled, credited, skipped };
 }

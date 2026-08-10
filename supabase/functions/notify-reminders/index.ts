@@ -40,14 +40,36 @@ function briefTitle(row: AssignmentRow): string {
   return b?.title?.trim() || 'Untitled';
 }
 
-function dueBody(count: number, firstTitle: string): string {
-  if (count === 1) return `1 post due today: ${firstTitle}`;
-  return `${count} posts due today including ${firstTitle}`;
+function dueTitle(streak: number): string {
+  if (streak > 0) return `Keep your ${streak}-day streak alive`;
+  return "Come make today's video";
 }
 
-function overdueBody(count: number): string {
-  if (count === 1) return '1 post is overdue';
-  return `${count} posts are overdue`;
+function dueBody(count: number, firstTitle: string, streak: number): string {
+  if (streak > 0) {
+    if (count === 1) {
+      return `Post today to protect your streak and keep earning: ${firstTitle}`;
+    }
+    return `${count} posts waiting — post today to protect your streak and keep earning`;
+  }
+  if (count === 1) return `Come make today's video and keep earning: ${firstTitle}`;
+  return `${count} posts waiting — come make them and keep earning`;
+}
+
+function overdueTitle(streak: number): string {
+  if (streak > 0) return `Keep your ${streak}-day streak alive`;
+  return 'Catch up and keep earning';
+}
+
+function overdueBody(count: number, streak: number): string {
+  if (streak > 0) {
+    if (count === 1) {
+      return 'Catch up on your overdue post to protect your streak and keep earning';
+    }
+    return `Catch up on ${count} overdue posts to protect your streak and keep earning`;
+  }
+  if (count === 1) return 'Catch up on your overdue post and keep earning';
+  return `Catch up on ${count} overdue posts and keep earning`;
 }
 
 Deno.serve(async (req) => {
@@ -113,6 +135,30 @@ Deno.serve(async (req) => {
       grouped.set(key, list);
     }
 
+    const companyIds = new Set<string>();
+    const creatorIds = new Set<string>();
+    for (const key of grouped.keys()) {
+      const parts = key.split(':');
+      companyIds.add(parts[0]);
+      creatorIds.add(parts[1]);
+    }
+
+    const streakByPair = new Map<string, number>();
+    if (companyIds.size > 0 && creatorIds.size > 0) {
+      const { data: streakRows, error: streakError } = await admin
+        .from('creator_streaks')
+        .select('company_id, creator_id, current_streak')
+        .in('company_id', [...companyIds])
+        .in('creator_id', [...creatorIds]);
+      if (streakError) throw new Error(streakError.message);
+      for (const row of streakRows ?? []) {
+        const streak = row.current_streak as number;
+        if (streak > 0) {
+          streakByPair.set(`${row.company_id}:${row.creator_id}`, streak);
+        }
+      }
+    }
+
     let claimed = 0;
     let pushes = 0;
     for (const [key, list] of grouped) {
@@ -145,12 +191,14 @@ Deno.serve(async (req) => {
       if (!inserted) continue;
       claimed += 1;
 
+      const streak = streakByPair.get(`${companyId}:${creatorId}`) ?? 0;
       const tokens = await creatorPushTokens(admin, creatorId, companyId);
-      const title = kind === 'due_today' ? 'Posts due today' : "You're behind";
+      const title =
+        kind === 'due_today' ? dueTitle(streak) : overdueTitle(streak);
       const body =
         kind === 'due_today'
-          ? dueBody(list.length, briefTitle(first))
-          : overdueBody(list.length);
+          ? dueBody(list.length, briefTitle(first), streak)
+          : overdueBody(list.length, streak);
       pushes += await sendExpoPush(tokens, {
         title,
         body,

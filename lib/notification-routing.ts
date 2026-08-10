@@ -69,11 +69,15 @@ export function routeNotificationTap(
     router.push('/(creator)/setup');
     return;
   }
-  if (event === 'post_live') {
+  if (event === 'post_live' || event === 'milestone') {
     const tiktok = str(data, 'tiktok_url');
     const ig = str(data, 'instagram_url');
     if (assignmentId) {
       router.push(`/(creator)/posts/${assignmentId}`);
+      return;
+    }
+    if (event === 'milestone') {
+      router.push('/(creator)/(tabs)');
       return;
     }
     if (tiktok || ig) {

@@ -250,8 +250,8 @@ Deno.serve(async (req) => {
         typeof body.amount_cents === 'number' ? body.amount_cents : 0;
       const tokens = await creatorPushTokens(admin, creatorId, companyId);
       const sent = await sendExpoPush(tokens, {
-        title: 'Bounty earned',
-        body: `You earned ${formatCentsLabel(amountCents)}`,
+        title: 'Bounty paid',
+        body: `${formatCentsLabel(amountCents)} just hit your wallet`,
         data: {
           event: body.event,
           creator_id: creatorId,
@@ -359,8 +359,8 @@ Deno.serve(async (req) => {
         if (body.event === 'streak_bonus') {
           const streak = typeof body.streak === 'number' ? body.streak : 0;
           const sent = await sendExpoPush(tokens, {
-            title: 'Streak bonus',
-            body: `You hit a ${streak}-day streak. ${amountLabel} is in your wallet.`,
+            title: `${amountLabel} streak bonus`,
+            body: `${streak}-day streak locked in. Cash is in your wallet.`,
             data: {
               creator_id: creatorId,
               event: body.event,
@@ -372,8 +372,8 @@ Deno.serve(async (req) => {
         }
         const days = typeof body.days === 'number' ? body.days : 0;
         const sent = await sendExpoPush(tokens, {
-          title: 'Streak almost there',
-          body: `Finish tomorrow's posts to unlock a ${amountLabel} ${days}-day streak bonus.`,
+          title: `${amountLabel} almost yours`,
+          body: `Post tomorrow to cash in your ${days}-day streak bonus.`,
           data: {
             creator_id: creatorId,
             event: body.event,
