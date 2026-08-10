@@ -2,6 +2,11 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../lib/auth';
 import type { StoredAccount } from '../lib/accounts';
+import {
+  profileCanCreate,
+  profileIsAdmin,
+  type AppMode,
+} from '../lib/active-mode';
 import { borderWidth, color, radius, type } from '../theme/tokens';
 import { Icon } from './ui/Icon';
 import { PressableScale } from './ui/PressableScale';
@@ -12,16 +17,17 @@ function roleLabel(role: string): string {
 }
 
 function AccountRow({
-  account,
+  title,
+  subtitle,
   active,
   onPress,
 }: {
-  account: StoredAccount;
+  title: string;
+  subtitle: string;
   active: boolean;
   onPress: () => void;
 }) {
-  const name = account.fullName?.trim() || account.email || 'Account';
-  const initial = name.charAt(0).toUpperCase();
+  const initial = title.charAt(0).toUpperCase();
 
   return (
     <PressableScale
@@ -35,11 +41,10 @@ function AccountRow({
       </View>
       <View style={styles.meta}>
         <Text style={styles.name} numberOfLines={1}>
-          {name}
+          {title}
         </Text>
         <Text style={styles.sub} numberOfLines={1}>
-          {roleLabel(account.role)}
-          {account.email ? ` · ${account.email}` : ''}
+          {subtitle}
         </Text>
       </View>
       {active ? (
@@ -56,24 +61,63 @@ export function AccountSwitcherSheet({
   visible: boolean;
   onClose: () => void;
 }) {
-  const { profile, accounts, switchAccount, addAccount } = useAuth();
+  const {
+    profile,
+    accounts,
+    activeMode,
+    switchAccount,
+    addAccount,
+    setActiveMode,
+    enableCreatorMode,
+  } = useAuth();
 
-  const hasCreator = accounts.some((a) => a.role === 'creator');
-  const showBecomeCreator = profile?.role === 'admin' && !hasCreator;
-  const addLabel = showBecomeCreator ? 'Become a creator' : 'Add account';
+  const isDual =
+    !!profile && profileIsAdmin(profile) && profileCanCreate(profile);
+  const showBecomeCreator =
+    !!profile && profileIsAdmin(profile) && !profile.can_create;
+  const displayName = profile?.full_name?.trim() || profile?.id || 'Account';
+  const email = accounts.find((a) => a.userId === profile?.id)?.email ?? null;
 
-  async function onSwitch(userId: string) {
-    if (userId === profile?.id) {
+  async function onSwitchMode(mode: AppMode) {
+    if (mode === activeMode) {
       onClose();
       return;
     }
     try {
       onClose();
-      await switchAccount(userId);
+      await setActiveMode(mode);
+    } catch (e) {
+      Alert.alert(
+        'Could not switch',
+        e instanceof Error ? e.message : 'Try again.',
+      );
+    }
+  }
+
+  async function onSwitch(account: StoredAccount) {
+    if (account.userId === profile?.id) {
+      onClose();
+      return;
+    }
+    try {
+      onClose();
+      await switchAccount(account.userId);
     } catch (e) {
       Alert.alert(
         'Could not switch',
         e instanceof Error ? e.message : 'Try signing in again.',
+      );
+    }
+  }
+
+  async function onBecomeCreator() {
+    try {
+      onClose();
+      await enableCreatorMode();
+    } catch (e) {
+      Alert.alert(
+        'Could not continue',
+        e instanceof Error ? e.message : 'Try again.',
       );
     }
   }
@@ -90,29 +134,71 @@ export function AccountSwitcherSheet({
     }
   }
 
+  const otherAccounts = accounts.filter((a) => a.userId !== profile?.id);
+
   return (
     <SheetShell visible={visible} onClose={onClose}>
       <View style={styles.list}>
-        {accounts.map((account) => (
+        {isDual ? (
+          <>
+            <AccountRow
+              title={displayName}
+              subtitle={`Admin${email ? ` · ${email}` : ''}`}
+              active={activeMode === 'admin'}
+              onPress={() => void onSwitchMode('admin')}
+            />
+            <AccountRow
+              title={displayName}
+              subtitle={`Creator${email ? ` · ${email}` : ''}`}
+              active={activeMode === 'creator'}
+              onPress={() => void onSwitchMode('creator')}
+            />
+          </>
+        ) : profile ? (
+          <AccountRow
+            title={displayName}
+            subtitle={`${roleLabel(profile.role)}${email ? ` · ${email}` : ''}`}
+            active
+            onPress={onClose}
+          />
+        ) : null}
+
+        {otherAccounts.map((account) => (
           <AccountRow
             key={account.userId}
-            account={account}
-            active={account.userId === profile?.id}
-            onPress={() => void onSwitch(account.userId)}
+            title={account.fullName?.trim() || account.email || 'Account'}
+            subtitle={`${roleLabel(account.role)}${
+              account.email ? ` · ${account.email}` : ''
+            }`}
+            active={false}
+            onPress={() => void onSwitch(account)}
           />
         ))}
       </View>
 
-      <PressableScale
-        accessibilityRole="button"
-        onPress={() => void onAdd()}
-        style={styles.addRow}
-      >
-        <View style={styles.addIcon}>
-          <Icon name="plus" size={20} color={color.ink} />
-        </View>
-        <Text style={styles.addLabel}>{addLabel}</Text>
-      </PressableScale>
+      {showBecomeCreator ? (
+        <PressableScale
+          accessibilityRole="button"
+          onPress={() => void onBecomeCreator()}
+          style={styles.addRow}
+        >
+          <View style={styles.addIcon}>
+            <Icon name="plus" size={20} color={color.ink} />
+          </View>
+          <Text style={styles.addLabel}>Become a creator</Text>
+        </PressableScale>
+      ) : (
+        <PressableScale
+          accessibilityRole="button"
+          onPress={() => void onAdd()}
+          style={styles.addRow}
+        >
+          <View style={styles.addIcon}>
+            <Icon name="plus" size={20} color={color.ink} />
+          </View>
+          <Text style={styles.addLabel}>Add account</Text>
+        </PressableScale>
+      )}
     </SheetShell>
   );
 }

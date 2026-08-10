@@ -90,7 +90,7 @@ async function fetchAvatars(companyId: string): Promise<Map<string, string>> {
     .from('profiles')
     .select('id, avatar_path')
     .eq('company_id', companyId)
-    .eq('role', 'creator');
+    .or('role.eq.creator,can_create.eq.true');
   const withPath = (profiles ?? []).filter(
     (p): p is { id: string; avatar_path: string } => p.avatar_path !== null,
   );

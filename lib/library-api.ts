@@ -161,7 +161,7 @@ export async function listCreatorOptions(
     .from('profiles')
     .select('id, full_name')
     .eq('company_id', companyId)
-    .eq('role', 'creator')
+    .or('role.eq.creator,can_create.eq.true')
     .order('full_name');
   if (error) throw error;
   return data ?? [];

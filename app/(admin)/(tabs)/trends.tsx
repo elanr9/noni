@@ -53,7 +53,7 @@ export default function TrendsScreen() {
         listCreators(profile.company_id),
       ]);
       setTrends(t);
-      setCreators(c.filter((p) => p.role === 'creator'));
+      setCreators(c.filter((p) => p.role === 'creator' || p.can_create));
     } finally {
       setLoading(false);
       setRefreshing(false);

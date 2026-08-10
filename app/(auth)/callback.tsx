@@ -9,7 +9,7 @@ import { createSessionFromUrl } from '../../lib/auth-session';
 import { destinationForProfile } from '../../lib/profile';
 
 export default function AuthCallbackScreen() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, activeMode } = useAuth();
   const params = useLocalSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [handled, setHandled] = useState(false);
@@ -50,7 +50,7 @@ export default function AuthCallbackScreen() {
   }
 
   if (session) {
-    return <Redirect href={destinationForProfile(profile, true)} />;
+    return <Redirect href={destinationForProfile(profile, true, activeMode)} />;
   }
 
   return <Redirect href="/(auth)/login" />;

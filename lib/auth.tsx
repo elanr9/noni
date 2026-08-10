@@ -17,7 +17,16 @@ import {
   upsertStoredAccount,
   type StoredAccount,
 } from './accounts';
-import { registerPushToken } from './notifications';
+import {
+  modesForProfile,
+  resolveMode,
+  setStoredMode,
+  type AppMode,
+} from './active-mode';
+import {
+  attachNotificationRouting,
+  registerPushToken,
+} from './notifications';
 import { destinationForProfile, type Profile } from './profile';
 import { supabase } from './supabase';
 
@@ -26,8 +35,11 @@ type AuthState = {
   profile: Profile | null;
   loading: boolean;
   accounts: StoredAccount[];
+  activeMode: AppMode;
   refreshProfile: () => Promise<void>;
   refreshAccounts: () => Promise<void>;
+  setActiveMode: (mode: AppMode) => Promise<void>;
+  enableCreatorMode: () => Promise<void>;
   signOut: () => Promise<void>;
   switchAccount: (userId: string) => Promise<void>;
   addAccount: () => Promise<void>;
@@ -76,10 +88,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
+  const [activeMode, setActiveModeState] = useState<AppMode>('admin');
   const [loading, setLoading] = useState(true);
 
   const refreshAccounts = useCallback(async () => {
     setAccounts(await listStoredAccounts());
+  }, []);
+
+  const applyProfileMode = useCallback(async (next: Profile | null) => {
+    if (!next) {
+      setActiveModeState('admin');
+      return;
+    }
+    try {
+      const mode = await resolveMode(next);
+      setActiveModeState(mode);
+      await setStoredMode(next.id, mode);
+    } catch (e) {
+      console.error('active mode resolve failed', e);
+      setActiveModeState(next.role === 'admin' ? 'admin' : 'creator');
+    }
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -90,11 +118,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const next = await fetchProfile(userId);
     setProfile(next);
+    await applyProfileMode(next);
     if (session) {
       await upsertStoredAccount(session, next);
       await refreshAccounts();
     }
-  }, [session, refreshAccounts]);
+  }, [session, refreshAccounts, applyProfileMode]);
 
   useEffect(() => {
     let mounted = true;
@@ -110,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const next = await fetchProfile(data.session.user.id);
           if (!mounted) return;
           setProfile(next);
+          await applyProfileMode(next);
           await upsertStoredAccount(data.session, next);
           if (mounted) await refreshAccounts();
         }
@@ -126,10 +156,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextSession?.user) {
         const next = await fetchProfile(nextSession.user.id);
         setProfile(next);
+        await applyProfileMode(next);
         await upsertStoredAccount(nextSession, next);
         await refreshAccounts();
       } else {
         setProfile(null);
+        setActiveModeState('admin');
       }
       setLoading(false);
     });
@@ -138,12 +170,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [refreshAccounts]);
+  }, [refreshAccounts, applyProfileMode]);
 
   useEffect(() => {
     const userId = session?.user?.id;
     if (userId) void registerPushToken(userId);
   }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (loading || !session?.user) return;
+    return attachNotificationRouting(() => activeMode);
+  }, [loading, session?.user?.id, activeMode]);
+
+  const setActiveMode = useCallback(
+    async (mode: AppMode) => {
+      if (!profile) return;
+      if (!modesForProfile(profile).includes(mode)) return;
+      try {
+        await setStoredMode(profile.id, mode);
+      } catch (e) {
+        console.error('active mode persist failed', e);
+      }
+      setActiveModeState(mode);
+      router.replace(destinationForProfile(profile, true, mode));
+    },
+    [profile],
+  );
+
+  const enableCreatorMode = useCallback(async () => {
+    if (!profile || !session) return;
+    if (profile.can_create !== true) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ can_create: true })
+        .eq('id', profile.id);
+      if (error) throw error;
+    }
+    const next = await fetchProfile(profile.id);
+    if (!next) throw new Error('Could not refresh profile.');
+    setProfile(next);
+    await upsertStoredAccount(session, next);
+    await refreshAccounts();
+    try {
+      await setStoredMode(next.id, 'creator');
+    } catch (e) {
+      console.error('active mode persist failed', e);
+    }
+    setActiveModeState('creator');
+    router.replace(destinationForProfile(next, true, 'creator'));
+  }, [profile, session, refreshAccounts]);
 
   const switchAccount = useCallback(
     async (userId: string) => {
@@ -156,7 +231,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const nextProfile = await activateStoredAccount(userId);
         await refreshAccounts();
-        router.replace(destinationForProfile(nextProfile, true));
+        const mode = nextProfile ? await resolveMode(nextProfile) : 'creator';
+        setActiveModeState(mode);
+        router.replace(destinationForProfile(nextProfile, true, mode));
       } catch (e) {
         await refreshAccounts();
         throw e;
@@ -187,7 +264,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const nextProfile = await activateStoredAccount(remaining[0].userId);
         await refreshAccounts();
-        router.replace(destinationForProfile(nextProfile, true));
+        const mode = nextProfile ? await resolveMode(nextProfile) : 'creator';
+        setActiveModeState(mode);
+        router.replace(destinationForProfile(nextProfile, true, mode));
       } catch {
         setProfile(null);
         await refreshAccounts();
@@ -204,8 +283,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       loading,
       accounts,
+      activeMode,
       refreshProfile,
       refreshAccounts,
+      setActiveMode,
+      enableCreatorMode,
       signOut,
       switchAccount,
       addAccount,
@@ -215,8 +297,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       loading,
       accounts,
+      activeMode,
       refreshProfile,
       refreshAccounts,
+      setActiveMode,
+      enableCreatorMode,
       signOut,
       switchAccount,
       addAccount,

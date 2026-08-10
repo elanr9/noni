@@ -10,9 +10,9 @@ export type StreakMilestone = {
 };
 
 export const DEFAULT_STREAK_MILESTONES: StreakMilestone[] = [
-  { days: 7, amountCents: 1000 },
-  { days: 14, amountCents: 2500 },
-  { days: 30, amountCents: 7500 },
+  { days: 3, amountCents: 2000 },
+  { days: 10, amountCents: 10000 },
+  { days: 31, amountCents: 30000 },
 ];
 
 export function parseStreakMilestones(
@@ -83,3 +83,85 @@ export function streakBonusText(
   const remaining = next.days - currentStreak;
   return `${amount} bonus in ${remaining} ${remaining === 1 ? 'day' : 'days'}`;
 }
+
+export type StreakRecordResult = {
+  streak: number;
+  bonus_cents: number;
+  counted: boolean;
+  near_milestone_days: number | null;
+  near_milestone_cents: number | null;
+};
+
+function formatDollars(cents: number): string {
+  const n = cents / 100;
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+
+/** Push streak bonus / one-day-away progress after a day is counted. */
+export function notifyStreakResult(
+  creatorId: string,
+  result: StreakRecordResult,
+): void {
+  if (!result.counted) return;
+  if (result.bonus_cents > 0) {
+    void supabase.functions.invoke('notify', {
+      body: {
+        creator_id: creatorId,
+        event: 'streak_bonus',
+        streak: result.streak,
+        amount_cents: result.bonus_cents,
+      },
+    });
+    return;
+  }
+  if (
+    result.near_milestone_days != null &&
+    result.near_milestone_cents != null &&
+    result.near_milestone_cents > 0
+  ) {
+    void supabase.functions.invoke('notify', {
+      body: {
+        creator_id: creatorId,
+        event: 'streak_progress',
+        streak: result.streak,
+        days: result.near_milestone_days,
+        amount_cents: result.near_milestone_cents,
+      },
+    });
+  }
+}
+
+export async function recordStreakDay(params: {
+  companyId: string;
+  creatorId: string;
+  day: string;
+}): Promise<StreakRecordResult | null> {
+  const { data, error } = await supabase.rpc('record_streak_approval', {
+    p_company: params.companyId,
+    p_creator: params.creatorId,
+    p_day: params.day,
+  });
+  if (error) {
+    console.warn('record_streak_approval:', error.message);
+    return null;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const row = data as Record<string, unknown>;
+  const result: StreakRecordResult = {
+    streak: typeof row.streak === 'number' ? row.streak : 0,
+    bonus_cents: typeof row.bonus_cents === 'number' ? row.bonus_cents : 0,
+    counted: row.counted === true,
+    near_milestone_days:
+      typeof row.near_milestone_days === 'number'
+        ? row.near_milestone_days
+        : null,
+    near_milestone_cents:
+      typeof row.near_milestone_cents === 'number'
+        ? row.near_milestone_cents
+        : null,
+  };
+  notifyStreakResult(params.creatorId, result);
+  return result;
+}
+
+export { formatDollars as formatStreakBonusCents };

@@ -94,7 +94,7 @@ export function CalendarView(props: {
       ]);
       setAssignments(a);
       setCreators(
-        c.filter((p) => p.role === 'creator').map(creatorFromProfile),
+        c.filter((p) => p.role === 'creator' || p.can_create).map(creatorFromProfile),
       );
     } finally {
       setLoading(false);

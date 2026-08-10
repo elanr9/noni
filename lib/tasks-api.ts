@@ -1,5 +1,6 @@
 import { RELEVANCE_THRESHOLD } from '../supabase/functions/_shared/relevance';
 import { clearDraft } from './recording-drafts';
+import { recordStreakDay } from './streaks';
 import { supabase } from './supabase';
 import {
   type Assignment,
@@ -14,6 +15,12 @@ export type TrendItem = Database['public']['Tables']['trend_items']['Row'];
 export type Brief = Database['public']['Tables']['briefs']['Row'];
 
 export type AssignmentWithBrief = Assignment & { briefs: Brief };
+
+const STREAK_COUNT_STATUSES = new Set<TaskStatus>([
+  'submitted',
+  'approved',
+  'posted',
+]);
 
 /** Shape of assignments.metrics jsonb, written by the metrics poller. */
 export type AssignmentMetrics = {
@@ -263,7 +270,24 @@ export async function transitionTask(
     });
   }
 
-  return data as ContentTask;
+  const task = data as ContentTask;
+  if (
+    STREAK_COUNT_STATUSES.has(to) &&
+    !STREAK_COUNT_STATUSES.has(from) &&
+    task.assigned_to &&
+    task.company_id
+  ) {
+    const day = task.due_date ?? task.scheduled_for;
+    if (day) {
+      void recordStreakDay({
+        companyId: task.company_id,
+        creatorId: task.assigned_to,
+        day,
+      });
+    }
+  }
+
+  return task;
 }
 
 /**
@@ -291,6 +315,14 @@ export async function transitionAssignment(
   if (to === 'submitted') {
     void supabase.functions.invoke('notify', {
       body: { assignment_id: assignment.id, event: 'submitted' },
+    });
+  }
+
+  if (STREAK_COUNT_STATUSES.has(to) && !STREAK_COUNT_STATUSES.has(from)) {
+    void recordStreakDay({
+      companyId: assignment.company_id,
+      creatorId: assignment.creator_id,
+      day: assignment.scheduled_date,
     });
   }
 

@@ -132,6 +132,10 @@ export async function reviewAssignment(params: {
 }): Promise<Assignment> {
   const { assignment, submissionId, reviewerId, action, note } = params;
 
+  if (action === 'approved' && assignment.creator_id === reviewerId) {
+    throw new Error('You cannot approve your own submission.');
+  }
+
   const { error: eventError } = await supabase.from('review_events').insert({
     submission_id: submissionId,
     author_id: reviewerId,
@@ -253,6 +257,9 @@ export async function reviewTask(params: {
   note: string | null;
 }): Promise<ContentTask> {
   const { task, submissionId, reviewerId, action, note } = params;
+  if (action === 'approved' && task.assigned_to === reviewerId) {
+    throw new Error('You cannot approve your own submission.');
+  }
   assertTransition(task.status, action);
 
   const { error: eventError } = await supabase.from('review_events').insert({
@@ -704,7 +711,7 @@ export async function fetchCreatorLeaderboard(
       .from('profiles')
       .select('id, full_name')
       .eq('company_id', companyId)
-      .eq('role', 'creator')
+      .or('role.eq.creator,can_create.eq.true')
       .order('full_name'),
     supabase
       .from('assignments')

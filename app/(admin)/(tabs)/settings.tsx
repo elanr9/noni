@@ -65,7 +65,7 @@ function CompanyRow({
 }
 
 export default function SettingsScreen() {
-  const { profile, accounts, signOut, addAccount } = useAuth();
+  const { profile, signOut, enableCreatorMode } = useAuth();
   const router = useRouter();
   const [members, setMembers] = useState<CreatorSocialStatus[]>([]);
   const [docCount, setDocCount] = useState<number | null>(null);
@@ -73,7 +73,7 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const hasCreatorAccount = accounts.some((a) => a.role === 'creator');
+  const showBecomeCreator = profile?.role === 'admin' && !profile.can_create;
 
   const load = useCallback(async () => {
     try {
@@ -175,6 +175,12 @@ export default function SettingsScreen() {
           value={approvedCount !== null ? `${approvedCount} approved` : ''}
           onPress={() => router.push('/(admin)/features')}
         />
+        <CompanyRow
+          icon="dollar-sign"
+          title="Billing & budget"
+          value=""
+          onPress={() => router.push('/(admin)/billing')}
+        />
         <CompanyRow icon="clock" title="Publish time" value="Sun 8PM EST" />
       </View>
 
@@ -186,18 +192,25 @@ export default function SettingsScreen() {
         iconSize={20}
       />
       <View style={styles.rows}>
-        {!hasCreatorAccount ? (
+        {showBecomeCreator ? (
           <PressableScale
             accessibilityRole="button"
             onPress={() => {
               Alert.alert(
                 'Become a creator',
-                'You will sign up with a different email for your creator account. Your admin account stays saved so you can switch back anytime.',
+                'Stay on this account and switch into creator mode anytime. You will set up your posting accounts next.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {
                     text: 'Continue',
-                    onPress: () => void addAccount(),
+                    onPress: () => {
+                      void enableCreatorMode().catch((e) => {
+                        Alert.alert(
+                          'Could not continue',
+                          e instanceof Error ? e.message : 'Try again.',
+                        );
+                      });
+                    },
                   },
                 ],
               );

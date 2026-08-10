@@ -1,6 +1,7 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
+import { profileCanCreate, profileIsAdmin } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
 import { color } from '../../theme/tokens';
@@ -21,20 +22,30 @@ const SETUP_EXEMPT = [
 ];
 
 export default function CreatorLayout() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, activeMode } = useAuth();
   const pathname = usePathname();
 
-  const isCreator = profile?.role === 'creator' && profile.onboarded === true;
-  const setupFlagged = isCreator && isSetupCompleteFlag(profile.onboarding_answers);
-  const setup = useSetupState(isCreator && !setupFlagged ? profile : null);
+  const inCreatorMode =
+    !!profile &&
+    profile.onboarded === true &&
+    profileCanCreate(profile) &&
+    (!profileIsAdmin(profile) || activeMode === 'creator');
+  const setupFlagged =
+    inCreatorMode && isSetupCompleteFlag(profile.onboarding_answers);
+  const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
 
   if (loading) return <LoadingScreen />;
   if (!session) return <Redirect href="/(auth)/login" />;
   if (!profile || !profile.onboarded) {
     return <Redirect href="/(onboarding)" />;
   }
-  if (profile.role !== 'creator') {
-    return <Redirect href="/(admin)/(tabs)" />;
+  if (!inCreatorMode) {
+    // Dual admin in admin mode, or anyone who cannot create → admin app.
+    // Pure creators always pass inCreatorMode above.
+    if (profileIsAdmin(profile)) {
+      return <Redirect href="/(admin)/(tabs)" />;
+    }
+    return <Redirect href="/(auth)/login" />;
   }
 
   const exempt = SETUP_EXEMPT.some(

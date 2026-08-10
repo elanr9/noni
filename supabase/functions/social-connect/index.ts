@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
         .from('profiles')
         .select('id, full_name, role, upload_post_profile')
         .eq('company_id', caller.company_id)
-        .eq('role', 'creator')
+        .or('role.eq.creator,can_create.eq.true')
         .order('full_name');
 
       const members = [];
@@ -143,13 +143,21 @@ Deno.serve(async (req) => {
       }
       targetId = target.id;
     } else if (caller.role === 'admin' && body.action === 'connect_url') {
-      return jsonResponse(
-        {
-          error:
-            'Creators connect their own socials. Open team status to see who is linked.',
-        },
-        400,
-      );
+      // Dual-role admins (can_create) connect their own socials like creators.
+      const { data: self } = await admin
+        .from('profiles')
+        .select('can_create')
+        .eq('id', caller.id)
+        .maybeSingle();
+      if (!self?.can_create) {
+        return jsonResponse(
+          {
+            error:
+              'Creators connect their own socials. Open team status to see who is linked.',
+          },
+          400,
+        );
+      }
     } else if (caller.role !== 'creator' && caller.role !== 'admin') {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
@@ -179,8 +187,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // connect_url — creator only (enforced above for admins without creator_id path)
-    if (caller.role !== 'creator' || targetId !== caller.id) {
+    // connect_url — creator, or dual admin connecting self
+    const { data: selfRow } = await admin
+      .from('profiles')
+      .select('can_create')
+      .eq('id', caller.id)
+      .maybeSingle();
+    const dualAdmin = caller.role === 'admin' && selfRow?.can_create === true;
+    if (
+      !(caller.role === 'creator' || dualAdmin) ||
+      targetId !== caller.id
+    ) {
       return jsonResponse({ error: 'only the creator can connect their socials' }, 403);
     }
 

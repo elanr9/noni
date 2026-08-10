@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     .from('profiles')
     .select('id')
     .eq('company_id', campaign.company_id)
-    .eq('role', 'creator');
+    .or('role.eq.creator,can_create.eq.true');
   if (creatorsError) {
     return jsonResponse({ error: creatorsError.message }, 500);
   }

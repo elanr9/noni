@@ -445,3 +445,12 @@ verify_jwt = false
 
 [functions.notify-scheduled]
 verify_jwt = false
+
+[functions.company-billing]
+verify_jwt = false
+
+[functions.weekly-payouts]
+verify_jwt = false
+
+[functions.notify-reminders]
+verify_jwt = false

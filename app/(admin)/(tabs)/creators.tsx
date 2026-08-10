@@ -41,7 +41,7 @@ async function fetchCreatorExtras(
       .from('profiles')
       .select('id, avatar_path')
       .eq('company_id', companyId)
-      .eq('role', 'creator'),
+      .or('role.eq.creator,can_create.eq.true'),
     supabase
       .from('creator_accounts')
       .select('creator_id, tiktok_handle, instagram_handle')

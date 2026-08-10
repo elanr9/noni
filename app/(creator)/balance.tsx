@@ -10,12 +10,11 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { LoadingScreen, Screen } from '../../components/layout/Screen';
-import { SoftToast, SuccessState } from '../../components/states';
+import { SoftToast } from '../../components/states';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { SheetShell } from '../../components/ui/SheetShell';
 import { useAuth } from '../../lib/auth';
 import {
   formatCents,
@@ -24,7 +23,6 @@ import {
   getStripeConnectUrl,
   ledgerKindLabel,
   listLedger,
-  requestPayout,
   type CreatorWallet,
   type StripeConnectStatus,
   type WalletLedgerRow,
@@ -36,6 +34,9 @@ import {
   space,
   type,
 } from '../../theme/tokens';
+
+const PAYOUT_SCHEDULE =
+  'Payouts are net of a 3% platform fee and send every Sunday at 8PM Eastern to your connected bank. Available balance is what transfers on the next run.';
 
 function isPendingKind(kind: string): boolean {
   return kind === 'payout_hold' || kind === 'payout_pending';
@@ -72,7 +73,7 @@ function ledgerSubtitle(row: WalletLedgerRow): string {
 
 function ledgerTitle(row: WalletLedgerRow): string {
   if (isCashOutKind(row.kind)) {
-    return row.note?.trim() || 'Cash out to bank';
+    return row.note?.trim() || 'Payout to bank';
   }
   return row.note?.trim() || ledgerKindLabel(row.kind);
 }
@@ -103,12 +104,14 @@ export default function CreatorBalanceScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [successCents, setSuccessCents] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.id || !profile.company_id) return;
+    if (!profile?.id || !profile.company_id) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
       const [w, rows, status] = await Promise.all([
         getOrCreateWallet(profile.company_id, profile.id),
@@ -147,26 +150,11 @@ export default function CreatorBalanceScreen() {
     }
   }
 
-  async function confirmCashOut() {
-    setBusy(true);
-    try {
-      const result = await requestPayout();
-      setConfirmOpen(false);
-      setSuccessCents(result.amount_cents);
-      await load();
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Cash out failed. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading) return <LoadingScreen label="Loading balance" />;
 
   const onboarded = connect?.onboarded === true;
   const available = wallet?.available_cents ?? 0;
   const pending = wallet?.pending_cents ?? 0;
-  const canCashOut = onboarded && available > 0 && !busy;
 
   const clearingLine =
     pending > 0
@@ -179,31 +167,9 @@ export default function CreatorBalanceScreen() {
       ? 'Finish bank setup'
       : 'Connect a bank account';
 
-  if (successCents !== null) {
-    return (
-      <Screen
-        bg={color.white}
-        contentStyle={styles.successBody}
-        footer={
-          <Button
-            block
-            size="lg"
-            onPress={() => {
-              setSuccessCents(null);
-              router.back();
-            }}
-          >
-            Done
-          </Button>
-        }
-      >
-        <SuccessState
-          title="Cash out started"
-          body={`${formatCents(successCents)} is on the way to your bank. Stripe usually finishes in one to three business days.`}
-        />
-      </Screen>
-    );
-  }
+  const scheduleLine = onboarded
+    ? PAYOUT_SCHEDULE
+    : 'Connect a bank so payouts can send. Earnings pay out automatically every Sunday at 8PM Eastern once your bank is connected.';
 
   return (
     <Screen
@@ -211,26 +177,14 @@ export default function CreatorBalanceScreen() {
       edges={['top', 'left', 'right']}
       contentStyle={styles.content}
       footer={
-        onboarded ? (
-          <Button
-            block
-            size="lg"
-            icon="download"
-            disabled={!canCashOut}
-            onPress={() => setConfirmOpen(true)}
-          >
-            {available > 0
-              ? `Cash out ${formatCents(available)}`
-              : 'Nothing to cash out'}
-          </Button>
-        ) : (
+        onboarded ? undefined : (
           <Button
             block
             size="lg"
             disabled={busy}
             onPress={() => void setupConnect()}
           >
-            {connect?.account_id ? 'Finish payout setup' : 'Set up payouts'}
+            {connect?.account_id ? 'Finish bank setup' : 'Connect bank'}
           </Button>
         )
       }
@@ -261,9 +215,10 @@ export default function CreatorBalanceScreen() {
         }
       >
         <View style={styles.hero}>
-          <Text style={styles.heroLabel}>Available to cash out</Text>
+          <Text style={styles.heroLabel}>Available balance</Text>
           <Text style={styles.heroValue}>{formatCents(available)}</Text>
           <Text style={styles.heroClearing}>{clearingLine}</Text>
+          <Text style={styles.scheduleCopy}>{scheduleLine}</Text>
         </View>
 
         <PressableScale
@@ -273,11 +228,22 @@ export default function CreatorBalanceScreen() {
           onPress={() => void setupConnect()}
         >
           <View style={styles.bankIcon}>
-            <Icon name="dollar-sign" size={18} color={color.ink} />
+            <Icon
+              name={onboarded ? 'check' : 'dollar-sign'}
+              size={18}
+              color={color.ink}
+            />
           </View>
-          <Text style={styles.bankLabel} numberOfLines={1}>
-            {bankLabel}
-          </Text>
+          <View style={styles.bankText}>
+            <Text style={styles.bankLabel} numberOfLines={1}>
+              {bankLabel}
+            </Text>
+            {onboarded ? (
+              <Text style={styles.bankSub} numberOfLines={2}>
+                Next payout runs Sunday at 8PM Eastern
+              </Text>
+            ) : null}
+          </View>
           <Icon name="pencil" size={18} color={color.slate400} />
         </PressableScale>
 
@@ -308,42 +274,6 @@ export default function CreatorBalanceScreen() {
         )}
       </ScrollView>
 
-      <SheetShell
-        visible={confirmOpen}
-        onClose={() => {
-          if (!busy) setConfirmOpen(false);
-        }}
-        footer={
-          <View style={styles.sheetFooter}>
-            <Button
-              block
-              size="lg"
-              icon="download"
-              disabled={busy}
-              onPress={() => void confirmCashOut()}
-            >
-              Cash out {formatCents(available)}
-            </Button>
-            <Button
-              block
-              size="md"
-              variant="ghost"
-              disabled={busy}
-              onPress={() => setConfirmOpen(false)}
-            >
-              Cancel
-            </Button>
-          </View>
-        }
-      >
-        <View style={styles.sheetBody}>
-          <Text style={styles.sheetTitle}>Cash out?</Text>
-          <Text style={styles.sheetCopy}>
-            Send {formatCents(available)} to your connected bank via Stripe.
-            Noni never sees your bank login.
-          </Text>
-        </View>
-      </SheetShell>
       <SoftToast
         visible={toast !== null}
         message={toast ?? ''}
@@ -398,6 +328,13 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.regular,
     color: color.slate400,
   },
+  scheduleCopy: {
+    marginTop: space[2],
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
+  },
   bankRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,11 +352,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bankLabel: {
+  bankText: {
     flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  bankLabel: {
     fontSize: type.size.bodySm,
     fontWeight: type.weight.bold,
     color: color.ink,
+  },
+  bankSub: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
+    color: color.slate400,
   },
   sectionLabel: {
     fontSize: type.size.label,
@@ -428,10 +374,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: color.slate400,
     marginBottom: -8,
-  },
-  empty: {
-    fontSize: type.size.meta,
-    color: color.slate500,
   },
   ledgerRow: {
     flexDirection: 'row',
@@ -468,50 +410,5 @@ const styles = StyleSheet.create({
     fontSize: type.size.bodySm,
     fontWeight: type.weight.heavy,
     color: color.amber,
-  },
-  sheetBody: {
-    gap: space[3],
-  },
-  sheetTitle: {
-    fontSize: type.size.titleSm,
-    fontWeight: type.weight.heavy,
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-  },
-  sheetCopy: {
-    fontSize: type.size.body,
-    lineHeight: type.size.body * type.leading.body,
-    color: color.slate500,
-  },
-  sheetFooter: {
-    gap: space[2],
-  },
-  successBody: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[4],
-    paddingHorizontal: space[4],
-  },
-  successIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.pill,
-    backgroundColor: color.greenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  successTitle: {
-    fontSize: type.size.titleSm,
-    fontWeight: type.weight.heavy,
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-    textAlign: 'center',
-  },
-  successBodyText: {
-    fontSize: type.size.body,
-    lineHeight: type.size.body * type.leading.body,
-    color: color.slate500,
-    textAlign: 'center',
   },
 });

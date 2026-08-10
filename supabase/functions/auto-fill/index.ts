@@ -42,7 +42,7 @@ async function fillCompany(admin: SupabaseClient, companyId: string): Promise<nu
       .from('profiles')
       .select('id')
       .eq('company_id', companyId)
-      .eq('role', 'creator')
+      .or('role.eq.creator,can_create.eq.true')
       .eq('onboarded', true),
     loadBrandContext(admin, companyId),
   ]);

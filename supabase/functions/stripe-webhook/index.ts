@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
+import { adminPushTokens, sendExpoPush } from '../_shared/push.ts';
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -74,12 +75,179 @@ async function resolvePromoCodes(
   return [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
 }
 
+async function handleCompanyBillingSetup(
+  admin: SupabaseClient,
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+) {
+  const companyId = session.metadata?.company_id;
+  if (!companyId) {
+    return { skipped: true, reason: 'company_billing_setup missing company_id' };
+  }
+
+  const customerId =
+    typeof session.customer === 'string'
+      ? session.customer
+      : session.customer?.id ?? null;
+  if (!customerId) {
+    return { skipped: true, reason: 'company_billing_setup missing customer' };
+  }
+
+  const setupIntentId =
+    typeof session.setup_intent === 'string'
+      ? session.setup_intent
+      : session.setup_intent?.id ?? null;
+  if (!setupIntentId) {
+    return { skipped: true, reason: 'company_billing_setup missing setup_intent' };
+  }
+
+  const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+  const paymentMethodId =
+    typeof setupIntent.payment_method === 'string'
+      ? setupIntent.payment_method
+      : setupIntent.payment_method?.id ?? null;
+  if (!paymentMethodId) {
+    return { skipped: true, reason: 'company_billing_setup missing payment_method' };
+  }
+
+  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+  await stripe.customers.update(customerId, {
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
+
+  const bank = pm.us_bank_account;
+  const { error } = await admin.from('company_billing').upsert(
+    {
+      company_id: companyId,
+      stripe_customer_id: customerId,
+      stripe_payment_method_id: paymentMethodId,
+      bank_last4: bank?.last4 ?? null,
+      bank_name: bank?.bank_name ?? null,
+      payouts_enabled: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id' },
+  );
+  if (error) throw error;
+
+  return {
+    ok: true,
+    purpose: 'company_billing_setup',
+    company_id: companyId,
+    payment_method_id: paymentMethodId,
+    bank_last4: bank?.last4 ?? null,
+  };
+}
+
+async function handleCompanyCreditTopup(
+  admin: SupabaseClient,
+  session: Stripe.Checkout.Session,
+) {
+  const companyId = session.metadata?.company_id;
+  if (!companyId) {
+    return { skipped: true, reason: 'company_credit_topup missing company_id' };
+  }
+
+  const amountFromMeta = Number(session.metadata?.amount_cents ?? NaN);
+  const amountCents =
+    Number.isFinite(amountFromMeta) && amountFromMeta > 0
+      ? Math.floor(amountFromMeta)
+      : (session.amount_total ?? 0);
+  if (amountCents <= 0) {
+    return { skipped: true, reason: 'company_credit_topup amount <= 0' };
+  }
+
+  await admin.from('company_billing').upsert(
+    { company_id: companyId, updated_at: new Date().toISOString() },
+    { onConflict: 'company_id' },
+  );
+
+  // Insert ledger first — unique session id is the idempotency key.
+  const { error: ledgerError } = await admin.from('company_credit_ledger').insert({
+    company_id: companyId,
+    kind: 'topup',
+    amount_cents: amountCents,
+    stripe_checkout_session_id: session.id,
+    note: `Stripe Checkout top-up ${session.id}`,
+  });
+  if (ledgerError) {
+    if (ledgerError.code === '23505') {
+      return {
+        ok: true,
+        purpose: 'company_credit_topup',
+        company_id: companyId,
+        amount_cents: amountCents,
+        idempotent: true,
+      };
+    }
+    throw ledgerError;
+  }
+
+  const { data: billing, error: readError } = await admin
+    .from('company_billing')
+    .select('credit_balance_cents')
+    .eq('company_id', companyId)
+    .single();
+  if (readError) throw readError;
+
+  const nextBalance = (billing.credit_balance_cents ?? 0) + amountCents;
+  const { error: balError } = await admin
+    .from('company_billing')
+    .update({
+      credit_balance_cents: nextBalance,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('company_id', companyId);
+  if (balError) throw balError;
+
+  try {
+    const dollars = amountCents / 100;
+    const label = Number.isInteger(dollars)
+      ? `$${dollars}`
+      : `$${dollars.toFixed(2)}`;
+    const tokens = await adminPushTokens(admin, companyId);
+    await sendExpoPush(tokens, {
+      title: 'Credits added',
+      body: `${label} added to your UGC credits`,
+      data: {
+        event: 'company_topup',
+        company_id: companyId,
+        amount_cents: String(amountCents),
+      },
+    });
+  } catch (e) {
+    console.error('company_topup push:', e);
+  }
+
+  return {
+    ok: true,
+    purpose: 'company_credit_topup',
+    company_id: companyId,
+    amount_cents: amountCents,
+    balance_after: nextBalance,
+  };
+}
+
 async function handleCheckoutCompleted(
   admin: SupabaseClient,
   stripe: Stripe,
   event: Stripe.Event,
 ) {
   const session = event.data.object as Stripe.Checkout.Session;
+  if (
+    session.mode === 'setup' &&
+    session.metadata?.purpose === 'company_billing_setup'
+  ) {
+    return await handleCompanyBillingSetup(admin, stripe, session);
+  }
+
+  if (
+    session.mode === 'payment' &&
+    session.metadata?.purpose === 'company_credit_topup'
+  ) {
+    return await handleCompanyCreditTopup(admin, session);
+  }
+
   const codes = await resolvePromoCodes(stripe, session);
   if (codes.length === 0) {
     return { skipped: true, reason: 'no attribution code on session' };

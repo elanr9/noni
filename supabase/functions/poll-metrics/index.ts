@@ -6,7 +6,15 @@ import {
   handleCors,
   jsonResponse,
 } from '../_shared/wp8.ts';
-import { adminPushTokens, sendExpoPush } from '../_shared/push.ts';
+import {
+  formatCentsDollars,
+  spendCompanyCreditsForEarning,
+} from '../_shared/credits.ts';
+import {
+  adminPushTokens,
+  creatorPushTokens,
+  sendExpoPush,
+} from '../_shared/push.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -136,36 +144,54 @@ async function fetchPostAnalytics(
   return extractMetrics(body, platform);
 }
 
-async function ensureWallet(
+async function notifyCreditsLow(
   admin: SupabaseClient,
   companyId: string,
-  creatorId: string,
-): Promise<{ id: string; available_cents: number }> {
-  const { data: existing } = await admin
-    .from('creator_wallets')
-    .select('id, available_cents')
-    .eq('company_id', companyId)
-    .eq('creator_id', creatorId)
-    .maybeSingle();
-  if (existing) return existing;
-
-  const { data, error } = await admin
-    .from('creator_wallets')
-    .insert({ company_id: companyId, creator_id: creatorId })
-    .select('id, available_cents')
-    .single();
-  if (error) {
-    const { data: again, error: againError } = await admin
-      .from('creator_wallets')
-      .select('id, available_cents')
-      .eq('company_id', companyId)
-      .eq('creator_id', creatorId)
-      .single();
-    if (againError) throw error;
-    return again;
+): Promise<void> {
+  try {
+    const tokens = await adminPushTokens(admin, companyId);
+    await sendExpoPush(tokens, {
+      title: 'Credits low',
+      body: 'UGC credits too low to pay bounties',
+      data: { event: 'credits_low', company_id: companyId },
+    });
+  } catch (e) {
+    console.error(`credits_low push ${companyId}:`, e);
   }
-  return data;
 }
+
+async function notifyBountyEarned(
+  admin: SupabaseClient,
+  params: {
+    companyId: string;
+    creatorId: string;
+    assignmentId: string | null;
+    postId: string;
+    creatorNet: number;
+  },
+): Promise<void> {
+  try {
+    const tokens = await creatorPushTokens(
+      admin,
+      params.creatorId,
+      params.companyId,
+    );
+    await sendExpoPush(tokens, {
+      title: 'Bounty earned',
+      body: `You earned ${formatCentsDollars(params.creatorNet)}`,
+      data: {
+        event: 'bounty_earned',
+        assignment_id: params.assignmentId,
+        post_id: params.postId,
+        amount_cents: String(params.creatorNet),
+      },
+    });
+  } catch (e) {
+    console.error(`bounty_earned push ${params.postId}:`, e);
+  }
+}
+
+type BountyCreditOutcome = 'credited' | 'skipped' | 'insufficient';
 
 async function maybeCreditBounty(
   admin: SupabaseClient,
@@ -177,8 +203,8 @@ async function maybeCreditBounty(
     amountCents: number;
     viewThreshold: number;
   },
-): Promise<boolean> {
-  if (params.views < params.viewThreshold) return false;
+): Promise<BountyCreditOutcome> {
+  if (params.views < params.viewThreshold) return 'skipped';
 
   const { data: existing } = await admin
     .from('wallet_ledger')
@@ -186,37 +212,42 @@ async function maybeCreditBounty(
     .eq('post_id', params.postId)
     .eq('kind', 'bounty_credit')
     .maybeSingle();
-  if (existing) return false;
+  if (existing) return 'skipped';
 
-  const wallet = await ensureWallet(admin, params.companyId, params.creatorId);
-
-  const { error: ledgerError } = await admin.from('wallet_ledger').insert({
-    company_id: params.companyId,
-    creator_id: params.creatorId,
-    kind: 'bounty_credit',
-    amount_cents: params.amountCents,
-    post_id: params.postId,
-    note: `Bounty at ${params.viewThreshold} views`,
+  const spend = await spendCompanyCreditsForEarning(admin, {
+    companyId: params.companyId,
+    creatorId: params.creatorId,
+    assignmentId: null,
+    grossCents: params.amountCents,
+    kind: 'bounty_debit',
+    postId: params.postId,
   });
-  if (ledgerError) {
-    // Unique (post_id, kind) — already credited by a concurrent poll.
-    if (ledgerError.code === '23505') return false;
-    throw ledgerError;
+  if (!spend.ok) {
+    if (spend.reason === 'insufficient_credits') {
+      console.warn(
+        `bounty insufficient_credits company=${params.companyId} post=${params.postId} gross=${params.amountCents}`,
+      );
+      return 'insufficient';
+    }
+    console.error(`legacy bounty spend ${params.postId}:`, spend.reason);
+    return 'skipped';
   }
 
-  const { error: balError } = await admin
-    .from('creator_wallets')
-    .update({ available_cents: wallet.available_cents + params.amountCents })
-    .eq('id', wallet.id)
-    .eq('available_cents', wallet.available_cents);
-  if (balError) throw balError;
-
-  return true;
+  if (!spend.idempotent) {
+    await notifyBountyEarned(admin, {
+      companyId: params.companyId,
+      creatorId: params.creatorId,
+      assignmentId: null,
+      postId: params.postId,
+      creatorNet: spend.creator_net,
+    });
+  }
+  return 'credited';
 }
 
 /**
- * Assignment-level bounty. The CAS on bounty_credited_at is the idempotency
- * guard; the ledger unique (post_id, kind) backstops legacy per-post credits.
+ * Spend prepaid credits first; only then set bounty_credited_at.
+ * On insufficient_credits leave bounty_credited_at null so later polls retry.
  */
 async function creditAssignmentBounty(
   admin: SupabaseClient,
@@ -228,42 +259,48 @@ async function creditAssignmentBounty(
     amountCents: number;
     viewThreshold: number;
   },
-): Promise<boolean> {
+): Promise<BountyCreditOutcome> {
+  const spend = await spendCompanyCreditsForEarning(admin, {
+    companyId: params.companyId,
+    creatorId: params.creatorId,
+    assignmentId: params.assignmentId,
+    grossCents: params.amountCents,
+    kind: 'bounty_debit',
+    postId: params.postId,
+  });
+  if (!spend.ok) {
+    if (spend.reason === 'insufficient_credits') {
+      console.warn(
+        `bounty insufficient_credits company=${params.companyId} assignment=${params.assignmentId} gross=${params.amountCents}`,
+      );
+      return 'insufficient';
+    }
+    console.error(`assignment bounty spend ${params.assignmentId}:`, spend.reason);
+    return 'skipped';
+  }
+
   const { data: claimed, error: claimError } = await admin
     .from('assignments')
     .update({
       bounty_credited_at: new Date().toISOString(),
-      bounty_amount_cents: params.amountCents,
+      bounty_amount_cents: spend.creator_net,
     })
     .eq('id', params.assignmentId)
     .is('bounty_credited_at', null)
     .select('id');
   if (claimError) throw claimError;
-  if (!claimed?.length) return false;
+  if (!claimed?.length) return 'skipped';
 
-  const wallet = await ensureWallet(admin, params.companyId, params.creatorId);
-
-  const { error: ledgerError } = await admin.from('wallet_ledger').insert({
-    company_id: params.companyId,
-    creator_id: params.creatorId,
-    kind: 'bounty_credit',
-    amount_cents: params.amountCents,
-    post_id: params.postId,
-    note: `Bounty at ${params.viewThreshold} views`,
-  });
-  if (ledgerError) {
-    if (ledgerError.code === '23505') return false;
-    throw ledgerError;
+  if (!spend.idempotent) {
+    await notifyBountyEarned(admin, {
+      companyId: params.companyId,
+      creatorId: params.creatorId,
+      assignmentId: params.assignmentId,
+      postId: params.postId,
+      creatorNet: spend.creator_net,
+    });
   }
-
-  const { error: balError } = await admin
-    .from('creator_wallets')
-    .update({ available_cents: wallet.available_cents + params.amountCents })
-    .eq('id', wallet.id)
-    .eq('available_cents', wallet.available_cents);
-  if (balError) throw balError;
-
-  return true;
+  return 'credited';
 }
 
 type AssignmentRow = {
@@ -449,6 +486,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   let polled = 0;
   let credited = 0;
   let skipped = 0;
+  let creditsLowNotified = false;
   const rollups = new Map<string, AssignmentRollup>();
   type MilestoneClaim = {
     postId: string;
@@ -541,7 +579,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     }
 
     // Legacy post with no assignment: per-post bounty on max views in history.
-    const didCredit = await maybeCreditBounty(admin, {
+    const outcome = await maybeCreditBounty(admin, {
       companyId,
       creatorId: post.creatorId,
       postId: post.postId,
@@ -549,7 +587,11 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       amountCents: bounty.amountCents,
       viewThreshold: bounty.viewThreshold,
     });
-    if (didCredit) credited += 1;
+    if (outcome === 'credited') credited += 1;
+    if (outcome === 'insufficient' && !creditsLowNotified) {
+      creditsLowNotified = true;
+      await notifyCreditsLow(admin, companyId);
+    }
   }
 
   // One push per post that crossed something, naming the highest new
@@ -648,7 +690,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       continue;
     }
     if (assignment.bounty_credited_at === null && bountyViews >= bounty.viewThreshold) {
-      const didCredit = await creditAssignmentBounty(admin, {
+      const outcome = await creditAssignmentBounty(admin, {
         companyId,
         creatorId: rollup.creatorId,
         assignmentId,
@@ -656,7 +698,11 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
         amountCents: bounty.amountCents,
         viewThreshold: bounty.viewThreshold,
       });
-      if (didCredit) credited += 1;
+      if (outcome === 'credited') credited += 1;
+      if (outcome === 'insufficient' && !creditsLowNotified) {
+        creditsLowNotified = true;
+        await notifyCreditsLow(admin, companyId);
+      }
     }
   }
 

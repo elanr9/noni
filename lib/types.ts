@@ -2035,6 +2035,7 @@ export type Database = {
           baseline_updated_at: string | null
           bio_facts: Json
           birthday: string | null
+          can_create: boolean
           can_film_with_second_person: boolean
           company_id: string
           created_at: string | null
@@ -2061,6 +2062,7 @@ export type Database = {
           baseline_updated_at?: string | null
           bio_facts?: Json
           birthday?: string | null
+          can_create?: boolean
           can_film_with_second_person?: boolean
           company_id: string
           created_at?: string | null
@@ -2087,6 +2089,7 @@ export type Database = {
           baseline_updated_at?: string | null
           bio_facts?: Json
           birthday?: string | null
+          can_create?: boolean
           can_film_with_second_person?: boolean
           company_id?: string
           created_at?: string | null
@@ -2905,8 +2908,8 @@ export type Database = {
         Returns: number
       }
       record_streak_approval: {
-        Args: { p_company: string; p_creator: string }
-        Returns: undefined
+        Args: { p_company: string; p_creator: string; p_day?: string }
+        Returns: Json
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
       streak_bonus_cents: {

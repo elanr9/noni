@@ -7,7 +7,7 @@ import { hasOnboardedLocally } from '../lib/onboarding';
 import { destinationForProfile } from '../lib/profile';
 
 export default function Index() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, activeMode } = useAuth();
   const [returning, setReturning] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function Index() {
   }
 
   if (session) {
-    return <Redirect href={destinationForProfile(profile, true)} />;
+    return <Redirect href={destinationForProfile(profile, true, activeMode)} />;
   }
 
   // Fresh install: straight into the pre-auth onboarding. Anyone who has

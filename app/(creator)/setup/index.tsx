@@ -237,7 +237,7 @@ export default function SetupChecklistScreen() {
       ? undefined
       : state.bank === 'done'
         ? undefined
-        : 'Where your payouts land';
+        : 'Where your payouts land every Sunday at 8PM Eastern';
 
   type Cta = { label: string; onPress: () => void; busy?: boolean };
   let cta: Cta | null = null;

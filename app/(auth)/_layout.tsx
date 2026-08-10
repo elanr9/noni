@@ -5,14 +5,14 @@ import { useAuth } from '../../lib/auth';
 import { destinationForProfile } from '../../lib/profile';
 
 export default function AuthLayout() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, activeMode } = useAuth();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (session) {
-    const dest = destinationForProfile(profile, true);
+    const dest = destinationForProfile(profile, true, activeMode);
     if (dest !== '/(auth)/login') {
       return <Redirect href={dest} />;
     }

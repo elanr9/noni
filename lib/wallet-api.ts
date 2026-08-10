@@ -82,30 +82,13 @@ export async function getStripeConnectUrl(): Promise<string> {
   return payload.url;
 }
 
+/** Manual cash-out is disabled; weekly job pays Sunday 8PM ET. */
 export async function requestPayout(): Promise<{
   payout_id: string;
   amount_cents: number;
   transfer_id: string;
 }> {
-  const { data, error } = await supabase.functions.invoke('creator-payout', {
-    body: {},
-  });
-  if (error) throw error;
-  const payload = data as {
-    payout_id?: string;
-    amount_cents?: number;
-    transfer_id?: string;
-    error?: string;
-  };
-  if (payload.error) throw new Error(payload.error);
-  if (!payload.payout_id || payload.amount_cents == null || !payload.transfer_id) {
-    throw new Error('Payout response incomplete');
-  }
-  return {
-    payout_id: payload.payout_id,
-    amount_cents: payload.amount_cents,
-    transfer_id: payload.transfer_id,
-  };
+  throw new Error('Payouts run Sunday 8PM ET');
 }
 
 export function formatCents(cents: number): string {
