@@ -151,11 +151,8 @@ function LockedSetupTabBar() {
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
   } as unknown as BottomTabBarProps;
 
-  return (
-    <View style={styles.tabSlot}>
-      <TabBar {...props} locked />
-    </View>
-  );
+  // Same floating chrome as the real tabs; parent must be the full screen.
+  return <TabBar {...props} locked />;
 }
 
 export default function SetupChecklistScreen() {
@@ -267,106 +264,119 @@ export default function SetupChecklistScreen() {
     }
   }
 
-  return (
-    <Screen
-      bg={color.offWhite}
-      scroll
-      contentStyle={styles.content}
-      footer={
-        <View style={styles.footerStack}>
-          {state?.complete ? (
-            <Button
-              size="lg"
-              block
-              onPress={() => router.replace('/(creator)/(tabs)' as Href)}
-            >
-              Go to Home
-            </Button>
-          ) : cta !== null ? (
-            <Button
-              size="lg"
-              block
-              disabled={cta.busy === true}
-              onPress={cta.onPress}
-            >
-              {cta.label}
-            </Button>
-          ) : null}
-          <LockedSetupTabBar />
-        </View>
-      }
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>Get set up</Text>
-        <Text style={styles.subtitle}>
-          Four steps and Home, Posts and Analytics unlock.
-        </Text>
-        {state !== null ? (
-          <View style={styles.progressRow}>
-            <View style={styles.progressBar}>
-              <ProgressBar progress={doneCount / 4} />
-            </View>
-            <Text style={styles.progressLabel}>
-              {doneCount} of 4
-            </Text>
-          </View>
-        ) : null}
-      </View>
+  const footerCta =
+    state?.complete ? (
+      <Button
+        size="lg"
+        block
+        onPress={() => router.replace('/(creator)/(tabs)' as Href)}
+      >
+        Go to Home
+      </Button>
+    ) : cta !== null ? (
+      <Button
+        size="lg"
+        block
+        disabled={cta.busy === true}
+        onPress={cta.onPress}
+      >
+        {cta.label}
+      </Button>
+    ) : null;
 
-      {state === null ? (
-        <View style={styles.skeletons}>
-          {[0, 1, 2, 3].map((i) => (
-            <SkeletonLine
-              key={i}
-              width="100%"
-              height={space.tapPrimary + space[4]}
-              radius={radius.lg}
+  return (
+    <View style={styles.root}>
+      <Screen
+        bg={color.offWhite}
+        scroll
+        contentStyle={styles.content}
+        footer={
+          footerCta !== null ? (
+            <View style={styles.footerPad}>{footerCta}</View>
+          ) : undefined
+        }
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>Get set up</Text>
+          <Text style={styles.subtitle}>
+            Four steps and Home, Posts and Analytics unlock.
+          </Text>
+          {state !== null ? (
+            <View style={styles.progressRow}>
+              <View style={styles.progressBar}>
+                <ProgressBar progress={doneCount / 4} />
+              </View>
+              <Text style={styles.progressLabel}>
+                {doneCount} of 4
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {state === null ? (
+          <View style={styles.skeletons}>
+            {[0, 1, 2, 3].map((i) => (
+              <SkeletonLine
+                key={i}
+                width="100%"
+                height={space.tapPrimary + space[4]}
+                radius={radius.lg}
+              />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.list}>
+            <StepRow
+              icon="at-sign"
+              title="Create accounts"
+              status={state.accounts}
+              onPress={() => router.push('/(creator)/account-setup' as Href)}
             />
-          ))}
-        </View>
-      ) : (
-        <View style={styles.list}>
-          <StepRow
-            icon="at-sign"
-            title="Create accounts"
-            status={state.accounts}
-            onPress={() => router.push('/(creator)/account-setup' as Href)}
-          />
-          <StepRow
-            icon="link"
-            title="Connect accounts"
-            sub={connectBusy ? 'Opening the connect flow' : connectSub}
-            status={state.connect}
-            busy={connectBusy}
-            onPress={() => void connectSocials()}
-          />
-          <StepRow
-            icon="flame"
-            title="Warm them up"
-            sub={warmupSub}
-            status={state.warmup}
-            sentBackReason={warmupSentBack}
-            onPress={() => router.push('/(creator)/setup/warmup' as Href)}
-          />
-          <StepRow
-            icon="dollar-sign"
-            title="Connect your bank"
-            sub={bankBusy ? 'Opening Stripe' : bankSub}
-            status={state.bank}
-            busy={bankBusy}
-            onPress={() => void connectBank()}
-          />
-        </View>
-      )}
-    </Screen>
+            <StepRow
+              icon="link"
+              title="Connect accounts"
+              sub={connectBusy ? 'Opening the connect flow' : connectSub}
+              status={state.connect}
+              busy={connectBusy}
+              onPress={() => void connectSocials()}
+            />
+            <StepRow
+              icon="flame"
+              title="Warm them up"
+              sub={warmupSub}
+              status={state.warmup}
+              sentBackReason={warmupSentBack}
+              onPress={() => router.push('/(creator)/setup/warmup' as Href)}
+            />
+            <StepRow
+              icon="dollar-sign"
+              title="Connect your bank"
+              sub={bankBusy ? 'Opening Stripe' : bankSub}
+              status={state.bank}
+              busy={bankBusy}
+              onPress={() => void connectBank()}
+            />
+          </View>
+        )}
+      </Screen>
+      <LockedSetupTabBar />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: color.offWhite,
+  },
   content: {
     gap: space[6],
     paddingTop: space[3],
     paddingBottom: space[9],
+  },
+  footerPad: {
+    // Floating locked TabBar (~68) + bottom offset (22), same as Home.
+    paddingBottom: space.tapMin + space[11] + space[2],
   },
   header: {
     gap: space[3],
@@ -440,13 +450,5 @@ const styles = StyleSheet.create({
     fontSize: type.size.meta,
     lineHeight: type.size.meta * type.leading.body,
     color: color.slate400,
-  },
-  footerStack: {
-    gap: space[4],
-  },
-  tabSlot: {
-    height: space[11] + space[9],
-    marginHorizontal: -space.gutter,
-    position: 'relative',
   },
 });
