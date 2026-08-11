@@ -17,9 +17,19 @@ const SETUP_EXEMPT = [
   '/chat',
   '/messages',
   '/profile',
+  '/posts',
+  '/analytics',
   '/balance',
   '/kitchen-sink',
 ];
+
+function isSetupExempt(pathname: string): boolean {
+  // Creator Home tab is `/` inside this stack.
+  if (pathname === '/' || pathname === '/index') return true;
+  return SETUP_EXEMPT.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
 
 export default function CreatorLayout() {
   const { session, profile, loading, activeMode } = useAuth();
@@ -48,9 +58,7 @@ export default function CreatorLayout() {
     return <Redirect href="/(auth)/login" />;
   }
 
-  const exempt = SETUP_EXEMPT.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  const exempt = isSetupExempt(pathname);
   if (!setupFlagged && !exempt) {
     if (setup.state === null) return <LoadingScreen />;
     if (!setup.state.complete) return <Redirect href="/(creator)/setup" />;

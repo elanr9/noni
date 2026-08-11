@@ -118,11 +118,20 @@ const TAB_ROUTES = [
   { key: 'profile', name: 'profile' },
 ] as const;
 
+const TAB_HREFS: Record<(typeof TAB_ROUTES)[number]['name'], Href> = {
+  index: '/(creator)/(tabs)',
+  posts: '/(creator)/(tabs)/posts',
+  analytics: '/(creator)/(tabs)/analytics',
+  profile: '/(creator)/(tabs)/profile',
+};
+
 function LockedSetupTabBar() {
+  const router = useRouter();
   const props = {
     state: {
       key: 'setup-tabs',
-      index: 0,
+      // No tab selected while on the setup checklist.
+      index: -1,
       routeNames: TAB_ROUTES.map((r) => r.name),
       routes: TAB_ROUTES.map((r) => ({
         key: r.key,
@@ -146,13 +155,15 @@ function LockedSetupTabBar() {
     ),
     navigation: {
       emit: () => ({ defaultPrevented: false }),
-      navigate: () => undefined,
+      navigate: (name: string) => {
+        const href = TAB_HREFS[name as keyof typeof TAB_HREFS];
+        if (href !== undefined) router.push(href);
+      },
     },
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
   } as unknown as BottomTabBarProps;
 
-  // Same floating chrome as the real tabs; parent must be the full screen.
-  return <TabBar {...props} locked />;
+  return <TabBar {...props} />;
 }
 
 export default function SetupChecklistScreen() {

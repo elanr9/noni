@@ -16,8 +16,8 @@ const ITEMS: Record<string, { icon: IconName; label: string }> = {
 type TabBarProps = BottomTabBarProps & {
   items?: Record<string, { icon: IconName; label: string }>;
   /**
-   * Setup gate (1c): bar is visible but non-interactive.
-   * Pass route names that should look locked (Home / Posts / Analytics).
+   * Setup gate (1c): dim and disable only `lockedRoutes`.
+   * Other tabs (e.g. Profile) stay tappable.
    */
   locked?: boolean;
   lockedRoutes?: string[];
@@ -33,11 +33,8 @@ export function TabBar({
   lockedRoutes = ['index', 'posts', 'analytics'],
 }: TabBarProps) {
   return (
-    <View
-      style={[styles.wrap, shadow.shadowFloat, locked && styles.locked]}
-      pointerEvents={locked ? 'none' : 'auto'}
-    >
-      <View style={styles.clip}>
+    <View style={[styles.wrap, shadow.shadowFloat]} pointerEvents="box-none">
+      <View style={styles.clip} pointerEvents="auto">
         <BlurView intensity={40} tint="light" style={StyleSheet.absoluteFill} />
         <View style={styles.row}>
           {state.routes.map((route, index) => {
@@ -48,7 +45,7 @@ export function TabBar({
             const routeLocked = locked && lockedRoutes.includes(route.name);
 
             const onPress = () => {
-              if (locked) return;
+              if (routeLocked) return;
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,
@@ -67,13 +64,23 @@ export function TabBar({
                 accessibilityLabel={item.label}
                 disabled={routeLocked}
                 onPress={onPress}
-                style={[styles.item, active && styles.itemActive]}
+                style={[
+                  styles.item,
+                  active && styles.itemActive,
+                  routeLocked && styles.itemLocked,
+                ]}
               >
                 <View>
                   <Icon
                     name={item.icon}
                     size={22}
-                    color={active ? color.blue600 : color.slate400}
+                    color={
+                      routeLocked
+                        ? color.slate300
+                        : active
+                          ? color.blue600
+                          : color.slate400
+                    }
                   />
                   {badge !== undefined && (
                     <View style={styles.badge}>
@@ -84,7 +91,13 @@ export function TabBar({
                 <Text
                   style={[
                     styles.label,
-                    { color: active ? color.blue700 : color.textSubtle },
+                    {
+                      color: routeLocked
+                        ? color.slate300
+                        : active
+                          ? color.blue700
+                          : color.textSubtle,
+                    },
                   ]}
                 >
                   {item.label}
@@ -106,8 +119,8 @@ const styles = StyleSheet.create({
     bottom: 22,
     borderRadius: 999,
   },
-  locked: {
-    opacity: 0.4,
+  itemLocked: {
+    opacity: 0.45,
   },
   clip: {
     borderRadius: 999,
