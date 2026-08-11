@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none" role="img" aria-label="Noni app icon">
-  <rect width="120" height="120" fill="#4FBAF2"/>
-  <g transform="translate(60 60) scale(0.62) translate(-60 -60)" fill="#FFFFFF" color="#4FBAF2">
+  <rect width="120" height="120" fill="#FFFFFF"/>
+  <g transform="translate(60 60) scale(0.62) translate(-60 -60)" fill="#4FBAF2" color="#FFFFFF">
     <path d="M36 90L8 74c6 10 9 18 9 25 0 7-2 14-6 21L36 90z"/>
     <path d="M44 72C44 48 50 28 58 18c8 12 12 28 12 42z"/>
     <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none">

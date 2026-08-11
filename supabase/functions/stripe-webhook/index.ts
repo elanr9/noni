@@ -54,19 +54,17 @@ async function resolvePromoCodes(
   stripe: Stripe,
   session: Stripe.Checkout.Session,
 ): Promise<string[]> {
+  // Never use session.retrieve({ expand }) here — Stripe rejects deep expands
+  // and FieldVision checkouts were 500ing the Noni webhook on every delivery.
   const codes = collectCodes(session);
-  // Expand promotion codes from discount IDs when only IDs are present.
-  const full = await stripe.checkout.sessions.retrieve(session.id, {
-    expand: ['total_details.breakdown.discounts.discount.promotion_code'],
-  });
-  for (const d of full.discounts ?? []) {
+  for (const d of session.discounts ?? []) {
     const promo = d.promotion_code;
     if (typeof promo === 'string') {
       try {
         const p = await stripe.promotionCodes.retrieve(promo);
         if (p.code) codes.push(p.code);
       } catch {
-        // ignore
+        // ignore missing/invalid promo ids
       }
     } else if (promo && typeof promo === 'object' && promo.code) {
       codes.push(promo.code);
@@ -248,39 +246,52 @@ async function handleCheckoutCompleted(
     return await handleCompanyCreditTopup(admin, session);
   }
 
-  const codes = await resolvePromoCodes(stripe, session);
-  if (codes.length === 0) {
-    return { skipped: true, reason: 'no attribution code on session' };
-  }
+  // Attribution for FieldVision / promo checkouts. Never 500 the webhook for
+  // unrelated sessions — acknowledge and skip so Stripe stops retrying.
+  try {
+    const codes = await resolvePromoCodes(stripe, session);
+    if (codes.length === 0) {
+      return { skipped: true, reason: 'no attribution code on session' };
+    }
 
-  const { data: links } = await admin
-    .from('attribution_links')
-    .select('id, company_id, code, task_id')
-    .in('code', codes);
+    const { data: links } = await admin
+      .from('attribution_links')
+      .select('id, company_id, code, task_id')
+      .in('code', codes);
 
-  const link = links?.[0] ?? null;
-  if (!link) {
-    return { skipped: true, reason: `no attribution_link for codes: ${codes.join(',')}` };
-  }
+    const link = links?.[0] ?? null;
+    if (!link) {
+      return {
+        skipped: true,
+        reason: `no attribution_link for codes: ${codes.join(',')}`,
+      };
+    }
 
-  const amountCents = session.amount_total ?? 0;
-  const { error } = await admin.from('revenue_events').upsert(
-    {
-      company_id: link.company_id,
+    const amountCents = session.amount_total ?? 0;
+    const { error } = await admin.from('revenue_events').upsert(
+      {
+        company_id: link.company_id,
+        attribution_link_id: link.id,
+        stripe_event_id: event.id,
+        amount_cents: amountCents,
+        occurred_at: new Date(
+          (session.created ?? Date.now() / 1000) * 1000,
+        ).toISOString(),
+      },
+      { onConflict: 'stripe_event_id' },
+    );
+    if (error) throw error;
+    return {
+      ok: true,
       attribution_link_id: link.id,
-      stripe_event_id: event.id,
+      task_id: link.task_id,
       amount_cents: amountCents,
-      occurred_at: new Date((session.created ?? Date.now() / 1000) * 1000).toISOString(),
-    },
-    { onConflict: 'stripe_event_id' },
-  );
-  if (error) throw error;
-  return {
-    ok: true,
-    attribution_link_id: link.id,
-    task_id: link.task_id,
-    amount_cents: amountCents,
-  };
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error('attribution checkout handler:', message);
+    return { skipped: true, reason: message };
+  }
 }
 
 async function findPayout(

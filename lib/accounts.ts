@@ -53,6 +53,8 @@ export async function upsertStoredAccount(
   session: Session,
   profile: Profile | null,
 ): Promise<void> {
+  if (!session.refresh_token.trim()) return;
+
   const next: StoredAccount = {
     userId: session.user.id,
     email: session.user.email ?? null,

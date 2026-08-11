@@ -67,6 +67,10 @@ async function activateStoredAccount(userId: string): Promise<Profile | null> {
   if (!target) {
     throw new Error('That account is no longer saved on this device.');
   }
+  if (!target.refreshToken.trim()) {
+    await removeStoredAccount(userId);
+    throw new Error('Session expired. Sign in again for that account.');
+  }
 
   const { data, error } = await supabase.auth.setSession({
     access_token: target.accessToken,
@@ -74,9 +78,11 @@ async function activateStoredAccount(userId: string): Promise<Profile | null> {
   });
   if (error || !data.session) {
     await removeStoredAccount(userId);
-    throw new Error(
-      error?.message ?? 'Could not switch accounts. Sign in again.',
-    );
+    const msg = error?.message ?? '';
+    if (/refresh token/i.test(msg)) {
+      throw new Error('Session expired. Sign in again for that account.');
+    }
+    throw new Error(msg || 'Could not switch accounts. Sign in again.');
   }
 
   const nextProfile = await fetchProfile(data.session.user.id);
@@ -224,8 +230,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (userId: string) => {
       if (session?.user?.id === userId) return;
 
-      if (session) {
-        await upsertStoredAccount(session, profile);
+      const { data: fresh } = await supabase.auth.getSession();
+      if (fresh.session) {
+        await upsertStoredAccount(fresh.session, profile);
       }
 
       try {
@@ -239,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     },
-    [session, profile, refreshAccounts],
+    [session?.user?.id, profile, refreshAccounts],
   );
 
   const addAccount = useCallback(async () => {

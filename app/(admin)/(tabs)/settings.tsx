@@ -25,6 +25,7 @@ import {
   listProductFeatures,
   type CreatorSocialStatus,
 } from '../../../lib/admin-api';
+import { contactSupport } from '../../../lib/support';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
 
 function connectedSummary(accounts: Record<string, unknown>): string {
@@ -224,6 +225,15 @@ export default function SettingsScreen() {
             <Icon name="chevron-right" size={16} color={color.slate300} />
           </PressableScale>
         ) : null}
+
+        <CompanyRow
+          icon="inbox"
+          title="Contact support"
+          value=""
+          onPress={() => {
+            contactSupport('Noni admin support');
+          }}
+        />
 
         <PressableScale
           accessibilityRole="button"

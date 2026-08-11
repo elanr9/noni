@@ -106,6 +106,17 @@ export function AccountSwitcherSheet({
       Alert.alert(
         'Could not switch',
         e instanceof Error ? e.message : 'Try signing in again.',
+        /sign in again/i.test(e instanceof Error ? e.message : '')
+          ? [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Sign in',
+                onPress: () => {
+                  void addAccount();
+                },
+              },
+            ]
+          : undefined,
       );
     }
   }

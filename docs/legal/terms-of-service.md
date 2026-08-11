@@ -3,7 +3,7 @@
 **Effective date:** August 9, 2026  
 **Product:** Noni  
 **Operator:** FieldVision AI (“FieldVision,” “we,” “us,” or “our”)  
-**Contact:** founders@fieldvisionai.com
+**Contact:** founders@usenoni.app
 
 These Terms of Service (“Terms”) govern your access to and use of the Noni mobile application and related services (the “Service”). By creating an account or using Noni, you agree to these Terms.
 
@@ -31,7 +31,7 @@ You are responsible for:
 - Keeping your login credentials secure
 - All activity under your account
 
-You may sign in with email, Google, Apple, or other methods we make available. You must promptly notify us at founders@fieldvisionai.com if you suspect unauthorized access.
+You may sign in with email, Google, Apple, or other methods we make available. You must promptly notify us at founders@usenoni.app if you suspect unauthorized access.
 
 We may suspend or terminate accounts that violate these Terms, appear fraudulent, create security risk, or harm the Service or other users.
 
@@ -130,7 +130,7 @@ You agree to defend, indemnify, and hold harmless FieldVision AI from claims, da
 
 ## 15. Suspension and termination
 
-You may stop using Noni at any time. You may request account deletion by contacting founders@fieldvisionai.com.
+You may stop using Noni at any time. You may request account deletion by contacting founders@usenoni.app.
 
 We may suspend or terminate access immediately if you violate these Terms or if we discontinue the Service. Sections that by nature should survive termination will survive (including ownership, licenses already exercised for published content, disclaimers, liability limits, and indemnity).
 
@@ -151,4 +151,4 @@ These Terms are governed by the laws of the State of Florida, excluding conflict
 ## 18. Contact
 
 **FieldVision AI**  
-Email: founders@fieldvisionai.com
+Email: founders@usenoni.app

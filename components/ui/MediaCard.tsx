@@ -106,18 +106,26 @@ export function MediaCard({
 
         {hero && <Scrim id={`scrim${gradientId}`} />}
 
-        <View style={styles.formatPill}>
-          <Icon name={slideshow ? 'images' : 'video'} size={13} color={color.ink} />
-          <Text style={styles.formatText}>{slideshow ? 'Slideshow' : 'Reel'}</Text>
-        </View>
-
-        {time !== undefined && (
-          <View style={styles.timePill}>
-            <Text style={styles.timeText} numberOfLines={1}>
-              {time}
-            </Text>
+        <View style={styles.tagRow}>
+          <View style={styles.formatPill}>
+            <Icon name={slideshow ? 'images' : 'video'} size={13} color={color.ink} />
+            <Text style={styles.formatText}>{slideshow ? 'Slideshow' : 'Reel'}</Text>
           </View>
-        )}
+          {contentTypeTag !== undefined ? (
+            <View style={styles.typePill}>
+              <Text style={styles.typeText} numberOfLines={1}>
+                {contentTypeTag}
+              </Text>
+            </View>
+          ) : null}
+          {time !== undefined ? (
+            <View style={styles.timePill}>
+              <Text style={styles.timeText} numberOfLines={1}>
+                {time}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
         <View style={styles.playWrap} pointerEvents="box-none">
           <PressableScale
@@ -152,12 +160,6 @@ export function MediaCard({
           </Text>
         )}
       </View>
-
-      {contentTypeTag !== undefined && (
-        <View style={styles.contentTypeTag}>
-          <Text style={styles.contentTypeText}>{contentTypeTag}</Text>
-        </View>
-      )}
 
       {hero
         ? children !== undefined && <View style={styles.body}>{children}</View>
@@ -225,9 +227,6 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   formatPill: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -235,20 +234,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.92)',
+    flexShrink: 0,
   },
   formatText: {
     color: color.ink,
     fontSize: 12,
     fontWeight: '700',
   },
-  timePill: {
+  tagRow: {
     position: 'absolute',
     top: 10,
+    left: 10,
     right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    zIndex: 2,
+  },
+  typePill: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: color.blue500,
+    maxWidth: '100%',
+    flexShrink: 1,
+  },
+  typeText: {
+    color: color.white,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  timePill: {
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 999,
     backgroundColor: 'rgba(15,23,32,0.55)',
+    flexShrink: 0,
   },
   timeText: {
     color: color.white,
@@ -290,19 +312,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 27,
     letterSpacing: -0.3,
-  },
-  contentTypeTag: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: color.accent,
-  },
-  contentTypeText: {
-    color: color.white,
-    fontSize: 12,
-    fontWeight: '700',
   },
   body: {
     flexGrow: 0,

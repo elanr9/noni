@@ -21,6 +21,7 @@ import {
 } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
+import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
 import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
 import {
@@ -313,6 +314,12 @@ export default function ProfileScreen() {
   function openSettings() {
     Alert.alert('Settings', 'Notifications and privacy', [
       { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Contact support',
+        onPress: () => {
+          contactSupport('Noni support');
+        },
+      },
       { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
     ]);
   }

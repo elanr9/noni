@@ -3,7 +3,7 @@
 **Effective date:** August 9, 2026  
 **Product:** Noni  
 **Operator:** FieldVision AI (“FieldVision,” “we,” “us,” or “our”)  
-**Contact:** founders@fieldvisionai.com
+**Contact:** founders@usenoni.app
 
 This Privacy Policy explains how Noni collects, uses, shares, and protects information when you use the Noni mobile application and related services (the “Service”).
 
@@ -130,7 +130,7 @@ You may:
 - Update certain profile information in the app
 - Disconnect Google or Apple sign-in by deleting your Noni account or contacting us
 - Disable push notifications in device settings
-- Request account or data deletion by emailing **founders@fieldvisionai.com**
+- Request account or data deletion by emailing **founders@usenoni.app**
 
 We will respond within a reasonable period and as required by applicable law.
 
@@ -171,4 +171,4 @@ We may update this Privacy Policy from time to time. We will post the updated ve
 Questions about privacy or data requests:
 
 **FieldVision AI**  
-Email: founders@fieldvisionai.com
+Email: founders@usenoni.app

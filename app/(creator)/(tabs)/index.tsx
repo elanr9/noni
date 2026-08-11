@@ -237,14 +237,10 @@ export default function HomeScreen() {
                 format={format}
                 title={hero.briefs.title}
                 time={dueLabel(hero.scheduled_date)}
+                contentTypeTag={contentTypeTag}
                 mediaHeight={HERO_HEIGHT}
                 onPress={() => openPost(hero)}
               />
-              {contentTypeTag !== undefined ? (
-                <View style={styles.contentTypeTag} pointerEvents="none">
-                  <Text style={styles.contentTypeText}>{contentTypeTag}</Text>
-                </View>
-              ) : null}
             </View>
           </>
         ) : today.length === 0 ? (
@@ -347,21 +343,6 @@ const styles = StyleSheet.create({
     width: HERO_WIDTH,
     alignSelf: 'center',
     position: 'relative',
-  },
-  contentTypeTag: {
-    position: 'absolute',
-    top: 10,
-    left: 80,
-    zIndex: 2,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue500,
-  },
-  contentTypeText: {
-    color: color.white,
-    fontSize: type.size.label,
-    fontWeight: type.weight.bold,
   },
   footerPad: {
     // Floating TabBar (~68) + bottom offset (22)
