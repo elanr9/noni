@@ -426,6 +426,65 @@ export async function signedScreenshotUrl(path: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Noni screenshot library
+
+/** One feature's video-ready screenshots from the Company Brain library. */
+export type NoniLibraryGroup = {
+  featureId: string;
+  name: string;
+  shots: Array<{
+    id: string;
+    /** Public URL in the product-features bucket; uploadable as-is. */
+    url: string;
+    shape: 'phone' | 'laptop';
+    source: 'upload' | 'noni';
+  }>;
+};
+
+/**
+ * The company's screenshot library, grouped per feature and ordered by the
+ * AI virality rank. Admins fill this on the web Company Brain page; managers
+ * attach these shots to brief clips without leaving the editor.
+ */
+export async function listNoniLibrary(companyId: string): Promise<NoniLibraryGroup[]> {
+  const [featuresRes, shotsRes] = await Promise.all([
+    supabase
+      .from('brain_features')
+      .select('id, name, rank')
+      .eq('company_id', companyId)
+      .order('rank', { ascending: true }),
+    supabase
+      .from('feature_screenshots')
+      .select('id, feature_id, path, shape, source')
+      .eq('company_id', companyId)
+      .order('sort_order', { ascending: true }),
+  ]);
+  if (featuresRes.error) throw featuresRes.error;
+  if (shotsRes.error) throw shotsRes.error;
+
+  const groups = new Map<string, NoniLibraryGroup>();
+  for (const feature of featuresRes.data ?? []) {
+    groups.set(feature.id, {
+      featureId: feature.id,
+      name: feature.name?.trim() || 'New feature',
+      shots: [],
+    });
+  }
+  for (const shot of shotsRes.data ?? []) {
+    const group = groups.get(shot.feature_id);
+    if (!group) continue;
+    const { data } = supabase.storage.from('product-features').getPublicUrl(shot.path);
+    group.shots.push({
+      id: shot.id,
+      url: data.publicUrl,
+      shape: shot.shape === 'laptop' ? 'laptop' : 'phone',
+      source: shot.source === 'noni' ? 'noni' : 'upload',
+    });
+  }
+  return [...groups.values()].filter((g) => g.shots.length > 0);
+}
+
+// ---------------------------------------------------------------------------
 // post types and row states
 
 /** All eight seeded types, sorted for pickers and setup screens. */

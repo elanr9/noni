@@ -264,6 +264,62 @@ export type Database = {
           },
         ]
       }
+      brain_features: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          idea_action: string
+          idea_example: string
+          idea_title: string
+          name: string
+          rank: number | null
+          reason: string
+          score: number | null
+          screenshot_path: string
+          sentence: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          idea_action?: string
+          idea_example?: string
+          idea_title?: string
+          name?: string
+          rank?: number | null
+          reason?: string
+          score?: number | null
+          screenshot_path: string
+          sentence: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          idea_action?: string
+          idea_example?: string
+          idea_title?: string
+          name?: string
+          rank?: number | null
+          reason?: string
+          score?: number | null
+          screenshot_path?: string
+          sentence?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brain_features_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brand_docs: {
         Row: {
           company_id: string
@@ -478,6 +534,69 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      brief_templates: {
+        Row: {
+          action: string
+          company_id: string
+          created_at: string
+          description: string
+          example: string
+          feature_id: string | null
+          format: string
+          id: string
+          phrase: string
+          sort_order: number
+          title: string
+          type_label: string
+          week_start: string
+        }
+        Insert: {
+          action: string
+          company_id: string
+          created_at?: string
+          description: string
+          example: string
+          feature_id?: string | null
+          format: string
+          id?: string
+          phrase?: string
+          sort_order?: number
+          title: string
+          type_label?: string
+          week_start: string
+        }
+        Update: {
+          action?: string
+          company_id?: string
+          created_at?: string
+          description?: string
+          example?: string
+          feature_id?: string | null
+          format?: string
+          id?: string
+          phrase?: string
+          sort_order?: number
+          title?: string
+          type_label?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brief_templates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_templates_feature_id_fkey"
+            columns: ["feature_id"]
+            isOneToOne: false
+            referencedRelation: "brain_features"
             referencedColumns: ["id"]
           },
         ]
@@ -856,33 +975,195 @@ export type Database = {
       }
       companies: {
         Row: {
+          admin_role: string | null
           created_at: string | null
+          creator_count: number
+          does_ugc: boolean
           id: string
+          join_code: string
+          manager_count: number
           name: string
           payouts_enabled: boolean
+          self_is_manager: boolean
           settings: Json | null
           slug: string
           website: string | null
         }
         Insert: {
+          admin_role?: string | null
           created_at?: string | null
+          creator_count?: number
+          does_ugc?: boolean
           id?: string
+          join_code?: string
+          manager_count?: number
           name: string
           payouts_enabled?: boolean
+          self_is_manager?: boolean
           settings?: Json | null
           slug: string
           website?: string | null
         }
         Update: {
+          admin_role?: string | null
           created_at?: string | null
+          creator_count?: number
+          does_ugc?: boolean
           id?: string
+          join_code?: string
+          manager_count?: number
           name?: string
           payouts_enabled?: boolean
+          self_is_manager?: boolean
           settings?: Json | null
           slug?: string
           website?: string | null
         }
         Relationships: []
+      }
+      company_billing: {
+        Row: {
+          auto_top_up: boolean
+          bank_last4: string | null
+          bank_name: string | null
+          billing_simulated: boolean
+          card_brand: string | null
+          card_last4: string | null
+          company_id: string
+          credit_balance_cents: number
+          monthly_budget_cents: number
+          payouts_enabled: boolean
+          stripe_account_id: string | null
+          stripe_connected: boolean
+          stripe_customer_id: string | null
+          stripe_payment_method_id: string | null
+          stripe_subscription_id: string | null
+          subscription_plan: string | null
+          subscription_price_cents: number | null
+          subscription_renews_at: string | null
+          subscription_status: string
+          updated_at: string
+          weekly_budget_cents: number
+        }
+        Insert: {
+          auto_top_up?: boolean
+          bank_last4?: string | null
+          bank_name?: string | null
+          billing_simulated?: boolean
+          card_brand?: string | null
+          card_last4?: string | null
+          company_id: string
+          credit_balance_cents?: number
+          monthly_budget_cents?: number
+          payouts_enabled?: boolean
+          stripe_account_id?: string | null
+          stripe_connected?: boolean
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_plan?: string | null
+          subscription_price_cents?: number | null
+          subscription_renews_at?: string | null
+          subscription_status?: string
+          updated_at?: string
+          weekly_budget_cents?: number
+        }
+        Update: {
+          auto_top_up?: boolean
+          bank_last4?: string | null
+          bank_name?: string | null
+          billing_simulated?: boolean
+          card_brand?: string | null
+          card_last4?: string | null
+          company_id?: string
+          credit_balance_cents?: number
+          monthly_budget_cents?: number
+          payouts_enabled?: boolean
+          stripe_account_id?: string | null
+          stripe_connected?: boolean
+          stripe_customer_id?: string | null
+          stripe_payment_method_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_plan?: string | null
+          subscription_price_cents?: number | null
+          subscription_renews_at?: string | null
+          subscription_status?: string
+          updated_at?: string
+          weekly_budget_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_billing_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_credit_ledger: {
+        Row: {
+          amount_cents: number
+          assignment_id: string | null
+          company_id: string
+          created_at: string
+          creator_id: string | null
+          fee_cents: number | null
+          gross_cents: number | null
+          id: string
+          kind: string
+          note: string | null
+          stripe_checkout_session_id: string | null
+        }
+        Insert: {
+          amount_cents: number
+          assignment_id?: string | null
+          company_id: string
+          created_at?: string
+          creator_id?: string | null
+          fee_cents?: number | null
+          gross_cents?: number | null
+          id?: string
+          kind: string
+          note?: string | null
+          stripe_checkout_session_id?: string | null
+        }
+        Update: {
+          amount_cents?: number
+          assignment_id?: string | null
+          company_id?: string
+          created_at?: string
+          creator_id?: string | null
+          fee_cents?: number | null
+          gross_cents?: number | null
+          id?: string
+          kind?: string
+          note?: string | null
+          stripe_checkout_session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_credit_ledger_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_credit_ledger_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_credit_ledger_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       company_invites: {
         Row: {
@@ -893,6 +1174,8 @@ export type Database = {
           expires_at: string
           id: string
           invited_by: string | null
+          invited_name: string | null
+          permissions: Json
           role: string
           token: string
         }
@@ -904,6 +1187,8 @@ export type Database = {
           expires_at?: string
           id?: string
           invited_by?: string | null
+          invited_name?: string | null
+          permissions?: Json
           role?: string
           token?: string
         }
@@ -915,6 +1200,8 @@ export type Database = {
           expires_at?: string
           id?: string
           invited_by?: string | null
+          invited_name?: string | null
+          permissions?: Json
           role?: string
           token?: string
         }
@@ -967,6 +1254,53 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_payout_runs: {
+        Row: {
+          charged_cents: number
+          company_id: string
+          created_at: string
+          creators_paid: number
+          error: string | null
+          id: string
+          period_end: string
+          period_start: string
+          status: string
+          stripe_payment_intent_id: string | null
+        }
+        Insert: {
+          charged_cents?: number
+          company_id: string
+          created_at?: string
+          creators_paid?: number
+          error?: string | null
+          id?: string
+          period_end: string
+          period_start: string
+          status?: string
+          stripe_payment_intent_id?: string | null
+        }
+        Update: {
+          charged_cents?: number
+          company_id?: string
+          created_at?: string
+          creators_paid?: number
+          error?: string | null
+          id?: string
+          period_end?: string
+          period_start?: string
+          status?: string
+          stripe_payment_intent_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_payout_runs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -1350,6 +1684,48 @@ export type Database = {
           },
         ]
       }
+      creator_reminders: {
+        Row: {
+          company_id: string
+          created_at: string
+          creator_id: string
+          id: string
+          kind: string
+          sent_on: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          creator_id: string
+          id?: string
+          kind: string
+          sent_on: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          creator_id?: string
+          id?: string
+          kind?: string
+          sent_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creator_reminders_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "creator_reminders_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       creator_streaks: {
         Row: {
           company_id: string
@@ -1433,6 +1809,54 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      feature_screenshots: {
+        Row: {
+          company_id: string
+          created_at: string
+          feature_id: string
+          id: string
+          path: string
+          shape: string
+          sort_order: number
+          source: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          feature_id: string
+          id?: string
+          path: string
+          shape?: string
+          sort_order?: number
+          source?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          feature_id?: string
+          id?: string
+          path?: string
+          shape?: string
+          sort_order?: number
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feature_screenshots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feature_screenshots_feature_id_fkey"
+            columns: ["feature_id"]
+            isOneToOne: false
+            referencedRelation: "brain_features"
             referencedColumns: ["id"]
           },
         ]
@@ -2442,6 +2866,7 @@ export type Database = {
           keeper_rate: number | null
           kind: string
           last_scraped_at: string | null
+          muted: boolean
           platform: string
           scraped_count: number
           status: string
@@ -2456,6 +2881,7 @@ export type Database = {
           keeper_rate?: number | null
           kind?: string
           last_scraped_at?: string | null
+          muted?: boolean
           platform: string
           scraped_count?: number
           status?: string
@@ -2470,6 +2896,7 @@ export type Database = {
           keeper_rate?: number | null
           kind?: string
           last_scraped_at?: string | null
+          muted?: boolean
           platform?: string
           scraped_count?: number
           status?: string
@@ -2951,15 +3378,22 @@ export type Database = {
     }
     Functions: {
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
+      can_create: { Args: never; Returns: boolean }
       claim_post_milestone: {
         Args: { p_post_id: string; p_threshold: number }
         Returns: boolean
       }
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
+      default_member_permissions: { Args: never; Returns: Json }
+      full_member_permissions: { Args: never; Returns: Json }
+      generate_join_code: { Args: never; Returns: string }
+      has_permission: { Args: { p_key: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_campaign_manager: { Args: never; Returns: boolean }
+      is_company_admin: { Args: never; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
+      join_company_by_code: { Args: { code: string }; Returns: string }
       label_trend: {
         Args: { p_label?: string; p_reason?: string; p_trend_id: string }
         Returns: undefined
@@ -2995,6 +3429,13 @@ export type Database = {
           views: number
         }[]
       }
+      lookup_company_by_code: {
+        Args: { code: string }
+        Returns: {
+          id: string
+          name: string
+        }[]
+      }
       publish_campaign_assignments: {
         Args: { p_assignments: Json; p_campaign_id: string }
         Returns: number
@@ -3003,9 +3444,37 @@ export type Database = {
         Args: { p_company: string; p_creator: string; p_day?: string }
         Returns: Json
       }
+      regenerate_company_join_code: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
       reset_broken_streaks: { Args: never; Returns: undefined }
+      spend_company_credits_for_earning: {
+        Args: {
+          p_assignment: string
+          p_company: string
+          p_creator: string
+          p_gross_cents: number
+          p_kind: string
+          p_post_id?: string
+        }
+        Returns: Json
+      }
       streak_bonus_cents: {
         Args: { p_days: number; p_settings: Json }
+        Returns: number
+      }
+      streak_day_complete: {
+        Args: { p_company: string; p_creator: string; p_day: string }
+        Returns: boolean
+      }
+      streak_missed_days: {
+        Args: {
+          p_after: string
+          p_before: string
+          p_company: string
+          p_creator: string
+        }
         Returns: number
       }
       sync_brief_segments: {

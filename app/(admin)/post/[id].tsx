@@ -39,6 +39,7 @@ import {
   listApprovedClaimIds,
   listBriefSegments,
   listCampaigns,
+  listNoniLibrary,
   listPostTypes,
   logBriefReviewEvents,
   markSearchQueryUsedByText,
@@ -54,6 +55,7 @@ import {
   type BriefReviewEventInput,
   type BriefReviewResult,
   type BriefSegment,
+  type NoniLibraryGroup,
   type PostType,
   type PostTypeShape,
   type RegenDraftPayload,
@@ -164,6 +166,15 @@ export default function PostEditorScreen() {
   const [hashtagBank, setHashtagBank] = useState<string[]>([]);
   const [segments, setSegments] = useState<BriefSegment[]>([]);
   const [screenshotUrls, setScreenshotUrls] = useState<Record<string, string>>({});
+  const [noniLibrary, setNoniLibrary] = useState<NoniLibraryGroup[]>([]);
+
+  /* Company Brain shots load once so the picker opens instantly. */
+  useEffect(() => {
+    if (!profile?.company_id) return;
+    void listNoniLibrary(profile.company_id)
+      .then(setNoniLibrary)
+      .catch(() => setNoniLibrary([]));
+  }, [profile?.company_id]);
 
   const [title, setTitle] = useState('');
   const [postTypeId, setPostTypeId] = useState<string | null>(null);
@@ -1372,6 +1383,7 @@ export default function PostEditorScreen() {
 
       <CameraRollSheet
         visible={shotPickerIndex !== null}
+        library={noniLibrary}
         onClose={() => setShotPickerIndex(null)}
         onPick={(uri) => {
           const index = shotPickerIndex;
