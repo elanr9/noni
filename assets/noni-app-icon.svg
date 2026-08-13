@@ -1,15 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none" role="img" aria-label="Noni app icon">
-  <rect width="120" height="120" fill="#FFFFFF"/>
-  <g transform="translate(60 60) scale(0.62) translate(-60 -60)" fill="#4FBAF2" color="#FFFFFF">
-    <path d="M36 90L8 74c6 10 9 18 9 25 0 7-2 14-6 21L36 90z"/>
-    <path d="M44 72C44 48 50 28 58 18c8 12 12 28 12 42z"/>
-    <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none">
-      <path d="M50 64c0-16 2-28 6-36"/>
-      <path d="M57 63c1-13 3-23 6-30"/>
-      <path d="M64 63c2-10 3-17 5-22"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none" role="img" aria-label="Noni app icon">
+  <rect width="160" height="160" fill="#FFFFFF"/>
+  <g transform="rotate(45 80 80) translate(20 2)">
+    <path fill-rule="evenodd" fill="#8EC9F5" d="M60 8C78 28 85 54 85 80L85 104 35 104 35 80C35 54 42 28 60 8ZM74 58a14 14 0 1 1-28 0a14 14 0 1 1 28 0Z"/>
+    <path d="M35 76C22 86 17 100 17 114L37 102Z" fill="#8EC9F5"/>
+    <path d="M85 76C98 86 103 100 103 114L83 102Z" fill="#8EC9F5"/>
+    <g stroke="#8EC9F5" stroke-width="11" stroke-linecap="round" fill="none">
+      <path d="M60 122L60 144"/>
+      <path d="M42 118L38 132"/>
+      <path d="M78 118L82 132"/>
     </g>
-    <path d="M30 96C26 76 40 54 60 41c10-6 20-10 28-11l26-18-19 27c-1 8-6 17-15 26C68 78 48 94 30 96z"/>
-    <path d="M60 68c8-1 15 3 19 9-8 3-17 1-23-4z"/>
-    <circle cx="80" cy="38" r="3" fill="currentColor"/>
   </g>
 </svg>
