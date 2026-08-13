@@ -2,30 +2,45 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Profile } from './profile';
 
-export type AppMode = 'admin' | 'creator';
+export type AppMode = 'admin' | 'creator' | 'platform';
 
 function modeKey(userId: string): string {
   return `noni.activeMode.${userId}`;
 }
 
 export function defaultMode(profile: Profile): AppMode {
-  return profile.role === 'admin' ? 'admin' : 'creator';
+  if (profile.role === 'admin') return 'platform';
+  return profile.role === 'campaign_manager' ? 'admin' : 'creator';
 }
 
 export function profileCanCreate(profile: Profile): boolean {
   return profile.role === 'creator' || profile.can_create === true;
 }
 
-/** PostgREST filter: pure creators + dual-role admins. */
+/** PostgREST filter: pure creators + dual-role campaign managers. */
 export const CREATOR_PROFILE_OR = 'role.eq.creator,can_create.eq.true';
 
-export function profileIsAdmin(profile: Profile): boolean {
+/** Company power: campaign managers run the (admin) product surface. */
+export function profileIsCampaignManager(profile: Profile): boolean {
+  return profile.role === 'campaign_manager';
+}
+
+/** The single Noni platform account; managed on the website, not the app. */
+export function profileIsPlatformAdmin(profile: Profile): boolean {
   return profile.role === 'admin';
 }
 
-/** Dual admins can flip; pure creators/admins stay on their only mode. */
+/** The company's one web-only admin; the app points them to usenoni.app. */
+export function profileIsCompanyAdmin(profile: Profile): boolean {
+  return profile.role === 'company_admin';
+}
+
+/** Dual campaign managers can flip; everyone else stays on their only mode. */
 export function modesForProfile(profile: Profile): AppMode[] {
-  if (profileIsAdmin(profile) && profileCanCreate(profile)) {
+  if (profileIsPlatformAdmin(profile)) {
+    return ['platform', 'admin', 'creator'];
+  }
+  if (profileIsCampaignManager(profile) && profileCanCreate(profile)) {
     return ['admin', 'creator'];
   }
   return [defaultMode(profile)];
@@ -33,7 +48,7 @@ export function modesForProfile(profile: Profile): AppMode[] {
 
 export async function getStoredMode(userId: string): Promise<AppMode | null> {
   const raw = await AsyncStorage.getItem(modeKey(userId));
-  if (raw === 'admin' || raw === 'creator') return raw;
+  if (raw === 'admin' || raw === 'creator' || raw === 'platform') return raw;
   return null;
 }
 

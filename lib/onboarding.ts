@@ -196,7 +196,7 @@ export async function completeOnboarding(userId: string): Promise<void> {
   if (error) throw error;
 }
 
-// ——— Creator pre-auth onboarding (Cal AI flow) ———
+// ——— Creator onboarding questions (Cal AI flow) ———
 
 export type UgcExperience =
   | 'never_heard'
@@ -231,7 +231,6 @@ export const HOURS_TO_MONTHLY_ESTIMATE: Record<HoursPerWeek, number> = {
 };
 
 const ANSWERS_KEY = 'noni.onboarding.answers';
-const ONBOARDED_LOCALLY_KEY = 'noni.onboarding.completed';
 
 function emptyAnswers(): CreatorOnboardingAnswers {
   return {
@@ -245,8 +244,8 @@ function emptyAnswers(): CreatorOnboardingAnswers {
   };
 }
 
-// Steps 0 to 7 run before a session exists, so answers live in this
-// module-level store, mirrored to AsyncStorage so a killed app resumes.
+// Answers live in this module-level store until the heard step writes them to
+// the profile, mirrored to AsyncStorage so a killed app resumes.
 let answers = emptyAnswers();
 
 export function getOnboardingAnswers(): CreatorOnboardingAnswers {
@@ -280,23 +279,6 @@ export async function clearOnboardingAnswers(): Promise<void> {
     await AsyncStorage.removeItem(ANSWERS_KEY);
   } catch {
     // storage failure only means a stale draft sticks around
-  }
-}
-
-/** True once someone has finished onboarding or signed in on this device. */
-export async function hasOnboardedLocally(): Promise<boolean> {
-  try {
-    return (await AsyncStorage.getItem(ONBOARDED_LOCALLY_KEY)) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export async function markOnboardedLocally(): Promise<void> {
-  try {
-    await AsyncStorage.setItem(ONBOARDED_LOCALLY_KEY, 'true');
-  } catch {
-    // worst case the welcome screen shows again on next launch
   }
 }
 
@@ -351,31 +333,4 @@ export async function saveOnboardingAnswersToProfile(
     .update(update)
     .eq('id', userId);
   if (error) throw error;
-}
-
-export type OnboardingAuthOutcome = 'continue' | 'existing';
-
-/**
- * Step 8: a session was just created mid-flow. Existing onboarded users get
- * routed to their app; new users get their answers written and continue.
- */
-export async function finishOnboardingAuth(): Promise<OnboardingAuthOutcome> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  if (!data.user) throw new Error('Sign in did not finish. Try again.');
-
-  const { data: row, error: profileError } = await supabase
-    .from('profiles')
-    .select('onboarded')
-    .eq('id', data.user.id)
-    .maybeSingle();
-  if (profileError) throw profileError;
-
-  if (row?.onboarded) {
-    await markOnboardedLocally();
-    return 'existing';
-  }
-
-  await saveOnboardingAnswersToProfile(data.user.id);
-  return 'continue';
 }

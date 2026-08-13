@@ -1,5 +1,11 @@
 import Stripe from 'npm:stripe@17';
-import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import {
+  adminClient,
+  authenticate,
+  handleCors,
+  hasPermission,
+  jsonResponse,
+} from '../_shared/wp8.ts';
 
 const MAX_MONTHLY_BUDGET_CENTS = 10_000_000; // $100,000
 const MIN_TOPUP_CENTS = 1000; // $10
@@ -82,7 +88,7 @@ Deno.serve(async (req) => {
     if (!caller || caller.kind !== 'user') {
       return jsonResponse({ error: 'unauthorized' }, 401);
     }
-    if (caller.role !== 'admin') {
+    if (!(await hasPermission(admin, caller, 'manage_billing'))) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 

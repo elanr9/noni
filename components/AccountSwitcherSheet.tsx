@@ -4,7 +4,8 @@ import { useAuth } from '../lib/auth';
 import type { StoredAccount } from '../lib/accounts';
 import {
   profileCanCreate,
-  profileIsAdmin,
+  profileIsCampaignManager,
+  profileIsPlatformAdmin,
   type AppMode,
 } from '../lib/active-mode';
 import { borderWidth, color, radius, type } from '../theme/tokens';
@@ -13,7 +14,9 @@ import { PressableScale } from './ui/PressableScale';
 import { SheetShell } from './ui/SheetShell';
 
 function roleLabel(role: string): string {
-  return role === 'admin' ? 'Admin' : 'Creator';
+  if (role === 'campaign_manager') return 'Campaign manager';
+  if (role === 'admin') return 'Noni platform';
+  return 'Creator';
 }
 
 function AccountRow({
@@ -71,10 +74,11 @@ export function AccountSwitcherSheet({
     enableCreatorMode,
   } = useAuth();
 
+  const isPlatform = !!profile && profileIsPlatformAdmin(profile);
   const isDual =
-    !!profile && profileIsAdmin(profile) && profileCanCreate(profile);
+    !!profile && profileIsCampaignManager(profile) && profileCanCreate(profile);
   const showBecomeCreator =
-    !!profile && profileIsAdmin(profile) && !profile.can_create;
+    !!profile && profileIsCampaignManager(profile) && !profile.can_create;
   const displayName = profile?.full_name?.trim() || profile?.id || 'Account';
   const email = accounts.find((a) => a.userId === profile?.id)?.email ?? null;
 
@@ -150,11 +154,32 @@ export function AccountSwitcherSheet({
   return (
     <SheetShell visible={visible} onClose={onClose}>
       <View style={styles.list}>
-        {isDual ? (
+        {isPlatform ? (
           <>
             <AccountRow
               title={displayName}
-              subtitle={`Admin${email ? ` · ${email}` : ''}`}
+              subtitle={`Noni admin${email ? ` · ${email}` : ''}`}
+              active={activeMode === 'platform'}
+              onPress={() => void onSwitchMode('platform')}
+            />
+            <AccountRow
+              title={displayName}
+              subtitle={`Campaign manager${email ? ` · ${email}` : ''}`}
+              active={activeMode === 'admin'}
+              onPress={() => void onSwitchMode('admin')}
+            />
+            <AccountRow
+              title={displayName}
+              subtitle={`Creator${email ? ` · ${email}` : ''}`}
+              active={activeMode === 'creator'}
+              onPress={() => void onSwitchMode('creator')}
+            />
+          </>
+        ) : isDual ? (
+          <>
+            <AccountRow
+              title={displayName}
+              subtitle={`Campaign manager${email ? ` · ${email}` : ''}`}
               active={activeMode === 'admin'}
               onPress={() => void onSwitchMode('admin')}
             />

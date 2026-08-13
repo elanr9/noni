@@ -282,7 +282,7 @@ Deno.serve(async (req) => {
   if (!caller || caller.kind !== 'user') {
     return jsonResponse({ error: 'unauthorized' }, 401);
   }
-  if (caller.role !== 'admin') return jsonResponse({ error: 'forbidden' }, 403);
+  if (caller.role !== 'campaign_manager') return jsonResponse({ error: 'forbidden' }, 403);
 
   const body = ((await req.json().catch(() => null)) ?? {}) as Body;
   const companyId = body.company_id?.trim();

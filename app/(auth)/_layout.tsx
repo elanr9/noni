@@ -13,7 +13,7 @@ export default function AuthLayout() {
 
   if (session) {
     const dest = destinationForProfile(profile, true, activeMode);
-    if (dest !== '/(auth)/login') {
+    if (dest !== '/(auth)/login' && dest !== '/(auth)/invite-required') {
       return <Redirect href={dest} />;
     }
   }

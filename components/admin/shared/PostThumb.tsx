@@ -34,6 +34,7 @@ export function PostThumb({
   radius = radiusAdmin.sm,
   style,
 }: PostThumbProps) {
+  const discSize = Math.min(34, Math.max(18, Math.round(width * 0.4)));
   return (
     <View
       style={[{ width, height, borderRadius: radius }, shadow.shadowMedia, style]}
@@ -43,22 +44,31 @@ export function PostThumb({
           <Image source={{ uri }} resizeMode="cover" style={StyleSheet.absoluteFill} />
         ) : (
           <>
-            {/* linear-gradient(160deg, #E7F4FD 0%, #DCE7F0 100%) */}
+            {/* linear-gradient(160deg, blue100 0%, mediaGradEnd 100%) */}
             <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
               <Defs>
                 <LinearGradient id="noniPostThumb" x1="33%" y1="3%" x2="67%" y2="97%">
-                  <Stop offset="0" stopColor="#E7F4FD" />
-                  <Stop offset="1" stopColor="#DCE7F0" />
+                  <Stop offset="0" stopColor={color.blue100} />
+                  <Stop offset="1" stopColor={color.mediaGradEnd} />
                 </LinearGradient>
               </Defs>
               <Rect x="0" y="0" width="100%" height="100%" fill="url(#noniPostThumb)" />
             </Svg>
             <View style={styles.glyph}>
-              <Icon
-                name={format === 'video' ? 'play' : 'images'}
-                size={Math.min(18, width * 0.32)}
-                color={color.blue300}
-              />
+              {format === 'video' ? (
+                // Design language: small white play disc on video placeholders.
+                <View
+                  style={[
+                    styles.playDisc,
+                    shadow.shadowCard,
+                    { width: discSize, height: discSize, borderRadius: discSize / 2 },
+                  ]}
+                >
+                  <Icon name="play" size={Math.round(discSize * 0.42)} color={color.ink} />
+                </View>
+              ) : (
+                <Icon name="images" size={Math.min(18, width * 0.32)} color={color.blue300} />
+              )}
             </View>
           </>
         )}
@@ -89,6 +99,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  playDisc: {
+    backgroundColor: color.whiteA90,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   badge: {
     position: 'absolute',
     paddingVertical: 2,
@@ -102,7 +117,7 @@ const styles = StyleSheet.create({
     left: 4,
     bottom: 4,
     fontSize: 10,
-    backgroundColor: 'rgba(11,15,20,0.55)',
+    backgroundColor: color.inkA55,
   },
   takeBadge: {
     left: 4,

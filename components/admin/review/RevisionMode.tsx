@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,39 +12,56 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { ContentFormat } from '../../../lib/admin-review-types';
 import { borderWidth, color, motion, radiusAdmin, type } from '../../../theme/tokens';
-import { Segmented } from '../shared';
+import { ActionBar, Card, PushHeader, SectionLabel, Segmented } from '../shared';
 import { Button } from '../../ui/Button';
+import { Icon } from '../../ui/Icon';
+import { RequestChangesSheet } from '../RequestChangesSheet';
 import { SectionNoteCard } from './SectionNoteCard';
 
 export interface RevisionSection {
   key: string;
-  /** "Hook" / "Clip 2" / "Slide 3" / "Caption". */
+  /** "Hook" / "Clip 2" / "Slide 3". Spoken sections only; captions come
+   * from the brief and are placed automatically, so they are never here. */
   label: string;
   text: string;
 }
 
 export interface RevisionModeProps {
-  /** Spoken segments plus the caption, in order. */
+  /** Creator first name, e.g. "Fabri". */
+  creatorShort: string;
+  postTitle: string;
+  format: ContentFormat;
   sections: RevisionSection[];
   busy: boolean;
   onCancel: () => void;
-  /** Flattened note text plus how many sections it covers. */
+  /** Notes flattened to `Label: text` blocks (ReviewThread parses this). */
   onSend: (note: string, count: number) => void;
 }
 
 /**
- * Admin handoff §3 revision mode — Section by section | Whole post. Only
- * noted sections go back.
+ * Admin handoff §3 revision mode — Section by section | Whole post. One card
+ * per spoken section, tap opens the watch sheet, plus opens the inline
+ * editor. Only the sections with notes go back.
  */
-export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeProps) {
+export function RevisionMode({
+  creatorShort,
+  postTitle,
+  format,
+  sections,
+  busy,
+  onCancel,
+  onSend,
+}: RevisionModeProps) {
   const insets = useSafeAreaInsets();
   const slide = useRef(new Animated.Value(0)).current;
 
   const [mode, setMode] = useState(0);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [wholeNote, setWholeNote] = useState('');
+  const [wholeNotes, setWholeNotes] = useState<string[]>(['']);
+  const [watchKey, setWatchKey] = useState<string | null>(null);
 
   useEffect(() => {
     Animated.timing(slide, {
@@ -54,7 +72,14 @@ export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeP
     }).start();
   }, [slide]);
 
-  const count = mode === 0 ? Object.keys(notes).length : wholeNote.trim().length > 0 ? 1 : 0;
+  const watch = useMemo(
+    () => sections.find((s) => s.key === watchKey) ?? null,
+    [sections, watchKey],
+  );
+
+  const filledWhole = wholeNotes.filter((t) => t.trim().length > 0);
+  const count = mode === 0 ? Object.keys(notes).length : filledWhole.length;
+  const lastWhole = wholeNotes[wholeNotes.length - 1] ?? '';
 
   const send = () => {
     const note =
@@ -63,7 +88,7 @@ export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeP
             .filter((s) => notes[s.key] !== undefined)
             .map((s) => `${s.label}: ${notes[s.key]}`)
             .join('\n\n')
-        : wholeNote.trim();
+        : filledWhole.map((t) => t.trim()).join('\n\n');
     onSend(note, count);
   };
 
@@ -83,8 +108,16 @@ export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeP
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.fill}
       >
-        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-          <Text style={styles.title}>Request changes</Text>
+        <ScrollView
+          style={styles.fill}
+          contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 6 }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <PushHeader
+            title={`What should ${creatorShort} fix?`}
+            subtitle={postTitle}
+            onBack={onCancel}
+          />
           <Segmented
             options={[{ label: 'Section by section' }, { label: 'Whole post' }]}
             value={mode}
@@ -93,59 +126,100 @@ export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeP
               setOpenKey(null);
             }}
           />
-          <Text style={styles.helper}>
-            {mode === 0 ? 'Only noted sections go back.' : 'One note, one re-record.'}
-          </Text>
-        </View>
 
-        <ScrollView
-          style={styles.fill}
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-        >
           {mode === 0 ? (
-            sections.map((section) => (
-              <SectionNoteCard
-                key={section.key}
-                label={section.label}
-                text={section.text}
-                note={notes[section.key] ?? null}
-                open={openKey === section.key}
-                onOpen={() => setOpenKey(section.key)}
-                onCancel={() => setOpenKey(null)}
-                onSave={(note) => {
-                  setNotes((prev) => ({ ...prev, [section.key]: note }));
-                  setOpenKey(null);
-                }}
-                onRemove={() =>
-                  setNotes((prev) => {
-                    const next = { ...prev };
-                    delete next[section.key];
-                    return next;
-                  })
-                }
-              />
-            ))
+            <>
+              <Text style={styles.helper}>
+                Tap a section to leave a note. Only the sections you note come
+                back. The rest stay approved.
+              </Text>
+              <View style={styles.cards}>
+                {sections.map((section) => (
+                  <SectionNoteCard
+                    key={section.key}
+                    label={section.label}
+                    text={section.text}
+                    format={format}
+                    note={notes[section.key] ?? null}
+                    open={openKey === section.key}
+                    onWatch={() => setWatchKey(section.key)}
+                    onOpen={() => setOpenKey(section.key)}
+                    onCancel={() => setOpenKey(null)}
+                    onSave={(note) => {
+                      setNotes((prev) => ({ ...prev, [section.key]: note }));
+                      setOpenKey(null);
+                    }}
+                    onRemove={() =>
+                      setNotes((prev) => {
+                        const next = { ...prev };
+                        delete next[section.key];
+                        return next;
+                      })
+                    }
+                  />
+                ))}
+              </View>
+            </>
           ) : (
-            <View style={styles.wholeBox}>
-              <TextInput
-                multiline
-                value={wholeNote}
-                onChangeText={setWholeNote}
-                placeholder="What should change"
-                placeholderTextColor={color.slate400}
-                style={styles.wholeInput}
-              />
-            </View>
+            <Card pad={14}>
+              <SectionLabel>Notes for the whole post</SectionLabel>
+              <View style={styles.wholeList}>
+                {wholeNotes.map((text, i) => (
+                  <View key={i}>
+                    <TextInput
+                      multiline
+                      value={text}
+                      onChangeText={(next) =>
+                        setWholeNotes(wholeNotes.map((t, j) => (j === i ? next : t)))
+                      }
+                      placeholder={
+                        i === 0
+                          ? `What has to change before ${creatorShort} records again`
+                          : 'Another note'
+                      }
+                      placeholderTextColor={color.slate400}
+                      style={styles.wholeInput}
+                    />
+                    {wholeNotes.length > 1 && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove note"
+                        hitSlop={10}
+                        onPress={() =>
+                          setWholeNotes(wholeNotes.filter((_, j) => j !== i))
+                        }
+                        style={styles.wholeRemove}
+                      >
+                        <Icon name="x" size={13} color={color.slate400} />
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add another note"
+                disabled={lastWhole.trim().length === 0}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                onPress={() => setWholeNotes([...wholeNotes, ''])}
+                style={[
+                  styles.addNote,
+                  lastWhole.trim().length === 0 && styles.addNoteDisabled,
+                ]}
+              >
+                <Icon name="plus" size={14} color={color.blue700} />
+                <Text style={styles.addNoteText}>Add another note</Text>
+              </Pressable>
+            </Card>
           )}
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+        <ActionBar style={styles.actionBar}>
           <Button
-            variant="outline"
+            variant="ghost"
             size="md"
             disabled={busy}
-            style={styles.footerCancel}
+            style={styles.cancel}
             onPress={onCancel}
           >
             Cancel
@@ -153,16 +227,33 @@ export function RevisionMode({ sections, busy, onCancel, onSend }: RevisionModeP
           <Button
             variant="primary"
             size="md"
+            icon="send"
             disabled={busy || count === 0}
-            style={styles.footerSend}
+            style={styles.send}
             onPress={send}
           >
-            {mode === 0
-              ? `Send back \u00b7 ${count} ${count === 1 ? 'note' : 'notes'}`
-              : 'Send back'}
+            {count === 0
+              ? 'Send back'
+              : `Send back \u00b7 ${count} ${count === 1 ? 'note' : 'notes'}`}
           </Button>
-        </View>
+        </ActionBar>
       </KeyboardAvoidingView>
+
+      <RequestChangesSheet
+        visible={watch !== null}
+        label={watch?.label ?? ''}
+        text={watch?.text ?? ''}
+        format={format}
+        creatorShort={creatorShort}
+        initialNote={watch !== null ? notes[watch.key] ?? '' : ''}
+        onClose={() => setWatchKey(null)}
+        onSave={(note) => {
+          if (watch !== null) {
+            setNotes((prev) => ({ ...prev, [watch.key]: note }));
+          }
+          setWatchKey(null);
+        }}
+      />
     </Animated.View>
   );
 }
@@ -175,57 +266,80 @@ const styles = StyleSheet.create({
   fill: {
     flex: 1,
   },
-  header: {
+  scroll: {
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingBottom: 120,
     gap: 12,
   },
-  title: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-    textAlign: 'center',
-  },
   helper: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.semibold,
-    color: color.slate400,
-    textAlign: 'center',
+    marginHorizontal: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
   },
-  list: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 10,
+  cards: {
+    gap: 8,
   },
-  wholeBox: {
-    padding: 14,
-    borderRadius: radiusAdmin.lg,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
+  wholeList: {
+    marginTop: 10,
+    gap: 8,
   },
   wholeInput: {
-    minHeight: 140,
-    textAlignVertical: 'top',
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * 1.45,
-    color: color.ink,
-    padding: 0,
-  },
-  footer: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    borderTopWidth: borderWidth.hair,
-    borderTopColor: color.line,
+    minHeight: 78,
+    paddingTop: 13,
+    paddingBottom: 13,
+    paddingLeft: 13,
+    paddingRight: 38,
+    borderRadius: radiusAdmin.md,
+    borderWidth: borderWidth.field,
+    borderColor: color.borderStrong,
     backgroundColor: color.white,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * 1.5,
+    color: color.ink,
+    textAlignVertical: 'top',
   },
-  footerCancel: {
-    flex: 46,
+  wholeRemove: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  footerSend: {
-    flex: 54,
+  addNote: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
+  },
+  addNoteDisabled: {
+    opacity: 0.45,
+  },
+  addNoteText: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
+  },
+  actionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  cancel: {
+    flex: 30,
+  },
+  send: {
+    flex: 70,
   },
 });

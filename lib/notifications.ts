@@ -8,14 +8,16 @@ import type { AppMode } from './active-mode';
 import { routeNotificationTap } from './notification-routing';
 import { supabase } from './supabase';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 function dataFromResponse(
   response: Notifications.NotificationResponse,
@@ -37,6 +39,9 @@ export function attachNotificationRouting(
   getMode: () => AppMode,
   nav: Router = router,
 ): () => void {
+  // Push notifications don't exist on web; every Notifications call throws.
+  if (Platform.OS === 'web') return () => {};
+
   const handle = (response: Notifications.NotificationResponse) => {
     routeNotificationTap(nav, dataFromResponse(response), getMode());
   };

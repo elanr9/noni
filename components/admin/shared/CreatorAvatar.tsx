@@ -6,12 +6,14 @@ export interface CreatorAvatarProps {
   /** Real profile photo from the linked account. Initial-letter fallback when missing. */
   uri?: string | null;
   name: string;
-  size: number;
+  size?: number;
+  /** Fallback tint: brand = blue-100/blue-700, quiet = fill-quiet/slate-500. */
+  tone?: 'brand' | 'quiet';
   style?: StyleProp<ViewStyle>;
 }
 
-/** Admin handoff §1 media rule — real photo, initial-letter circle as fallback only. */
-export function CreatorAvatar({ uri, name, size, style }: CreatorAvatarProps) {
+/** Admin handoff — real photo, initial-letter circle as fallback only. */
+export function CreatorAvatar({ uri, name, size = 36, tone = 'brand', style }: CreatorAvatarProps) {
   const round = { width: size, height: size, borderRadius: size / 2 };
 
   if (uri) {
@@ -23,8 +25,21 @@ export function CreatorAvatar({ uri, name, size, style }: CreatorAvatarProps) {
   }
 
   return (
-    <View style={[styles.fallback, round, style]}>
-      <Text style={[styles.initial, { fontSize: Math.round(size * 0.42) }]}>
+    <View
+      style={[
+        styles.fallback,
+        round,
+        tone === 'quiet' && { backgroundColor: color.fillQuiet },
+        style,
+      ]}
+    >
+      <Text
+        style={[
+          styles.initial,
+          { fontSize: Math.round(size * 0.42) },
+          tone === 'quiet' && { color: color.slate500 },
+        ]}
+      >
         {name.trim().charAt(0).toUpperCase()}
       </Text>
     </View>

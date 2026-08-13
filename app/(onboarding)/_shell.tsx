@@ -8,7 +8,7 @@ import { ProgressBar } from '../../components/ui/ProgressBar';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { color, motion, radius, space, type } from '../../theme/tokens';
 
-const TOTAL_STEPS = 12;
+const TOTAL_STEPS = 11;
 
 export interface OnboardingShellProps {
   /** 1-based step for the thin progress bar. */

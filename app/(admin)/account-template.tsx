@@ -51,7 +51,8 @@ function goBack() {
 }
 
 export default function AccountTemplateScreen() {
-  const { profile } = useAuth();
+  const { profile, permissions } = useAuth();
+  const canEdit = permissions.edit_account_template;
   const [template, setTemplate] = useState<AccountTemplate>(EMPTY);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
@@ -129,7 +130,7 @@ export default function AccountTemplateScreen() {
   return (
     <AdminScreen
       actionBar={
-        loading ? undefined : (
+        loading || !canEdit ? undefined : (
           <Button size="md" variant="primary" block disabled={busy} onPress={() => void saveCopy()}>
             Save
           </Button>
@@ -148,10 +149,9 @@ export default function AccountTemplateScreen() {
       ) : (
         <>
           <Text style={styles.body}>
-            The standard for a creator account. Creators copy the bios and
-            Instagram link, then match the example look. Setup also suggests
-            display names like Name | College Soccer Recruiting and usernames
-            like name.d1soccer.
+            {canEdit
+              ? 'The standard for a creator account. Creators copy the bios and Instagram link, then match the example look. Setup also suggests display names like Name | College Soccer Recruiting and usernames like name.d1soccer.'
+              : 'The standard for a creator account. Your Noni admin manages this template; you can view it but not change it.'}
           </Text>
 
           <SectionLabel style={styles.sectionLabel}>Instagram bio</SectionLabel>
@@ -165,6 +165,7 @@ export default function AccountTemplateScreen() {
               placeholder="Exact Instagram bio creators should use"
               placeholderTextColor={color.slate400}
               multiline
+              editable={canEdit}
             />
             <View style={styles.fieldFooter}>
               <CopyChip value={template.instagramBio} label="Instagram bio" />
@@ -185,6 +186,7 @@ export default function AccountTemplateScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="url"
+                editable={canEdit}
               />
               <CopyChip value={template.instagramLink} label="link in bio" />
             </View>
@@ -199,6 +201,7 @@ export default function AccountTemplateScreen() {
               placeholder="Exact TikTok bio creators should use"
               placeholderTextColor={color.slate400}
               multiline
+              editable={canEdit}
             />
             <View style={styles.fieldFooter}>
               <CopyChip value={template.tiktokBio} label="TikTok bio" />
@@ -241,7 +244,7 @@ export default function AccountTemplateScreen() {
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Replace example account screenshot"
-            disabled={busy}
+            disabled={busy || !canEdit}
             onPress={() => void replaceScreenshot()}
             style={styles.screenshotSlot}
           >

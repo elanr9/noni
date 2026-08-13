@@ -776,6 +776,18 @@ export async function listCampaigns(): Promise<Campaign[]> {
   );
 }
 
+/** Draft-week target edits. Counts only; stamped rows and the split stay. */
+export async function updateCampaignTargets(
+  id: string,
+  targets: { video_target: number; slideshow_target: number },
+): Promise<void> {
+  const { error } = await supabase
+    .from('campaigns')
+    .update(targets)
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function getCampaign(id: string): Promise<Campaign | null> {
   const { data, error } = await supabase
     .from('campaigns')
@@ -1038,4 +1050,353 @@ export async function confirmBriefReview(
     })
     .eq('id', briefId);
   if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// Briefs week list (Agent 5). One Next week card plus finished weeks, with
+// the per-week aggregates for the stat pill row. A week runs Monday through
+// Sunday of its drop week; a week is fully planned before it starts, so the
+// list never shows a live-incomplete state.
+
+export type BriefWeekStatus = 'next' | 'current' | 'done';
+
+function briefWeekMonday(dropDate: string): Date {
+  const d = new Date(`${dropDate}T00:00:00`);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d;
+}
+
+function briefWeekAddDays(d: Date, n: number): Date {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() + n);
+  return copy;
+}
+
+function briefWeekIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** "Aug 17 to 23", or "Jul 27 to Aug 2" across a month boundary. */
+export function briefWeekRangeLabel(dropDate: string): string {
+  const mon = briefWeekMonday(dropDate);
+  const sun = briefWeekAddDays(mon, 6);
+  const monMonth = mon.toLocaleDateString(undefined, { month: 'short' });
+  if (mon.getMonth() === sun.getMonth()) {
+    return `${monMonth} ${mon.getDate()} to ${sun.getDate()}`;
+  }
+  const sunMonth = sun.toLocaleDateString(undefined, { month: 'short' });
+  return `${monMonth} ${mon.getDate()} to ${sunMonth} ${sun.getDate()}`;
+}
+
+/** Drop date (Monday) of the week after the one containing today. */
+export function upcomingWeekDropDate(): string {
+  const thisMonday = briefWeekMonday(briefWeekIso(new Date()));
+  return briefWeekIso(briefWeekAddDays(thisMonday, 7));
+}
+
+/**
+ * Where a campaign week sits relative to today. Drafts are always the next
+ * week: a week is fully planned before it starts, so a live week is never
+ * incomplete.
+ */
+export function briefWeekStatus(
+  campaign: Pick<Campaign, 'status' | 'drop_date'>,
+): { status: BriefWeekStatus; dayOfWeek: number | null } {
+  if (campaign.status !== 'published' || campaign.drop_date === null) {
+    return { status: 'next', dayOfWeek: null };
+  }
+  const monday = briefWeekMonday(campaign.drop_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today.getTime() - monday.getTime()) / 86400000);
+  if (diff < 0) return { status: 'next', dayOfWeek: null };
+  if (diff <= 6) return { status: 'current', dayOfWeek: diff + 1 };
+  return { status: 'done', dayOfWeek: null };
+}
+
+export type BriefWeekStats = {
+  creators: number;
+  /** Whole-roster earnings per elapsed day, in cents. */
+  earnCentsPerDay: number;
+  viewsPerDay: number;
+  /** Posts posted per creator per elapsed day. */
+  postsPerCreatorPerDay: number;
+};
+
+export type BriefWeekSummary = {
+  campaign: Campaign;
+  /** 1-based, oldest week is 1. */
+  weekNumber: number;
+  status: BriefWeekStatus;
+  /** 1 to 7 while the week is live. */
+  dayOfWeek: number | null;
+  videoDone: number;
+  videoTarget: number;
+  slideshowDone: number;
+  slideshowTarget: number;
+  /** Present on every non-next week, zeros until data lands. */
+  stats: BriefWeekStats | null;
+};
+
+type WeekMetricSnapshot = { views: number | null; fetched_at: string | null };
+
+function weekLatestViews(rows: WeekMetricSnapshot[]): number {
+  let views = 0;
+  let latest = -Infinity;
+  for (const row of rows) {
+    if (row.fetched_at === null) continue;
+    const t = new Date(row.fetched_at).getTime();
+    if (t > latest) {
+      latest = t;
+      views = row.views ?? 0;
+    }
+  }
+  return views;
+}
+
+function emptyWeekStats(): BriefWeekStats {
+  return {
+    creators: 0,
+    earnCentsPerDay: 0,
+    viewsPerDay: 0,
+    postsPerCreatorPerDay: 0,
+  };
+}
+
+async function fetchBriefWeekStats(
+  campaigns: Campaign[],
+  statuses: Map<string, { status: BriefWeekStatus; dayOfWeek: number | null }>,
+): Promise<Map<string, BriefWeekStats>> {
+  const result = new Map<string, BriefWeekStats>();
+  const ranges = campaigns.flatMap((c) => {
+    if (c.drop_date === null) return [];
+    const monday = briefWeekMonday(c.drop_date);
+    return [
+      {
+        id: c.id,
+        start: briefWeekIso(monday),
+        end: briefWeekIso(briefWeekAddDays(monday, 6)),
+      },
+    ];
+  });
+  if (ranges.length === 0) return result;
+
+  const ids = ranges.map((r) => r.id);
+  const companyId = campaigns[0].company_id;
+  const minDay = ranges.reduce((m, r) => (r.start < m ? r.start : m), ranges[0].start);
+  const maxDay = ranges.reduce((m, r) => (r.end > m ? r.end : m), ranges[0].end);
+
+  const [assignmentsRes, postsRes, conversionsRes, revenueRes] = await Promise.all([
+    supabase
+      .from('assignments')
+      .select('id, campaign_id, creator_id')
+      .in('campaign_id', ids),
+    supabase
+      .from('posts')
+      .select(
+        'posted_at, post_metrics ( views, fetched_at ), assignments!inner ( campaign_id )',
+      )
+      .in('assignments.campaign_id', ids)
+      .not('posted_at', 'is', null)
+      .neq('status', 'failed'),
+    supabase
+      .from('conversion_daily')
+      .select('day, sales_cents')
+      .eq('company_id', companyId)
+      .is('creator_id', null)
+      .gte('day', minDay)
+      .lte('day', maxDay),
+    supabase
+      .from('revenue_events')
+      .select('amount_cents, occurred_at')
+      .eq('company_id', companyId)
+      .gte('occurred_at', `${minDay}T00:00:00`)
+      .lte('occurred_at', `${maxDay}T23:59:59`),
+  ]);
+  if (assignmentsRes.error) throw assignmentsRes.error;
+  if (postsRes.error) throw postsRes.error;
+  if (conversionsRes.error) throw conversionsRes.error;
+  if (revenueRes.error) throw revenueRes.error;
+
+  const creatorsByCampaign = new Map<string, Set<string>>();
+  for (const a of assignmentsRes.data ?? []) {
+    if (a.campaign_id === null) continue;
+    const set = creatorsByCampaign.get(a.campaign_id) ?? new Set<string>();
+    set.add(a.creator_id);
+    creatorsByCampaign.set(a.campaign_id, set);
+  }
+
+  type WeekPostRow = {
+    posted_at: string | null;
+    post_metrics: WeekMetricSnapshot[];
+    assignments: { campaign_id: string | null } | null;
+  };
+  const postTotals = new Map<string, { posted: number; views: number }>();
+  for (const post of (postsRes.data ?? []) as unknown as WeekPostRow[]) {
+    const campaignId = post.assignments?.campaign_id;
+    if (!campaignId) continue;
+    const entry = postTotals.get(campaignId) ?? { posted: 0, views: 0 };
+    entry.posted += 1;
+    entry.views += weekLatestViews(post.post_metrics);
+    postTotals.set(campaignId, entry);
+  }
+
+  // Same revenue rule as analytics: conversion_daily once synced, else
+  // Noni's own link-attributed revenue_events.
+  const revenueByDay = new Map<string, number>();
+  const conversions = conversionsRes.data ?? [];
+  if (conversions.length > 0) {
+    for (const row of conversions) {
+      revenueByDay.set(row.day, (revenueByDay.get(row.day) ?? 0) + (row.sales_cents ?? 0));
+    }
+  } else {
+    for (const event of revenueRes.data ?? []) {
+      if (event.occurred_at === null) continue;
+      const day = briefWeekIso(new Date(event.occurred_at));
+      revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + (event.amount_cents ?? 0));
+    }
+  }
+
+  for (const range of ranges) {
+    const days = statuses.get(range.id)?.dayOfWeek ?? 7;
+    const creators = creatorsByCampaign.get(range.id)?.size ?? 0;
+    const totals = postTotals.get(range.id) ?? { posted: 0, views: 0 };
+    let revenueCents = 0;
+    for (const [day, cents] of revenueByDay) {
+      if (day >= range.start && day <= range.end) revenueCents += cents;
+    }
+    result.set(range.id, {
+      creators,
+      earnCentsPerDay: revenueCents / days,
+      viewsPerDay: totals.views / days,
+      postsPerCreatorPerDay: creators > 0 ? totals.posted / days / creators : 0,
+    });
+  }
+  return result;
+}
+
+/** The Briefs list: every stamped or published week, newest first. */
+export async function listBriefWeeks(): Promise<BriefWeekSummary[]> {
+  const campaigns = await listCampaigns();
+  if (campaigns.length === 0) return [];
+  const ids = campaigns.map((c) => c.id);
+
+  const numberById = new Map<string, number>();
+  [...campaigns]
+    .sort((a, b) => ((a.drop_date ?? '') < (b.drop_date ?? '') ? -1 : 1))
+    .forEach((c, i) => numberById.set(c.id, i + 1));
+
+  // Lane progress: reviewed or intentionally killed rows count as done.
+  const { data: laneLinks, error: laneError } = await supabase
+    .from('campaign_briefs')
+    .select(
+      'campaign_id, briefs!inner ( format, reviewed_at, kill_reason, post_types ( family ) )',
+    )
+    .in('campaign_id', ids);
+  if (laneError) throw laneError;
+  type LaneLink = {
+    campaign_id: string;
+    briefs: {
+      format: string;
+      reviewed_at: string | null;
+      kill_reason: string | null;
+      post_types: { family: string } | null;
+    } | null;
+  };
+  const laneDone = new Map<string, { video: number; slideshow: number }>();
+  for (const link of (laneLinks ?? []) as unknown as LaneLink[]) {
+    const b = link.briefs;
+    if (!b || (b.reviewed_at === null && b.kill_reason === null)) continue;
+    const family = b.post_types?.family ?? b.format;
+    const entry = laneDone.get(link.campaign_id) ?? { video: 0, slideshow: 0 };
+    if (family === 'photo_carousel') entry.slideshow += 1;
+    else entry.video += 1;
+    laneDone.set(link.campaign_id, entry);
+  }
+
+  const statuses = new Map(
+    campaigns.map((c) => [c.id, briefWeekStatus(c)] as const),
+  );
+  const statsById = await fetchBriefWeekStats(
+    campaigns.filter((c) => statuses.get(c.id)?.status !== 'next'),
+    statuses,
+  );
+
+  return campaigns.map((campaign) => {
+    const where = statuses.get(campaign.id) ?? {
+      status: 'next' as const,
+      dayOfWeek: null,
+    };
+    const done = laneDone.get(campaign.id) ?? { video: 0, slideshow: 0 };
+    return {
+      campaign,
+      weekNumber: numberById.get(campaign.id) ?? campaigns.length,
+      status: where.status,
+      dayOfWeek: where.dayOfWeek,
+      videoDone: done.video,
+      videoTarget: campaign.video_target ?? 20,
+      slideshowDone: done.slideshow,
+      slideshowTarget: campaign.slideshow_target ?? 10,
+      stats:
+        where.status === 'next'
+          ? null
+          : (statsById.get(campaign.id) ?? emptyWeekStats()),
+    };
+  });
+}
+
+export type WeekPostItem = {
+  postId: string;
+  title: string;
+  creatorName: string;
+  format: BriefFormat;
+  /** e.g. "Jul 24". */
+  when: string;
+  views: number;
+};
+
+/** Posts made from a published week, newest first, for the week summary. */
+export async function listWeekPosts(campaignId: string): Promise<WeekPostItem[]> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select(
+      `id, posted_at,
+       post_metrics ( views, fetched_at ),
+       assignments!inner ( campaign_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) )`,
+    )
+    .eq('assignments.campaign_id', campaignId)
+    .not('posted_at', 'is', null)
+    .neq('status', 'failed')
+    .order('posted_at', { ascending: false });
+  if (error) throw error;
+  type Row = {
+    id: string;
+    posted_at: string | null;
+    post_metrics: WeekMetricSnapshot[];
+    assignments: {
+      briefs: { title: string | null; format: string | null } | null;
+      profiles: { full_name: string | null } | null;
+    } | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((row) => ({
+    postId: row.id,
+    title: row.assignments?.briefs?.title ?? 'Post',
+    creatorName: row.assignments?.profiles?.full_name ?? 'Creator',
+    format:
+      row.assignments?.briefs?.format === 'photo_carousel'
+        ? 'photo_carousel'
+        : 'video',
+    when:
+      row.posted_at === null
+        ? ''
+        : new Date(row.posted_at).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          }),
+    views: weekLatestViews(row.post_metrics),
+  }));
 }

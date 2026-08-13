@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
   if (!caller || caller.kind !== 'user') {
     return jsonResponse({ error: 'unauthorized' }, 401);
   }
-  if (caller.role !== 'admin') return jsonResponse({ error: 'forbidden' }, 403);
+  if (caller.role !== 'campaign_manager') return jsonResponse({ error: 'forbidden' }, 403);
 
   let body: { url?: string };
   try {

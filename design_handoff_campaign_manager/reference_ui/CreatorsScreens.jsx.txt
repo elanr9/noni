@@ -1,0 +1,444 @@
+/* Team — creators, the humans running the campaign (admin + other campaign
+   managers), and Slack-style channels. Every person and channel opens a chat. */
+
+const TEAM_PEOPLE = [
+  { id: 'ad1', name: 'Elan Rosen', role: 'Admin', meta: 'Budget, billing and the web console', you: false },
+  { id: 'cm2', name: 'Sofia Marek', role: 'Campaign manager', meta: 'Runs the Tuesday and Thursday briefs', you: false },
+  { id: 'cm1', name: 'You', role: 'Campaign manager', meta: 'Signed in on this phone', you: true },
+];
+
+const SEED_CHANNELS = [
+  { id: 'ch1', name: 'general', last: 'Elan: Budget tops up Friday — keep approvals moving.', unread: 2, members: 3 },
+  { id: 'ch2', name: 'wins', last: 'Sofia: Fabri’s tripod reel just crossed 400k 🎉', unread: 0, members: 3 },
+  { id: 'ch3', name: 'briefs', last: 'You: Next week leans slideshows, drafts up tonight.', unread: 0, members: 2 },
+];
+
+function CreatorsScreen({ state = 'default', onOpen, onOpenMember, onOpenChannel }) {
+  const { Icon, EmptyState } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [lane, setLane] = React.useState(0);
+  const [sort, setSort] = React.useState(0);
+  const [channels, setChannels] = React.useState(SEED_CHANNELS);
+  const [creating, setCreating] = React.useState(false);
+  const [chName, setChName] = React.useState('');
+  const loading = state === 'loading';
+  const empty = state === 'empty';
+  const list = empty ? [] : A.creators.filter((c) => c.status === 'approved');
+
+  const addChannel = () => {
+    const n = chName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    if (!n) return;
+    setChannels([...channels, { id: 'ch' + (channels.length + 1) + n, name: n, last: 'You created this channel.', unread: 0, members: 1 }]);
+    setChName(''); setCreating(false);
+  };
+
+  return (
+    <AdminScreen>
+      <AdminHeader title="Team" subtitle={loading ? null : `${list.length} creators · ${TEAM_PEOPLE.filter((p) => !p.you && p.role !== 'Admin').length + 1} campaign managers · 1 admin`} />
+      {!loading && !empty ? <Segmented items={['Creators', 'Team', 'Channels']} active={lane} onSelect={setLane} /> : null}
+
+      {loading ? <SkeletonRows n={3} height={112} /> : null}
+      {!loading && empty ? <EmptyState icon="users" title="No creators yet" body="Invite from Settings. They upload warm-up proof, you approve, then briefs start landing." style={{ marginTop: 40 }} /> : null}
+
+      {!loading && !empty && lane === 0 ? (
+        <>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['Earnings', 'Views', 'Posts'].map((s, i) => (
+            <button key={s} type="button" onClick={() => setSort(i)}
+              style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: sort === i ? 'var(--blue-100)' : 'var(--white)', boxShadow: sort === i ? 'none' : 'var(--shadow-card)', color: sort === i ? 'var(--blue-700)' : 'var(--slate-500)', font: '700 12px var(--font-ui)' }}>
+              {sort === i ? <Icon name="trending-up" size={12} /> : null}{s}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {list.map((c) => (
+            <Card key={c.id} pad={14} onClick={() => onOpen && onOpen(c)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={c.name} size={44} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{c.name}</div>
+                  <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{c.tiktok}</div>
+                </div>
+                <Icon name="chevron-right" size={18} color="var(--slate-300)" />
+              </div>
+              <div style={{ marginTop: 13, display: 'flex', gap: 8 }}>
+                {[[c.earned, 'earned'], [c.posts, 'posts'], [c.views, 'views']].map(([v, l]) => (
+                  <div key={l} style={{ flex: 1, padding: '10px 11px', borderRadius: 'var(--radius-sm)', background: 'var(--off-white)' }}>
+                    <div style={{ font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{v}</div>
+                    <div style={{ marginTop: 1, font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{l}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+        </>
+      ) : null}
+
+      {!loading && !empty && lane === 1 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {TEAM_PEOPLE.map((p) => (
+            <Card key={p.id} pad={14} onClick={!p.you ? () => onOpenMember && onOpenMember(p) : undefined} style={p.you ? { opacity: 0.75 } : undefined}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={p.you ? 'You' : p.name} size={44} tone={p.role === 'Admin' ? undefined : 'quiet'} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{p.name}</span>
+                    <TypeChip tone={p.role === 'Admin' ? 'brand' : undefined}>{p.role}</TypeChip>
+                  </div>
+                  <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.meta}</div>
+                </div>
+                {!p.you ? (
+                  <span style={{ width: 36, height: 36, flex: '0 0 auto', borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="message-circle" size={17} color="var(--blue-700)" />
+                  </span>
+                ) : null}
+              </div>
+            </Card>
+          ))}
+          <p style={{ margin: '2px 2px 0', font: '400 12.5px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Tap anyone to message them. Creators live in their own lane.</p>
+        </div>
+      ) : null}
+
+      {!loading && !empty && lane === 2 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button type="button" onClick={() => setCreating(true)}
+            style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 13px var(--font-ui)' }}>
+            <Icon name="plus" size={14} />New channel
+          </button>
+          {channels.map((ch) => (
+            <Card key={ch.id} pad={13} onClick={() => onOpenChannel && onOpenChannel(ch)} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <span style={{ width: 38, height: 38, flex: '0 0 auto', borderRadius: 11, background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '700 17px var(--font-display)', color: 'var(--slate-500)' }}>#</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 14.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>#{ch.name}</div>
+                <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: ch.unread ? 'var(--ink)' : 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ch.last}</div>
+              </div>
+              {ch.unread ? <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'var(--blue-500)', color: 'var(--white)', font: '700 11px/20px var(--font-ui)', textAlign: 'center' }}>{ch.unread}</span> : <Icon name="chevron-right" size={16} color="var(--slate-300)" />}
+            </Card>
+          ))}
+        </div>
+      ) : null}
+
+      {creating ? (
+        <Sheet title="New channel" subtitle="Everyone on the team can join. Creators are not in channels." onClose={() => setCreating(false)} maxHeight="46%"
+          footer={<window.NoniDesignSystem_710e43.Button variant="primary" size="lg" block disabled={!chName.trim()} onClick={addChannel}>Create channel</window.NoniDesignSystem_710e43.Button>}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 14px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)' }}>
+            <span style={{ font: '700 16px var(--font-display)', color: 'var(--slate-400)' }}>#</span>
+            <input autoFocus value={chName} onChange={(e) => setChName(e.target.value)} placeholder="channel-name"
+              style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', font: '600 15px var(--font-ui)', color: 'var(--ink)' }}></input>
+          </div>
+        </Sheet>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Slack-style channel thread. Sender names on other people's messages. */
+function ChannelScreen({ channel, onBack }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const msgs = [
+    { from: 'Elan Rosen', body: 'Budget tops up Friday — keep approvals moving.', time: '8:44 AM' },
+    { from: 'me', body: 'On it. Two posts and a song check left in the queue.', time: '8:51 AM' },
+    { from: 'Sofia Marek', body: 'Fabri’s tripod reel just crossed 400k. Pinning it to the library.', time: '9:02 AM' },
+  ];
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--white)' }}>
+      <div style={{ flex: '0 0 auto', paddingTop: 4, borderBottom: '1px solid var(--line)', background: 'var(--white)' }}>
+        <PushHeader title={`#${channel.name}`} meta={`${channel.members} ${channel.members === 1 ? 'member' : 'members'}`} onBack={onBack} style={{ background: 'transparent' }} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `16px ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {msgs.map((m, i) => {
+          const mine = m.from === 'me';
+          return (
+            <div key={i} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '84%' }}>
+              {!mine ? <div style={{ margin: '0 0 3px 4px', font: '700 11px var(--font-ui)', color: 'var(--slate-400)' }}>{m.from}</div> : null}
+              <div style={{ padding: '10px 13px', borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', background: mine ? 'var(--blue-500)' : 'var(--fill-quiet)' }}>
+                <div style={{ font: '400 14px/1.4 var(--font-ui)', color: mine ? 'var(--white)' : 'var(--ink)' }}>{m.body}</div>
+                <div style={{ marginTop: 4, font: '600 11px var(--font-ui)', color: mine ? 'rgba(255,255,255,0.7)' : 'var(--slate-400)' }}>{m.time}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ flex: '0 0 auto', padding: `10px ${window.GUT}px 26px`, borderTop: '1px solid var(--line)', display: 'flex', gap: 9, alignItems: 'center' }}>
+        <div style={{ flex: 1, padding: '12px 15px', borderRadius: 999, background: 'var(--fill-quiet)', font: '400 15px var(--font-ui)', color: 'var(--slate-400)' }}>Message #{channel.name}</div>
+        <button type="button" aria-label="Send" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-500)', boxShadow: 'var(--shadow-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="send" size={18} color="var(--white)" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Creator-scoped week: stepper (past/next week), only this creator's briefs.
+   Green check = posted, orange dot = not yet. Right label = Post | Slideshow. */
+function CreatorWeek({ creator }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [w, setW] = React.useState(0);
+  const mine = A.calendar.map((d) => ({ day: d.day, items: d.items.filter((it) => it.c === creator.short) }));
+  const weeks = {
+    '-1': { label: 'Aug 3 – 9', days: [
+      { day: 'Mon 3', items: [{ t: 'First touch warm-up', f: 'video', s: 'posted' }] },
+      { day: 'Tue 4', items: [] },
+      { day: 'Wed 5', items: [{ t: 'Coach reply window', f: 'photo_carousel', s: 'posted' }] },
+      { day: 'Thu 6', items: [] },
+      { day: 'Fri 7', items: [{ t: 'Match film breakdown', f: 'video', s: 'posted' }] },
+      { day: 'Sat 8', items: [{ t: '3 stats that decide Sunday', f: 'photo_carousel', s: 'assigned' }] },
+      { day: 'Sun 9', items: [] },
+    ] },
+    '0': { label: 'Aug 10 – 16', days: mine },
+    '1': { label: 'Aug 17 – 23', days: [
+      { day: 'Mon 17', items: [{ t: 'Preseason check-in', f: 'video', s: 'assigned' }] },
+      { day: 'Tue 18', items: [] },
+      { day: 'Wed 19', items: [{ t: 'Drill of the week', f: 'photo_carousel', s: 'assigned' }] },
+      { day: 'Thu 20', items: [] },
+      { day: 'Fri 21', items: [{ t: 'Scrimmage highlights', f: 'video', s: 'assigned' }] },
+      { day: 'Sat 22', items: [] },
+      { day: 'Sun 23', items: [] },
+    ] },
+  };
+  const wk = weeks['' + w];
+  const posted = (s) => s === 'posted' || s === 'approved';
+  const all = wk.days.flatMap((d) => d.items);
+  const nDone = all.filter((it) => posted(it.s)).length;
+  const step = (dir, disabled) => (
+    <button type="button" onClick={() => setW(w + dir)} disabled={disabled} aria-label={dir < 0 ? 'Previous week' : 'Next week'}
+      style={{ width: 32, height: 32, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.35 : 1, background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name={dir < 0 ? 'chevron-left' : 'chevron-right'} size={16} color="var(--ink)" />
+    </button>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {step(-1, w === -1)}
+        <div style={{ flex: 1, textAlign: 'center' }}>
+          <div style={{ font: '700 14.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{wk.label}</div>
+          <div style={{ marginTop: 1, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>{all.length ? `${nDone} of ${all.length} posted` : 'No brief this week'}</div>
+        </div>
+        {step(1, w === 1)}
+      </div>
+      {wk.days.map((d) => (
+        <Card key={d.day} pad={12} style={{ display: 'flex', gap: 12, alignItems: d.items.length ? 'flex-start' : 'center' }}>
+          <div style={{ width: 46, flex: '0 0 auto' }}>
+            <div style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{d.day.split(' ')[0]}</div>
+            <div style={{ font: '700 20px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{d.day.split(' ')[1]}</div>
+          </div>
+          {d.items.length ? (
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {d.items.map((it, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 'var(--radius-sm)', background: 'var(--off-white)' }}>
+                  {posted(it.s)
+                    ? <Icon name="circle-check-big" size={14} color="var(--green)" style={{ flex: '0 0 auto' }} />
+                    : <span style={{ width: 8, height: 8, flex: '0 0 auto', borderRadius: 999, background: 'var(--amber)' }}></span>}
+                  <span style={{ flex: 1, minWidth: 0, font: '600 13px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.t}</span>
+                  <Icon name={window.isReel(it.f) ? 'video' : 'images'} size={13} color="var(--slate-400)" />
+                  <span style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{window.isReel(it.f) ? 'Post' : 'Slideshow'}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span style={{ flex: 1, font: '400 13px var(--font-ui)', color: 'var(--slate-300)' }}>Rest day</span>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* Per-creator analytics: range · views chart · platform split. Reuses the
+   Analytics tab's chart engine, scoped to this creator. */
+function CreatorAnalytics({ creator }) {
+  const { MAreaChart, MMenu, MItem, aRangeData, A_WEEKLY, A_RANGES, Icon } = { ...window, Icon: window.NoniDesignSystem_710e43.Icon };
+  const [range, setRange] = React.useState('Last month');
+  const n = /m/i.test(creator.views) ? parseFloat(creator.views) * 1000 : parseFloat(creator.views);
+  const share = Math.min(1, (n || 400) / 4200);
+  const chart = aRangeData(range, A_WEEKLY.map((v) => +(v * share).toFixed(1)));
+  const tt = 0.76;
+  return (
+    <Card pad={14}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <SectionLabel style={{ padding: 0, flex: 1 }}>Views · {range.toLowerCase()}</SectionLabel>
+        <MMenu trigger={range}>
+          {(close) => A_RANGES.map((r) => <MItem key={r} label={r} on={range === r} pick={() => close(() => setRange(r))} />)}
+        </MMenu>
+      </div>
+      <MAreaChart series={chart.data} labels={chart.labels} />
+      <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 11 }}>
+        {[['TikTok', 'music-2', tt], ['Instagram', 'at-sign', 1 - tt]].map(([l, icon, f]) => (
+          <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Icon name={icon} size={13} color="var(--slate-500)" />
+            <span style={{ width: 72, font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>{l}</span>
+            <span style={{ flex: 1, height: 8, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden' }}>
+              <span style={{ display: 'block', width: Math.round(f * 100) + '%', height: '100%', borderRadius: 999, background: 'var(--blue-500)' }}></span>
+            </span>
+            <span style={{ width: 34, textAlign: 'right', font: '700 12.5px var(--font-ui)', color: 'var(--ink)' }}>{Math.round(f * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/* Instagram-style profile: stats, then posts · analytics · calendar. */
+function CreatorProfile({ creator, view: view0 = 'grid', onBack, onChat, onOpenPost }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [view, setView] = React.useState(view0);
+  const posts = A.library.ours;
+
+  return (
+    <AdminScreen bottom={40} pad={false}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 40px' }}>
+        <PushHeader title={creator.name} meta={`@${creator.tiktok}`} onBack={onBack}
+          right={<button type="button" onClick={onChat} aria-label={`Message ${creator.short}`} style={{ width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="message-circle" size={18} color="var(--blue-700)" />
+          </button>} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <Avatar name={creator.name} size={64} />
+            <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+              {[[creator.views, 'views'], [creator.posts, 'posts'], [creator.earned, 'earned']].map(([v, l]) => (
+                <div key={l} style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{ font: '700 18px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{v}</div>
+                  <div style={{ marginTop: 1, font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ font: '600 14px/1.45 var(--font-ui)', color: 'var(--ink)' }}>{creator.credential}</div>
+            <div style={{ marginTop: 3, font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}>@{creator.tiktok} · @{creator.instagram}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)', alignSelf: 'flex-start' }}>
+            {[['grid', 'layout-grid'], ['analytics', 'chart-column'], ['calendar', 'calendar-days']].map(([k, icon]) => (
+              <button key={k} type="button" onClick={() => setView(k)} aria-label={k} aria-pressed={view === k}
+                style={{ width: 44, height: 32, borderRadius: 999, border: 'none', cursor: 'pointer', background: view === k ? 'var(--white)' : 'transparent', boxShadow: view === k ? 'var(--shadow-card)' : 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={icon} size={16} color={view === k ? 'var(--ink)' : 'var(--slate-400)'} />
+              </button>
+            ))}
+          </div>
+
+          {view === 'grid' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              {posts.concat(posts).map((p, i) => (
+                <div key={i} onClick={() => onOpenPost && onOpenPost(p)} style={{ position: 'relative', aspectRatio: '9/16', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', cursor: 'pointer', display: 'flex', alignItems: 'flex-end', padding: 7 }}>
+                  <Icon name={window.isReel(p.format) ? 'play' : 'images'} size={13} color="rgba(15,23,32,0.45)" />
+                  <span style={{ marginLeft: 5, font: '700 11px var(--font-ui)', color: 'rgba(15,23,32,0.6)' }}>{p.views}</span>
+                </div>
+              ))}
+            </div>
+          ) : view === 'analytics' ? <CreatorAnalytics creator={creator} /> : <CreatorWeek creator={creator} />}
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+function CreatorPost({ post, creator, onBack }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const stats = [['eye', post.views, 'views'], ['dollar-sign', '$180', 'payout'], ['bookmark', '4.1K', 'saves'], ['heart', '38K', 'likes'], ['message-circle', '612', 'comments']];
+  return (
+    <AdminScreen bottom={40} pad={false}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 40px' }}>
+        <PushHeader title={post.title} meta={`${creator.short} · ${post.when}`} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ position: 'relative', height: 300, borderRadius: 'var(--radius-xl)', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name={window.isReel(post.format) ? 'play' : 'images'} size={38} color="var(--blue-300)" />
+            <span style={{ position: 'absolute', top: 12, left: 12 }}><FormatChip format={post.format} size="sm" /></span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {stats.map(([icon, v, l]) => (
+              <div key={l} style={{ flex: '1 1 30%', padding: '11px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--white)', border: '1px solid var(--border)' }}>
+                <Icon name={icon} size={14} color="var(--slate-400)" />
+                <div style={{ marginTop: 6, font: '700 17px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{v}</div>
+                <div style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{l}</div>
+              </div>
+            ))}
+          </div>
+          <Card pad={14}>
+            <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Caption</div>
+            <p style={{ margin: '8px 0 0', font: '400 14px/1.5 var(--font-ui)', color: 'var(--ink)' }}>Save this before Sunday. Comment D1 and I will send the template. #collegesoccer #matchfilm</p>
+          </Card>
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+/* One thread per creator. A message can carry a post reference that renders
+   inline; Review scrolls this thread to that post. */
+function ChatScreen({ creator, onBack }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const msgs = window.NONI_ADMIN.chat;
+  const [attach, setAttach] = React.useState(false);
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--white)' }}>
+      <div style={{ flex: '0 0 auto', paddingTop: 4, borderBottom: '1px solid var(--line)', background: 'var(--white)' }}>
+        <PushHeader title={creator.name} meta={creator.tiktok ? `@${creator.tiktok}` : creator.role} onBack={onBack} style={{ background: 'transparent' }} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `16px ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {msgs.map((m, i) => {
+          const mine = m.from === 'admin';
+          if (m.ref) {
+            return (
+              <div key={i} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '84%', padding: 9, borderRadius: 16, background: 'var(--blue-500)' }}>
+                <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: 8, borderRadius: 12, background: 'rgba(255,255,255,0.16)' }}>
+                  <Thumb format={m.ref.format} w={34} h={46} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ font: '700 13px var(--font-ui)', color: 'var(--white)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.ref.title}</div>
+                    <div style={{ marginTop: 2, font: '600 11px var(--font-ui)', color: 'rgba(255,255,255,0.75)' }}>{m.ref.meta}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 5, textAlign: 'right', font: '600 11px var(--font-ui)', color: 'rgba(255,255,255,0.7)' }}>{m.time}</div>
+              </div>
+            );
+          }
+          if (m.media) {
+            return (
+              <div key={i} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '64%', padding: 5, borderRadius: 16, background: mine ? 'var(--blue-500)' : 'var(--fill-quiet)' }}>
+                <div style={{ position: 'relative', width: 168, height: m.media === 'video' ? 224 : 118, borderRadius: 12, overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {m.media === 'video' ? (
+                    <span style={{ width: 34, height: 34, borderRadius: 999, background: 'rgba(255,255,255,0.88)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={14} color="var(--ink)" /></span>
+                  ) : <Icon name="images" size={22} color="var(--blue-300)" />}
+                  {m.len ? <span style={{ position: 'absolute', bottom: 6, right: 6, padding: '1px 6px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 10px var(--font-ui)' }}>{m.len}</span> : null}
+                </div>
+                {m.body ? <div style={{ padding: '7px 8px 2px', font: '400 14px/1.4 var(--font-ui)', color: mine ? 'var(--white)' : 'var(--ink)' }}>{m.body}</div> : null}
+                <div style={{ padding: '4px 8px 3px', textAlign: 'right', font: '600 11px var(--font-ui)', color: mine ? 'rgba(255,255,255,0.7)' : 'var(--slate-400)' }}>{m.time}</div>
+              </div>
+            );
+          }
+          return (
+            <div key={i} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '84%', padding: '10px 13px', borderRadius: mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px', background: mine ? 'var(--blue-500)' : 'var(--fill-quiet)' }}>
+              <div style={{ font: '400 14px/1.4 var(--font-ui)', color: mine ? 'var(--white)' : 'var(--ink)' }}>{m.body}</div>
+              <div style={{ marginTop: 4, font: '600 11px var(--font-ui)', color: mine ? 'rgba(255,255,255,0.7)' : 'var(--slate-400)' }}>{m.time}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ flex: '0 0 auto', borderTop: '1px solid var(--line)', background: 'var(--white)' }}>
+        {attach ? (
+          <div style={{ display: 'flex', gap: 8, padding: `10px ${window.GUT}px 0` }}>
+            {[['images', 'Photos'], ['camera', 'Camera'], ['video', 'Video']].map(([icon, label]) => (
+              <button key={label} type="button" onClick={() => setAttach(false)}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '11px 0', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', background: 'var(--blue-50)', font: '700 12px var(--font-ui)', color: 'var(--blue-700)' }}>
+                <Icon name={icon} size={18} color="var(--blue-600)" />{label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div style={{ padding: `10px ${window.GUT}px 26px`, display: 'flex', gap: 9, alignItems: 'center' }}>
+          <button type="button" onClick={() => setAttach(!attach)} aria-label="Add a photo or video" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: attach ? 'var(--blue-100)' : 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background var(--dur-fast) var(--ease-out)' }}>
+            <Icon name="plus" size={20} color={attach ? 'var(--blue-700)' : 'var(--slate-500)'} />
+          </button>
+          <div style={{ flex: 1, padding: '12px 15px', borderRadius: 999, background: 'var(--fill-quiet)', font: '400 15px var(--font-ui)', color: 'var(--slate-400)' }}>Message {creator.short || creator.name.split(' ')[0]}</div>
+          <button type="button" aria-label="Send" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-500)', boxShadow: 'var(--shadow-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="send" size={18} color="var(--white)" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { CreatorsScreen, CreatorProfile, CreatorPost, ChatScreen, ChannelScreen });

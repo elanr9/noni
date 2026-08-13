@@ -367,6 +367,32 @@ export async function listCreatorSocialStatus(): Promise<CreatorSocialStatus[]> 
   return ((data as { members?: CreatorSocialStatus[] }).members ?? []);
 }
 
+/**
+ * Emails a creator invite. The invitee downloads the app and signs in with
+ * Google on the invited email; signup attaches them to the company.
+ */
+export async function inviteCreator(
+  companyId: string,
+  name: string,
+  email: string,
+): Promise<void> {
+  const { data, error } = await supabase.functions.invoke(
+    'invite-campaign-manager',
+    {
+      body: {
+        action: 'invite',
+        company_id: companyId,
+        role: 'creator',
+        name,
+        email,
+      },
+    },
+  );
+  if (error) throw error;
+  const result = data as { error?: string } | null;
+  if (result?.error) throw new Error(result.error);
+}
+
 export async function listCreators(companyId: string): Promise<Profile[]> {
   const { data, error } = await supabase
     .from('profiles')
@@ -374,7 +400,8 @@ export async function listCreators(companyId: string): Promise<Profile[]> {
     .eq('company_id', companyId)
     .order('full_name');
   if (error) throw error;
-  return data ?? [];
+  // Rows are filtered to this company, so company_id is never null here.
+  return (data ?? []) as Profile[];
 }
 
 export async function updateTask(params: {
@@ -1178,6 +1205,10 @@ export type MusicApprovalItem = {
   markedAt: string;
   /** Live post links, one per platform Upload-Post responded for. */
   postLinks: Array<{ platform: string; url: string }>;
+  /** Cover + points + close, from the brief. Null when the brief has no count. */
+  slideCount?: number | null;
+  /** Earliest live posted_at across platforms. Null until Upload-Post confirms. */
+  postedAt?: string | null;
 };
 
 /**
@@ -1190,7 +1221,9 @@ export async function listMusicApprovalQueue(
 ): Promise<MusicApprovalItem[]> {
   const { data, error } = await supabase
     .from('assignments')
-    .select('*, briefs:brief_id ( id, title ), profiles:creator_id ( id, full_name )')
+    .select(
+      '*, briefs:brief_id ( id, title, point_count ), profiles:creator_id ( id, full_name )',
+    )
     .eq('company_id', companyId)
     .not('music_marked_by_creator_at', 'is', null)
     .is('music_approved_at', null)
@@ -1198,7 +1231,7 @@ export async function listMusicApprovalQueue(
   if (error) throw error;
   const rows = (data ?? []) as Array<
     Assignment & {
-      briefs: { id: string; title: string } | null;
+      briefs: { id: string; title: string; point_count: number | null } | null;
       profiles: { id: string; full_name: string | null } | null;
     }
   >;
@@ -1206,17 +1239,24 @@ export async function listMusicApprovalQueue(
 
   const { data: posts, error: postsError } = await supabase
     .from('posts')
-    .select('assignment_id, platform, post_url')
+    .select('assignment_id, platform, post_url, posted_at')
     .in('assignment_id', rows.map((r) => r.id))
     .not('post_url', 'is', null);
   if (postsError) throw postsError;
 
   const linksByAssignment = new Map<string, Array<{ platform: string; url: string }>>();
+  const postedByAssignment = new Map<string, string>();
   for (const p of posts ?? []) {
     if (p.assignment_id === null || p.post_url === null) continue;
     const list = linksByAssignment.get(p.assignment_id) ?? [];
     list.push({ platform: p.platform ?? 'post', url: p.post_url });
     linksByAssignment.set(p.assignment_id, list);
+    if (p.posted_at !== null) {
+      const earliest = postedByAssignment.get(p.assignment_id);
+      if (earliest === undefined || p.posted_at < earliest) {
+        postedByAssignment.set(p.assignment_id, p.posted_at);
+      }
+    }
   }
 
   return rows.map((r) => ({
@@ -1225,6 +1265,9 @@ export async function listMusicApprovalQueue(
     creatorName: r.profiles?.full_name?.trim() || 'Creator',
     markedAt: r.music_marked_by_creator_at ?? '',
     postLinks: linksByAssignment.get(r.id) ?? [],
+    slideCount:
+      r.briefs !== null && r.briefs.point_count !== null ? r.briefs.point_count + 2 : null,
+    postedAt: postedByAssignment.get(r.id) ?? null,
   }));
 }
 
@@ -1374,4 +1417,64 @@ export async function ingestFeatures(params: {
     skipped_existing: result.skipped_existing ?? 0,
     dropped_over_cap: result.dropped_over_cap ?? 0,
   };
+}
+
+// --- Music approval extras --------------------------------------------------
+
+/** Earliest live timestamp across the assignment's posts, for "Live Xh ago". */
+export async function getAssignmentLiveAt(
+  assignmentId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select('posted_at')
+    .eq('assignment_id', assignmentId)
+    .not('posted_at', 'is', null)
+    .order('posted_at', { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0]?.posted_at ?? null;
+}
+
+/**
+ * Admin sends the song back: clears the creator's music mark so the post
+ * leaves the approval queue, then drops the reasons and note into the review
+ * thread so the creator sees what to fix. It re-enters the queue when the
+ * creator taps "Music added" again (markMusicAdded).
+ */
+export async function requestMusicChanges(params: {
+  companyId: string;
+  assignmentId: string;
+  adminId: string;
+  reasons: string[];
+  note: string | null;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('assignments')
+    .update({ music_marked_by_creator_at: null })
+    .eq('company_id', params.companyId)
+    .eq('id', params.assignmentId);
+  if (error) throw error;
+
+  const parts = [...params.reasons];
+  const note = params.note?.trim();
+  if (note) parts.push(note);
+  const message = parts.join('. ');
+  if (!message) return;
+
+  const subs = await latestSubmissionsByAssignment([params.assignmentId]);
+  const submission = subs.get(params.assignmentId);
+  if (submission !== undefined) {
+    const { error: eventError } = await supabase.from('review_events').insert({
+      submission_id: submission.id,
+      author_id: params.adminId,
+      action: 'comment',
+      note: message,
+    });
+    if (eventError) throw eventError;
+  }
+
+  void supabase.functions.invoke('notify', {
+    body: { assignment_id: params.assignmentId, event: 'comment' },
+  });
 }

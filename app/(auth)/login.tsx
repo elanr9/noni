@@ -1,37 +1,16 @@
-import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import * as AppleAuthentication from 'expo-apple-authentication';
-import { router } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { Screen } from '../../components/layout/Screen';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { Wordmark } from '../../components/ui/Wordmark';
-import {
-  routeAfterSignIn,
-  signInWithApple,
-  signInWithGoogle,
-} from '../../lib/auth-session';
+import { BubbleMark } from '../../components/ui/Wordmark';
+import { routeAfterSignIn, signInWithGoogle } from '../../lib/auth-session';
 import { color, radius, space, type } from '../../theme/tokens';
 
-function AppleMark({ size, fill }: { size: number; fill: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path
-        fill={fill}
-        d="M16.365 1.43c0 1.14-.42 2.2-1.2 3.02-.9.96-2.2 1.7-3.4 1.6-.1-1.2.4-2.4 1.2-3.25.9-.95 2.35-1.65 3.4-1.37zM20.9 17.3c-.55 1.25-.8 1.8-1.5 2.9-.96 1.52-2.3 3.42-4 3.45-1.5.02-1.9-.98-3.95-.97-2.05.01-2.5.99-4 .97-1.7-.03-3-1.72-3.95-3.24C1.4 16.9.2 12.7 1.85 9.55c.9-1.7 2.5-2.8 4.25-2.83 1.6-.03 3.1 1.08 4 1.08.9 0 2.65-1.33 4.5-1.13.77.03 2.9.3 4.3 2.3-.1.07-2.55 1.5-2.52 4.45.03 3.55 3.1 4.72 3.12 4.73l-.6-.85z"
-      />
-    </Svg>
-  );
-}
+const ROCKET_SIZE = 150;
 
+/** Official multicolor Google G. Brand mark, not a token colour. */
 function GoogleMark({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
@@ -56,18 +35,10 @@ function GoogleMark({ size }: { size: number }) {
 }
 
 export default function LoginScreen() {
-  const [busy, setBusy] = useState<'apple' | 'google' | null>(null);
-  const [appleAvailable, setAppleAvailable] = useState(false);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    AppleAuthentication.isAvailableAsync()
-      .then(setAppleAvailable)
-      .catch(() => setAppleAvailable(false));
-  }, []);
+  const [busy, setBusy] = useState(false);
 
   async function handleGoogle() {
-    setBusy('google');
+    setBusy(true);
     try {
       const signedIn = await signInWithGoogle();
       if (signedIn) await routeAfterSignIn();
@@ -77,167 +48,117 @@ export default function LoginScreen() {
         e instanceof Error ? e.message : 'Could not sign in with Google',
       );
     } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleApple() {
-    setBusy('apple');
-    try {
-      const signedIn = await signInWithApple();
-      if (signedIn) await routeAfterSignIn();
-    } catch (e) {
-      Alert.alert(
-        'Sign in failed',
-        e instanceof Error ? e.message : 'Could not sign in with Apple',
-      );
-    } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
   return (
-    <Screen edges={['top', 'left', 'right', 'bottom']} contentStyle={styles.content}>
+    <View style={styles.root}>
       <View style={styles.bleed} pointerEvents="none" />
 
-      <View style={styles.hero}>
-        <Wordmark size={type.size.titleXl} />
-        <Text style={styles.headline}>Welcome back</Text>
-        <Text style={styles.body}>Sign in to keep creating and getting paid.</Text>
-      </View>
-
-      <View style={styles.authStack}>
-        {appleAvailable ? (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Sign in with Apple"
-            disabled={busy !== null}
-            onPress={() => {
-              if (!busy) void handleApple();
-            }}
-            style={[styles.btn, styles.appleBtn, busy !== null && styles.btnDisabled]}
-          >
-            {busy === 'apple' ? (
-              <ActivityIndicator color={color.white} />
-            ) : (
-              <>
-                <AppleMark size={20} fill={color.white} />
-                <Text style={styles.appleLabel}>Continue with Apple</Text>
-              </>
-            )}
-          </PressableScale>
-        ) : null}
+      <Screen
+        edges={['top', 'left', 'right', 'bottom']}
+        bg="transparent"
+        contentStyle={styles.content}
+      >
+        <View style={styles.hero}>
+          <BubbleMark size={ROCKET_SIZE} />
+          <Text style={styles.welcome}>Welcome to Noni!</Text>
+          <Text style={styles.headline}>UGC Made Easy</Text>
+          <Text style={styles.body}>
+            Sign in with the Google account your invite was sent to.
+          </Text>
+        </View>
 
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Sign in with Google"
-          disabled={busy !== null}
+          accessibilityLabel="Continue with Google"
+          disabled={busy}
           onPress={() => void handleGoogle()}
-          style={[styles.btn, styles.googleBtn, busy !== null && styles.btnDisabled]}
+          style={[styles.googleBtn, busy && styles.btnDisabled]}
         >
-          {busy === 'google' ? (
+          {busy ? (
             <ActivityIndicator color={color.ink} />
           ) : (
             <>
-              <GoogleMark size={22} />
+              <GoogleMark size={19} />
               <Text style={styles.googleLabel}>Continue with Google</Text>
             </>
           )}
         </PressableScale>
-
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Create an account"
-          onPress={() => router.push('/(onboarding)/welcome')}
-          style={styles.footerLink}
-        >
-          <Text style={styles.footerMuted}>New here? </Text>
-          <Text style={styles.footerStrong}>Get started</Text>
-        </PressableScale>
-      </View>
-    </Screen>
+      </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
+  root: {
     flex: 1,
     overflow: 'hidden',
-    justifyContent: 'space-between',
+    backgroundColor: color.white,
   },
   bleed: {
     position: 'absolute',
-    top: -(space[11] * 3 + space[5]),
-    left: -(space[11] * 2 + space[5]),
-    width: space[11] * 10 + space[7],
-    height: space[11] * 10 + space[7],
+    top: -180,
+    left: -120,
+    width: 420,
+    height: 420,
     borderRadius: radius.pill,
     backgroundColor: color.blue50,
   },
+  content: {
+    flex: 1,
+    paddingBottom: space[3],
+  },
   hero: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: space[4],
-    paddingBottom: space[8],
+  },
+  welcome: {
+    marginTop: space[6],
+    fontFamily: type.font.rounded,
+    fontSize: type.size.action,
+    fontWeight: type.weight.heavy,
+    letterSpacing: -0.2,
+    color: color.blue600,
+    textAlign: 'center',
   },
   headline: {
-    fontSize: type.size.hero,
-    lineHeight: type.size.hero * type.leading.tight,
+    marginTop: space[2],
+    fontSize: 40,
+    lineHeight: 40 * type.leading.tight,
     letterSpacing: type.tracking.hero,
     fontWeight: type.weight.heavy,
     color: color.ink,
+    textAlign: 'center',
   },
   body: {
-    fontSize: type.size.body,
-    lineHeight: type.size.body * type.leading.body,
-    color: color.slate500,
+    marginTop: space[4],
     maxWidth: 280,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.slate500,
+    textAlign: 'center',
   },
-  authStack: {
-    gap: space[3],
-    paddingBottom: space[4],
-  },
-  btn: {
-    height: 60,
+  googleBtn: {
+    height: 52,
     borderRadius: radius.pill,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-  },
-  btnDisabled: {
-    opacity: 0.55,
-  },
-  appleBtn: {
-    backgroundColor: color.ink,
-  },
-  appleLabel: {
-    color: color.white,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  googleBtn: {
+    gap: 10,
     backgroundColor: color.white,
     borderWidth: 1.5,
     borderColor: color.borderStrong,
   },
+  btnDisabled: {
+    opacity: 0.55,
+  },
   googleLabel: {
     color: color.ink,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  footerLink: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingVertical: space[3],
-  },
-  footerMuted: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-  },
-  footerStrong: {
-    fontSize: type.size.bodySm,
+    fontSize: type.size.body,
     fontWeight: type.weight.bold,
-    color: color.ink,
+    letterSpacing: -0.1,
   },
 });

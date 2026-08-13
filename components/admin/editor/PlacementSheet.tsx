@@ -188,7 +188,7 @@ export function PlacementSheet({
           : overlayText
             ? 'Drag the text to where it should sit on the finished video.'
             : 'Drag it to where it should sit on the finished video.'}{' '}
-        The frame below stands in for the creator's camera.
+        {"The frame below stands in for the creator's camera."}
       </Text>
 
       <View style={styles.canvasWrap}>

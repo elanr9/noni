@@ -11,11 +11,13 @@ import {
 
 import {
   listThread,
+  parseMessageMedia,
   sendMessage,
   type MessagePostRef,
   type ThreadMessage,
 } from '../lib/messages-api';
 import { borderWidth, color, radius, type } from '../theme/tokens';
+import { ChatMediaBlock } from './admin/chat/MessageBubble';
 import { Icon } from './ui/Icon';
 import { PressableScale } from './ui/PressableScale';
 
@@ -149,6 +151,31 @@ export function ChatThread(props: {
         ) : (
           messages.map((m) => {
             const mine = m.authorId === meId;
+            const { media, text } = parseMessageMedia(m.body);
+            if (media !== null) {
+              return (
+                <View
+                  key={m.id}
+                  onLayout={(e) =>
+                    messageY.current.set(m.id, e.nativeEvent.layout.y)
+                  }
+                  style={[
+                    styles.mediaBubble,
+                    mine ? styles.mediaBubbleMine : styles.mediaBubbleTheirs,
+                  ]}
+                >
+                  <ChatMediaBlock media={media} />
+                  {text.length > 0 && (
+                    <Text style={mine ? styles.mediaCaptionMine : styles.mediaCaptionTheirs}>
+                      {text}
+                    </Text>
+                  )}
+                  <Text style={mine ? styles.mediaTimeMine : styles.mediaTimeTheirs}>
+                    {timeLabel(m.createdAt)}
+                  </Text>
+                </View>
+              );
+            }
             return (
               <View
                 key={m.id}
@@ -290,6 +317,50 @@ const styles = StyleSheet.create({
     fontSize: type.size.chip,
     fontWeight: '700',
     color: color.blue700,
+  },
+  mediaBubble: {
+    padding: 5,
+    borderRadius: 16,
+  },
+  mediaBubbleMine: {
+    alignSelf: 'flex-end',
+    backgroundColor: color.blue600,
+  },
+  mediaBubbleTheirs: {
+    alignSelf: 'flex-start',
+    backgroundColor: color.white,
+  },
+  mediaCaptionMine: {
+    paddingHorizontal: 8,
+    paddingTop: 7,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.4,
+    color: color.white,
+  },
+  mediaCaptionTheirs: {
+    paddingHorizontal: 8,
+    paddingTop: 7,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.4,
+    color: color.ink,
+  },
+  mediaTimeMine: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 3,
+    textAlign: 'right',
+    fontSize: type.size.micro11,
+    fontWeight: '600',
+    color: color.whiteA75,
+  },
+  mediaTimeTheirs: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 3,
+    textAlign: 'right',
+    fontSize: type.size.micro11,
+    fontWeight: '600',
+    color: color.slate400,
   },
   composer: {
     borderTopWidth: borderWidth.hair,

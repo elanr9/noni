@@ -42,7 +42,7 @@ export default function HeardScreen() {
 
   return (
     <OnboardingShell
-      step={9}
+      step={8}
       title="How did you hear about Noni?"
       primaryLabel="Continue"
       primaryDisabled={!selected || busy}

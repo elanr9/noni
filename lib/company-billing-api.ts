@@ -95,6 +95,16 @@ export async function setWeeklyBudget(
   };
 }
 
+/**
+ * Day one for money data: when the company's Stripe was connected. Null
+ * until then, and analytics hides every dollar surface. Requires the
+ * manage_billing permission (the caller falls back on payout history).
+ */
+export async function getStripeConnectedAt(): Promise<string | null> {
+  const status = await getBillingStatus();
+  return status.stripe_customer_id !== null ? status.updated_at : null;
+}
+
 export function formatBudgetDollars(cents: number): string {
   return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 }

@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -13,20 +14,30 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 
 import {
   listThread,
+  sendMediaMessage,
   sendMessage,
   type MessagePostRef,
   type ThreadMessage,
 } from '../../../lib/messages-api';
 import { color, radiusAdmin, shadow, type } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
+import { Icon, type IconName } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { SkeletonCard } from '../shared';
 import { MessageBubble } from './MessageBubble';
 
 const POLL_MS = 5000;
+
+type AttachKind = 'photos' | 'camera' | 'video';
+
+const ATTACH_TILES: Array<{ kind: AttachKind; icon: IconName; label: string }> = [
+  { kind: 'photos', icon: 'images', label: 'Photos' },
+  { kind: 'camera', icon: 'camera', label: 'Camera' },
+  { kind: 'video', icon: 'video', label: 'Video' },
+];
 
 /** Post reference attached to the composer before sending. */
 export type PendingPostRef = {
@@ -59,6 +70,7 @@ export function AdminChatThread({
   const [draft, setDraft] = useState('');
   const [pendingRef, setPendingRef] = useState<PendingPostRef | null>(initialRef);
   const [sending, setSending] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const messageY = useRef(new Map<string, number>());
@@ -124,6 +136,51 @@ export function AdminChatThread({
     }
   };
 
+  const attach = async (kind: AttachKind) => {
+    setAttachOpen(false);
+    let result: ImagePicker.ImagePickerResult;
+    if (kind === 'photos') {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.85,
+      });
+    } else {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Camera needed', 'Allow camera access to attach from here.');
+        return;
+      }
+      result = await ImagePicker.launchCameraAsync({
+        mediaTypes: kind === 'video' ? ['videos'] : ['images'],
+        quality: 0.85,
+      });
+    }
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset || sending) return;
+
+    const isVideo = asset.type === 'video';
+    setSending(true);
+    try {
+      await sendMediaMessage({
+        companyId,
+        creatorId,
+        authorId: meId,
+        media: isVideo ? 'video' : 'image',
+        localUri: asset.uri,
+        contentType: asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+        durationMs: asset.duration,
+        caption: draft.trim() || undefined,
+      });
+      setDraft('');
+      await load();
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (e) {
+      Alert.alert('Could not send', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const canSend = draft.trim().length > 0 && !sending;
 
   return (
@@ -169,13 +226,42 @@ export function AdminChatThread({
               accessibilityRole="button"
               accessibilityLabel="Remove post reference"
               onPress={() => setPendingRef(null)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <Icon name="x" size={14} color={color.slate400} />
             </PressableScale>
           </View>
         )}
+        {attachOpen && (
+          <View style={styles.attachRow}>
+            {ATTACH_TILES.map((tile) => (
+              <PressableScale
+                key={tile.kind}
+                accessibilityRole="button"
+                accessibilityLabel={tile.label}
+                onPress={() => void attach(tile.kind)}
+                style={styles.attachTile}
+              >
+                <Icon name={tile.icon} size={18} color={color.blue600} />
+                <Text style={styles.attachLabel}>{tile.label}</Text>
+              </PressableScale>
+            ))}
+          </View>
+        )}
         <View style={styles.composerRow}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Add a photo or video"
+            accessibilityState={{ expanded: attachOpen }}
+            onPress={() => setAttachOpen((open) => !open)}
+            style={[styles.plusButton, attachOpen && styles.plusButtonActive]}
+          >
+            <Icon
+              name="plus"
+              size={20}
+              color={attachOpen ? color.blue700 : color.slate500}
+            />
+          </PressableScale>
           <TextInput
             style={styles.input}
             value={draft}
@@ -194,7 +280,7 @@ export function AdminChatThread({
               canSend ? shadow.shadowAccent : styles.sendButtonDisabled,
             ]}
           >
-            <Icon name="arrow-right" size={19} color={color.white} />
+            <Icon name="send" size={18} color={color.white} />
           </PressableScale>
         </View>
       </View>
@@ -258,6 +344,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+  },
+  attachRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  attachTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: radiusAdmin.md,
+    backgroundColor: color.blue50,
+  },
+  attachLabel: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.blue700,
+  },
+  plusButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusButtonActive: {
+    backgroundColor: color.blue100,
   },
   input: {
     flex: 1,

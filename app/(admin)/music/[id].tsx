@@ -1,22 +1,68 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
-import { LinkRow } from '../../../components/admin/approval/LinkRow';
-import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
-import { AdminScreen, PushHeader } from '../../../components/admin/shared';
+import {
+  AdminScreen,
+  Card,
+  CheckboxReasonRow,
+  ConfirmationTakeover,
+  EmptyState,
+  PushHeader,
+  SectionLabel,
+  Sheet,
+  SkeletonCard,
+  SkeletonLine,
+} from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
-import { Icon } from '../../../components/ui/Icon';
+import { FormatPill } from '../../../components/ui/FormatPill';
+import { Icon, type IconName } from '../../../components/ui/Icon';
+import { PressableScale } from '../../../components/ui/PressableScale';
 import {
   approveMusic,
+  getAssignmentLiveAt,
   listMusicApprovalQueue,
+  requestMusicChanges,
   type MusicApprovalItem,
 } from '../../../lib/admin-api';
 import { formatAge, slidesFromScript } from '../../../lib/admin-queue-map';
 import { getBrief } from '../../../lib/briefs-api';
 import { getCreatorAccount, type CreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
-import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
+
+const CHANGE_REASONS = [
+  'Song is not on the post',
+  'Different song than the brief',
+  'Only added on one platform',
+];
+
+function LivePostRow({
+  icon,
+  label,
+  handle,
+  url,
+}: {
+  icon: IconName;
+  label: string;
+  handle: string | null;
+  url: string | null;
+}) {
+  const disabled = url === null;
+  return (
+    <Card
+      pad={13}
+      onPress={disabled ? undefined : () => void Linking.openURL(url)}
+      style={[styles.linkRow, disabled && styles.linkRowDisabled]}
+    >
+      <Icon name={icon} size={18} color={color.slate500} />
+      <Text style={styles.linkLabel}>{label}</Text>
+      {handle !== null && <Text style={styles.linkHandle}>{`@${handle}`}</Text>}
+      <Icon name="arrow-right" size={16} color={color.slate300} />
+    </Card>
+  );
+}
 
 export default function MusicApprovalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -27,9 +73,14 @@ export default function MusicApprovalScreen() {
   const [slides, setSlides] = useState<string[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
   const [account, setAccount] = useState<CreatorAccount | null>(null);
+  const [liveAt, setLiveAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [approved, setApproved] = useState(false);
+  const [reqOpen, setReqOpen] = useState(false);
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [sent, setSent] = useState(false);
 
   const load = useCallback(async () => {
     if (!profile || !id) return;
@@ -38,14 +89,16 @@ export default function MusicApprovalScreen() {
       const found = queue.find((entry) => entry.assignment.id === id) ?? null;
       setItem(found);
       if (found !== null) {
-        const [brief, creatorAccount] = await Promise.all([
+        const [brief, creatorAccount, live] = await Promise.all([
           getBrief(found.assignment.brief_id).catch(() => null),
           getCreatorAccount(profile.company_id, found.assignment.creator_id).catch(
             () => null,
           ),
+          getAssignmentLiveAt(found.assignment.id).catch(() => null),
         ]);
         setSlides(slidesFromScript(brief?.script));
         setAccount(creatorAccount);
+        setLiveAt(live);
       }
     } catch (e) {
       Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
@@ -57,6 +110,21 @@ export default function MusicApprovalScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const short = item?.creatorName.split(' ')[0] ?? 'Creator';
+  const canSend = reasons.length > 0 || note.trim().length > 0;
+
+  const toggleReason = (reason: string) => {
+    setReasons((prev) =>
+      prev.includes(reason) ? prev.filter((r) => r !== reason) : [...prev, reason],
+    );
+  };
+
+  const closeRequest = () => {
+    setReqOpen(false);
+    setReasons([]);
+    setNote('');
+  };
 
   const approve = async () => {
     if (!profile || !item) return;
@@ -75,44 +143,90 @@ export default function MusicApprovalScreen() {
     }
   };
 
+  const sendBack = async () => {
+    if (!profile || !item) return;
+    setBusy(true);
+    try {
+      await requestMusicChanges({
+        companyId: profile.company_id,
+        assignmentId: item.assignment.id,
+        adminId: profile.id,
+        reasons,
+        note: note.trim().length > 0 ? note.trim() : null,
+      });
+      setReqOpen(false);
+      setSent(true);
+    } catch (e) {
+      Alert.alert("Couldn't send back", e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const linkFor = (platform: string): string | null =>
     item?.postLinks.find((link) => link.platform === platform)?.url ?? null;
 
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <AdminScreen>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator color={color.blue500} />
-      </View>
+        <View style={styles.skeletonHeader}>
+          <SkeletonLine height={36} width={36} radius={18} />
+          <SkeletonLine height={16} width={150} />
+        </View>
+        <SkeletonCard height={330} radius={radiusAdmin.xl} style={styles.skeletonBlock} />
+        <SkeletonLine height={12} width={140} style={styles.skeletonBlock} />
+        <SkeletonCard height={52} style={styles.skeletonRow} />
+        <SkeletonCard height={52} style={styles.skeletonRow} />
+      </AdminScreen>
     );
   }
 
   if (!item) {
     return (
-      <View style={styles.centered}>
+      <AdminScreen>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.missing}>Nothing waiting here.</Text>
-        <Button size="md" variant="outline" onPress={() => router.back()}>
-          Back
-        </Button>
-      </View>
+        <EmptyState
+          icon="music-2"
+          title="Nothing waiting here"
+          body="This post is not in the music queue anymore."
+          actionLabel="Back"
+          onAction={() => router.back()}
+        />
+      </AdminScreen>
     );
   }
 
   if (approved) {
     return (
-      <View style={styles.centered}>
+      <View style={styles.takeover}>
         <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.checkCircle}>
-          <Icon name="check" size={32} color={color.green} strokeWidth={2.5} />
-        </View>
-        <Text style={styles.confirmTitle}>Song approved</Text>
-        <Text style={styles.confirmBody}>
-          {`Earnings for this post are unlocked for ${item.creatorName}.`}
-        </Text>
-        <Button size="md" variant="primary" onPress={() => router.back()}>
-          Back to Review
-        </Button>
+        <ConfirmationTakeover
+          icon="check"
+          tone="good"
+          title="Song approved"
+          body={`Earnings for this post are unlocked. ${short} sees it in their wallet tonight.`}
+          actionLabel="Back to Review"
+          onAction={() => router.back()}
+          onBack={() => setApproved(false)}
+        />
+      </View>
+    );
+  }
+
+  if (sent) {
+    return (
+      <View style={styles.takeover}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ConfirmationTakeover
+          icon="send"
+          tone="brand"
+          title="Sent back"
+          body={`${short} sees your notes and fixes the song on the live post. It lands back in this queue when they mark it added again.`}
+          actionLabel="Back to Review"
+          onAction={() => router.back()}
+          onBack={() => setSent(false)}
+        />
       </View>
     );
   }
@@ -120,170 +234,301 @@ export default function MusicApprovalScreen() {
   return (
     <AdminScreen
       actionBar={
-        <View style={styles.actionBar}>
-          <View style={styles.footerRow}>
-            <Button
-              variant="outline"
-              size="md"
-              disabled={busy}
-              style={styles.footerButton}
-              onPress={() => router.back()}
-            >
-              Not on it yet
-            </Button>
-            <Button
-              variant="approve"
-              size="md"
-              icon="check"
-              disabled={busy}
-              style={styles.footerButton}
-              onPress={() => void approve()}
-            >
-              Song is on it
-            </Button>
-          </View>
-          <Text style={styles.footerNote}>
-            Approving unlocks this post's earnings. Videos never enter this queue.
-          </Text>
+        <View style={styles.footerRow}>
+          <Button
+            variant="outline"
+            size="md"
+            disabled={busy}
+            style={styles.footerOutline}
+            onPress={() => setReqOpen(true)}
+          >
+            Request Changes
+          </Button>
+          <Button
+            variant="approve"
+            size="md"
+            icon="check"
+            disabled={busy}
+            style={styles.footerApprove}
+            onPress={() => void approve()}
+          >
+            Accept Song
+          </Button>
         </View>
       }
     >
       <Stack.Screen options={{ headerShown: false }} />
       <PushHeader
-        title={item.briefTitle}
-        subtitle={`${item.creatorName} \u00b7 Slideshow`}
+        title="Music approval"
+        subtitle={`${item.creatorName} \u00b7 Live ${formatAge(liveAt ?? item.markedAt)}`}
         onBack={() => router.back()}
       />
 
-      <View style={styles.slideFrame}>
-        <SlideshowSurface
-          slides={slides}
-          index={slideIndex}
-          onIndex={setSlideIndex}
-          hasScreenshot={[]}
-        />
-      </View>
+      <View style={[styles.pager, shadow.shadowMedia]}>
+        <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id="noniMusicSlide" x1="0" y1="0" x2="0.4" y2="1">
+              <Stop offset="0" stopColor={color.blue100} />
+              <Stop offset="1" stopColor={color.lineStrong} />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#noniMusicSlide)" />
+        </Svg>
 
-      <View style={styles.markedCard}>
-        <View style={styles.markedIcon}>
-          <Icon name="music-2" size={15} color={color.blue700} />
+        <View style={styles.pagerCentre} pointerEvents="none">
+          <Text style={styles.pagerText}>{slides[slideIndex] ?? ''}</Text>
         </View>
-        <View style={styles.markedText}>
-          <Text style={styles.markedTitle}>
-            {`${item.creatorName} says the song is added`}
-          </Text>
-          <Text style={styles.markedMeta}>{`Marked ${formatAge(item.markedAt)}`}</Text>
+
+        <View style={styles.dots} pointerEvents="none">
+          {slides.map((_, i) => (
+            <View key={i} style={[styles.dot, i === slideIndex && styles.dotActive]} />
+          ))}
         </View>
+
+        <View style={styles.formatChip}>
+          <FormatPill format="photo_carousel" />
+        </View>
+
+        {slideIndex > 0 && (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Previous slide"
+            hitSlop={8}
+            onPress={() => setSlideIndex(slideIndex - 1)}
+            style={[styles.arrow, styles.arrowLeft, shadow.shadowCard]}
+          >
+            <Icon name="chevron-left" size={17} color={color.ink} />
+          </PressableScale>
+        )}
+        {slideIndex < slides.length - 1 && (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Next slide"
+            hitSlop={8}
+            onPress={() => setSlideIndex(slideIndex + 1)}
+            style={[styles.arrow, styles.arrowRight, shadow.shadowCard]}
+          >
+            <Icon name="chevron-right" size={17} color={color.ink} />
+          </PressableScale>
+        )}
       </View>
 
       <View style={styles.links}>
-        <LinkRow
+        <SectionLabel>Check the live post</SectionLabel>
+        <LivePostRow
           icon="music-2"
           label="Open on TikTok"
           handle={account?.tiktok_handle ?? null}
           url={linkFor('tiktok')}
         />
-        <LinkRow
+        <LivePostRow
           icon="at-sign"
           label="Open on Instagram"
           handle={account?.instagram_handle ?? null}
           url={linkFor('instagram')}
         />
       </View>
+
+      <Text style={styles.footnote}>
+        {"Approving unlocks this post's earnings. Videos never enter this queue."}
+      </Text>
+
+      <Sheet
+        visible={reqOpen}
+        onClose={closeRequest}
+        title="Request changes"
+        subtitle={`Goes to ${short}`}
+        footer={
+          <View style={styles.sheetFooter}>
+            <Button variant="ghost" size="lg" style={styles.sheetCancel} onPress={closeRequest}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
+              icon="send"
+              disabled={!canSend || busy}
+              style={styles.sheetSend}
+              onPress={() => void sendBack()}
+            >
+              Send back
+            </Button>
+          </View>
+        }
+      >
+        <View style={styles.reasonList}>
+          {CHANGE_REASONS.map((reason) => (
+            <CheckboxReasonRow
+              key={reason}
+              label={reason}
+              selected={reasons.includes(reason)}
+              onToggle={() => toggleReason(reason)}
+            />
+          ))}
+        </View>
+        <TextInput
+          value={note}
+          onChangeText={setNote}
+          multiline
+          placeholder="Anything specific, in your words"
+          placeholderTextColor={color.slate400}
+          style={styles.noteInput}
+        />
+      </Sheet>
     </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    paddingHorizontal: 32,
-    backgroundColor: color.offWhite,
-  },
-  missing: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
-    color: color.slate500,
-  },
-  checkCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: radiusAdmin.pill,
-    backgroundColor: color.greenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmTitle: {
-    fontSize: 28,
-    fontWeight: type.weight.bold,
-    letterSpacing: type.tracking.title,
-    color: color.ink,
-  },
-  confirmBody: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * 1.45,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-    textAlign: 'center',
-  },
-  slideFrame: {
-    height: 340,
-    borderRadius: radiusAdmin.xl,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  markedCard: {
+  skeletonHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    borderRadius: radiusAdmin.lg,
-    backgroundColor: color.blue50,
-    marginBottom: 12,
+    gap: 10,
+    paddingVertical: 10,
+    marginBottom: 4,
   },
-  markedIcon: {
+  skeletonBlock: {
+    marginBottom: 14,
+  },
+  skeletonRow: {
+    marginBottom: 8,
+  },
+  takeover: {
+    flex: 1,
+    backgroundColor: color.white,
+  },
+  pager: {
+    height: 330,
+    borderRadius: radiusAdmin.xl,
+    overflow: 'hidden',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  pagerCentre: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 44,
+    paddingHorizontal: 34,
+    paddingBottom: 52,
+  },
+  pagerText: {
+    fontSize: type.size.action,
+    lineHeight: type.size.action * 1.3,
+    fontWeight: type.weight.heavy,
+    letterSpacing: -0.3,
+    color: color.ink,
+    textAlign: 'center',
+  },
+  dots: {
+    position: 'absolute',
+    top: 14,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.slate300,
+  },
+  dotActive: {
+    width: 18,
+    backgroundColor: color.ink,
+  },
+  formatChip: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+  },
+  arrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -16,
     width: 32,
     height: 32,
     borderRadius: radiusAdmin.pill,
-    backgroundColor: color.blue100,
+    backgroundColor: color.glass,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  markedText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
+  arrowLeft: {
+    left: 10,
   },
-  markedTitle: {
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  markedMeta: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.semibold,
-    color: color.blue600,
+  arrowRight: {
+    right: 10,
   },
   links: {
     gap: 8,
+    marginBottom: 14,
   },
-  actionBar: {
-    gap: 8,
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    minHeight: 44,
+  },
+  linkRowDisabled: {
+    opacity: 0.55,
+  },
+  linkLabel: {
+    flex: 1,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.semibold,
+    color: color.ink,
+  },
+  linkHandle: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.semibold,
+    color: color.slate400,
+  },
+  footnote: {
+    marginHorizontal: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
+    fontWeight: type.weight.regular,
+    color: color.slate400,
   },
   footerRow: {
     flexDirection: 'row',
     gap: 10,
   },
-  footerButton: {
+  footerOutline: {
+    width: '42%',
+  },
+  footerApprove: {
     flex: 1,
   },
-  footerNote: {
-    fontSize: type.size.label,
+  sheetFooter: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sheetCancel: {
+    width: '28%',
+  },
+  sheetSend: {
+    flex: 1,
+  },
+  reasonList: {
+    gap: 7,
+  },
+  noteInput: {
+    marginTop: 11,
+    minHeight: 84,
+    padding: 13,
+    paddingTop: 13,
+    borderRadius: radiusAdmin.md,
+    borderWidth: borderWidth.field,
+    borderColor: color.borderStrong,
+    backgroundColor: color.white,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.5,
     fontWeight: type.weight.regular,
-    color: color.slate400,
-    textAlign: 'center',
+    color: color.ink,
+    textAlignVertical: 'top',
   },
 });

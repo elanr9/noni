@@ -38,7 +38,7 @@ export async function adminPushTokens(
     .from('profiles')
     .select('expo_push_token')
     .eq('company_id', companyId)
-    .eq('role', 'admin')
+    .eq('role', 'campaign_manager')
     .not('expo_push_token', 'is', null);
   return (data ?? [])
     .map((p) => p.expo_push_token as string | null)

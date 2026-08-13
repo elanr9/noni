@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
-import { Text, StyleSheet } from 'react-native';
+import { Platform, Text, StyleSheet } from 'react-native';
 
 import { LoadingScreen, Screen, colors } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
@@ -17,14 +17,19 @@ export default function AuthCallbackScreen() {
   useEffect(() => {
     async function run() {
       try {
-        const url = Linking.createURL('auth/callback', {
-          queryParams: Object.fromEntries(
-            Object.entries(params).map(([k, v]) => [
-              k,
-              Array.isArray(v) ? v[0] : String(v ?? ''),
-            ]),
-          ),
-        });
+        // On web, prefer the real browser URL so ?code= / hash tokens survive
+        // the OAuth redirect. Linking.createURL can drop or reshape them.
+        const url =
+          Platform.OS === 'web' && typeof window !== 'undefined'
+            ? window.location.href
+            : Linking.createURL('auth/callback', {
+                queryParams: Object.fromEntries(
+                  Object.entries(params).map(([k, v]) => [
+                    k,
+                    Array.isArray(v) ? v[0] : String(v ?? ''),
+                  ]),
+                ),
+              });
         await createSessionFromUrl(url);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not finish sign in');

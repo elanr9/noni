@@ -18,7 +18,7 @@ import {
   ourPostCardModel,
 } from '../../../components/admin/LibraryItemCard';
 import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
-import { QuickCapture } from '../../../components/admin/library/QuickCapture';
+import { QuickCapture, type IdeaFormat } from '../../../components/admin/library/QuickCapture';
 import { SourceChips } from '../../../components/admin/library/SourceChips';
 import { AdminHeader, AdminScreen } from '../../../components/admin/shared';
 import { Dropdown } from '../../../components/ui/Dropdown';
@@ -52,18 +52,18 @@ const EMPTY: Record<
 > = {
   idea: {
     icon: 'sparkles',
-    title: 'No ideas yet',
-    body: 'Type one above and save it. Paste a whole doc and every line becomes its own idea.',
+    title: 'No ideas saved yet',
+    body: 'Write one line above. AI cleans it into a draft.',
   },
   our_post: {
     icon: 'trending-up',
     title: 'No posts yet',
-    body: 'Posts land here as creators go live, sorted by how they perform.',
+    body: 'Posts land here the day they go live, sorted by performance.',
   },
   reference: {
     icon: 'link',
     title: 'No references yet',
-    body: 'Paste a TikTok or Instagram link above and it saves here with a thumbnail.',
+    body: 'Paste a TikTok or Instagram link and it saves with a thumbnail.',
   },
   from_creator: {
     icon: 'users',
@@ -83,6 +83,7 @@ export default function LibraryScreen() {
   const [postTypeId, setPostTypeId] = useState<string | null>(null);
 
   const [capture, setCapture] = useState('');
+  const [ideaFormat, setIdeaFormat] = useState<IdeaFormat>('video');
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -213,6 +214,11 @@ export default function LibraryScreen() {
           onChangeText={setCapture}
           onSave={() => void onCapture()}
           note={savedNote}
+          ideas={
+            source === 'idea'
+              ? { format: ideaFormat, onChangeFormat: setIdeaFormat }
+              : undefined
+          }
         />
 
         <SourceChips

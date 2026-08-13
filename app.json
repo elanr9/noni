@@ -10,7 +10,6 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "usesAppleSignIn": true,
       "bundleIdentifier": "com.fieldvision.noni",
       "buildNumber": "1",
       "infoPlist": {
@@ -40,7 +39,6 @@
     "plugins": [
       "expo-router",
       "expo-web-browser",
-      "expo-apple-authentication",
       [
         "expo-camera",
         {

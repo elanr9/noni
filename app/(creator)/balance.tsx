@@ -16,6 +16,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuth } from '../../lib/auth';
+import { getCompany } from '../../lib/onboarding';
 import {
   formatCents,
   getOrCreateWallet,
@@ -101,6 +102,7 @@ export default function CreatorBalanceScreen() {
   const [wallet, setWallet] = useState<CreatorWallet | null>(null);
   const [ledger, setLedger] = useState<WalletLedgerRow[]>([]);
   const [connect, setConnect] = useState<StripeConnectStatus | null>(null);
+  const [payoutsEnabled, setPayoutsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -113,14 +115,16 @@ export default function CreatorBalanceScreen() {
       return;
     }
     try {
-      const [w, rows, status] = await Promise.all([
+      const [w, rows, status, company] = await Promise.all([
         getOrCreateWallet(profile.company_id, profile.id),
         listLedger(profile.id),
         getStripeConnectStatus().catch(() => null),
+        getCompany(profile.company_id).catch(() => null),
       ]);
       setWallet(w);
       setLedger(rows);
       setConnect(status);
+      if (company) setPayoutsEnabled(company.payouts_enabled);
     } catch (e) {
       setToast(
         e instanceof Error ? e.message : 'Could not load balance. Try again.',
@@ -167,9 +171,11 @@ export default function CreatorBalanceScreen() {
       ? 'Finish bank setup'
       : 'Connect a bank account';
 
-  const scheduleLine = onboarded
-    ? PAYOUT_SCHEDULE
-    : 'Connect a bank so payouts can send. Earnings pay out automatically every Sunday at 8PM Eastern once your bank is connected.';
+  const scheduleLine = !payoutsEnabled
+    ? 'Payouts are paused during early access. Your earnings are safe and will pay out once payouts turn on.'
+    : onboarded
+      ? PAYOUT_SCHEDULE
+      : 'Connect a bank so payouts can send. Earnings pay out automatically every Sunday at 8PM Eastern once your bank is connected.';
 
   return (
     <Screen
@@ -240,7 +246,9 @@ export default function CreatorBalanceScreen() {
             </Text>
             {onboarded ? (
               <Text style={styles.bankSub} numberOfLines={2}>
-                Next payout runs Sunday at 8PM Eastern
+                {payoutsEnabled
+                  ? 'Next payout runs Sunday at 8PM Eastern'
+                  : 'Payouts are paused during early access'}
               </Text>
             ) : null}
           </View>

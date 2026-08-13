@@ -1,0 +1,138 @@
+/* Week setup — the only stepped ceremony in the product. It runs once a week,
+   so it can afford three screens. The split is a pool, not a lock: types stay
+   editable inside each post and the grid header shows the drift. */
+
+const VIDEO_TYPES = [
+  { key: 'numbered_list', label: 'Numbered list', hint: 'Hook, N points, outro', d: 8 },
+  { key: 'talking_head', label: 'Talking head', hint: '3 to 5 points, one speaker', d: 5 },
+  { key: 'explainer', label: 'Explainer', hint: 'One idea, taken apart', d: 3 },
+  { key: 'contrast', label: 'Contrast', hint: 'Two sides, still one speaker', d: 2 },
+  { key: 'replay_bait', label: 'Replay bait', hint: 'One loop clip, no plug', d: 2 },
+];
+const SLIDE_TYPES = [
+  { key: 'numbered_tips', label: 'Numbered tips', hint: 'One slide per point', d: 5 },
+  { key: 'how_to', label: 'How to', hint: 'Steps in order', d: 3 },
+  { key: 'getting_started', label: 'Getting started', hint: 'For someone on day one', d: 2 },
+];
+
+function WeekSetup({ step: step0 = 0, state = 'default', onDone, onBack }) {
+  const { Button, ProgressBar, Icon } = window.NoniDesignSystem_710e43;
+  const [step, setStep] = React.useState(step0);
+  const [videos, setVideos] = React.useState(20);
+  const [slideshows, setSlideshows] = React.useState(10);
+  const [vSplit, setVSplit] = React.useState(() => Object.fromEntries(VIDEO_TYPES.map((t) => [t.key, t.d])));
+  const [sSplit, setSSplit] = React.useState(() => Object.fromEntries(SLIDE_TYPES.map((t) => [t.key, t.d])));
+
+  const vSum = Object.values(vSplit).reduce((a, b) => a + b, 0);
+  const sSum = Object.values(sSplit).reduce((a, b) => a + b, 0);
+  const over = state === 'mismatch';
+  const vTotal = over ? vSum + 2 : vSum;
+
+  const titles = ["This week's mix", 'Video types', 'Slideshow types'];
+  const subs = [
+    'Thirty posts is the week. Change the ratio if the roster is short.',
+    `The ${videos} videos split across five types. Numbered list carries the week.`,
+    `The ${slideshows} slideshows split across three types.`,
+  ];
+  const ok = step === 0 ? true : step === 1 ? vTotal === videos : sSum === slideshows;
+
+  return (
+    <AdminScreen bottom={110} pad={false} footer={
+      <ActionBar>
+        {step > 0 ? <Button variant="ghost" size="md" onClick={() => setStep(step - 1)} style={{ flex: '0 0 30%' }}>Back</Button> : null}
+        <Button variant="primary" size="md" block disabled={!ok} onClick={() => (step < 2 ? setStep(step + 1) : onDone && onDone())} style={{ flex: 1 }}>
+          {step < 2 ? 'Next' : 'Create 30 rows'}
+        </Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, padding: `0 0 110px` }}>
+        <PushHeader title="Week 15 · Aug 17–23" meta={`Step ${step + 1} of 3`} onBack={step === 0 ? onBack : () => setStep(step - 1)} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <ProgressBar step={step} total={3} variant="dots" />
+          <div>
+            <h1 style={{ margin: 0, font: '700 28px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{titles[step]}</h1>
+            <p style={{ margin: '8px 0 0', font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{subs[step]}</p>
+          </div>
+
+          {step === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <RatioCard label="Videos" hint="Reels" value={videos} onChange={setVideos} icon="video" />
+              <RatioCard label="Slideshows" hint="Photo carousels" value={slideshows} onChange={setSlideshows} icon="images" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)' }}>
+                <Icon name="layout-list" size={18} color="var(--blue-600)" />
+                <span style={{ flex: 1, font: '600 14px var(--font-ui)', color: 'var(--ink)' }}>{videos + slideshows} rows will be stamped and ready to fill</span>
+              </div>
+            </div>
+          ) : null}
+
+          {step === 1 ? <SplitList types={VIDEO_TYPES} split={vSplit} onChange={(k, v) => setVSplit({ ...vSplit, [k]: v })} sum={vTotal} target={videos} noun="videos" /> : null}
+          {step === 2 ? <SplitList types={SLIDE_TYPES} split={sSplit} onChange={(k, v) => setSSplit({ ...sSplit, [k]: v })} sum={sSum} target={slideshows} noun="slideshows" /> : null}
+
+          <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>
+            This is a pool, not a lock. Any post's type stays editable later and the grid header shows the drift.
+          </p>
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+function RatioCard({ label, hint, value, onChange, icon }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const step = (d) => onChange(Math.max(0, value + d));
+  return (
+    <Card pad={16} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <span style={{ width: 42, height: 42, flex: '0 0 auto', borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={icon} size={19} color="var(--blue-700)" />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{label}</div>
+        <div style={{ marginTop: 2, font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}>{hint}</div>
+      </div>
+      <StepControl value={value} onStep={step} />
+    </Card>
+  );
+}
+
+function StepControl({ value, onStep, w = 34 }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const btn = { width: w, height: w, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <button type="button" onClick={() => onStep(-1)} aria-label="Decrease" style={btn}>
+        <span style={{ width: 12, height: 2, borderRadius: 2, background: 'var(--slate-500)' }} />
+      </button>
+      <span style={{ minWidth: 28, textAlign: 'center', font: '700 22px var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>{value}</span>
+      <button type="button" onClick={() => onStep(1)} aria-label="Increase" style={btn}>
+        <Icon name="plus" size={16} color="var(--slate-500)" />
+      </button>
+    </div>
+  );
+}
+
+function SplitList({ types, split, onChange, sum, target, noun }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const diff = sum - target;
+  const good = diff === 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: good ? 'var(--green-soft)' : 'var(--amber-soft)' }}>
+        <Icon name={good ? 'circle-check-big' : 'circle-alert'} size={17} color={good ? 'var(--green)' : 'var(--amber)'} />
+        <span style={{ flex: 1, font: '700 14px var(--font-ui)', color: good ? 'var(--green)' : '#8A5A0E' }}>
+          {good ? `${sum} of ${target} ${noun} assigned` : diff > 0 ? `${diff} over. Take ${diff} off a type.` : `${-diff} left to assign.`}
+        </span>
+      </div>
+      {types.map((t) => (
+        <Card key={t.key} pad={13} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{t.label}</div>
+            <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{t.hint}</div>
+          </div>
+          <StepControl value={split[t.key]} onStep={(d) => onChange(t.key, Math.max(0, split[t.key] + d))} w={30} />
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+Object.assign(window, { WeekSetup, RatioCard, StepControl, SplitList, VIDEO_TYPES, SLIDE_TYPES });

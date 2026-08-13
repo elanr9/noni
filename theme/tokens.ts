@@ -9,7 +9,7 @@ export const color = {
   blue200: '#A7D3F7',
   blue300: '#8EC9F5',
   blue400: '#4FBAF2',
-  blue500: '#4FBAF2',
+  blue500: '#1BA6EE',
   blue600: '#0F8FD1',
   blue700: '#0B76AD',
 
@@ -19,6 +19,8 @@ export const color = {
   fillQuiet: '#F1F3F5',
   line: '#E6EEF6',
   lineStrong: '#D6E3EF',
+  // End stop of the 160deg media placeholder gradient (starts at blue100)
+  mediaGradEnd: '#DCE7F0',
   slate300: '#B4BFCB',
   slate400: '#8E9AA6',
   slate500: '#6B7A8C',
@@ -48,13 +50,13 @@ export const color = {
   textOnDark: '#FFFFFF',
   textOnAccent: '#FFFFFF',
   textBrand: '#0F8FD1',
-  accent: '#4FBAF2',
-  accentHover: '#8EC9F5',
+  accent: '#1BA6EE',
+  accentHover: '#4FBAF2',
   accentPress: '#0F8FD1',
   accentTint: '#8EC9F5',
   border: '#E6EEF6',
   borderStrong: '#D6E3EF',
-  borderAccent: '#4FBAF2',
+  borderAccent: '#1BA6EE',
   statusTodoFg: '#0B76AD',
   statusTodoBg: '#E7F4FD',
   statusProgressFg: '#0B76AD',
@@ -63,6 +65,8 @@ export const color = {
   statusPendingBg: '#FDF2DF',
   statusDoneFg: '#1F8F5F',
   statusDoneBg: '#E4F5EC',
+  /** Dark pill behind duration/count badges on media (reference rgba(11,15,20,0.55)). */
+  inkA55: 'rgba(11,15,20,0.55)',
   scrim: 'rgba(0,0,0,0.45)',
   scrimStrong: 'rgba(0,0,0,0.6)',
   sheetScrim: 'rgba(11,15,20,0.5)',
@@ -226,9 +230,9 @@ export const shadow: Record<
     shadowOpacity: 0.1,
     elevation: 5,
   },
-  // 0 12px 24px -12px rgba(79,186,242,.85)
+  // 0 8px 20px rgba(27,166,238,0.28)
   shadowAccent: {
-    shadowColor: '#4FBAF2',
+    shadowColor: '#1BA6EE',
     shadowOffset: { width: 0, height: 8 },
     shadowRadius: 10,
     shadowOpacity: 0.28,
@@ -236,10 +240,10 @@ export const shadow: Record<
   },
 };
 
-// ring-focus: 0 0 0 3px rgba(79,186,242,0.30) — RN has no outline, so a 3px border recipe.
+// ring-focus: 0 0 0 3px rgba(27,166,238,0.30) — RN has no outline, so a 3px border recipe.
 export const ringFocus: ViewStyle = {
   borderWidth: 3,
-  borderColor: 'rgba(79,186,242,0.30)',
+  borderColor: 'rgba(27,166,238,0.30)',
 };
 
 export const motion = {

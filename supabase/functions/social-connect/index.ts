@@ -101,11 +101,14 @@ Deno.serve(async (req) => {
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
+    // Platform admin (role admin) inherits campaign manager powers.
+    const isManager =
+      caller.role === 'campaign_manager' || caller.role === 'admin';
 
     const apiKey = uploadPostKey();
 
     if (body.action === 'team_status') {
-      if (caller.role !== 'admin') {
+      if (!isManager) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       const { data: creators } = await admin
@@ -132,7 +135,7 @@ Deno.serve(async (req) => {
 
     // Creators manage their own accounts. Admins may inspect a creator via creator_id.
     let targetId = caller.id;
-    if (caller.role === 'admin' && body.creator_id) {
+    if (isManager && body.creator_id) {
       const { data: target } = await admin
         .from('profiles')
         .select('id, company_id, upload_post_profile')
@@ -142,7 +145,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'creator not found' }, 404);
       }
       targetId = target.id;
-    } else if (caller.role === 'admin' && body.action === 'connect_url') {
+    } else if (isManager && body.action === 'connect_url') {
       // Dual-role admins (can_create) connect their own socials like creators.
       const { data: self } = await admin
         .from('profiles')
@@ -158,7 +161,7 @@ Deno.serve(async (req) => {
           400,
         );
       }
-    } else if (caller.role !== 'creator' && caller.role !== 'admin') {
+    } else if (caller.role !== 'creator' && !isManager) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 
@@ -193,7 +196,7 @@ Deno.serve(async (req) => {
       .select('can_create')
       .eq('id', caller.id)
       .maybeSingle();
-    const dualAdmin = caller.role === 'admin' && selfRow?.can_create === true;
+    const dualAdmin = isManager && selfRow?.can_create === true;
     if (
       !(caller.role === 'creator' || dualAdmin) ||
       targetId !== caller.id

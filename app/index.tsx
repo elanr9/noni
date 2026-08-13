@@ -1,34 +1,20 @@
-import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
 
 import { LoadingScreen } from '../components/Screen';
 import { useAuth } from '../lib/auth';
-import { hasOnboardedLocally } from '../lib/onboarding';
 import { destinationForProfile } from '../lib/profile';
 
 export default function Index() {
   const { session, profile, loading, activeMode } = useAuth();
-  const [returning, setReturning] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    hasOnboardedLocally()
-      .then(setReturning)
-      .catch(() => setReturning(false));
-  }, []);
-
-  if (loading || returning === null) {
+  if (loading) {
     return <LoadingScreen label="Opening Noni" />;
   }
 
-  if (session) {
-    return <Redirect href={destinationForProfile(profile, true, activeMode)} />;
-  }
-
-  // Fresh install: straight into the pre-auth onboarding. Anyone who has
-  // onboarded or signed in on this device before goes to sign in instead.
+  // Noni is invite only: there is no pre-auth onboarding, everyone signs in.
   return (
     <Redirect
-      href={returning ? '/(auth)/login' : '/(onboarding)/welcome'}
+      href={destinationForProfile(profile, session !== null, activeMode)}
     />
   );
 }

@@ -21,7 +21,7 @@ export default function NotificationsScreen() {
 
   return (
     <OnboardingShell
-      step={10}
+      step={9}
       onBack={() => router.back()}
       title="Turn on notifications"
       subtitle="We ping you when a post is ready to record and when you get paid."

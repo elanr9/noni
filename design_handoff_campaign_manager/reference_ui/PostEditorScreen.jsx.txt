@@ -1,0 +1,215 @@
+/* Post editor — seven steps, one decision group per screen. Nothing generates
+   when it opens: every AI action is a tap. The post type is locked here; it
+   was stamped at week setup and the clip count follows from it. */
+
+const EDITOR_STEPS = ['Title', 'Search phrase', 'Hook', 'CTA', 'Talking points', 'Caption', 'Review'];
+
+function PostEditor({ step: step0 = 0, format = 'video', state = 'default', sheet: sheet0 = null, animateSheet = true, onBack, onDone }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const slide = !window.isReel(format);
+  const P = slide ? window.NONI_ADMIN.slidePost : window.NONI_ADMIN.post;
+  const [step, setStep] = React.useState(step0);
+  const [sheet, setSheet] = React.useState(sheet0);
+  const [hook, setHook] = React.useState(state === 'other' ? 'other' : 0);
+  const [applied, setApplied] = React.useState({});
+  const blank = state === 'empty';
+  const saved = state === 'saved';
+  const last = step === 6;
+
+  const titles = ['Title', 'Search phrase', 'Hook', 'CTA', 'Talking points', 'Caption and hashtags', 'Review'];
+  const intents = [
+    'Optional. It is how the post reads in the grid, not on the platform.',
+    'The TikTok search this post answers. Everything downstream is written against it.',
+    'Nine words maximum, written against the finished body. Pick one or write your own.',
+    'One sentence that plugs FieldVision. It rides inside a talking point, never its own clip.',
+    slide ? `${P.points.length} slides, set by the type. The plug sits inside one of them.` : `${P.points.length} points, set by the type. The plug sits inside one of them.`,
+    'Both go out together. Instagram needs the tags inside the caption.',
+    'Scores and suggestions. Nothing is applied unless you apply it.',
+  ];
+
+  const footer = (
+    <ActionBar>
+      {step > 0
+        ? <Button variant="ghost" size="md" onClick={() => setStep(step - 1)} style={{ flex: '0 0 30%' }}>Back</Button>
+        : null}
+      <Button variant="primary" size="md" block icon={last ? 'check' : null}
+        onClick={() => (last ? onDone && onDone() : setStep(step + 1))} style={{ flex: 1 }}>
+        {last ? 'Save post' : 'Next'}
+      </Button>
+    </ActionBar>
+  );
+
+  return (
+    <AdminScreen bottom={132} pad={false} footer={footer}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, padding: '0 0 132px' }}>
+        <PushHeader
+          title={`Post ${String(P.n).padStart(2, '0')}`}
+          meta={`${P.typeLabel} · Week 14`}
+          onBack={step === 0 ? onBack : () => setStep(step - 1)}
+          right={<button type="button" onClick={onBack} style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 2px', font: '700 13px var(--font-ui)', color: 'var(--blue-600)', whiteSpace: 'nowrap' }}>Save progress</button>} />
+
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <StepDots step={step} total={7} label={`Step ${step + 1} of 7 · ${EDITOR_STEPS[step]}`} />
+
+          <div>
+            <h1 style={{ margin: 0, font: '700 28px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{titles[step]}</h1>
+            <p style={{ margin: '8px 0 0', font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{intents[step]}</p>
+          </div>
+
+          {saved ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--green-soft)' }}>
+              <Icon name="check" size={16} color="var(--green)" />
+              <span style={{ flex: 1, font: '700 13px var(--font-ui)', color: 'var(--green)' }}>Progress saved. The row stays partial until review.</span>
+            </div>
+          ) : null}
+
+          {step === 0 ? <TitleStep post={P} blank={blank} onFill={() => setSheet('fill')} /> : null}
+          {step === 1 ? <PhraseStep post={P} blank={blank} /> : null}
+          {step === 2 ? <HookStep post={P} pick={hook} onPick={setHook} onLibrary={() => setSheet('library')} /> : null}
+          {step === 3 ? <CtaStep post={P} blank={blank} /> : null}
+          {step === 4 ? <PointsStep post={P} blank={blank} onShot={() => setSheet('shot')} onMove={() => setSheet('move')} /> : null}
+          {step === 5 ? <CaptionStep post={P} blank={blank} /> : null}
+          {step === 6 ? <ReviewStep post={P} applied={applied} onToggle={(k) => setApplied({ ...applied, [k]: true })} /> : null}
+        </div>
+      </div>
+
+      {sheet === 'fill' ? <FillSheet onClose={() => setSheet(null)} animate={animateSheet} /> : null}
+      {sheet === 'shot' ? <ShotPickerSheet post={P} onClose={() => setSheet(null)} animate={animateSheet} /> : null}
+      {sheet === 'move' ? <MoveSheet post={P} onClose={() => setSheet(null)} animate={animateSheet} /> : null}
+      {sheet === 'library' ? <LibraryPickerSheet onClose={() => setSheet(null)} animate={animateSheet} /> : null}
+    </AdminScreen>
+  );
+}
+
+/* Seven dots. The current one stretches — position is readable without
+   counting. */
+function StepDots({ step, total, label }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+        {Array.from({ length: total }).map((_, i) => (
+          <span key={i} style={{ height: 6, flex: i === step ? '0 0 26px' : '0 0 6px', borderRadius: 999, background: i === step ? 'var(--blue-500)' : i < step ? 'var(--blue-300)' : 'var(--line-strong)', transition: 'flex var(--dur-base) var(--ease-out), background var(--dur-fast) var(--ease-out)' }} />
+        ))}
+      </div>
+      <span style={{ font: '700 12px var(--font-ui)', color: 'var(--slate-400)' }}>{label}</span>
+    </div>
+  );
+}
+
+function TitleStep({ post, blank, onFill }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <EditorField label="Title" meta="Optional" action={<AiAction onClick={onFill} />}>
+        <p style={{ margin: 0, font: '700 20px/1.3 var(--font-display)', letterSpacing: '-0.4px', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+          {blank ? 'Untitled post' : post.title}
+        </p>
+      </EditorField>
+      <StepNote>Skip it and the grid shows the hook instead. Fill with AI writes the whole post in order, from the claim down.</StepNote>
+    </div>
+  );
+}
+
+function PhraseStep({ post, blank }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <EditorField label="Search phrase" action={<AiAction label="Regenerate" icon="rotate-ccw" />}>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+          <Icon name="search" size={16} color="var(--slate-400)" style={{ flex: '0 0 auto', marginTop: 3 }} />
+          <p style={{ margin: 0, font: '600 17px/1.35 var(--font-ui)', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+            {blank ? 'why am I not getting recruited for college soccer' : post.phrase}
+          </p>
+        </div>
+      </EditorField>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)', padding: '0 2px' }}>Also searched</span>
+        {post.phraseAlts.map((p) => (
+          <button key={p} type="button" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 13px', borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--white)', boxShadow: 'var(--shadow-card)', cursor: 'pointer', textAlign: 'left' }}>
+            <Icon name="search" size={14} color="var(--slate-300)" />
+            <span style={{ flex: 1, font: '400 14px var(--font-ui)', color: 'var(--slate-500)' }}>{p}</span>
+            <Icon name="chevron-right" size={15} color="var(--slate-300)" />
+          </button>
+        ))}
+      </div>
+      <StepNote>The phrase decides the talking points, the caption and the hook. Change it here rather than downstream.</StepNote>
+    </div>
+  );
+}
+
+/* Eight to ten options, best first, plus Other. Same order the creator app
+   receives. */
+function HookStep({ post, pick, onPick, onLibrary }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{post.hookOptions.length} options</span>
+        <button type="button" onClick={onLibrary} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--white)', boxShadow: 'var(--shadow-card)', font: '700 12px var(--font-ui)', color: 'var(--ink)' }}>
+          <Icon name="images" size={13} color="var(--slate-500)" />Library
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {post.hookOptions.map((h, i) => {
+          const on = pick === i;
+          const words = h.split(' ').length;
+          return (
+            <button key={h} type="button" onClick={() => onPick(i)}
+              style={{ display: 'flex', gap: 11, alignItems: 'flex-start', textAlign: 'left', padding: 13, borderRadius: 'var(--radius-md)', cursor: 'pointer', border: `1.5px solid ${on ? 'var(--blue-500)' : 'transparent'}`, background: on ? 'var(--blue-50)' : 'var(--white)', boxShadow: on ? 'none' : 'var(--shadow-card)' }}>
+              <span style={{ width: 20, height: 20, flex: '0 0 auto', marginTop: 2, borderRadius: 999, background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--line-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                {on ? <Icon name="check" size={12} color="var(--white)" /> : null}
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', font: '600 15px/1.35 var(--font-ui)', color: 'var(--ink)' }}>{h}</span>
+                <span style={{ display: 'block', marginTop: 5, font: '700 11px var(--font-ui)', color: words > 9 ? 'var(--danger)' : 'var(--slate-400)' }}>{words} words{i === 0 ? ' · best scored' : ''}</span>
+              </span>
+            </button>
+          );
+        })}
+
+        <div style={{ padding: 13, borderRadius: 'var(--radius-md)', border: `1.5px solid ${pick === 'other' ? 'var(--blue-500)' : 'transparent'}`, background: pick === 'other' ? 'var(--blue-50)' : 'var(--white)', boxShadow: pick === 'other' ? 'none' : 'var(--shadow-card)' }}>
+          <button type="button" onClick={() => onPick('other')} style={{ display: 'flex', gap: 11, alignItems: 'center', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 999, background: pick === 'other' ? 'var(--blue-500)' : 'var(--white)', border: pick === 'other' ? 'none' : '1.5px solid var(--line-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {pick === 'other' ? <Icon name="check" size={12} color="var(--white)" /> : null}
+            </span>
+            <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>Other</span>
+            <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>Write your own</span>
+          </button>
+          {pick === 'other' ? (
+            <div style={{ marginTop: 11, padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--white)', border: '1.5px solid var(--blue-500)', boxShadow: '0 0 0 3px rgba(27,166,238,0.30)' }}>
+              <span style={{ font: '600 15px/1.35 var(--font-ui)', color: 'var(--ink)' }}>Nobody fades at 70. They stop being served.</span>
+              <span style={{ display: 'block', marginTop: 6, font: '700 11px var(--font-ui)', color: 'var(--slate-400)' }}>8 of 9 words</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CtaStep({ post, blank }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <EditorField label="Plug sentence" action={<AiAction label="Rewrite" />}>
+        <p style={{ margin: 0, font: '400 16px/1.5 var(--font-ui)', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+          {blank ? 'One sentence, traceable to an approved claim' : post.cta}
+        </p>
+        {blank ? null : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, padding: '6px 11px', borderRadius: 999, background: 'var(--blue-100)', font: '700 11px var(--font-ui)', color: 'var(--blue-700)' }}>
+            <Icon name="circle-check-big" size={12} />Traces to: {post.claim}
+          </span>
+        )}
+      </EditorField>
+      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '13px 14px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)' }}>
+        <Icon name="zap" size={15} color="var(--blue-600)" style={{ flex: '0 0 auto', marginTop: 2 }} />
+        <span style={{ flex: 1, font: '600 13px/1.45 var(--font-ui)', color: 'var(--ink)' }}>
+          On the next step this sentence lands inside one talking point. It never gets its own card or clip.
+        </span>
+      </div>
+      <StepNote>Every post plugs FieldVision once. Claims come from Features, so a plug the product cannot back is rejected here.</StepNote>
+    </div>
+  );
+}
+
+Object.assign(window, { PostEditor, StepDots, TitleStep, PhraseStep, HookStep, CtaStep, EDITOR_STEPS });

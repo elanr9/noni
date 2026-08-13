@@ -2,7 +2,7 @@
 // week at a time: lanes, split chips, thirty rows, the footer state
 // machine, and the calendar view behind the header toggle.
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 
 import { BriefRow, type GridRowState } from '../../../components/admin/grid/BriefRow';
@@ -19,6 +19,7 @@ import {
   type BriefsView,
 } from '../../../components/admin/grid/ViewToggle';
 import { WeekCalendar } from '../../../components/admin/grid/WeekCalendar';
+import { WeekTargetsSheet } from '../../../components/admin/grid/WeekTargetsSheet';
 import {
   WeekFooter,
   type WeekPhase,
@@ -28,6 +29,10 @@ import {
   AdminScreen,
   SkeletonCard,
 } from '../../../components/admin/shared';
+import {
+  FormatInfoSheet,
+  type FormatInfo,
+} from '../../../components/FormatInfoSheet';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import {
   listWeekAssignments,
@@ -38,10 +43,12 @@ import {
   listCampaignBriefs,
   listCampaigns,
   publishCampaign,
+  updateCampaignTargets,
   type Campaign,
   type CampaignBriefItem,
 } from '../../../lib/briefs-api';
-import { space } from '../../../theme/tokens';
+import { PressableScale } from '../../../components/ui/PressableScale';
+import { color, space, type } from '../../../theme/tokens';
 
 function mondayOf(iso: string): Date {
   const d = new Date(`${iso}T00:00:00`);
@@ -63,16 +70,16 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** "Aug 10–16", or "Aug 30 – Sep 5" across a month boundary. */
+/** "Aug 10 to 16", or "Aug 30 to Sep 5" across a month boundary. */
 function weekRangeLabel(dropDate: string): string {
   const mon = mondayOf(dropDate);
   const sun = addDays(mon, 6);
   const monMonth = mon.toLocaleDateString(undefined, { month: 'short' });
   if (mon.getMonth() === sun.getMonth()) {
-    return `${monMonth} ${mon.getDate()}–${sun.getDate()}`;
+    return `${monMonth} ${mon.getDate()} to ${sun.getDate()}`;
   }
   const sunMonth = sun.toLocaleDateString(undefined, { month: 'short' });
-  return `${monMonth} ${mon.getDate()} – ${sunMonth} ${sun.getDate()}`;
+  return `${monMonth} ${mon.getDate()} to ${sunMonth} ${sun.getDate()}`;
 }
 
 /**
@@ -116,6 +123,9 @@ export default function BriefsScreen() {
   const [view, setView] = useState<BriefsView>('grid');
   const [lane, setLane] = useState<Lane>('video');
   const [publishing, setPublishing] = useState(false);
+  const [targetsVisible, setTargetsVisible] = useState(false);
+  const [targetsSaving, setTargetsSaving] = useState(false);
+  const [infoFormat, setInfoFormat] = useState<FormatInfo | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -238,6 +248,23 @@ export default function BriefsScreen() {
     );
   }
 
+  async function saveTargets(videoTarget: number, slideshowTarget: number) {
+    if (!campaign) return;
+    setTargetsSaving(true);
+    try {
+      await updateCampaignTargets(campaign.id, {
+        video_target: videoTarget,
+        slideshow_target: slideshowTarget,
+      });
+      setTargetsVisible(false);
+      await load();
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setTargetsSaving(false);
+    }
+  }
+
   async function publish() {
     if (!campaign) return;
     setPublishing(true);
@@ -333,7 +360,17 @@ export default function BriefsScreen() {
             }}
             onChange={setLane}
           />
-          <SplitHeader chips={splitChips} />
+          {editable ? (
+            <View style={styles.targetsRow}>
+              <PressableScale
+                accessibilityRole="button"
+                onPress={() => setTargetsVisible(true)}
+              >
+                <Text style={styles.targetsEdit}>Edit targets</Text>
+              </PressableScale>
+            </View>
+          ) : null}
+          <SplitHeader chips={splitChips} onChipPress={setInfoFormat} />
           <View style={styles.rows}>
             {activeRows.map((row, i) => (
               <BriefRow
@@ -348,6 +385,17 @@ export default function BriefsScreen() {
           </View>
         </View>
       )}
+
+      <FormatInfoSheet format={infoFormat} onClose={() => setInfoFormat(null)} />
+
+      <WeekTargetsSheet
+        visible={targetsVisible}
+        videoTarget={campaign?.video_target ?? 20}
+        slideshowTarget={campaign?.slideshow_target ?? 10}
+        saving={targetsSaving}
+        onClose={() => setTargetsVisible(false)}
+        onSave={(v, s) => void saveTargets(v, s)}
+      />
     </AdminScreen>
   );
 }
@@ -361,5 +409,15 @@ const styles = StyleSheet.create({
   },
   empty: {
     marginTop: 56,
+  },
+  targetsRow: {
+    marginTop: -4,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  targetsEdit: {
+    fontSize: type.size.meta,
+    fontWeight: '700',
+    color: color.blue600,
   },
 });

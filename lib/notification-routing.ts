@@ -24,8 +24,9 @@ export function routeNotificationTap(
   const campaignId = str(data, 'campaign_id');
 
   if (mode === 'admin') {
+    // Billing moved to the web dashboard; land on settings where its link lives.
     if (event === 'credits_low' || event === 'company_topup' || event === 'company_spend') {
-      router.push('/(admin)/billing');
+      router.push('/(admin)/(tabs)/settings');
       return;
     }
     if (event === 'message' && creatorId) {

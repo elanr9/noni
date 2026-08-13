@@ -21,7 +21,9 @@ import { color, space, type } from '../../theme/tokens';
 // own onLayout frame and gets it wrong once a SafeAreaView insets the view.
 // metrics() seeds the height for a screen that mounts with the keyboard open.
 function useKeyboardHeight(): number {
-  const [height, setHeight] = useState(() => Keyboard.metrics()?.height ?? 0);
+  const [height, setHeight] = useState(() =>
+    typeof Keyboard.metrics === 'function' ? (Keyboard.metrics()?.height ?? 0) : 0,
+  );
 
   useEffect(() => {
     const shown = Keyboard.addListener(

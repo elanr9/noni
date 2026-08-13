@@ -188,10 +188,12 @@ Deno.serve(async (req) => {
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!profile) return jsonResponse({ error: 'forbidden' }, 403);
+    // Platform admin acts as a campaign manager inside their own company.
+    const role = profile.role as string;
     caller = {
       userId: userData.user.id,
       companyId: profile.company_id as string,
-      role: profile.role as string,
+      role: role === 'admin' ? 'campaign_manager' : role,
     };
   } else if (!SERVICE_EVENTS.includes(body.event)) {
     return jsonResponse({ error: 'forbidden' }, 403);
@@ -278,7 +280,7 @@ Deno.serve(async (req) => {
         .eq('id', body.campaign_id)
         .maybeSingle();
       if (!campaign) return jsonResponse({ error: 'campaign not found' }, 404);
-      if (caller.companyId !== campaign.company_id || caller.role !== 'admin') {
+      if (caller.companyId !== campaign.company_id || caller.role !== 'campaign_manager') {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       const tokens = await creatorPushTokens(
@@ -303,12 +305,12 @@ Deno.serve(async (req) => {
       body.event === 'streak_progress'
     ) {
       const creatorId =
-        body.creator_id ?? (caller.role === 'admin' ? null : caller.userId);
+        body.creator_id ?? (caller.role === 'campaign_manager' ? null : caller.userId);
       if (!creatorId) {
         return jsonResponse({ error: `${body.event} expects { creator_id }` }, 400);
       }
       // Creators may only fire events about their own thread and account.
-      if (caller.role !== 'admin' && creatorId !== caller.userId) {
+      if (caller.role !== 'campaign_manager' && creatorId !== caller.userId) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       const { data: creator } = await admin
@@ -333,7 +335,7 @@ Deno.serve(async (req) => {
 
       // account_decided: admin's verdict back to the creator.
       if (body.event === 'account_decided') {
-        if (caller.role !== 'admin') {
+        if (caller.role !== 'campaign_manager') {
           return jsonResponse({ error: 'forbidden' }, 403);
         }
         const approved = body.status === 'approved';
@@ -386,13 +388,13 @@ Deno.serve(async (req) => {
 
       // message: creator -> admins; admin -> that creator's thread.
       const tokens =
-        caller.role === 'admin'
+        caller.role === 'campaign_manager'
           ? await creatorPushTokens(admin, creatorId, caller.companyId)
           : await adminPushTokens(admin, caller.companyId);
       const sent = await sendExpoPush(tokens, {
-        title: caller.role === 'admin' ? 'New message' : `Message from ${name}`,
+        title: caller.role === 'campaign_manager' ? 'New message' : `Message from ${name}`,
         body:
-          caller.role === 'admin'
+          caller.role === 'campaign_manager'
             ? 'You have a new message'
             : `${name} sent you a message`,
         data: { creator_id: creatorId, event: body.event },
@@ -417,7 +419,7 @@ Deno.serve(async (req) => {
     if (
       body.event === 'submitted' ||
       body.event === 'music_pending' ||
-      (body.event === 'comment' && caller.role !== 'admin')
+      (body.event === 'comment' && caller.role !== 'campaign_manager')
     ) {
       const tokens = await adminPushTokens(admin, subject.company_id);
       const message: PushMessage =

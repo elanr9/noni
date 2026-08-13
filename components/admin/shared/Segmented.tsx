@@ -36,13 +36,15 @@ export function Segmented({ options, value, onChange }: SegmentedProps) {
             <Text style={[styles.label, { color: active ? color.ink : color.slate500 }]}>
               {option.label}
             </Text>
-            {option.count !== undefined && option.count > 0 && (
+            {option.count !== undefined && (
               <Text
                 style={[
                   styles.count,
                   active
-                    ? { backgroundColor: color.blue500, color: color.white }
-                    : { backgroundColor: color.lineStrong, color: color.slate500 },
+                    ? option.count > 0
+                      ? { backgroundColor: color.blue500, color: color.white }
+                      : { backgroundColor: color.fillQuiet, color: color.slate400 }
+                    : { backgroundColor: color.white, color: color.slate500 },
                 ]}
               >
                 {option.count}
@@ -69,15 +71,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: radiusAdmin.pill,
   },
   itemActive: {
     backgroundColor: color.white,
   },
   label: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.1,
   },

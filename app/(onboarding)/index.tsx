@@ -4,19 +4,23 @@ import { LoadingScreen } from '../../components/layout/Screen';
 import { useAuth } from '../../lib/auth';
 
 export default function OnboardingIndex() {
-  const { session, profile, loading } = useAuth();
+  const { profile, loading } = useAuth();
 
   if (loading) return <LoadingScreen />;
 
-  if (session && profile?.role === 'admin') {
-    return <Redirect href="/(onboarding)/company" />;
+  // The layout already bounced missing sessions, missing profiles, and
+  // onboarded users.
+  if (profile?.role === 'admin') {
+    return <Redirect href="/platform-admin" />;
   }
 
-  // A signed-in creator who is not onboarded already passed the save step,
-  // so resume at the first post-auth question.
-  if (session && profile) {
-    return <Redirect href="/(onboarding)/heard" />;
+  if (profile?.role === 'company_admin') {
+    return <Redirect href="/company-admin" />;
   }
 
-  return <Redirect href="/(onboarding)/welcome" />;
+  if (profile?.role === 'campaign_manager') {
+    return <Redirect href="/(onboarding)/manager" />;
+  }
+
+  return <Redirect href="/(onboarding)/name" />;
 }

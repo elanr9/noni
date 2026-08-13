@@ -72,7 +72,7 @@ export function CaptionStep({
 
       <View style={styles.tagBlock}>
         <SectionLabel style={tagCountOff ? styles.labelWarn : undefined}>
-          {`Hashtags · ${hashtags.length} of 3–5`}
+          {`Hashtags · ${hashtags.length} of 3 to 5`}
         </SectionLabel>
         <View style={styles.tagRow}>
           {bankTags.map((tag) => {

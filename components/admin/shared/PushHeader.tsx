@@ -22,9 +22,10 @@ export function PushHeader({ title, subtitle, onBack, trailing }: PushHeaderProp
         accessibilityRole="button"
         accessibilityLabel="Back"
         onPress={onBack}
+        hitSlop={4}
         style={[styles.back, shadow.shadowCard]}
       >
-        <Icon name="chevron-left" size={18} color={color.ink} />
+        <Icon name="chevron-left" size={20} color={color.ink} />
       </PressableScale>
 
       <View style={styles.titleBlock}>
@@ -47,7 +48,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingVertical: 10,
   },
   back: {
@@ -65,7 +66,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 17,
     fontWeight: '700',
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
     color: color.ink,
   },
   subtitle: {

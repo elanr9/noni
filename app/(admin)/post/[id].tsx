@@ -1,6 +1,6 @@
-// Stepped post editor. Post type is locked from week setup. Nothing
-// generates on open — AI assist is on demand. Screenshots live on
-// brief_segments keyed by talking_point_index.
+// Stepped post editor. Post type comes stamped from week setup but stays
+// editable on the title step. Nothing generates on open — AI assist is on
+// demand. Screenshots live on brief_segments keyed by talking_point_index.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,6 +19,7 @@ import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseC
 import { StepDots } from '../../../components/admin/editor/StepDots';
 import { TextStyleSheet } from '../../../components/admin/editor/TextStyleSheet';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
+import { TypePicker } from '../../../components/admin/editor/TypePicker';
 import {
   LibraryPickerSheet,
   type LibraryPick,
@@ -1171,6 +1172,13 @@ export default function PostEditorScreen() {
               filling={filling}
               onFillWithAi={() => setFillVisible(true)}
             />
+            {postTypeId !== null ? (
+              <TypePicker
+                postTypes={postTypes}
+                selectedId={postTypeId}
+                onSelect={(t) => setPostTypeId(t.id)}
+              />
+            ) : null}
           </View>
         ) : null}
 

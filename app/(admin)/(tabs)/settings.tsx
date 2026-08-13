@@ -1,320 +1,501 @@
+// Settings is the manager's own account only: invites, notifications,
+// support, sign out, delete. Company brain, billing and team live on the
+// web admin console.
 import { useCallback, useState } from 'react';
-import {
-  Alert,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
-import { AccountSwitcherCaret } from '../../../components/AccountSwitcherCaret';
 import {
-  AdminHeader,
   AdminScreen,
-  SectionLabel,
-  SkeletonCard,
+  Card,
+  ConfirmationTakeover,
+  PushHeader,
+  Sheet,
 } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
+import { TextField } from '../../../components/ui/TextField';
+import { inviteCreator } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
-import {
-  listBrandDocs,
-  listCreatorSocialStatus,
-  listProductFeatures,
-  type CreatorSocialStatus,
-} from '../../../lib/admin-api';
 import { contactSupport } from '../../../lib/support';
-import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
+import { supabase } from '../../../lib/supabase';
+import { borderWidth, color, type } from '../../../theme/tokens';
 
-function connectedSummary(accounts: Record<string, unknown>): string {
-  const parts: string[] = [];
-  if (accounts.tiktok) parts.push('TikTok');
-  if (accounts.instagram) parts.push('Instagram');
-  return parts.length > 0 ? parts.join(' · ') : 'Not connected';
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function CompanyRow({
+type OpenSheet = 'invite' | 'notifs' | 'terms' | 'signout' | 'delete' | null;
+type Ended = 'signedout' | 'deleted' | null;
+
+function NavRow({
   icon,
-  title,
-  value,
+  label,
+  tone = 'plain',
+  last = false,
   onPress,
 }: {
   icon: IconName;
-  title: string;
-  value: string;
+  label: string;
+  tone?: 'plain' | 'danger';
+  last?: boolean;
   onPress?: () => void;
 }) {
+  const danger = tone === 'danger';
   return (
-    <PressableScale
+    <Pressable
       accessibilityRole="button"
-      disabled={onPress === undefined}
       onPress={onPress}
-      style={[styles.row, shadow.shadowCard]}
+      style={[styles.navRow, !last && styles.navRowBorder]}
     >
-      <View style={styles.rowIcon}>
-        <Icon name={icon} size={16} color={color.blue600} />
-      </View>
-      <Text style={styles.rowTitle}>{title}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-      {onPress !== undefined && (
-        <Icon name="chevron-right" size={16} color={color.slate300} />
-      )}
-    </PressableScale>
+      <Icon name={icon} size={19} color={danger ? color.danger : color.slate500} />
+      <Text style={[styles.navLabel, danger && { color: color.danger }]}>{label}</Text>
+      {!danger && <Icon name="chevron-right" size={17} color={color.slate300} />}
+    </Pressable>
   );
 }
 
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      hitSlop={8}
+      onPress={() => onChange(!on)}
+      style={[styles.toggle, { backgroundColor: on ? color.blue500 : color.lineStrong }]}
+    >
+      <View style={[styles.toggleKnob, on && { alignSelf: 'flex-end' }]} />
+    </Pressable>
+  );
+}
+
+const NOTIF_ROWS: Array<{ key: 'subs' | 'live' | 'weekly'; label: string; sub: string }> = [
+  { key: 'subs', label: 'New submissions', sub: 'A creator sends something for review' },
+  { key: 'live', label: 'Posts going live', sub: 'An approved post publishes' },
+  { key: 'weekly', label: 'Weekly summary', sub: 'Views, sign-ups and earnings every Monday' },
+];
+
 export default function SettingsScreen() {
-  const { profile, signOut, enableCreatorMode } = useAuth();
+  const { profile, signOut } = useAuth();
   const router = useRouter();
-  const [members, setMembers] = useState<CreatorSocialStatus[]>([]);
-  const [docCount, setDocCount] = useState<number | null>(null);
-  const [approvedCount, setApprovedCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const showBecomeCreator = profile?.role === 'admin' && !profile.can_create;
-
-  const load = useCallback(async () => {
-    try {
-      setMembers(await listCreatorSocialStatus());
-    } catch (e) {
-      Alert.alert(
-        'Could not load',
-        e instanceof Error ? e.message : 'Unknown error',
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-    // Row counts arrive after the roster; rows fall back to a quiet value.
-    void listBrandDocs()
-      .then((docs) => setDocCount(docs.filter((d) => d.content.trim().length > 0).length))
-      .catch(() => undefined);
-    void listProductFeatures()
-      .then((rows) => setApprovedCount(rows.filter((r) => r.approved).length))
-      .catch(() => undefined);
-  }, []);
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  const [open, setOpen] = useState<OpenSheet>(null);
+  const [ended, setEnded] = useState<Ended>(null);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [notifs, setNotifs] = useState({ subs: true, live: true, weekly: false });
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      void supabase
+        .from('companies')
+        .select('name')
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data !== null) setCompanyName(data.name);
+        });
+    }, []),
   );
 
-  function onInvite() {
-    Alert.alert(
-      'Invite a creator',
-      'Creators sign up in the Noni app and land on your roster once their account is approved.',
-    );
+  const company = companyName ?? 'your company';
+  const inviteValid = name.trim().length > 0 && EMAIL_RE.test(email.trim());
+
+  async function sendInvite() {
+    if (!profile) return;
+    setSending(true);
+    setInviteError(null);
+    try {
+      await inviteCreator(profile.company_id, name.trim(), email.trim().toLowerCase());
+      setSent(true);
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : 'Could not send. Try again.');
+    } finally {
+      setSending(false);
+    }
   }
 
+  const terms: Array<[string, string]> = [
+    [
+      'Your account',
+      `You use Noni on behalf of ${company}. Your access can be granted or revoked by the company admin at any time.`,
+    ],
+    [
+      'Content and approvals',
+      'Approving a post publishes it to the linked creator accounts. You are responsible for reviewing content before it goes live.',
+    ],
+    [
+      'Payments',
+      'Creator earnings unlock on your approvals and are paid from the company budget. Noni does not hold funds on your behalf.',
+    ],
+    [
+      'Data',
+      'Analytics come from the connected platforms and Stripe. Noni stores only what it needs to run briefs, approvals and payouts.',
+    ],
+    [
+      'Leaving',
+      'Deleting your account removes your access and preferences. Posts, creators and company data stay with the company.',
+    ],
+  ];
+
   return (
-    <AdminScreen
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            void load();
-          }}
-        />
-      }
-    >
-      <AdminHeader title="Settings" />
+    <>
+      <AdminScreen>
+        <PushHeader title="Settings" onBack={() => router.back()} />
 
-      <View style={styles.rosterHeader}>
-        <SectionLabel>Roster</SectionLabel>
-        <Button size="sm" variant="tint" icon="plus" onPress={onInvite}>
-          Invite
-        </Button>
-      </View>
-
-      <View style={styles.rows}>
-        {loading ? (
-          <>
-            <SkeletonCard height={56} radius={radiusAdmin.lg} />
-            <SkeletonCard height={56} radius={radiusAdmin.lg} />
-          </>
-        ) : members.length === 0 ? (
-          <Text style={styles.empty}>
-            No creators yet. Invite the first one and their account approval
-            starts here.
-          </Text>
-        ) : (
-          members.map((m) => (
-            <View key={m.id} style={[styles.row, shadow.shadowCard]}>
-              <Text style={styles.rowTitle} numberOfLines={1}>
-                {m.full_name ?? 'Creator'}
-              </Text>
-              <Text style={styles.rowValue}>
-                {connectedSummary(m.social_accounts)}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      <SectionLabel style={styles.section}>Company</SectionLabel>
-      <View style={styles.rows}>
-        <CompanyRow
-          icon="circle-user-round"
-          title="Account template"
-          value=""
-          onPress={() => router.push('/(admin)/account-template')}
-        />
-        <CompanyRow
-          icon="sparkles"
-          title="Brand Brain"
-          value={docCount !== null ? `${docCount} doc${docCount === 1 ? '' : 's'}` : ''}
-          onPress={() => router.push('/(admin)/brain')}
-        />
-        <CompanyRow
-          icon="zap"
-          title="Features"
-          value={approvedCount !== null ? `${approvedCount} approved` : ''}
-          onPress={() => router.push('/(admin)/features')}
-        />
-        <CompanyRow
-          icon="dollar-sign"
-          title="Billing & budget"
-          value=""
-          onPress={() => router.push('/(admin)/billing')}
-        />
-        <CompanyRow icon="clock" title="Publish time" value="Sun 8PM EST" />
-      </View>
-
-      <SectionLabel style={styles.section}>Account</SectionLabel>
-      <AccountSwitcherCaret
-        name={profile?.full_name?.trim() || 'Admin'}
-        style={styles.caret}
-        textStyle={styles.caretName}
-        iconSize={20}
-      />
-      <View style={styles.rows}>
-        {showBecomeCreator ? (
-          <PressableScale
-            accessibilityRole="button"
+        <View style={styles.stack}>
+        <Card pad={0}>
+          <NavRow
+            icon="plus"
+            label="Invite a creator"
             onPress={() => {
-              Alert.alert(
-                'Become a creator',
-                'Stay on this account and switch into creator mode anytime. You will set up your posting accounts next.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Continue',
-                    onPress: () => {
-                      void enableCreatorMode().catch((e) => {
-                        Alert.alert(
-                          'Could not continue',
-                          e instanceof Error ? e.message : 'Try again.',
-                        );
-                      });
-                    },
-                  },
-                ],
-              );
+              setName('');
+              setEmail('');
+              setSent(false);
+              setInviteError(null);
+              setOpen('invite');
             }}
-            style={[styles.row, shadow.shadowCard]}
-          >
-            <View style={styles.rowIcon}>
-              <Icon name="plus" size={16} color={color.blue600} />
+          />
+          <NavRow icon="bell" label="Notifications" onPress={() => setOpen('notifs')} />
+          <NavRow
+            icon="message-circle"
+            label="Contact support"
+            onPress={() => contactSupport('Noni admin support')}
+          />
+          <NavRow
+            icon="link"
+            label="Terms and conditions"
+            last
+            onPress={() => setOpen('terms')}
+          />
+        </Card>
+
+        <Card pad={0}>
+          <NavRow
+            icon="log-out"
+            label="Sign out"
+            tone="danger"
+            onPress={() => setOpen('signout')}
+          />
+          <NavRow
+            icon="trash-2"
+            label="Delete account"
+            tone="danger"
+            last
+            onPress={() => setOpen('delete')}
+          />
+        </Card>
+
+        <Text style={styles.foot}>
+          {`Signed in as campaign manager · ${company}`}
+        </Text>
+        </View>
+      </AdminScreen>
+
+      <Sheet
+        visible={open === 'invite'}
+        onClose={() => setOpen(null)}
+        title={sent ? 'Invite sent' : 'Invite a creator'}
+        subtitle={
+          sent
+            ? undefined
+            : `They get an email that signs them into the creator app for ${company}. No setup on their end.`
+        }
+        footer={
+          sent ? (
+            <Button variant="primary" size="lg" block onPress={() => setOpen(null)}>
+              Done
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              disabled={sending || !inviteValid}
+              onPress={() => void sendInvite()}
+            >
+              {sending ? 'Sending' : 'Send invite'}
+            </Button>
+          )
+        }
+      >
+        {sent ? (
+          <View style={styles.sentRow}>
+            <Icon name="circle-check-big" size={20} color={color.green} />
+            <Text style={styles.sentText}>
+              {`${name.trim()} is invited. That email is already bound to ${company}, so signing in lands them in the creator app with nothing to configure.`}
+            </Text>
+          </View>
+        ) : (
+          <View>
+            <TextField
+              value={name}
+              onChangeText={setName}
+              placeholder="Name"
+              autoCapitalize="words"
+              accessibilityLabel="Creator name"
+            />
+            <TextField
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              accessibilityLabel="Creator email"
+              style={styles.fieldGap}
+            />
+            {inviteError !== null && <Text style={styles.inviteError}>{inviteError}</Text>}
+          </View>
+        )}
+      </Sheet>
+
+      <Sheet
+        visible={open === 'notifs'}
+        onClose={() => setOpen(null)}
+        title="Notifications"
+        subtitle="What Noni pings you about."
+        footer={
+          <Button variant="primary" size="lg" block onPress={() => setOpen(null)}>
+            Done
+          </Button>
+        }
+      >
+        <View>
+          {NOTIF_ROWS.map((row, i) => (
+            <View
+              key={row.key}
+              style={[styles.notifRow, i < NOTIF_ROWS.length - 1 && styles.notifRowBorder]}
+            >
+              <View style={styles.notifText}>
+                <Text style={styles.notifLabel}>{row.label}</Text>
+                <Text style={styles.notifSub}>{row.sub}</Text>
+              </View>
+              <Toggle
+                on={notifs[row.key]}
+                onChange={(v) => setNotifs({ ...notifs, [row.key]: v })}
+              />
             </View>
-            <Text style={styles.rowTitle}>Become a creator</Text>
-            <Icon name="chevron-right" size={16} color={color.slate300} />
-          </PressableScale>
-        ) : null}
+          ))}
+        </View>
+      </Sheet>
 
-        <CompanyRow
-          icon="inbox"
-          title="Contact support"
-          value=""
-          onPress={() => {
-            contactSupport('Noni admin support');
-          }}
+      <Sheet
+        visible={open === 'terms'}
+        onClose={() => setOpen(null)}
+        title="Terms and conditions"
+        subtitle="The short version. The full text lives on usenoni.app/terms."
+        footer={
+          <Button variant="primary" size="lg" block onPress={() => setOpen(null)}>
+            Done
+          </Button>
+        }
+      >
+        <View style={styles.termsList}>
+          {terms.map(([h, b]) => (
+            <View key={h}>
+              <Text style={styles.termsHead}>{h.toUpperCase()}</Text>
+              <Text style={styles.termsBody}>{b}</Text>
+            </View>
+          ))}
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={open === 'signout'}
+        onClose={() => setOpen(null)}
+        title="Sign out?"
+        subtitle="Are you sure? You can sign back in anytime with the same email."
+        footer={
+          <View style={styles.footerStack}>
+            <Button
+              variant="danger"
+              size="lg"
+              block
+              onPress={() => {
+                setOpen(null);
+                setEnded('signedout');
+              }}
+            >
+              Sign out
+            </Button>
+            <Button variant="ghost" size="lg" block onPress={() => setOpen(null)}>
+              Stay signed in
+            </Button>
+          </View>
+        }
+      >
+        <Text style={styles.sheetBody}>
+          {`Pending approvals stay in the queue for ${company}. Nothing is lost.`}
+        </Text>
+      </Sheet>
+
+      <Sheet
+        visible={open === 'delete'}
+        onClose={() => setOpen(null)}
+        title="Delete your account?"
+        subtitle="Are you sure? This removes you as a campaign manager. Posts, creators and company data stay with the company."
+        footer={
+          <View style={styles.footerStack}>
+            <Button
+              variant="danger"
+              size="lg"
+              block
+              onPress={() => {
+                setOpen(null);
+                setEnded('deleted');
+              }}
+            >
+              Delete account
+            </Button>
+            <Button variant="ghost" size="lg" block onPress={() => setOpen(null)}>
+              Keep my account
+            </Button>
+          </View>
+        }
+      >
+        <Text style={styles.sheetBody}>
+          Your admin can invite you again later, but your notification preferences
+          and sign-in are gone for good.
+        </Text>
+      </Sheet>
+
+      {ended === 'signedout' && (
+        <ConfirmationTakeover
+          icon="log-out"
+          tone="brand"
+          title="Signed out"
+          body="Sign back in anytime with the same email."
+          actionLabel="Sign back in"
+          onAction={() => void signOut()}
         />
-
-        <PressableScale
-          accessibilityRole="button"
-          onPress={() => void signOut()}
-          style={[styles.row, styles.dangerRow]}
-        >
-          <Icon name="log-out" size={16} color={color.danger} />
-          <Text style={styles.dangerText}>Sign out</Text>
-        </PressableScale>
-      </View>
-    </AdminScreen>
+      )}
+      {ended === 'deleted' && (
+        <ConfirmationTakeover
+          icon="trash-2"
+          tone="danger"
+          title="Account deleted"
+          body={`You no longer have access to ${company} on Noni.`}
+          actionLabel="Back"
+          onAction={() => void signOut()}
+        />
+      )}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  rosterHeader: {
+  stack: {
+    gap: 14,
+    paddingTop: 4,
+  },
+  navRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-    marginBottom: 10,
-  },
-  section: {
-    marginTop: 24,
-    marginBottom: 10,
-  },
-  caret: {
-    marginBottom: 14,
-  },
-  caretName: {
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  rows: {
-    gap: 10,
-  },
-  empty: {
-    fontSize: type.size.bodySm,
-    color: color.slate500,
-    fontWeight: '600',
-    lineHeight: type.size.bodySm * type.leading.body,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minHeight: 56,
+    gap: 12,
+    minHeight: 44,
+    paddingVertical: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: color.white,
-    borderRadius: radiusAdmin.lg,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
   },
-  rowIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: radiusAdmin.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
+  navRowBorder: {
+    borderBottomWidth: borderWidth.hair,
+    borderBottomColor: color.line,
   },
-  rowTitle: {
+  navLabel: {
     flex: 1,
     fontSize: type.size.bodySm,
-    fontWeight: '700',
+    fontWeight: '600',
     color: color.ink,
   },
-  rowValue: {
-    fontSize: type.size.chip,
+  foot: {
+    marginHorizontal: 2,
+    textAlign: 'center',
+    fontSize: type.size.label,
     fontWeight: '600',
-    color: color.slate500,
+    color: color.slate300,
   },
-  dangerRow: {
-    backgroundColor: color.dangerSoft,
-    borderColor: color.dangerSoft,
+  sentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+    paddingVertical: 4,
   },
-  dangerText: {
+  sentText: {
     flex: 1,
     fontSize: type.size.bodySm,
-    fontWeight: '700',
+    lineHeight: type.size.bodySm * 1.5,
+    color: color.ink,
+  },
+  fieldGap: {
+    marginTop: 10,
+  },
+  inviteError: {
+    marginTop: 10,
+    fontSize: type.size.chip,
+    fontWeight: '600',
     color: color.danger,
+  },
+  notifRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+  },
+  notifRowBorder: {
+    borderBottomWidth: borderWidth.hair,
+    borderBottomColor: color.line,
+  },
+  notifText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  notifLabel: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.ink,
+  },
+  notifSub: {
+    marginTop: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.4,
+    color: color.slate400,
+  },
+  toggle: {
+    width: 46,
+    height: 28,
+    borderRadius: 999,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleKnob: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    backgroundColor: color.white,
+    alignSelf: 'flex-start',
+  },
+  termsList: {
+    gap: 14,
+    paddingBottom: 4,
+  },
+  termsHead: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    letterSpacing: type.tracking.label,
+    color: color.slate500,
+  },
+  termsBody: {
+    marginTop: 5,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.5,
+    color: color.ink,
+  },
+  footerStack: {
+    gap: 8,
+  },
+  sheetBody: {
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.5,
+    color: color.slate500,
   },
 });

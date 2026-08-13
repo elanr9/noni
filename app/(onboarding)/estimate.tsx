@@ -20,7 +20,7 @@ export default function EstimateScreen() {
       onBack={() => router.back()}
       title="Here's what that's worth"
       primaryLabel="Continue"
-      onPrimary={() => router.push('/(onboarding)/save')}
+      onPrimary={() => router.push('/(onboarding)/heard')}
     >
       <View style={styles.payoff}>
         <CountUp value={target} prefix="$" style={styles.amount} />

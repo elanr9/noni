@@ -1,7 +1,15 @@
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { MessagePostRef, ThreadMessage } from '../../../lib/messages-api';
+import {
+  parseMessageMedia,
+  signedChatMediaUrl,
+  type MessageMedia,
+  type MessagePostRef,
+  type ThreadMessage,
+} from '../../../lib/messages-api';
 import { color, type } from '../../../theme/tokens';
+import { PostThumb } from '../shared';
 import { PostRefBlock } from './PostRefBlock';
 
 export interface MessageBubbleProps {
@@ -19,11 +27,67 @@ function timeLabel(iso: string): string {
 }
 
 /**
+ * The 168-wide media block inside a media bubble: images load through a
+ * signed URL over the gradient placeholder, videos keep the placeholder with
+ * the play disc and duration badge. Shared by the admin and creator threads.
+ */
+export function ChatMediaBlock({ media }: { media: MessageMedia }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (media.media !== 'image') return;
+    let cancelled = false;
+    void signedChatMediaUrl(media.url)
+      .then((signed) => {
+        if (!cancelled) setUrl(signed);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [media]);
+
+  return (
+    <PostThumb
+      uri={media.media === 'image' ? url : null}
+      format={media.media === 'video' ? 'video' : 'photo_carousel'}
+      badge={media.len}
+      width={168}
+      height={media.media === 'video' ? 224 : 118}
+      radius={12}
+    />
+  );
+}
+
+/**
  * Admin handoff §10 — admin bubbles blue-500 with 16/16/4/16 radius, creator
- * bubbles quiet fill mirrored.
+ * bubbles quiet fill mirrored. Media messages render as a 168-wide media
+ * block with optional caption and the timestamp inside the bubble.
  */
 export function MessageBubble({ message, onOpenPostRef }: MessageBubbleProps) {
   const admin = !message.fromCreator;
+  const { media, text } = parseMessageMedia(message.body);
+
+  if (media !== null) {
+    return (
+      <View
+        style={[
+          styles.mediaBubble,
+          admin ? styles.mediaBubbleAdmin : styles.mediaBubbleCreator,
+        ]}
+      >
+        <ChatMediaBlock media={media} />
+        {text.length > 0 && (
+          <Text style={admin ? styles.mediaCaptionAdmin : styles.mediaCaptionCreator}>
+            {text}
+          </Text>
+        )}
+        <Text style={admin ? styles.mediaTimeAdmin : styles.mediaTimeCreator}>
+          {timeLabel(message.createdAt)}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.entry, admin ? styles.entryAdmin : styles.entryCreator]}>
@@ -103,5 +167,49 @@ const styles = StyleSheet.create({
     lineHeight: type.size.bodySm * type.leading.body,
     fontWeight: '500',
     color: color.ink,
+  },
+  mediaBubble: {
+    padding: 5,
+    borderRadius: 16,
+  },
+  mediaBubbleAdmin: {
+    alignSelf: 'flex-end',
+    backgroundColor: color.blue500,
+  },
+  mediaBubbleCreator: {
+    alignSelf: 'flex-start',
+    backgroundColor: color.fillQuiet,
+  },
+  mediaCaptionAdmin: {
+    paddingHorizontal: 8,
+    paddingTop: 7,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * type.leading.snug,
+    color: color.white,
+  },
+  mediaCaptionCreator: {
+    paddingHorizontal: 8,
+    paddingTop: 7,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * type.leading.snug,
+    color: color.ink,
+  },
+  mediaTimeAdmin: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 3,
+    textAlign: 'right',
+    fontSize: type.size.micro11,
+    fontWeight: '600',
+    color: color.whiteA75,
+  },
+  mediaTimeCreator: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 3,
+    textAlign: 'right',
+    fontSize: type.size.micro11,
+    fontWeight: '600',
+    color: color.slate400,
   },
 });

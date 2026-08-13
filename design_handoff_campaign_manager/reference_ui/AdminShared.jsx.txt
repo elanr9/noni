@@ -1,0 +1,272 @@
+/* Shared vocabulary for the admin kit. Everything here extends the creator
+   design system — no new hex, no new radii. Admin screen gutter is 20px
+   (the creator app uses 24): admin surfaces are dense lists, and 20 matches
+   app/(admin) as built. */
+
+const NS = () => window.NoniDesignSystem_710e43;
+const GUT = 20;
+
+/* Screen scaffold. Off-white ground, one scrolling column, optional pinned
+   footer that the content scrolls behind. */
+function AdminScreen({ children, footer, dark = false, pad = true, gap = 14, bottom = 108, style }) {
+  return (
+    <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', background: dark ? 'var(--ink-900)' : 'var(--off-white)', ...style }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap, padding: pad ? `6px ${GUT}px ${bottom}px` : 0 }}>
+        {children}
+      </div>
+      {footer}
+    </div>
+  );
+}
+
+/* Tab-level header: title, one line of intent, trailing slot. */
+function AdminHeader({ title, subtitle, right, style }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '6px 0 2px', ...style }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <h1 style={{ margin: 0, font: '700 30px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{title}</h1>
+        {subtitle ? <p style={{ margin: '6px 0 0', font: '400 15px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>{subtitle}</p> : null}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+/* Pushed-screen header: back chevron, title, trailing slot. */
+function PushHeader({ title, meta, onBack, right, dark = false, style }) {
+  const { Icon } = NS();
+  const fg = dark ? 'var(--white)' : 'var(--ink)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `4px ${GUT}px 10px`, background: dark ? 'transparent' : 'var(--off-white)', ...style }}>
+      <button type="button" onClick={onBack} aria-label="Back" style={{ width: 36, height: 36, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: dark ? 'rgba(255,255,255,0.16)' : 'var(--white)', boxShadow: dark ? 'none' : 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="chevron-left" size={20} color={fg} />
+      </button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
+        {meta ? <div style={{ font: '600 12px var(--font-ui)', color: dark ? 'rgba(255,255,255,0.6)' : 'var(--slate-400)', marginTop: 1 }}>{meta}</div> : null}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+/* Queue switcher. Counts live in the control so the admin never taps to
+   find out a lane is empty. */
+function Segmented({ items, active, onSelect, style }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 'var(--radius-pill)', background: 'var(--fill-quiet)', ...style }}>
+      {items.map((it, i) => {
+        const on = i === active;
+        const label = typeof it === 'string' ? it : it.label;
+        const count = typeof it === 'string' ? null : it.count;
+        return (
+          <button key={label} type="button" onClick={() => onSelect(i)} aria-pressed={on}
+            style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 6px', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-pill)', background: on ? 'var(--white)' : 'transparent', boxShadow: on ? 'var(--shadow-card)' : 'none', color: on ? 'var(--ink)' : 'var(--slate-500)', font: '700 14px var(--font-ui)', letterSpacing: '-0.1px', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>
+            {label}
+            {count != null ? (
+              <span style={{ minWidth: 19, height: 19, padding: '0 5px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '700 11px var(--font-ui)', background: on ? (count ? 'var(--blue-500)' : 'var(--fill-quiet)') : 'var(--white)', color: on ? (count ? 'var(--white)' : 'var(--slate-400)') : 'var(--slate-500)' }}>{count}</span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SectionLabel({ children, right, style }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '10px 2px 0', ...style }}>
+      <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{children}</span>
+      {right}
+    </div>
+  );
+}
+
+function CountPill({ children, tone = 'brand' }) {
+  const map = {
+    brand: ['var(--blue-100)', 'var(--blue-700)'],
+    clear: ['var(--green-soft)', 'var(--green)'],
+    quiet: ['var(--fill-quiet)', 'var(--slate-500)'],
+  };
+  const [bg, fg] = map[tone];
+  return <span style={{ padding: '7px 13px', borderRadius: 999, background: bg, color: fg, font: '700 13px var(--font-ui)', whiteSpace: 'nowrap' }}>{children}</span>;
+}
+
+function Avatar({ name, size = 36, tone = 'brand', photo = false }) {
+  const { Icon } = NS();
+  const initial = (name || '?').trim().charAt(0).toUpperCase();
+  if (photo) {
+    return (
+      <span title={name} style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 999, overflow: 'hidden', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)' }}>
+        <Icon name="circle-user-round" size={Math.round(size * 0.62)} color="var(--blue-300)" />
+      </span>
+    );
+  }
+  return (
+    <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: tone === 'brand' ? 'var(--blue-100)' : 'var(--fill-quiet)', color: tone === 'brand' ? 'var(--blue-700)' : 'var(--slate-500)', font: `700 ${Math.round(size * 0.42)}px var(--font-display)` }}>{initial}</span>
+  );
+}
+
+const isReel = (f) => f === 'video' || f === 'reel';
+const formatLabel = (f) => (isReel(f) ? 'Reel' : 'Slideshow');
+
+/* Format is never implied. Every surface that shows media states Reel or
+   Slideshow. */
+function FormatChip({ format, size = 'md', onDark = false, style }) {
+  const { Icon } = NS();
+  const reel = isReel(format);
+  const sm = size === 'sm';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: sm ? 4 : 5, padding: sm ? '3px 8px 3px 6px' : '5px 10px 5px 8px', borderRadius: 999, background: onDark ? 'rgba(255,255,255,0.16)' : 'var(--blue-100)', color: onDark ? 'var(--white)' : 'var(--blue-700)', font: `700 ${sm ? 11 : 12}px var(--font-ui)`, whiteSpace: 'nowrap', ...style }}>
+      <Icon name={reel ? 'video' : 'images'} size={sm ? 12 : 13} />{formatLabel(format)}
+    </span>
+  );
+}
+
+function TypeChip({ children, tone = 'quiet', style }) {
+  const map = { quiet: ['var(--fill-quiet)', 'var(--slate-500)'], warn: ['var(--amber-soft)', 'var(--amber)'], good: ['var(--green-soft)', 'var(--green)'], bad: ['var(--danger-soft)', 'var(--danger)'], brand: ['var(--blue-100)', 'var(--blue-700)'] };
+  const [bg, fg] = map[tone];
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 999, background: bg, color: fg, font: '700 11px var(--font-ui)', whiteSpace: 'nowrap', ...style }}>{children}</span>;
+}
+
+/* One hue per post type so a lane reads by colour before it reads by word.
+   Tints only — same soft-chip recipe as the status chips, never a fill. */
+const TYPE_TONES = {
+  numbered_list: ['#E3F2FD', '#0E6BA8'],
+  talking_head: ['#ECE7FB', '#5B44B4'],
+  explainer: ['#DFF3EE', '#0E6E5C'],
+  contrast: ['#FDEEDC', '#95560C'],
+  replay_bait: ['#FBE7EF', '#A03A67'],
+  numbered_tips: ['#E3F2FD', '#0E6BA8'],
+  how_to: ['#E7EAFB', '#3B4EA0'],
+  getting_started: ['#FDEEDC', '#95560C'],
+};
+
+function PostTypeChip({ type, children, style }) {
+  const [bg, fg] = TYPE_TONES[type] || ['var(--fill-quiet)', 'var(--slate-500)'];
+  return <span style={{ display: 'inline-flex', alignItems: 'center', padding: '5px 10px', borderRadius: 999, background: bg, color: fg, font: '700 12px var(--font-ui)', whiteSpace: 'nowrap', ...style }}>{children}</span>;
+}
+
+/* 9:16 media placeholder. No real frames exist in the sources, so this is a
+   quiet fill with the format glyph — never a drawn illustration. */
+function Thumb({ format = 'video', w = 52, h = 70, radius = 'var(--radius-sm)', badge, topBadge, style, onClick }) {
+  const { Icon } = NS();
+  return (
+    <div onClick={onClick} style={{ width: w, height: h, flex: '0 0 auto', position: 'relative', borderRadius: radius, overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: onClick ? 'pointer' : 'default', ...style }}>
+      <Icon name={isReel(format) ? 'play' : 'images'} size={typeof w === 'number' ? Math.min(22, Math.round(w * 0.36)) : 22} color="var(--blue-300)" />
+      {topBadge ? <span style={{ position: 'absolute', left: 4, top: 4, padding: '2px 5px', borderRadius: 999, background: 'var(--amber)', color: 'var(--white)', font: '700 9px var(--font-ui)', whiteSpace: 'nowrap' }}>{topBadge}</span> : null}
+      {badge ? <span style={{ position: 'absolute', left: 4, bottom: 4, padding: '2px 6px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 10px var(--font-ui)', whiteSpace: 'nowrap' }}>{badge}</span> : null}
+    </div>
+  );
+}
+
+function Card({ children, pad = 14, onClick, style }) {
+  return (
+    <div onClick={onClick} role={onClick ? 'button' : undefined}
+      style={{ background: 'var(--white)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-card)', padding: pad, cursor: onClick ? 'pointer' : 'default', transition: 'transform var(--dur-instant) var(--ease-out)', ...style }}>
+      {children}
+    </div>
+  );
+}
+
+/* Pinned bottom action bar. Content scrolls behind it. */
+function ActionBar({ children, dark = false, style }) {
+  return (
+    <div style={{ flex: '0 0 auto', padding: `12px ${GUT}px 26px`, background: dark ? 'linear-gradient(180deg,rgba(11,15,20,0) 0%,var(--ink-900) 42%)' : 'linear-gradient(180deg,rgba(247,250,253,0) 0%,var(--off-white) 34%)', display: 'flex', gap: 10, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function SkeletonLine({ w = '100%', h = 13, r = 999, style }) {
+  return <div style={{ width: w, height: h, borderRadius: r, background: 'var(--fill-quiet)', ...style }} />;
+}
+
+function SkeletonCard({ height = 92, radius = 'var(--radius-lg)', style }) {
+  return <div style={{ height, borderRadius: radius, background: 'linear-gradient(100deg,var(--fill-quiet) 30%,#FAFCFE 50%,var(--fill-quiet) 70%)', backgroundSize: '220% 100%', animation: 'noni-shimmer 1400ms linear infinite', ...style }} />;
+}
+
+function SkeletonRows({ n = 4, height = 92, gap = 12 }) {
+  return <div style={{ display: 'flex', flexDirection: 'column', gap }}>{Array.from({ length: n }).map((_, i) => <SkeletonCard key={i} height={height} />)}</div>;
+}
+
+/* Bottom sheet. 240ms rise, scrim fades with it. */
+function Sheet({ title, subtitle, onClose, children, footer, animate = true, maxHeight = '84%', style }) {
+  const { Icon } = NS();
+  const [shown, setShown] = React.useState(!animate);
+  React.useLayoutEffect(() => { if (animate) { const t = setTimeout(() => setShown(true), 0); return () => clearTimeout(t); } }, [animate]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 70, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', opacity: shown ? 1 : 0, transition: 'opacity var(--dur-base) var(--ease-out)' }} />
+      <div style={{ position: 'relative', maxHeight, display: 'flex', flexDirection: 'column', background: 'var(--white)', borderRadius: 'var(--radius-2xl) var(--radius-2xl) 0 0', boxShadow: 'var(--shadow-raised)', paddingBottom: 24, transform: shown ? 'translateY(0)' : 'translateY(100%)', transition: 'transform var(--dur-base) var(--ease-out)', ...style }}>
+        <div style={{ padding: '10px 0 0', display: 'flex', justifyContent: 'center' }}>
+          <span style={{ width: 40, height: 5, borderRadius: 999, background: 'var(--line-strong)' }} />
+        </div>
+        <div style={{ padding: `14px ${GUT}px 12px`, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{ margin: 0, font: '700 21px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{title}</h2>
+            {subtitle ? <p style={{ margin: '5px 0 0', font: '400 14px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>{subtitle}</p> : null}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ border: 'none', background: 'var(--fill-quiet)', width: 32, height: 32, flex: '0 0 auto', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <Icon name="x" size={17} color="var(--slate-500)" />
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `0 ${GUT}px` }}>{children}</div>
+        {footer ? <div style={{ padding: `12px ${GUT}px 0` }}>{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/* Score dial for the AI review step. Ring only — no gauge chrome. */
+function ScoreDial({ value, size = 76, stroke = 7, label }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const tone = value >= 80 ? 'var(--green)' : value >= 65 ? 'var(--amber)' : 'var(--danger)';
+  return (
+    <div style={{ width: size, height: size, position: 'relative', flex: '0 0 auto' }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--fill-quiet)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} style={{ transition: 'stroke-dashoffset var(--dur-slow) var(--ease-out)' }} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <span style={{ font: `700 ${Math.round(size * 0.31)}px var(--font-display)`, letterSpacing: '-0.5px', color: 'var(--ink)' }}>{value}</span>
+        {label ? <span style={{ font: '700 9px var(--font-ui)', letterSpacing: '0.6px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{label}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function ScoreBar({ value, style }) {
+  const tone = value >= 80 ? 'var(--green)' : value >= 65 ? 'var(--amber)' : 'var(--danger)';
+  return (
+    <span style={{ width: 54, height: 6, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden', display: 'inline-block', ...style }}>
+      <span style={{ display: 'block', width: `${value}%`, height: '100%', borderRadius: 999, background: tone }} />
+    </span>
+  );
+}
+
+/* Settings-style navigation row. */
+function NavRow({ icon, label, meta, onClick, tone = 'plain', last = false }) {
+  const { Icon } = NS();
+  const danger = tone === 'danger';
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '14px 14px', border: 'none', borderBottom: last ? 'none' : '1px solid var(--line)', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+      {icon ? <Icon name={icon} size={19} color={danger ? 'var(--danger)' : 'var(--slate-500)'} /> : null}
+      <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: danger ? 'var(--danger)' : 'var(--ink)' }}>{label}</span>
+      {meta ? <span style={{ font: '600 14px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{meta}</span> : null}
+      {!danger ? <Icon name="chevron-right" size={17} color="var(--slate-300)" /> : null}
+    </button>
+  );
+}
+
+const ADMIN_TABS = [
+  { label: 'Review', icon: 'inbox' },
+  { label: 'Briefs', icon: 'layout-list' },
+  { label: 'Library', icon: 'images' },
+  { label: 'Team', icon: 'users' },
+  { label: 'Analytics', icon: 'chart-column' },
+];
+
+Object.assign(window, { AdminScreen, AdminHeader, PushHeader, Segmented, SectionLabel, CountPill, Avatar, FormatChip, TypeChip, PostTypeChip, TYPE_TONES, Thumb, Card, ActionBar, SkeletonLine, SkeletonCard, SkeletonRows, Sheet, ScoreDial, ScoreBar, NavRow, ADMIN_TABS, GUT, isReel, formatLabel });

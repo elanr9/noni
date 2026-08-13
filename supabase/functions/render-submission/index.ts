@@ -40,6 +40,9 @@ Deno.serve(async (req) => {
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
+    // Platform admin (role admin) inherits campaign manager powers.
+    const isManager =
+      caller.role === 'campaign_manager' || caller.role === 'admin';
 
     const { data: submission } = await admin
       .from('submissions')
@@ -80,7 +83,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'submission not found' }, 404);
     }
     const isOwner = submission.creator_id === userData.user.id;
-    if (!isOwner && caller.role !== 'admin') {
+    if (!isOwner && !isManager) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 
@@ -101,7 +104,7 @@ Deno.serve(async (req) => {
     // Claim the job. The status filter is the lock: a second invoke while the
     // first is mid-flight ('rendering') becomes a no-op unless the caller is
     // an admin explicitly restarting a stuck job.
-    const claimable = isOwner && caller.role !== 'admin'
+    const claimable = isOwner && !isManager
       ? ['queued', 'failed']
       : ['queued', 'failed', 'rendering'];
     const { data: claimed } = await admin

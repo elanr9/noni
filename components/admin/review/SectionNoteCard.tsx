@@ -1,17 +1,23 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
+import type { ContentFormat } from '../../../lib/admin-review-types';
+import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
+import { NoteBlock, PostThumb } from '../shared';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 
 export interface SectionNoteCardProps {
-  /** "Hook" / "Clip 2" / "Slide 3" / "Caption". */
+  /** "Hook" / "Clip 2" / "Slide 3". Spoken sections only, never Caption. */
   label: string;
   text: string;
+  format: ContentFormat;
   note: string | null;
   open: boolean;
+  /** Card body tap: the watch sheet. */
+  onWatch: () => void;
+  /** Plus icon tap: the inline note editor under the card. */
   onOpen: () => void;
   onCancel: () => void;
   onSave: (note: string) => void;
@@ -19,14 +25,17 @@ export interface SectionNoteCardProps {
 }
 
 /**
- * Admin handoff §3 revision card — tap opens a blue-50 note box under it.
- * A saved note turns the border blue-500 and the label reads `Note added`.
+ * Admin handoff §3 revision card — thumb, uppercase slot label, section
+ * text. A saved note turns the border blue-500, shows `Note added` and a
+ * blue-50 note block with a remove x.
  */
 export function SectionNoteCard({
   label,
   text,
+  format,
   note,
   open,
+  onWatch,
   onOpen,
   onCancel,
   onSave,
@@ -41,40 +50,54 @@ export function SectionNoteCard({
   }, [open]);
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.card, shadow.shadowCard, (noted || open) && styles.cardActive]}>
       <PressableScale
         accessibilityRole="button"
-        onPress={onOpen}
-        style={[styles.card, noted && styles.cardNoted]}
+        accessibilityLabel={`Watch ${label}`}
+        onPress={onWatch}
+        style={styles.body}
       >
-        <Text style={[styles.label, noted && styles.labelNoted]}>
-          {(noted ? 'Note added' : label).toUpperCase()}
-        </Text>
-        <Text style={styles.text}>{text}</Text>
+        <PostThumb format={format} width={46} height={62} radius={9} />
+        <View style={styles.main}>
+          <View style={styles.labelRow}>
+            <Text style={[styles.label, noted && styles.labelNoted]}>
+              {label.toUpperCase()}
+            </Text>
+            <View style={styles.spacer} />
+            {noted ? (
+              <View style={styles.notedTag}>
+                <Icon name="pencil" size={12} color={color.blue700} />
+                <Text style={styles.notedText}>Note added</Text>
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Add note to ${label}`}
+                hitSlop={15}
+                onPress={open ? onCancel : onOpen}
+              >
+                <Icon name="plus" size={15} color={color.slate300} />
+              </Pressable>
+            )}
+          </View>
+          <Text style={styles.text}>{text}</Text>
+        </View>
       </PressableScale>
 
-      {noted && !open && (
-        <View style={styles.noteBlock}>
-          <Text style={styles.noteText}>{note}</Text>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Remove note"
-            onPress={onRemove}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon name="x" size={14} color={color.blue700} />
-          </PressableScale>
-        </View>
+      {note !== null && !open && (
+        <NoteBlock onRemove={onRemove} style={styles.noteBlock}>
+          {note}
+        </NoteBlock>
       )}
 
       {open && (
         <View style={styles.editor}>
           <TextInput
-            multiline
             autoFocus
+            multiline
             value={draft}
             onChangeText={setDraft}
-            placeholder="What should change"
+            placeholder="What to change here"
             placeholderTextColor={color.slate400}
             style={styles.input}
           />
@@ -98,19 +121,29 @@ export function SectionNoteCard({
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    gap: 6,
-  },
   card: {
-    gap: 5,
-    padding: 14,
-    borderRadius: radiusAdmin.lg,
     backgroundColor: color.white,
-    borderWidth: borderWidth.field,
+    borderWidth: borderWidth.hair,
     borderColor: color.line,
+    borderRadius: radiusAdmin.lg,
   },
-  cardNoted: {
+  cardActive: {
     borderColor: color.blue500,
+  },
+  body: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+    padding: 12,
+  },
+  main: {
+    flex: 1,
+    minWidth: 0,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   label: {
     fontSize: type.size.micro11,
@@ -119,46 +152,55 @@ const styles = StyleSheet.create({
     color: color.slate400,
   },
   labelNoted: {
-    color: color.blue600,
+    color: color.blue700,
+  },
+  spacer: {
+    flex: 1,
+  },
+  notedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  notedText: {
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
   },
   text: {
-    fontSize: type.size.meta,
-    lineHeight: type.size.meta * 1.45,
+    marginTop: 5,
+    fontSize: 13.5,
+    lineHeight: 13.5 * 1.45,
     fontWeight: type.weight.regular,
     color: color.ink,
   },
   noteBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: radiusAdmin.md,
-    backgroundColor: color.blue50,
-  },
-  noteText: {
-    flex: 1,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * 1.4,
-    fontWeight: type.weight.semibold,
-    color: color.blue700,
+    marginHorizontal: 13,
+    marginBottom: 13,
   },
   editor: {
-    gap: 10,
-    padding: 12,
-    borderRadius: radiusAdmin.md,
+    marginHorizontal: 13,
+    marginBottom: 13,
+    padding: 11,
+    borderRadius: radiusAdmin.sm,
     backgroundColor: color.blue50,
+    gap: 9,
   },
   input: {
     minHeight: 70,
-    textAlignVertical: 'top',
+    padding: 11,
+    borderRadius: radiusAdmin.sm,
+    borderWidth: borderWidth.field,
+    borderColor: color.blue300,
+    backgroundColor: color.white,
     fontSize: type.size.meta,
-    lineHeight: type.size.meta * 1.4,
+    lineHeight: type.size.meta * 1.45,
     color: color.ink,
-    padding: 0,
+    textAlignVertical: 'top',
   },
   editorRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 8,
+    gap: 7,
   },
 });

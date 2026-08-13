@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AccountRow } from '../../../components/admin/AccountRow';
@@ -10,12 +10,11 @@ import {
   SectionLabel,
   Segmented,
   SkeletonCard,
+  SkeletonLine,
 } from '../../../components/admin/shared';
 import { SubmissionRow } from '../../../components/admin/SubmissionRow';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import {
-  approveMusic,
-  countAssignmentsInFlight,
   latestSubmissionsByAssignment,
   listAssignmentQueue,
   listMusicApprovalQueue,
@@ -30,11 +29,14 @@ import { toAssignmentQueueRow } from '../../../lib/admin-queue-map';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
 import { color, radiusAdmin, type } from '../../../theme/tokens';
 
-const SUBTITLE_DEFAULT =
-  "Approve and it's live. Editing, posting and tracking are automatic.";
+const SUBTITLE_DEFAULT = 'Approve posts and they will be posted automatically!';
 const SUBTITLE_ONE_LEFT = "One to clear, then you're done for today.";
-const SUBTITLE_CLEARED = 'All caught up. New submissions land here on their own.';
-const FOOTER_NOTE = 'Reject a single clip and only that clip goes back.';
+const SUBTITLE_CLEARED =
+  'Everything is cleared. Creators are recording the rest of the week.';
+const FOOTER_NOTE =
+  'Reject a single clip and only that clip goes back. The rest stay approved.';
+const MUSIC_INTRO =
+  "Slideshows only. Open the post, check the song is on it, approve. Approval unlocks that post's earnings.";
 
 /** MockQueueItem plus the media-badge facts the row spec needs. */
 type SubmissionQueueRow = {
@@ -50,21 +52,17 @@ function useAdminQueue(companyId: string | undefined): {
   music: MusicApprovalItem[];
   accounts: AccountApprovalItem[];
   loading: boolean;
-  inFlight: number;
-  reload: () => Promise<void>;
 } {
   const [posts, setPosts] = useState<SubmissionQueueRow[]>([]);
   const [music, setMusic] = useState<MusicApprovalItem[]>([]);
   const [accounts, setAccounts] = useState<AccountApprovalItem[]>([]);
-  const [inFlight, setInFlight] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (companyId === undefined) return;
     try {
-      const [queue, flying, musicQueue, accountQueue] = await Promise.all([
+      const [queue, musicQueue, accountQueue] = await Promise.all([
         listAssignmentQueue(),
-        countAssignmentsInFlight(),
         listMusicApprovalQueue(companyId),
         listAccountApprovalQueue(companyId),
       ]);
@@ -79,7 +77,6 @@ function useAdminQueue(companyId: string | undefined): {
           };
         }),
       );
-      setInFlight(flying);
       setMusic(musicQueue);
       setAccounts(accountQueue);
     } finally {
@@ -94,34 +91,14 @@ function useAdminQueue(companyId: string | undefined): {
     }, [load]),
   );
 
-  return { posts, music, accounts, loading, inFlight, reload: load };
+  return { posts, music, accounts, loading };
 }
 
 export default function ReviewScreen() {
   const router = useRouter();
   const { profile } = useAuth();
-  const { posts, music, accounts, loading, inFlight, reload } = useAdminQueue(
-    profile?.company_id,
-  );
+  const { posts, music, accounts, loading } = useAdminQueue(profile?.company_id);
   const [lane, setLane] = useState(0);
-  const [musicBusy, setMusicBusy] = useState<string | null>(null);
-
-  const approveMusicItem = async (assignmentId: string) => {
-    if (!profile) return;
-    setMusicBusy(assignmentId);
-    try {
-      await approveMusic({
-        companyId: profile.company_id,
-        assignmentId,
-        adminId: profile.id,
-      });
-      await reload();
-    } catch (e) {
-      Alert.alert("Couldn't approve", e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setMusicBusy(null);
-    }
-  };
 
   const total = posts.length + music.length + accounts.length;
   const subtitle =
@@ -148,13 +125,14 @@ export default function ReviewScreen() {
               : { label: `${total} waiting`, tone: 'accent' }
         }
         subtitle={loading ? undefined : subtitle}
+        trailing={loading ? <SkeletonLine width={84} height={30} /> : undefined}
       />
 
       <Segmented
         options={[
-          { label: 'Posts', count: posts.length },
-          { label: 'Music', count: music.length },
-          { label: 'Accounts', count: accounts.length },
+          { label: 'Posts', count: loading ? undefined : posts.length },
+          { label: 'Music', count: loading ? undefined : music.length },
+          { label: 'Accounts', count: loading ? undefined : accounts.length },
         ]}
         value={lane}
         onChange={setLane}
@@ -170,15 +148,9 @@ export default function ReviewScreen() {
       ) : lane === 0 ? (
         posts.length === 0 ? (
           <EmptyState
-            icon="circle-check-big"
+            icon="inbox"
             title="Nothing to review"
-            body={
-              inFlight > 0
-                ? `${inFlight} posts are with creators. They land here the moment they're submitted.`
-                : 'Submissions land here the moment a creator finishes recording.'
-            }
-            actionLabel="Open Calendar"
-            onAction={() => router.navigate('/(admin)/(tabs)/calendar')}
+            body="Creators are recording this week's posts. New submissions land here, newest first."
             style={styles.empty}
           />
         ) : (
@@ -201,26 +173,26 @@ export default function ReviewScreen() {
           <EmptyState
             icon="music-2"
             title="No songs waiting"
-            body="Slideshows land here when a creator marks the song added."
+            body="Creators tap Music added once the track is on a live slideshow. It lands here."
             style={styles.empty}
           />
         ) : (
           <View style={styles.list}>
+            <Text style={styles.musicIntro}>{MUSIC_INTRO}</Text>
             {music.map((item) => (
               <MusicApprovalRow
                 key={item.assignment.id}
                 item={item}
-                busy={musicBusy === item.assignment.id}
-                onApprove={() => void approveMusicItem(item.assignment.id)}
+                onPress={() => router.push(`/(admin)/music/${item.assignment.id}`)}
               />
             ))}
           </View>
         )
       ) : accounts.length === 0 ? (
         <EmptyState
-          icon="users"
+          icon="circle-user-round"
           title="No accounts to approve"
-          body="New creators land here when they submit their warm-up proof."
+          body="Every creator on the roster is linked. New creators show up here after they upload their warm-up proof."
           style={styles.empty}
         />
       ) : (
@@ -259,14 +231,23 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 2,
   },
+  musicIntro: {
+    marginTop: 2,
+    marginHorizontal: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
+  },
   footerNote: {
-    marginTop: 4,
-    fontSize: type.size.label,
+    marginTop: 6,
+    marginHorizontal: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.45,
     fontWeight: type.weight.regular,
     color: color.slate400,
-    textAlign: 'center',
   },
   empty: {
-    marginTop: 48,
+    marginTop: 40,
   },
 });

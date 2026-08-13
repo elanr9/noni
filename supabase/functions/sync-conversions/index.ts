@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const caller = await authenticate(req, admin);
     if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
-    if (caller.kind === 'user' && caller.role !== 'admin') {
+    if (caller.kind === 'user' && caller.role !== 'campaign_manager') {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 

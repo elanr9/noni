@@ -32,7 +32,14 @@ export function adminClient(): SupabaseClient {
 
 export type Caller =
   | { kind: 'cron' }
-  | { kind: 'user'; userId: string; companyId: string; role: string };
+  | {
+      kind: 'user';
+      userId: string;
+      companyId: string;
+      role: string;
+      platformAdmin: boolean;
+      companyAdmin: boolean;
+    };
 
 // Cron jobs authenticate with x-cron-secret; app calls carry the user's JWT.
 export async function authenticate(
@@ -52,12 +59,44 @@ export async function authenticate(
     .eq('id', data.user.id)
     .maybeSingle();
   if (!profile) return null;
+  // Platform admin and company admin inherit campaign manager powers inside
+  // their company; platform-only endpoints gate on platformAdmin, company
+  // admin-only endpoints gate on companyAdmin.
   return {
     kind: 'user',
     userId: data.user.id,
     companyId: profile.company_id,
-    role: profile.role,
+    role:
+      profile.role === 'admin' || profile.role === 'company_admin'
+        ? 'campaign_manager'
+        : profile.role,
+    platformAdmin: profile.role === 'admin',
+    companyAdmin: profile.role === 'company_admin',
   };
+}
+
+// Mirrors the SQL has_permission(): platform admin and company admin pass
+// everything, campaign managers need the flag in their company_members row.
+export async function hasPermission(
+  admin: SupabaseClient,
+  caller: {
+    userId: string;
+    companyId: string;
+    platformAdmin: boolean;
+    companyAdmin?: boolean;
+  },
+  key: string,
+): Promise<boolean> {
+  if (caller.platformAdmin || caller.companyAdmin) return true;
+  if (!caller.companyId) return false;
+  const { data } = await admin
+    .from('company_members')
+    .select('permissions')
+    .eq('company_id', caller.companyId)
+    .eq('profile_id', caller.userId)
+    .maybeSingle();
+  const permissions = data?.permissions as Record<string, unknown> | undefined;
+  return permissions?.[key] === true;
 }
 
 export async function askClaude(

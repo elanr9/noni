@@ -14,6 +14,7 @@ import {
 } from '../../../components/admin/review/RevisionMode';
 import { SentConfirmation } from '../../../components/admin/review/SentConfirmation';
 import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
+import { SkeletonCard, SkeletonLine } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import {
   getSubmissionRenderState,
@@ -35,6 +36,7 @@ import {
   listPostTypes,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
 import { borderWidth, color, type } from '../../../theme/tokens';
@@ -73,6 +75,7 @@ export default function ReviewScreen() {
   const [slideIndex, setSlideIndex] = useState(0);
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
+  const [handle, setHandle] = useState<string | null>(null);
 
   const [revisionVisible, setRevisionVisible] = useState(false);
   const [approvedVisible, setApprovedVisible] = useState(false);
@@ -200,6 +203,7 @@ export default function ReviewScreen() {
     setPositionSec(0);
     setSlideIndex(0);
     setBriefSegments([]);
+    setHandle(null);
     void (async () => {
       try {
         const url = await signedUrlFor(current);
@@ -214,6 +218,13 @@ export default function ReviewScreen() {
         if (!cancelled) setBriefSegments(segments);
       } catch {
         if (!cancelled) setBriefSegments([]);
+      }
+      if (profile) {
+        const account = await getCreatorAccount(
+          profile.company_id,
+          current.assignment.creator_id,
+        ).catch(() => null);
+        if (!cancelled) setHandle(account?.tiktok_handle ?? null);
       }
       const next = queue[index + 1];
       if (next !== undefined) void signedUrlFor(next).catch(() => undefined);
@@ -232,9 +243,15 @@ export default function ReviewScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.fallbackScreen, styles.centered]}>
+      <View style={[styles.fallbackScreen, { paddingTop: insets.top + 12 }]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator color={color.blue500} />
+        <View style={styles.skeletonBody}>
+          <SkeletonCard style={styles.skeletonMedia} />
+          <View style={styles.skeletonStrip}>
+            <SkeletonLine height={48} width="46%" radius={14} />
+            <SkeletonLine height={48} style={styles.skeletonGrow} radius={14} />
+          </View>
+        </View>
       </View>
     );
   }
@@ -276,14 +293,14 @@ export default function ReviewScreen() {
     (_, i) => briefSegments[i]?.screenshot_url != null,
   );
 
-  const sections: RevisionSection[] = [
-    ...scriptTexts.map((text, i) => ({
-      key: `segment-${i}`,
-      label: sectionLabel(i, scriptTexts.length, isReel),
-      text,
-    })),
-    { key: 'caption', label: 'Caption', text: caption || 'No caption.' },
-  ];
+  // Spoken sections only. Captions come from the brief and are placed
+  // automatically, so revision mode never shows a caption card.
+  const sections: RevisionSection[] = scriptTexts.map((text, i) => ({
+    key: `segment-${i}`,
+    label: sectionLabel(i, scriptTexts.length, isReel),
+    text,
+  }));
+  const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
 
   const togglePlay = () => {
     if (!playing && durationSec > 0 && positionSec >= durationSec) setPositionSec(0);
@@ -420,7 +437,7 @@ export default function ReviewScreen() {
 
         <ReviewMetaOverlay
           creatorName={row.creator.name}
-          handle={null}
+          handle={handle}
           typeLabel={typeLabel}
           ageLabel={row.ageLabel}
           format={row.format}
@@ -465,6 +482,9 @@ export default function ReviewScreen() {
 
       {revisionVisible && (
         <RevisionMode
+          creatorShort={creatorShort}
+          postTitle={row.title}
+          format={row.format}
           sections={sections}
           busy={busy}
           onCancel={() => setRevisionVisible(false)}
@@ -475,12 +495,12 @@ export default function ReviewScreen() {
         <ApprovedOverlay
           title={row.title}
           format={row.format}
-          creatorName={row.creator.name}
+          creatorShort={creatorShort}
           onNext={closeAndAdvance}
         />
       )}
       {sentVisible && (
-        <SentConfirmation creatorName={row.creator.name} onNext={closeAndAdvance} />
+        <SentConfirmation creatorShort={creatorShort} onNext={closeAndAdvance} />
       )}
     </View>
   );
@@ -499,6 +519,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
+  },
+  skeletonBody: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    gap: 14,
+  },
+  skeletonMedia: {
+    flex: 1,
+  },
+  skeletonStrip: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  skeletonGrow: {
+    flex: 1,
+    width: 'auto',
   },
   missing: {
     fontSize: type.size.bodySm,

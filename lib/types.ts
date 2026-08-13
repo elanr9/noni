@@ -859,6 +859,7 @@ export type Database = {
           created_at: string | null
           id: string
           name: string
+          payouts_enabled: boolean
           settings: Json | null
           slug: string
           website: string | null
@@ -867,6 +868,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           name: string
+          payouts_enabled?: boolean
           settings?: Json | null
           slug: string
           website?: string | null
@@ -875,11 +877,99 @@ export type Database = {
           created_at?: string | null
           id?: string
           name?: string
+          payouts_enabled?: boolean
           settings?: Json | null
           slug?: string
           website?: string | null
         }
         Relationships: []
+      }
+      company_invites: {
+        Row: {
+          accepted_at: string | null
+          company_id: string
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string | null
+          role: string
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          company_id: string
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: string
+          token?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          company_id?: string
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_invites_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_members: {
+        Row: {
+          company_id: string
+          created_at: string
+          permissions: Json
+          profile_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          permissions?: Json
+          profile_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          permissions?: Json
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_members_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_members_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       content_tasks: {
         Row: {
@@ -2037,7 +2127,7 @@ export type Database = {
           birthday: string | null
           can_create: boolean
           can_film_with_second_person: boolean
-          company_id: string
+          company_id: string | null
           created_at: string | null
           credential_line: string | null
           expo_push_token: string | null
@@ -2064,7 +2154,7 @@ export type Database = {
           birthday?: string | null
           can_create?: boolean
           can_film_with_second_person?: boolean
-          company_id: string
+          company_id?: string | null
           created_at?: string | null
           credential_line?: string | null
           expo_push_token?: string | null
@@ -2091,7 +2181,7 @@ export type Database = {
           birthday?: string | null
           can_create?: boolean
           can_film_with_second_person?: boolean
-          company_id?: string
+          company_id?: string | null
           created_at?: string | null
           credential_line?: string | null
           expo_push_token?: string | null
@@ -2868,6 +2958,8 @@ export type Database = {
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
+      is_campaign_manager: { Args: never; Returns: boolean }
+      is_platform_admin: { Args: never; Returns: boolean }
       label_trend: {
         Args: { p_label?: string; p_reason?: string; p_trend_id: string }
         Returns: undefined

@@ -6,10 +6,10 @@ import { useAuth } from '../../lib/auth';
 import { hydrateOnboardingAnswers } from '../../lib/onboarding';
 import { destinationForProfile } from '../../lib/profile';
 
-// Onboarding runs WITHOUT a session (steps 0 to 7); auth happens mid-flow
-// at the save step. Only already-onboarded users get bounced to their app.
+// Onboarding runs after an invited sign-in. Users without a session or
+// without a profile get bounced to sign in; onboarded users go to their app.
 export default function OnboardingLayout() {
-  const { profile, loading, activeMode } = useAuth();
+  const { session, profile, loading, activeMode } = useAuth();
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -18,8 +18,12 @@ export default function OnboardingLayout() {
 
   if (loading || !hydrated) return <LoadingScreen />;
 
-  if (profile?.onboarded) {
-    return <Redirect href={destinationForProfile(profile, true, activeMode)} />;
+  if (!session || !profile || profile.onboarded) {
+    return (
+      <Redirect
+        href={destinationForProfile(profile, session !== null, activeMode)}
+      />
+    );
   }
 
   return <Stack screenOptions={{ headerShown: false }} />;

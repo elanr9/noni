@@ -6,7 +6,6 @@ import { useAuth } from '../../lib/auth';
 import {
   clearOnboardingAnswers,
   completeOnboarding,
-  markOnboardedLocally,
 } from '../../lib/onboarding';
 import { OnboardingShell } from './_shell';
 
@@ -19,7 +18,6 @@ export default function DoneScreen() {
     setBusy(true);
     try {
       await completeOnboarding(session.user.id);
-      await markOnboardedLocally();
       await clearOnboardingAnswers();
       await refreshProfile();
       router.replace('/(creator)/(tabs)');
@@ -31,7 +29,7 @@ export default function DoneScreen() {
 
   return (
     <OnboardingShell
-      step={12}
+      step={11}
       onBack={() => router.back()}
       title="You're in."
       subtitle="Next: set up your accounts."

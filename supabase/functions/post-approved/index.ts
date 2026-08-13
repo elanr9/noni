@@ -209,7 +209,8 @@ Deno.serve(async (req) => {
       .select('company_id, role')
       .eq('id', userData.user.id)
       .maybeSingle();
-    if (!caller || caller.role !== 'admin') {
+    // Platform admin (role admin) inherits campaign manager powers.
+    if (!caller || (caller.role !== 'campaign_manager' && caller.role !== 'admin')) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 

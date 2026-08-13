@@ -1,7 +1,11 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
-import { profileCanCreate, profileIsAdmin } from '../../lib/active-mode';
+import {
+  profileCanCreate,
+  profileIsCampaignManager,
+  profileIsPlatformAdmin,
+} from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
 import { color } from '../../theme/tokens';
@@ -39,20 +43,32 @@ export default function CreatorLayout() {
     !!profile &&
     profile.onboarded === true &&
     profileCanCreate(profile) &&
-    (!profileIsAdmin(profile) || activeMode === 'creator');
+    ((!profileIsCampaignManager(profile) && !profileIsPlatformAdmin(profile)) ||
+      activeMode === 'creator');
   const setupFlagged =
     inCreatorMode && isSetupCompleteFlag(profile.onboarding_answers);
   const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
 
   if (loading) return <LoadingScreen />;
   if (!session) return <Redirect href="/(auth)/login" />;
+  // The platform admin runs this surface only in creator mode.
+  if (profile && profileIsPlatformAdmin(profile) && activeMode !== 'creator') {
+    return (
+      <Redirect
+        href={activeMode === 'admin' ? '/(admin)/(tabs)' : '/platform-admin'}
+      />
+    );
+  }
   if (!profile || !profile.onboarded) {
     return <Redirect href="/(onboarding)" />;
   }
   if (!inCreatorMode) {
-    // Dual admin in admin mode, or anyone who cannot create → admin app.
-    // Pure creators always pass inCreatorMode above.
-    if (profileIsAdmin(profile)) {
+    // Dual campaign manager in admin mode, or anyone who cannot create →
+    // admin app. Pure creators always pass inCreatorMode above.
+    if (profileIsPlatformAdmin(profile)) {
+      return <Redirect href="/platform-admin" />;
+    }
+    if (profileIsCampaignManager(profile)) {
       return <Redirect href="/(admin)/(tabs)" />;
     }
     return <Redirect href="/(auth)/login" />;

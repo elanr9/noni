@@ -1,0 +1,371 @@
+/* Briefs — a list of week cards, next week always on top, older weeks below.
+   Calendar toggle steps week by week like a calendar app. Opening a card
+   shows that week's brief: lanes and rows while it's live, posts made once
+   it's done. */
+
+const BRIEF_WEEKS = [
+  { id: 15, label: 'Week 15', range: 'Aug 17 – 23', status: 'next', vDone: 0, vT: 20, sDone: 0, sT: 10 },
+  { id: 14, label: 'Week 14', range: 'Aug 10 – 16', status: 'done', day: 4, vDone: 20, vT: 20, sDone: 10, sT: 10, avgEarn: '$238', avgViews: '52K', avgPosts: '2.6', creators: 5 },
+  { id: 13, label: 'Week 13', range: 'Aug 3 – 9', status: 'done', vDone: 20, vT: 20, sDone: 10, sT: 10, avgEarn: '$214', avgViews: '47K', avgPosts: '2.4', creators: 5 },
+  { id: 12, label: 'Week 12', range: 'Jul 27 – Aug 2', status: 'done', vDone: 19, vT: 20, sDone: 10, sT: 10, avgEarn: '$189', avgViews: '41K', avgPosts: '2.1', creators: 4 },
+  { id: 11, label: 'Week 11', range: 'Jul 20 – 26', status: 'done', vDone: 20, vT: 20, sDone: 9, sT: 10, avgEarn: '$203', avgViews: '44K', avgPosts: '2.3', creators: 4 },
+];
+
+function BriefsScreen({ state = 'default', view: view0 = 'list', lane: lane0 = 0, onOpenPost, onNewWeek, onOpenDay }) {
+  const { Button, Icon, EmptyState } = window.NoniDesignSystem_710e43;
+  const W = window.NONI_ADMIN.week;
+  const posts = window.NONI_ADMIN.library.ours;
+  const [view, setView] = React.useState(view0 === 'grid' ? 'list' : view0);
+  const [lane, setLane] = React.useState(lane0);
+  const [sel, setSel] = React.useState(null);
+  const [wi, setWi] = React.useState(1); /* calendar view index into BRIEF_WEEKS */
+  const loading = state === 'loading';
+  const empty = state === 'empty';
+
+  const rows = lane === 0 ? W.rows : W.slideRows;
+  const done = lane === 0 ? W.videoDone : W.slideshowDone;
+  const target = lane === 0 ? W.videoTarget : W.slideshowTarget;
+  const left = W.videoTarget + W.slideshowTarget - W.videoDone - W.slideshowDone;
+  const ready = state === 'ready' || state === 'published' || left === 0;
+  const published = state === 'published';
+
+  if (empty) {
+    return (
+      <AdminScreen>
+        <AdminHeader title="Briefs" subtitle="A week is one shared pool of posts for the whole roster." />
+        <EmptyState icon="layout-list" title="No week yet" body="Set the ratio, split the types, and thirty stamped rows appear." actionLabel="Start week" onAction={onNewWeek} style={{ marginTop: 40 }} />
+      </AdminScreen>
+    );
+  }
+
+  const postsMade = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <SectionLabel style={{ padding: '2px 2px 0' }}>Posts made this week</SectionLabel>
+      {posts.map((it) => (
+        <Card key={it.id} pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+          <Thumb format={it.format} w={38} h={50} radius={9} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
+            <div style={{ marginTop: 2, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>{it.creator} · {formatLabel(it.format)} · {it.when}</div>
+          </div>
+          <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+            <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{it.views}</div>
+            <div style={{ font: '600 10.5px var(--font-ui)', color: 'var(--slate-400)' }}>views</div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+
+  if (sel) {
+    const live = sel.status === 'live';
+    return (
+      <AdminScreen bottom={live ? 128 : 40} pad={false} footer={live ? (
+        <ActionBar style={{ flexDirection: 'column', gap: 8 }}>
+          {published ? (
+            <>
+              <Button variant="outline" size="md" icon="plus" block onClick={onNewWeek}>Start week 15</Button>
+              <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)', textAlign: 'center' }}>Week 14 is with the creators. Next week opens now.</span>
+            </>
+          ) : ready ? (
+            <>
+              <Button variant="primary" size="md" block>Publish to creators</Button>
+              <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)', textAlign: 'center' }}>Before Sunday 8:00 PM EST, so creators are notified on schedule.</span>
+            </>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 15px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+              <span style={{ width: 34, height: 34, flex: '0 0 auto', borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '700 13px var(--font-display)', color: 'var(--blue-700)' }}>{left}</span>
+              <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>posts left this week. Publish opens when all thirty are complete.</span>
+            </div>
+          )}
+        </ActionBar>
+      ) : undefined}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: live ? '0 0 128px' : '0 0 40px' }}>
+          <PushHeader title={sel.label} meta={`${sel.range}${sel.status === 'next' ? ' · opens Sunday' : sel.day ? ` · day ${sel.day} of 7` : ' · done'}`} onBack={() => setSel(null)} />
+          <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {sel.status === 'next' ? (
+              <EmptyState icon="layout-list" title="Not planned yet" body="Set the ratio, split the types, and thirty stamped rows appear." actionLabel="Start week 15" onAction={onNewWeek} style={{ marginTop: 30 }} />
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <LaneCard label="Videos" done={sel.vDone} target={sel.vT} on={live && lane === 0} onClick={live ? () => setLane(0) : undefined} icon="video" />
+                  <LaneCard label="Slideshows" done={sel.sDone} target={sel.sT} on={live && lane === 1} onClick={live ? () => setLane(1) : undefined} icon="images" />
+                </div>
+                {live ? <SplitHeader split={lane === 0 ? W.split : W.slideSplit} /> : null}
+                {live ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {rows.map((r) => <PostRow key={r.n} row={r} onClick={() => onOpenPost && onOpenPost(r)} />)}
+                  </div>
+                ) : postsMade}
+              </>
+            )}
+          </div>
+        </div>
+      </AdminScreen>
+    );
+  }
+
+  const cw = BRIEF_WEEKS[wi];
+  return (
+    <AdminScreen gap={12}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0 0' }}>
+        <h1 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>Briefs</h1>
+        <span style={{ flex: 1 }}></span>
+        <ViewToggle view={view} onView={setView} />
+      </div>
+
+      {loading ? (<><SkeletonCard height={78} /><SkeletonRows n={4} height={72} /></>) : view === 'calendar' ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button type="button" onClick={() => setWi(Math.min(BRIEF_WEEKS.length - 1, wi + 1))} disabled={wi === BRIEF_WEEKS.length - 1} aria-label="Earlier week"
+              style={{ width: 32, height: 32, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: wi === BRIEF_WEEKS.length - 1 ? 'default' : 'pointer', opacity: wi === BRIEF_WEEKS.length - 1 ? 0.35 : 1, background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="chevron-left" size={16} color="var(--ink)" />
+            </button>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ font: '700 14.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{cw.label} · {cw.range}</div>
+              <div style={{ marginTop: 1, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>{cw.status === 'next' ? 'Opens Sunday' : cw.day ? `Day ${cw.day} of 7` : 'Done'}</div>
+            </div>
+            <button type="button" onClick={() => setWi(Math.max(0, wi - 1))} disabled={wi === 0} aria-label="Later week"
+              style={{ width: 32, height: 32, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: wi === 0 ? 'default' : 'pointer', opacity: wi === 0 ? 0.35 : 1, background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="chevron-right" size={16} color="var(--ink)" />
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {[['video', 'Videos', cw.vDone, cw.vT], ['images', 'Slideshows', cw.sDone, cw.sT]].map(([icon, label, d, t]) => (
+              <Card key={label} pad={12} style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name={icon} size={14} color="var(--slate-400)" />
+                  <span style={{ font: '700 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>{label}</span>
+                </div>
+                <div style={{ marginTop: 5, font: '700 20px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{d}<span style={{ font: '700 14px var(--font-display)', color: 'var(--slate-400)' }}> / {t}</span></div>
+                <div style={{ marginTop: 7, height: 4, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden' }}>
+                  <span style={{ display: 'block', width: `${(d / t) * 100}%`, height: '100%', borderRadius: 999, background: 'var(--blue-500)' }}></span>
+                </div>
+              </Card>
+            ))}
+          </div>
+          {cw.status === 'next'
+            ? <p style={{ margin: '4px 2px 0', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Nothing recorded yet. The brief opens Sunday.</p>
+            : postsMade}
+        </>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {BRIEF_WEEKS.map((w) => (
+            <Card key={w.id} pad={13} onClick={() => setSel(w)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{w.label}</span>
+                  <span style={{ marginLeft: 8, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{w.range}</span>
+                </div>
+                <TypeChip tone={w.status === 'next' ? 'brand' : w.day ? 'good' : 'quiet'}>{w.status === 'next' ? 'Next week' : w.day ? `Day ${w.day} of 7` : 'Done'}</TypeChip>
+                <Icon name="chevron-right" size={16} color="var(--slate-300)" style={{ flex: '0 0 auto' }} />
+              </div>
+              {w.status !== 'next' ? (
+                <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                  {[['video', w.vDone, w.vT], ['images', w.sDone, w.sT]].map(([icon, d, t]) => (
+                    <div key={icon} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <Icon name={icon} size={13} color="var(--slate-400)" style={{ flex: '0 0 auto' }} />
+                      <span style={{ flex: 1, height: 4, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden' }}>
+                        <span style={{ display: 'block', width: `${(d / t) * 100}%`, height: '100%', borderRadius: 999, background: 'var(--blue-500)' }}></span>
+                      </span>
+                      <span style={{ flex: '0 0 auto', whiteSpace: 'nowrap', font: '700 11.5px var(--font-ui)', color: 'var(--slate-500)' }}>{d}/{t}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: '8px 0 0', font: '400 12.5px/1.4 var(--font-ui)', color: 'var(--slate-400)' }}>Not planned yet. Opens Sunday — tap to start it.</p>
+              )}
+              {w.avgEarn ? (
+                <div style={{ marginTop: 9, display: 'flex', gap: 6 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 9px', borderRadius: 999, background: 'var(--off-white)', font: '600 11.5px var(--font-ui)', color: 'var(--slate-500)' }}>
+                    <span style={{ font: '700 11.5px var(--font-ui)', color: 'var(--ink)' }}>{w.avgEarn}</span>/day avg
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 9px', borderRadius: 999, background: 'var(--off-white)', font: '600 11.5px var(--font-ui)', color: 'var(--slate-500)' }}>
+                    <span style={{ font: '700 11.5px var(--font-ui)', color: 'var(--ink)' }}>{w.avgViews}</span> views/day
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 9px', borderRadius: 999, background: 'var(--off-white)', font: '600 11.5px var(--font-ui)', color: 'var(--slate-500)' }}>
+                    <span style={{ font: '700 11.5px var(--font-ui)', color: 'var(--ink)' }}>{w.avgPosts}</span> posts/day
+                  </span>
+                  <span style={{ flex: 1 }}></span>
+                  <span style={{ alignSelf: 'center', font: '600 10.5px var(--font-ui)', color: 'var(--slate-400)' }}>{w.creators} creators</span>
+                </div>
+              ) : null}
+            </Card>
+          ))}
+        </div>
+      )}
+    </AdminScreen>
+  );
+}
+
+function ViewToggle({ view, onView }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+      {[['list', 'layout-list'], ['calendar', 'calendar-days']].map(([k, icon]) => (
+        <button key={k} type="button" onClick={() => onView(k)} aria-label={k === 'list' ? 'List view' : 'Calendar view'} aria-pressed={view === k}
+          style={{ width: 36, height: 32, borderRadius: 999, border: 'none', cursor: 'pointer', background: view === k ? 'var(--white)' : 'transparent', boxShadow: view === k ? 'var(--shadow-card)' : 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background var(--dur-fast) var(--ease-out)' }}>
+          <Icon name={icon} size={17} color={view === k ? 'var(--ink)' : 'var(--slate-400)'} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* The switcher is the progress. Two buttons, counts inside them. */
+function LaneCard({ label, done, target, on, onClick, icon }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <button type="button" onClick={onClick} aria-pressed={on}
+      style={{ flex: 1, textAlign: 'left', padding: 14, borderRadius: 'var(--radius-lg)', cursor: 'pointer', background: on ? 'var(--blue-500)' : 'var(--white)', border: `1px solid ${on ? 'transparent' : 'var(--border)'}`, boxShadow: on ? 'var(--shadow-accent)' : 'var(--shadow-card)', transition: 'background var(--dur-fast) var(--ease-out)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name={icon} size={15} color={on ? 'rgba(255,255,255,0.75)' : 'var(--slate-400)'} />
+        <span style={{ font: '700 13px var(--font-ui)', color: on ? 'rgba(255,255,255,0.85)' : 'var(--slate-500)' }}>{label}</span>
+      </div>
+      <div style={{ marginTop: 7, font: '700 26px var(--font-display)', letterSpacing: '-0.6px', color: on ? 'var(--white)' : 'var(--ink)' }}>
+        {done}<span style={{ font: '700 17px var(--font-display)', color: on ? 'rgba(255,255,255,0.6)' : 'var(--slate-400)' }}> / {target}</span>
+      </div>
+      <div style={{ marginTop: 9, height: 5, borderRadius: 999, background: on ? 'rgba(255,255,255,0.28)' : 'var(--fill-quiet)', overflow: 'hidden' }}>
+        <span style={{ display: 'block', width: `${(done / target) * 100}%`, height: '100%', borderRadius: 999, background: on ? 'var(--white)' : 'var(--blue-300)' }} />
+      </div>
+    </button>
+  );
+}
+
+/* The pool was a plan, not a lock. Drift shows here rather than in a dialog. */
+function SplitHeader({ split }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+      {split.map((s) => {
+        const drift = s.actual !== s.planned;
+        return (
+          <span key={s.type} style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 11px', borderRadius: 999, background: 'var(--white)', border: `1px solid ${drift ? 'rgba(224,138,22,0.4)' : 'var(--border)'}`, font: '700 12px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap' }}>
+            {s.label}
+            <span style={{ font: '700 12px var(--font-ui)', color: drift ? 'var(--amber)' : 'var(--ink)', whiteSpace: 'nowrap' }}>{s.actual}{drift ? `/${s.planned}` : ''}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Four states, readable while scrolling, no legend: empty, partial,
+   filled-unreviewed, complete. Killed slots keep their reason. */
+function PostRow({ row, onClick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const n = String(row.n).padStart(2, '0');
+  const num = <span style={{ width: 20, flex: '0 0 auto', font: '700 12px var(--font-ui)', color: 'var(--slate-300)', paddingTop: 2 }}>{n}</span>;
+
+  if (row.state === 'empty') {
+    return (
+      <button type="button" onClick={onClick}
+        style={{ display: 'flex', gap: 10, width: '100%', textAlign: 'left', padding: 13, borderRadius: 'var(--radius-lg)', cursor: 'pointer', background: 'transparent', border: '1.5px dashed var(--line-strong)' }}>
+        {num}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <PostTypeChip type={row.type} style={{ alignSelf: 'flex-start' }}>{row.typeLabel}</PostTypeChip>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+            <Icon name="search" size={14} color="var(--slate-400)" style={{ flex: '0 0 auto', marginTop: 2 }} />
+            <span style={{ font: '400 14px/1.35 var(--font-ui)', color: 'var(--slate-500)' }}>“{row.phrase}”</span>
+          </div>
+        </div>
+        <Icon name="plus" size={17} color="var(--slate-300)" />
+      </button>
+    );
+  }
+
+  if (row.state === 'killed') {
+    return (
+      <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-lg)', background: 'var(--fill-quiet)' }}>
+        {num}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: '700 13px var(--font-ui)', color: 'var(--slate-500)' }}>Left empty on purpose</div>
+          <div style={{ marginTop: 3, font: '400 13px/1.4 var(--font-ui)', color: 'var(--slate-400)' }}>{row.kill}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const complete = row.state === 'complete';
+  const filled = row.state === 'filled';
+  return (
+    <Card pad={14} onClick={onClick} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      {num}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <div style={{ font: '700 16px/1.3 var(--font-display)', letterSpacing: '-0.25px', color: 'var(--ink)' }}>{row.title}</div>
+        <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
+          <PostTypeChip type={row.type}>{row.typeLabel}</PostTypeChip>
+          {complete ? <span style={{ font: '700 12px var(--font-ui)', color: 'var(--green)', whiteSpace: 'nowrap' }}>AI score {row.score}</span> : null}
+          {filled ? <span style={{ font: '700 12px var(--font-ui)', color: 'var(--amber)', whiteSpace: 'nowrap' }}>Needs review</span> : null}
+          {row.state === 'partial' ? <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{row.filled}</span> : null}
+        </div>
+      </div>
+      {complete
+        ? <Icon name="circle-check-big" size={19} color="var(--green)" style={{ flex: '0 0 auto' }} />
+        : <Icon name="chevron-right" size={18} color="var(--slate-300)" style={{ flex: '0 0 auto' }} />}
+    </Card>
+  );
+}
+
+/* Week oversight across creators. Compact cells; the day sheet carries the
+   detail. */
+function CalendarView({ onOpenDay }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const days = window.NONI_ADMIN.calendar;
+  const dot = { assigned: 'var(--blue-300)', recorded: 'var(--amber)', submitted: 'var(--amber)', approved: 'var(--green)', posted: 'var(--green)' };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {days.map((d) => (
+        <Card key={d.day} pad={12} onClick={() => onOpenDay && onOpenDay(d)} style={{ display: 'flex', gap: 12, alignItems: d.items.length ? 'flex-start' : 'center' }}>
+          <div style={{ width: 46, flex: '0 0 auto' }}>
+            <div style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{d.day.split(' ')[0]}</div>
+            <div style={{ font: '700 20px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>{d.day.split(' ')[1]}</div>
+          </div>
+          {d.items.length ? (
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {d.items.map((it, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 'var(--radius-sm)', background: 'var(--off-white)' }}>
+                  <span style={{ width: 7, height: 7, flex: '0 0 auto', borderRadius: 999, background: dot[it.s] }} />
+                  <span style={{ flex: 1, minWidth: 0, font: '600 13px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.t}</span>
+                  <Icon name={window.isReel(it.f) ? 'video' : 'images'} size={13} color="var(--slate-400)" />
+                  <span style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{it.c}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span style={{ flex: 1, font: '400 13px var(--font-ui)', color: 'var(--slate-300)' }}>Rest day</span>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function DayDetailSheet({ day, onClose, animate }) {
+  const { Button } = window.NoniDesignSystem_710e43;
+  const dot = { assigned: 'var(--blue-300)', recorded: 'var(--amber)', submitted: 'var(--amber)', approved: 'var(--green)', posted: 'var(--green)' };
+  const label = { assigned: 'To shoot', recorded: 'Recorded', submitted: 'In review', approved: 'Approved', posted: 'Posted' };
+  return (
+    <Sheet title={day.day} subtitle={`${day.items.length} posts across the roster`} onClose={onClose} animate={animate} maxHeight="62%"
+      footer={<Button variant="ghost" size="md" block onClick={onClose}>Close</Button>}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {day.items.map((it, i) => (
+          <Card key={i} pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+            <Thumb format={it.f} w={40} h={54} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{it.t}</div>
+              <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <FormatChip format={it.f} size="sm" />
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 11px var(--font-ui)', color: 'var(--slate-500)' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 999, background: dot[it.s] }} />{label[it.s]}
+                </span>
+              </div>
+            </div>
+            <Avatar name={it.c} size={28} />
+          </Card>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+Object.assign(window, { BriefsScreen, PostRow, CalendarView, DayDetailSheet, LaneCard, SplitHeader, ViewToggle });

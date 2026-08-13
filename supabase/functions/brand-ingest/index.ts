@@ -332,7 +332,7 @@ Deno.serve(async (req) => {
 
   try {
     if (caller.kind === 'user') {
-      if (caller.role !== 'admin') return jsonResponse({ error: 'forbidden' }, 403);
+      if (caller.role !== 'campaign_manager') return jsonResponse({ error: 'forbidden' }, 403);
       if (body.action === 'cleanup_doc') {
         const kind = body.kind;
         const content = body.content?.trim() ?? '';

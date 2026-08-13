@@ -18,6 +18,7 @@ import {
   type StoredAccount,
 } from './accounts';
 import {
+  defaultMode,
   modesForProfile,
   resolveMode,
   setStoredMode,
@@ -30,9 +31,37 @@ import {
 import { destinationForProfile, type Profile } from './profile';
 import { supabase } from './supabase';
 
+export type CompanyPermissions = {
+  invite_members: boolean;
+  edit_account_template: boolean;
+  manage_brand: boolean;
+  manage_features: boolean;
+  manage_billing: boolean;
+  manage_publish_time: boolean;
+};
+
+export const NO_PERMISSIONS: CompanyPermissions = {
+  invite_members: false,
+  edit_account_template: false,
+  manage_brand: false,
+  manage_features: false,
+  manage_billing: false,
+  manage_publish_time: false,
+};
+
+const ALL_PERMISSIONS: CompanyPermissions = {
+  invite_members: true,
+  edit_account_template: true,
+  manage_brand: true,
+  manage_features: true,
+  manage_billing: true,
+  manage_publish_time: true,
+};
+
 type AuthState = {
   session: Session | null;
   profile: Profile | null;
+  permissions: CompanyPermissions;
   loading: boolean;
   accounts: StoredAccount[];
   activeMode: AppMode;
@@ -59,7 +88,41 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
     return null;
   }
 
-  return data;
+  // company_id is null only for pre-join creators; see the Profile type note.
+  return data as Profile | null;
+}
+
+// The platform admin and the company admin implicitly hold every permission;
+// campaign managers carry theirs on their company_members row.
+async function fetchPermissions(
+  profile: Profile | null,
+): Promise<CompanyPermissions> {
+  if (!profile) return NO_PERMISSIONS;
+  if (profile.role === 'admin' || profile.role === 'company_admin') {
+    return ALL_PERMISSIONS;
+  }
+  if (profile.role !== 'campaign_manager' || !profile.company_id) {
+    return NO_PERMISSIONS;
+  }
+  const { data, error } = await supabase
+    .from('company_members')
+    .select('permissions')
+    .eq('company_id', profile.company_id)
+    .eq('profile_id', profile.id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error('permissions lookup failed', error.message);
+    return NO_PERMISSIONS;
+  }
+  const raw = data.permissions as Record<string, unknown>;
+  return {
+    invite_members: raw.invite_members === true,
+    edit_account_template: raw.edit_account_template === true,
+    manage_brand: raw.manage_brand === true,
+    manage_features: raw.manage_features === true,
+    manage_billing: raw.manage_billing === true,
+    manage_publish_time: raw.manage_publish_time === true,
+  };
 }
 
 async function activateStoredAccount(userId: string): Promise<Profile | null> {
@@ -93,6 +156,7 @@ async function activateStoredAccount(userId: string): Promise<Profile | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [permissions, setPermissions] = useState<CompanyPermissions>(NO_PERMISSIONS);
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
   const [activeMode, setActiveModeState] = useState<AppMode>('admin');
   const [loading, setLoading] = useState(true);
@@ -112,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await setStoredMode(next.id, mode);
     } catch (e) {
       console.error('active mode resolve failed', e);
-      setActiveModeState(next.role === 'admin' ? 'admin' : 'creator');
+      setActiveModeState(defaultMode(next));
     }
   }, []);
 
@@ -124,6 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const next = await fetchProfile(userId);
     setProfile(next);
+    setPermissions(await fetchPermissions(next));
     await applyProfileMode(next);
     if (session) {
       await upsertStoredAccount(session, next);
@@ -145,6 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const next = await fetchProfile(data.session.user.id);
           if (!mounted) return;
           setProfile(next);
+          setPermissions(await fetchPermissions(next));
           await applyProfileMode(next);
           await upsertStoredAccount(data.session, next);
           if (mounted) await refreshAccounts();
@@ -162,11 +228,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextSession?.user) {
         const next = await fetchProfile(nextSession.user.id);
         setProfile(next);
+        setPermissions(await fetchPermissions(next));
         await applyProfileMode(next);
         await upsertStoredAccount(nextSession, next);
         await refreshAccounts();
       } else {
         setProfile(null);
+        setPermissions(NO_PERMISSIONS);
         setActiveModeState('admin');
       }
       setLoading(false);
@@ -215,6 +283,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const next = await fetchProfile(profile.id);
     if (!next) throw new Error('Could not refresh profile.');
     setProfile(next);
+    setPermissions(await fetchPermissions(next));
     await upsertStoredAccount(session, next);
     await refreshAccounts();
     try {
@@ -288,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       profile,
+      permissions,
       loading,
       accounts,
       activeMode,
@@ -302,6 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       session,
       profile,
+      permissions,
       loading,
       accounts,
       activeMode,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
+import { CREATOR_PROFILE_OR } from './active-mode';
 import { getSocialConnectStatus, type SocialConnectStatus } from './admin-api';
 import { getCreatorAccount, type CreatorAccount } from './creator-accounts-api';
 import { supabase } from './supabase';
@@ -177,4 +178,52 @@ export async function markWarmupTutorialSeen(creatorId: string): Promise<void> {
 
 export function isSetupCompleteFlag(answers: Json | null): boolean {
   return answersRecord(answers).setup_complete === true;
+}
+
+// ---------------------------------------------------------------------------
+// Campaign manager setup (the temporary admin Setup tab).
+
+export type ManagerSetupState = {
+  /** The company has at least one brief. */
+  brief: boolean;
+  /** A creator joined the roster, or this manager already sent an invite. */
+  creators: boolean;
+};
+
+/**
+ * Derived from live company data, like the creator checklist. Invited
+ * creators are invisible to managers until they sign in (company_invites is
+ * admin-only under RLS), so sending an invite is tracked with a profile flag.
+ */
+export async function fetchManagerSetupState(
+  companyId: string,
+  answers: Json | null,
+): Promise<ManagerSetupState> {
+  const [briefs, creators] = await Promise.all([
+    supabase
+      .from('briefs')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId),
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .or(CREATOR_PROFILE_OR),
+  ]);
+  return {
+    brief: (briefs.count ?? 0) > 0,
+    creators:
+      (creators.count ?? 0) > 0 ||
+      answersRecord(answers).creator_invited === true,
+  };
+}
+
+export async function markCreatorInvited(profileId: string): Promise<void> {
+  await mergeOnboardingAnswers(profileId, { creator_invited: true });
+}
+
+export async function markManagerSetupComplete(
+  profileId: string,
+): Promise<void> {
+  await mergeOnboardingAnswers(profileId, { manager_setup_complete: true });
 }

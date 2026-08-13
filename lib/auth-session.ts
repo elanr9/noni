@@ -1,11 +1,9 @@
-import * as AppleAuthentication from 'expo-apple-authentication';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 
-import { markOnboardedLocally } from './onboarding';
 import { resolveMode } from './active-mode';
 import { destinationForProfile } from './profile';
 import { supabase } from './supabase';
@@ -15,9 +13,16 @@ import type { Profile } from './profile';
  * Public HTTPS callback on the marketing site. Expo Go's exp://192.168…
  * redirects are rejected by Supabase (private IP check), which previously
  * fell back to the Site URL homepage. `?app=1` tells noni-web not to consume
- * the PKCE code so this client can exchange it.
+ * the PKCE code and to bounce straight to noni://auth/callback instead.
  */
 const HTTPS_AUTH_CALLBACK = 'https://www.usenoni.app/auth/callback?app=1';
+
+/**
+ * iOS's auth session can only auto-capture a custom-scheme redirect (an
+ * https return URL needs the Associated Domains entitlement, which this app
+ * does not ship). The web callback page redirects here with the PKCE code.
+ */
+const NATIVE_RETURN_URL = 'noni://auth/callback';
 
 export function getAuthRedirectUri(): string {
   if (Platform.OS === 'web') {
@@ -75,11 +80,8 @@ export async function routeAfterSignIn(): Promise<void> {
       .select('*')
       .eq('id', data.user.id)
       .maybeSingle();
-    profile = row;
-  }
-
-  if (profile?.onboarded) {
-    await markOnboardedLocally();
+    // company_id is null only for pre-join creators; see the Profile type note.
+    profile = row as Profile | null;
   }
 
   const mode = profile ? await resolveMode(profile) : null;
@@ -101,12 +103,17 @@ export async function signInWithGoogle(): Promise<boolean> {
     throw new Error('Google sign in did not return an auth URL');
   }
 
-  // Prefix match: session completes when the browser lands on /auth/callback
-  const result = await WebBrowser.openAuthSessionAsync(
-    data.url,
-    'https://www.usenoni.app/auth/callback',
-  );
+  // Web: the browser lands back on origin/auth/callback. Native: the
+  // marketing callback page bounces to noni://auth/callback, which the auth
+  // session captures (it can only capture the app's custom scheme on iOS).
+  const returnUrl =
+    Platform.OS === 'web'
+      ? (redirectTo.split('?')[0] ?? redirectTo)
+      : NATIVE_RETURN_URL;
+  const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
   if (result.type !== 'success' || !result.url) {
+    // The session can end "dismissed" while the noni:// deep link still
+    // opens /auth/callback, which finishes the exchange. Not an error here.
     return false;
   }
 
@@ -119,34 +126,3 @@ export async function signInWithGoogle(): Promise<boolean> {
   return true;
 }
 
-export async function signInWithApple(): Promise<boolean> {
-  let credential: AppleAuthentication.AppleAuthenticationCredential;
-  try {
-    credential = await AppleAuthentication.signInAsync({
-      requestedScopes: [
-        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-        AppleAuthentication.AppleAuthenticationScope.EMAIL,
-      ],
-    });
-  } catch (e) {
-    if (
-      e instanceof Error &&
-      'code' in e &&
-      (e as { code?: string }).code === 'ERR_REQUEST_CANCELED'
-    ) {
-      return false;
-    }
-    throw e;
-  }
-
-  if (!credential.identityToken) {
-    throw new Error('Apple did not return an identity token');
-  }
-
-  const { error } = await supabase.auth.signInWithIdToken({
-    provider: 'apple',
-    token: credential.identityToken,
-  });
-  if (error) throw error;
-  return true;
-}

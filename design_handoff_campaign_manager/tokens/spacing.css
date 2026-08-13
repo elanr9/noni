@@ -1,0 +1,22 @@
+:root{
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:14px;
+  --space-5:16px;
+  --space-6:18px;
+  --space-7:20px;
+  --space-8:24px;
+  --space-9:28px;
+  --space-10:32px;
+  --space-11:40px;
+
+  --gutter:24px;          /* screen horizontal padding */
+  --card-pad:18px;        /* standard card padding */
+  --stack-gap:12px;       /* gap between cards in a list */
+  --section-gap:28px;
+
+  --tap-min:44px;
+  --tap-primary:60px;     /* full-width pill CTA height */
+  --shutter:84px;
+}

@@ -1,7 +1,7 @@
 // Admin handoff §6 — the split header. Chips come from the week pool; a
 // type that drifts from plan gets an amber border and shows actual/planned.
 // This is the only place drift is reported.
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { color, postTypeTone, radiusAdmin } from '../../../theme/tokens';
 import { PostTypeChip } from '../shared';
@@ -13,7 +13,13 @@ export interface SplitChip {
   planned: number;
 }
 
-export function SplitHeader({ chips }: { chips: SplitChip[] }) {
+export function SplitHeader({
+  chips,
+  onChipPress,
+}: {
+  chips: SplitChip[];
+  onChipPress?: (chip: SplitChip) => void;
+}) {
   if (chips.length === 0) return null;
   return (
     <ScrollView
@@ -23,25 +29,35 @@ export function SplitHeader({ chips }: { chips: SplitChip[] }) {
       contentContainerStyle={styles.row}
     >
       {chips.map((chip) => {
+        let body;
         if (chip.actual === chip.planned) {
-          return <PostTypeChip key={chip.key} typeKey={chip.key} label={chip.label} />;
+          body = <PostTypeChip typeKey={chip.key} label={chip.label} />;
+        } else {
+          const tone =
+            chip.key in postTypeTone
+              ? postTypeTone[chip.key as keyof typeof postTypeTone]
+              : { bg: color.fillQuiet, fg: color.slate500 };
+          body = (
+            <View style={[styles.drifted, { backgroundColor: tone.bg }]}>
+              <Text numberOfLines={1} style={[styles.driftedLabel, { color: tone.fg }]}>
+                {chip.label}
+              </Text>
+              <Text style={styles.driftedCount}>
+                {chip.actual}/{chip.planned}
+              </Text>
+            </View>
+          );
         }
-        const tone =
-          chip.key in postTypeTone
-            ? postTypeTone[chip.key as keyof typeof postTypeTone]
-            : { bg: color.fillQuiet, fg: color.slate500 };
+        if (!onChipPress) return <View key={chip.key}>{body}</View>;
         return (
-          <View
+          <Pressable
             key={chip.key}
-            style={[styles.drifted, { backgroundColor: tone.bg }]}
+            accessibilityRole="button"
+            accessibilityLabel={`About ${chip.label}`}
+            onPress={() => onChipPress(chip)}
           >
-            <Text numberOfLines={1} style={[styles.driftedLabel, { color: tone.fg }]}>
-              {chip.label}
-            </Text>
-            <Text style={styles.driftedCount}>
-              {chip.actual}/{chip.planned}
-            </Text>
-          </View>
+            {body}
+          </Pressable>
         );
       })}
     </ScrollView>

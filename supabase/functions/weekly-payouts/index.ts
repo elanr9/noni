@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const caller = await authenticate(req, admin);
     if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
-    if (caller.kind === 'user' && caller.role !== 'admin') {
+    if (caller.kind === 'user' && caller.role !== 'campaign_manager') {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 
@@ -294,6 +294,17 @@ Deno.serve(async (req) => {
     const stripe = stripeClient();
     const results: Record<string, unknown>[] = [];
     for (const companyId of companyIds) {
+      const { data: company, error: companyError } = await admin
+        .from('companies')
+        .select('payouts_enabled')
+        .eq('id', companyId)
+        .maybeSingle();
+      if (companyError) throw companyError;
+      if (company?.payouts_enabled !== true) {
+        console.log(`weekly-payouts: payouts disabled for company ${companyId}, skipping`);
+        results.push({ company_id: companyId, skipped: true, reason: 'payouts disabled' });
+        continue;
+      }
       results.push(await processCompany(admin, stripe, companyId, periodEnd, periodStart));
     }
 

@@ -8,7 +8,9 @@ Backend is Supabase: auth, Postgres with RLS, storage, edge functions.
 Posting goes through Upload-Post only, never platform APIs directly.
 The loop: scrape trends + Claude fill creator queues automatically; creators record; admins only approve; after Approve everything (edit, post, track) is automatic. Humans appear exactly twice.
 Every table and query is scoped by company_id. No exceptions.
-Two roles, admin and creator, gating both routes and RLS.
+Roles, four tiers: a single cross-tenant platform admin role admin (founders@usenoni.app, is_platform_admin) provisions companies and emails the company_admin invite from the noni-web /ops dashboard; each company has exactly one company_admin (web-only, is_company_admin, implicitly passes has_permission) who owns the Stripe subscription, budget, brand brain, features, and invites campaign managers and creators and toggles manager permissions from the web dashboard; campaign_manager and creator work per company in the app (gating routes and RLS via is_campaign_manager). Campaign managers holding invite_members also invite creators from the app roster screen.
+Sign-in is invite only. The app has one auth screen: Continue with Google, nothing else (no sign-up, no Apple). handle_new_user creates a profile only when a pending company_invites row matches the email; anyone else hits the invite-required screen. Onboarding runs after sign-in. Join codes do not exist.
+Subscription (Stripe, on the web): $100/month billed annually or $200/month billed monthly, 1 week free trial. Campaign manager permission flags live on company_members and default to all off.
 Task status changes only through lib/tasks.ts transition functions.
 Schema lives in supabase/migrations, read before writing queries.
 All third party keys live in edge function env, never in the app.
