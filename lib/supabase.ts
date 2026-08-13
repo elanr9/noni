@@ -35,6 +35,11 @@ export const supabase = createClient<Database>(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+      // signInWithGoogle exchanges a PKCE code via exchangeCodeForSession.
+      // Without this, supabase-js defaults to the implicit flow and GoTrue
+      // returns tokens in the URL fragment, so the web callback page never
+      // sees a ?code param and fails with "Missing auth code."
+      flowType: 'pkce',
     },
   },
 );
