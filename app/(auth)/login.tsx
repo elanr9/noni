@@ -1,5 +1,14 @@
-import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { Screen } from '../../components/layout/Screen';
@@ -8,7 +17,9 @@ import { BubbleMark } from '../../components/ui/Wordmark';
 import { routeAfterSignIn, signInWithGoogle } from '../../lib/auth-session';
 import { color, radius, space, type } from '../../theme/tokens';
 
+const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 const ROCKET_SIZE = 150;
+const INTRO_ROCKET = 116;
 
 /** Official multicolor Google G. Brand mark, not a token colour. */
 function GoogleMark({ size }: { size: number }) {
@@ -36,6 +47,60 @@ function GoogleMark({ size }: { size: number }) {
 
 export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
+  const [introDone, setIntroDone] = useState(false);
+
+  const pop = useRef(new Animated.Value(0)).current;
+  const flight = useRef(new Animated.Value(0)).current;
+  const reveal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.delay(120),
+      Animated.spring(pop, {
+        toValue: 1,
+        friction: 5,
+        tension: 130,
+        useNativeDriver: true,
+      }),
+      Animated.delay(140),
+      Animated.parallel([
+        Animated.timing(flight, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(reveal, {
+          toValue: 1,
+          duration: 760,
+          delay: 340,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start(() => setIntroDone(true));
+  }, [flight, pop, reveal]);
+
+  const flightX = flight.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, WIN_W * 0.16, WIN_W * 0.85],
+  });
+  const flightY = flight.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, -WIN_H * 0.42, -WIN_H * 0.95],
+  });
+  const flightTilt = flight.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['-16deg', '6deg'],
+  });
+  const rocketOpacity = flight.interpolate({
+    inputRange: [0, 0.82, 1],
+    outputRange: [1, 1, 0],
+  });
+  const contentRise = reveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [18, 0],
+  });
 
   async function handleGoogle() {
     setBusy(true);
@@ -54,39 +119,67 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.bleed} pointerEvents="none" />
-
-      <Screen
-        edges={['top', 'left', 'right', 'bottom']}
-        bg="transparent"
-        contentStyle={styles.content}
+      <Animated.View
+        style={[
+          styles.flex,
+          { opacity: reveal, transform: [{ translateY: contentRise }] },
+        ]}
       >
-        <View style={styles.hero}>
-          <BubbleMark size={ROCKET_SIZE} />
-          <Text style={styles.welcome}>Welcome to Noni!</Text>
-          <Text style={styles.headline}>UGC Made Easy</Text>
-          <Text style={styles.body}>
-            Sign in with the Google account your invite was sent to.
-          </Text>
-        </View>
+        <View style={styles.bleed} pointerEvents="none" />
 
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Continue with Google"
-          disabled={busy}
-          onPress={() => void handleGoogle()}
-          style={[styles.googleBtn, busy && styles.btnDisabled]}
+        <Screen
+          edges={['top', 'left', 'right', 'bottom']}
+          bg="transparent"
+          contentStyle={styles.content}
         >
-          {busy ? (
-            <ActivityIndicator color={color.ink} />
-          ) : (
-            <>
-              <GoogleMark size={19} />
-              <Text style={styles.googleLabel}>Continue with Google</Text>
-            </>
-          )}
-        </PressableScale>
-      </Screen>
+          <View style={styles.hero}>
+            <BubbleMark size={ROCKET_SIZE} />
+            <Text style={styles.welcome}>Welcome to Noni!</Text>
+            <Text style={styles.headline}>UGC Made Easy</Text>
+            <Text style={styles.body}>
+              Sign in with the Google account your invite was sent to.
+            </Text>
+          </View>
+
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Google"
+            disabled={busy}
+            onPress={() => void handleGoogle()}
+            style={[styles.googleBtn, busy && styles.btnDisabled]}
+          >
+            {busy ? (
+              <ActivityIndicator color={color.ink} />
+            ) : (
+              <>
+                <GoogleMark size={19} />
+                <Text style={styles.googleLabel}>Continue with Google</Text>
+              </>
+            )}
+          </PressableScale>
+        </Screen>
+      </Animated.View>
+
+      {!introDone ? (
+        <View pointerEvents="none" style={styles.intro}>
+          <Animated.View
+            style={[
+              styles.introRocket,
+              {
+                opacity: rocketOpacity,
+                transform: [
+                  { translateX: flightX },
+                  { translateY: flightY },
+                  { rotate: flightTilt },
+                  { scale: pop },
+                ],
+              },
+            ]}
+          >
+            <BubbleMark size={INTRO_ROCKET} />
+          </Animated.View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -96,6 +189,19 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
     backgroundColor: color.white,
+  },
+  flex: {
+    flex: 1,
+  },
+  intro: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  introRocket: {
+    marginTop: WIN_H * 0.08,
+    marginRight: WIN_W * 0.2,
   },
   bleed: {
     position: 'absolute',

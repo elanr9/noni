@@ -2,7 +2,6 @@ import {
   defaultMode,
   profileCanCreate,
   profileIsCampaignManager,
-  profileIsCompanyAdmin,
   profileIsPlatformAdmin,
   type AppMode,
 } from './active-mode';
@@ -48,14 +47,14 @@ export function destinationForProfile(
   // A session with no profile means the signup trigger found no invite for
   // that email. Sign-in is invite only, so the account is blocked.
   if (!profile) return '/(auth)/invite-required';
-  if (profile && profileIsPlatformAdmin(profile)) {
+  if (profileIsPlatformAdmin(profile)) {
     const active = mode ?? defaultMode(profile);
     if (active === 'admin') return '/(admin)/(tabs)';
     if (active === 'creator') return '/(creator)/(tabs)';
     return '/platform-admin';
   }
-  // Company admins run their company on the web, onboarding included.
-  if (profileIsCompanyAdmin(profile)) return '/company-admin';
+  // Old unattached creator rows (pre invite-only trigger) have no company.
+  if (!profile.company_id) return '/(auth)/invite-required';
   if (!profile.onboarded) return '/(onboarding)';
   const active = mode ?? defaultMode(profile);
   if (
@@ -66,8 +65,9 @@ export function destinationForProfile(
     return '/(creator)/(tabs)';
   }
   if (profileIsCampaignManager(profile)) {
-    // Fresh managers land on the temporary Setup tab until the checklist
-    // (first brief, creators invited) is done.
+    // Company admins already finished setup on the web. Fresh invited
+    // managers land on the temporary Setup tab until the checklist is done.
+    if (profile.role === 'company_admin') return '/(admin)/(tabs)';
     return isManagerSetupCompleteFlag(profile.onboarding_answers)
       ? '/(admin)/(tabs)'
       : '/(admin)/(tabs)/setup';

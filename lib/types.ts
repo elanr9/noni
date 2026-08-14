@@ -980,7 +980,6 @@ export type Database = {
           creator_count: number
           does_ugc: boolean
           id: string
-          join_code: string
           manager_count: number
           name: string
           payouts_enabled: boolean
@@ -995,7 +994,6 @@ export type Database = {
           creator_count?: number
           does_ugc?: boolean
           id?: string
-          join_code?: string
           manager_count?: number
           name: string
           payouts_enabled?: boolean
@@ -1010,7 +1008,6 @@ export type Database = {
           creator_count?: number
           does_ugc?: boolean
           id?: string
-          join_code?: string
           manager_count?: number
           name?: string
           payouts_enabled?: boolean
@@ -1034,6 +1031,7 @@ export type Database = {
           monthly_budget_cents: number
           payouts_enabled: boolean
           stripe_account_id: string | null
+          stripe_budget_subscription_id: string | null
           stripe_connected: boolean
           stripe_customer_id: string | null
           stripe_payment_method_id: string | null
@@ -1057,6 +1055,7 @@ export type Database = {
           monthly_budget_cents?: number
           payouts_enabled?: boolean
           stripe_account_id?: string | null
+          stripe_budget_subscription_id?: string | null
           stripe_connected?: boolean
           stripe_customer_id?: string | null
           stripe_payment_method_id?: string | null
@@ -1080,6 +1079,7 @@ export type Database = {
           monthly_budget_cents?: number
           payouts_enabled?: boolean
           stripe_account_id?: string | null
+          stripe_budget_subscription_id?: string | null
           stripe_connected?: boolean
           stripe_customer_id?: string | null
           stripe_payment_method_id?: string | null
@@ -1114,6 +1114,7 @@ export type Database = {
           kind: string
           note: string | null
           stripe_checkout_session_id: string | null
+          stripe_invoice_id: string | null
         }
         Insert: {
           amount_cents: number
@@ -1127,6 +1128,7 @@ export type Database = {
           kind: string
           note?: string | null
           stripe_checkout_session_id?: string | null
+          stripe_invoice_id?: string | null
         }
         Update: {
           amount_cents?: number
@@ -1140,6 +1142,7 @@ export type Database = {
           kind?: string
           note?: string | null
           stripe_checkout_session_id?: string | null
+          stripe_invoice_id?: string | null
         }
         Relationships: [
           {
@@ -3379,6 +3382,42 @@ export type Database = {
     Functions: {
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
       can_create: { Args: never; Returns: boolean }
+      claim_pending_invite: {
+        Args: never
+        Returns: {
+          available: boolean
+          avatar_path: string | null
+          baseline_primary_signal: number | null
+          baseline_updated_at: string | null
+          bio_facts: Json
+          birthday: string | null
+          can_create: boolean
+          can_film_with_second_person: boolean
+          company_id: string | null
+          created_at: string | null
+          credential_line: string | null
+          expo_push_token: string | null
+          full_name: string | null
+          has_credential: boolean
+          has_scar_tissue: boolean
+          has_transformation: boolean
+          id: string
+          lives_the_identity: boolean
+          on_camera_comfortable: boolean
+          onboarded: boolean | null
+          onboarding_answers: Json
+          phone: string | null
+          role: string
+          script_mode: string
+          upload_post_profile: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       claim_post_milestone: {
         Args: { p_post_id: string; p_threshold: number }
         Returns: boolean
@@ -3387,13 +3426,11 @@ export type Database = {
       current_role: { Args: never; Returns: string }
       default_member_permissions: { Args: never; Returns: Json }
       full_member_permissions: { Args: never; Returns: Json }
-      generate_join_code: { Args: never; Returns: string }
       has_permission: { Args: { p_key: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_campaign_manager: { Args: never; Returns: boolean }
       is_company_admin: { Args: never; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
-      join_company_by_code: { Args: { code: string }; Returns: string }
       label_trend: {
         Args: { p_label?: string; p_reason?: string; p_trend_id: string }
         Returns: undefined
@@ -3429,13 +3466,6 @@ export type Database = {
           views: number
         }[]
       }
-      lookup_company_by_code: {
-        Args: { code: string }
-        Returns: {
-          id: string
-          name: string
-        }[]
-      }
       publish_campaign_assignments: {
         Args: { p_assignments: Json; p_campaign_id: string }
         Returns: number
@@ -3443,10 +3473,6 @@ export type Database = {
       record_streak_approval: {
         Args: { p_company: string; p_creator: string; p_day?: string }
         Returns: Json
-      }
-      regenerate_company_join_code: {
-        Args: { p_company_id: string }
-        Returns: string
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
       spend_company_credits_for_earning: {

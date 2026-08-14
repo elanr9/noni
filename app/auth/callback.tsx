@@ -5,7 +5,7 @@ import { Platform, Text, StyleSheet } from 'react-native';
 
 import { LoadingScreen, Screen, colors } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
-import { createSessionFromUrl } from '../../lib/auth-session';
+import { createSessionFromUrl, routeAfterSignIn } from '../../lib/auth-session';
 import { destinationForProfile } from '../../lib/profile';
 
 export default function AuthCallbackScreen() {
@@ -13,6 +13,7 @@ export default function AuthCallbackScreen() {
   const params = useLocalSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [handled, setHandled] = useState(false);
+  const [routed, setRouted] = useState(false);
 
   useEffect(() => {
     async function run() {
@@ -30,7 +31,12 @@ export default function AuthCallbackScreen() {
                   ]),
                 ),
               });
-        await createSessionFromUrl(url);
+        const signedIn = await createSessionFromUrl(url);
+        if (signedIn) {
+          await routeAfterSignIn();
+          setRouted(true);
+          return;
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not finish sign in');
       } finally {
@@ -50,7 +56,7 @@ export default function AuthCallbackScreen() {
     );
   }
 
-  if (!handled || loading) {
+  if (!handled || loading || routed) {
     return <LoadingScreen label="Finishing sign in" />;
   }
 

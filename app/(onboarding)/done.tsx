@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/auth';
 import {
   clearOnboardingAnswers,
   completeOnboarding,
+  saveOnboardingAnswersToProfile,
 } from '../../lib/onboarding';
 import { OnboardingShell } from './_shell';
 
@@ -17,6 +18,7 @@ export default function DoneScreen() {
     if (!session) return;
     setBusy(true);
     try {
+      await saveOnboardingAnswersToProfile(session.user.id);
       await completeOnboarding(session.user.id);
       await clearOnboardingAnswers();
       await refreshProfile();

@@ -1,4 +1,5 @@
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
@@ -31,7 +32,14 @@ export function getAuthRedirectUri(): string {
     }
     return HTTPS_AUTH_CALLBACK;
   }
-  return HTTPS_AUTH_CALLBACK;
+  // Expo Go private IPs are rejected by Supabase, so bounce via the
+  // marketing HTTPS callback. TestFlight / store builds use the custom
+  // scheme directly so ASWebAuthenticationSession never lands on the web
+  // page that used to fail with "Missing auth code."
+  if (Constants.appOwnership === 'expo') {
+    return HTTPS_AUTH_CALLBACK;
+  }
+  return NATIVE_RETURN_URL;
 }
 
 export async function createSessionFromUrl(url: string): Promise<boolean> {
@@ -70,18 +78,29 @@ export function getInitialAuthUrl(): Promise<string | null> {
   return Linking.getInitialURL();
 }
 
+async function loadProfile(userId: string): Promise<Profile | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+  return data as Profile | null;
+}
+
 export async function routeAfterSignIn(): Promise<void> {
   const { data } = await supabase.auth.getUser();
+  const userId = data.user?.id;
+  if (!userId) {
+    router.replace('/(auth)/login');
+    return;
+  }
 
-  let profile: Profile | null = null;
-  if (data.user) {
-    const { data: row } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', data.user.id)
-      .maybeSingle();
-    // company_id is null only for pre-join creators; see the Profile type note.
-    profile = row as Profile | null;
+  await supabase.rpc('claim_pending_invite');
+
+  let profile = await loadProfile(userId);
+  for (let i = 0; i < 4 && !profile; i += 1) {
+    await new Promise((r) => setTimeout(r, 250));
+    profile = await loadProfile(userId);
   }
 
   const mode = profile ? await resolveMode(profile) : null;
@@ -103,9 +122,9 @@ export async function signInWithGoogle(): Promise<boolean> {
     throw new Error('Google sign in did not return an auth URL');
   }
 
-  // Web: the browser lands back on origin/auth/callback. Native: the
-  // marketing callback page bounces to noni://auth/callback, which the auth
-  // session captures (it can only capture the app's custom scheme on iOS).
+  // Web: the browser lands back on origin/auth/callback. Native store
+  // builds set redirectTo to noni:// so the auth session captures the
+  // PKCE code without the marketing-site hop. Expo Go still uses that hop.
   const returnUrl =
     Platform.OS === 'web'
       ? (redirectTo.split('?')[0] ?? redirectTo)

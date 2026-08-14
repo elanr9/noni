@@ -10,7 +10,7 @@ function modeKey(userId: string): string {
 
 export function defaultMode(profile: Profile): AppMode {
   if (profile.role === 'admin') return 'platform';
-  return profile.role === 'campaign_manager' ? 'admin' : 'creator';
+  return profileIsCampaignManager(profile) ? 'admin' : 'creator';
 }
 
 export function profileCanCreate(profile: Profile): boolean {
@@ -20,9 +20,13 @@ export function profileCanCreate(profile: Profile): boolean {
 /** PostgREST filter: pure creators + dual-role campaign managers. */
 export const CREATOR_PROFILE_OR = 'role.eq.creator,can_create.eq.true';
 
-/** Company power: campaign managers run the (admin) product surface. */
+/** Company power: campaign managers and company admins who also run
+ *  campaigns (self-as-manager) share the admin product surface. Matches
+ *  SQL is_campaign_manager(), which already includes company_admin. */
 export function profileIsCampaignManager(profile: Profile): boolean {
-  return profile.role === 'campaign_manager';
+  return (
+    profile.role === 'campaign_manager' || profile.role === 'company_admin'
+  );
 }
 
 /** The single Noni platform account; managed on the website, not the app. */
