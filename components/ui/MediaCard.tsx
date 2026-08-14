@@ -27,6 +27,11 @@ export interface MediaCardProps {
   fill?: boolean;
   /** Solid brand tag beside the hero frame (e.g. "Talking head"). */
   contentTypeTag?: string;
+  /**
+   * Custom chips rendered top-left on the media (e.g. FormatTag + TypeTag).
+   * Replaces the default white format chip and contentTypeTag pill.
+   */
+  chips?: ReactNode;
   onPlay?: () => void;
   onPress?: () => void;
   children?: ReactNode;
@@ -74,6 +79,7 @@ export function MediaCard({
   mediaHeight,
   fill = false,
   contentTypeTag,
+  chips,
   onPlay,
   onPress,
   children,
@@ -107,17 +113,23 @@ export function MediaCard({
         {hero && <Scrim id={`scrim${gradientId}`} />}
 
         <View style={styles.tagRow}>
-          <View style={styles.formatPill}>
-            <Icon name={slideshow ? 'images' : 'video'} size={13} color={color.ink} />
-            <Text style={styles.formatText}>{slideshow ? 'Slideshow' : 'Reel'}</Text>
-          </View>
-          {contentTypeTag !== undefined ? (
-            <View style={styles.typePill}>
-              <Text style={styles.typeText} numberOfLines={1}>
-                {contentTypeTag}
-              </Text>
-            </View>
-          ) : null}
+          {chips !== undefined ? (
+            chips
+          ) : (
+            <>
+              <View style={styles.formatPill}>
+                <Icon name={slideshow ? 'images' : 'video'} size={13} color={color.ink} />
+                <Text style={styles.formatText}>{slideshow ? 'Slideshow' : 'Reel'}</Text>
+              </View>
+              {contentTypeTag !== undefined ? (
+                <View style={styles.typePill}>
+                  <Text style={styles.typeText} numberOfLines={1}>
+                    {contentTypeTag}
+                  </Text>
+                </View>
+              ) : null}
+            </>
+          )}
           {time !== undefined ? (
             <View style={styles.timePill}>
               <Text style={styles.timeText} numberOfLines={1}>

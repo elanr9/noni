@@ -3,8 +3,9 @@
 // Money exists only from the day the admin connected the company's Stripe:
 // views and posts are platform data and are always there; anything in
 // dollars starts on the connect day and earlier days simply have no money.
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  Animated,
   Linking,
   Modal,
   Pressable,
@@ -49,7 +50,7 @@ import {
 import { formatMetric } from '../../../lib/analytics';
 import { useAuth } from '../../../lib/auth';
 import { getStripeConnectedAt } from '../../../lib/company-billing-api';
-import { borderWidth, color, shadow, type } from '../../../theme/tokens';
+import { borderWidth, color, motion, shadow, type } from '../../../theme/tokens';
 
 const SORTS = ['Views over time', 'Top creators', 'Top posts', 'Formats'] as const;
 type SortKey = (typeof SORTS)[number];
@@ -79,6 +80,18 @@ function MenuPill({
   const { width: winW } = useWindowDimensions();
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<View>(null);
+  const appear = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (anchor === null) return;
+    appear.setValue(0);
+    Animated.timing(appear, {
+      toValue: 1,
+      duration: motion.fast,
+      easing: motion.easeOut,
+      useNativeDriver: true,
+    }).start();
+  }, [anchor, appear]);
 
   function open() {
     ref.current?.measureInWindow((x, y, w, h) => {
@@ -126,11 +139,30 @@ function MenuPill({
           onPress={() => setAnchor(null)}
         />
         {anchor !== null && (
-          <View
+          <Animated.View
             style={[
               styles.menuPanel,
               shadow.shadowRaised,
-              { top: anchor.top, left: anchor.left, maxWidth: winW - 24 },
+              {
+                top: anchor.top,
+                left: anchor.left,
+                maxWidth: winW - 24,
+                opacity: appear,
+                transform: [
+                  {
+                    scale: appear.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
+                  {
+                    translateY: appear.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-6, 0],
+                    }),
+                  },
+                ],
+              },
             ]}
           >
             {sections.map((section, si) => (
@@ -156,7 +188,7 @@ function MenuPill({
                 ))}
               </View>
             ))}
-          </View>
+          </Animated.View>
         )}
       </Modal>
     </>
@@ -296,15 +328,17 @@ function RankRow({
 function PostRow({
   post,
   gate,
+  showFinancials,
   border,
   onOpen,
 }: {
   post: AnalyticsPost;
   gate: MoneyGate;
+  showFinancials: boolean;
   border: boolean;
   onOpen: () => void;
 }) {
-  const money = moneyOn(gate, post.day);
+  const money = showFinancials && moneyOn(gate, post.day);
   return (
     <Pressable
       accessibilityRole="button"
@@ -366,16 +400,22 @@ function PlatformCol({
 function PostDetail({
   post,
   gate,
+  showFinancials,
   onBack,
 }: {
   post: AnalyticsPost;
   gate: MoneyGate;
+  showFinancials: boolean;
   onBack: () => void;
 }) {
-  const money = moneyOn(gate, post.day);
+  const money = showFinancials && moneyOn(gate, post.day);
   const cells: Array<[string, string]> = [
     ['Total views', formatMetric(post.views)],
-    ['Earned', money ? formatMoney(post.earnedCents) : 'Not tracked'],
+    ...(showFinancials
+      ? ([['Earned', money ? formatMoney(post.earnedCents) : 'Not tracked']] as Array<
+          [string, string]
+        >)
+      : []),
     ['Posted', shortDayLabel(post.day)],
   ];
   return (
@@ -443,25 +483,34 @@ function DayDetail({
   day,
   posts,
   gate,
+  showSignups,
+  showFinancials,
   onOpenPost,
   onClose,
 }: {
   day: AnalyticsDay;
   posts: AnalyticsPost[];
   gate: MoneyGate;
+  showSignups: boolean;
+  showFinancials: boolean;
   onOpenPost: (post: AnalyticsPost) => void;
   onClose: () => void;
 }) {
-  const money = moneyOn(gate, day.day);
+  const money = showFinancials && moneyOn(gate, day.day);
   return (
     <View>
       <View style={styles.dayHead}>
         <Text style={styles.dayTitle}>{shortDayLabel(day.day)}</Text>
         <Text numberOfLines={1} style={styles.daySummary}>
           <Text style={styles.daySummaryStrong}>{formatMetric(day.views)}</Text>
-          {' views · '}
-          <Text style={styles.daySummaryStrong}>{day.signups}</Text>
-          {' sign-ups'}
+          {' views'}
+          {showSignups && (
+            <>
+              {' · '}
+              <Text style={styles.daySummaryStrong}>{day.signups}</Text>
+              {' sign-ups'}
+            </>
+          )}
           {money && (
             <>
               {' · '}
@@ -483,7 +532,7 @@ function DayDetail({
         </Pressable>
       </View>
 
-      {gate.connectedDay !== null && !money && (
+      {showFinancials && gate.connectedDay !== null && !money && (
         <Text style={styles.dayNoMoney}>
           {`No money data for this day. Stripe was connected ${gate.sinceLabel ?? ''}.`}
         </Text>
@@ -498,6 +547,7 @@ function DayDetail({
             key={p.id}
             post={p}
             gate={gate}
+            showFinancials={showFinancials}
             border={i < posts.length - 1}
             onOpen={() => onOpenPost(p)}
           />
@@ -512,11 +562,15 @@ function DayDetail({
 function MonthCal({
   days,
   gate,
+  showSignups,
+  showFinancials,
   selected,
   onPick,
 }: {
   days: AnalyticsDay[];
   gate: MoneyGate;
+  showSignups: boolean;
+  showFinancials: boolean;
   selected: string | null;
   onPick: (day: string) => void;
 }) {
@@ -554,7 +608,10 @@ function MonthCal({
           const posted = data !== undefined && data.postIds.length > 0;
           const has =
             data !== undefined &&
-            (data.views > 0 || data.signups > 0 || data.salesCents > 0 || posted);
+            (data.views > 0 ||
+              (showSignups && data.signups > 0) ||
+              (showFinancials && data.salesCents > 0) ||
+              posted);
           const future = d > today;
           const on = selected === key;
           return (
@@ -573,7 +630,7 @@ function MonthCal({
                   <Text style={styles.calDayNum}>{d}</Text>
                   {posted && <View style={styles.calDot} />}
                 </View>
-                {has && moneyOn(gate, key) && (
+                {has && showFinancials && moneyOn(gate, key) && (
                   <Text numberOfLines={1} style={styles.calMoney}>
                     {formatMoney(data.salesCents)}
                   </Text>
@@ -584,9 +641,11 @@ function MonthCal({
         })}
       </View>
       <Text numberOfLines={1} style={styles.calFoot}>
-        {gate.connectedDay !== null
-          ? `$ = sales, tracked since ${gate.sinceLabel ?? ''} · dot = posts`
-          : '$ appears once Stripe is connected · dot = posts'}
+        {showFinancials
+          ? gate.connectedDay !== null
+            ? `$ = sales, tracked since ${gate.sinceLabel ?? ''} · dot = posts`
+            : '$ appears once Stripe is connected · dot = posts'
+          : 'dot = posts'}
       </Text>
     </View>
   );
@@ -595,7 +654,7 @@ function MonthCal({
 // ————— Screen —————
 
 export default function AnalyticsScreen() {
-  const { profile } = useAuth();
+  const { profile, managerAccess, refreshManagerAccess } = useAuth();
   const [data, setData] = useState<CompanyAnalytics | null>(null);
   const [gate, setGate] = useState<MoneyGate>({ connectedDay: null, sinceLabel: null });
   const [loading, setLoading] = useState(true);
@@ -616,6 +675,7 @@ export default function AnalyticsScreen() {
         // Managers without the billing permission fall back on the first
         // completed payout: money can only exist after Stripe connected.
         getStripeConnectedAt().catch(() => null),
+        refreshManagerAccess(),
       ]);
       setData(analytics);
       setGate(buildMoneyGate(connectedAt, analytics.payouts[0]?.day));
@@ -625,7 +685,7 @@ export default function AnalyticsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile]);
+  }, [profile, refreshManagerAccess]);
 
   useFocusEffect(
     useCallback(() => {
@@ -634,8 +694,11 @@ export default function AnalyticsScreen() {
   );
 
   const posts = data?.posts ?? [];
+  const showSignups = managerAccess.viewSignups;
+  const showFinancials = managerAccess.viewFinancials;
   const empty =
-    posts.length === 0 && (data === null || data.totals.signups === 0);
+    posts.length === 0 &&
+    (!showSignups || data === null || data.totals.signups === 0);
 
   const creators = (() => {
     const map = new Map<string, { id: string; name: string; views: number }>();
@@ -703,18 +766,26 @@ export default function AnalyticsScreen() {
           `${data.totals.posts}`,
           data.totals.postsThisWeek > 0 ? `+${data.totals.postsThisWeek} wk` : '',
         ],
-        [
-          'Sign-ups',
-          data.totals.signups.toLocaleString('en-US'),
-          data.totals.signupsDeltaPct !== null
-            ? `${data.totals.signupsDeltaPct >= 0 ? '+' : ''}${data.totals.signupsDeltaPct}%`
-            : '',
-        ],
-        [
-          'Paid out',
-          gate.connectedDay !== null ? formatMoney(paidOutCents) : 'Not tracked',
-          gate.sinceLabel !== null ? `since ${gate.sinceLabel}` : '',
-        ],
+        ...(showSignups
+          ? ([
+              [
+                'Sign-ups',
+                data.totals.signups.toLocaleString('en-US'),
+                data.totals.signupsDeltaPct !== null
+                  ? `${data.totals.signupsDeltaPct >= 0 ? '+' : ''}${data.totals.signupsDeltaPct}%`
+                  : '',
+              ],
+            ] as Array<[string, string, string]>)
+          : []),
+        ...(showFinancials
+          ? ([
+              [
+                'Paid out',
+                gate.connectedDay !== null ? formatMoney(paidOutCents) : 'Not tracked',
+                gate.sinceLabel !== null ? `since ${gate.sinceLabel}` : '',
+              ],
+            ] as Array<[string, string, string]>)
+          : []),
       ]
     : [];
 
@@ -760,6 +831,7 @@ export default function AnalyticsScreen() {
               key={q.id}
               post={q}
               gate={gate}
+              showFinancials={showFinancials}
               border={i < topPosts.length - 1}
               onOpen={() => setPost(q)}
             />
@@ -887,7 +959,12 @@ export default function AnalyticsScreen() {
           {mode === 0 ? (
             <Card pad={16}>
               {post !== null ? (
-                <PostDetail post={post} gate={gate} onBack={() => setPost(null)} />
+                <PostDetail
+                  post={post}
+                  gate={gate}
+                  showFinancials={showFinancials}
+                  onBack={() => setPost(null)}
+                />
               ) : (
                 <>
                   <View style={styles.filterRow}>
@@ -953,6 +1030,8 @@ export default function AnalyticsScreen() {
                 <MonthCal
                   days={data.days}
                   gate={gate}
+                  showSignups={showSignups}
+                  showFinancials={showFinancials}
                   selected={day}
                   onPick={(d) => {
                     setDay(d);
@@ -963,12 +1042,19 @@ export default function AnalyticsScreen() {
               {selectedDay !== null && (
                 <Card pad={12}>
                   {post !== null ? (
-                    <PostDetail post={post} gate={gate} onBack={() => setPost(null)} />
+                    <PostDetail
+                      post={post}
+                      gate={gate}
+                      showFinancials={showFinancials}
+                      onBack={() => setPost(null)}
+                    />
                   ) : (
                     <DayDetail
                       day={selectedDay}
                       posts={dayPosts}
                       gate={gate}
+                      showSignups={showSignups}
+                      showFinancials={showFinancials}
                       onOpenPost={setPost}
                       onClose={() => setDay(null)}
                     />

@@ -50,6 +50,21 @@ export function modesForProfile(profile: Profile): AppMode[] {
   return [defaultMode(profile)];
 }
 
+/** Settings-row label for flipping this email between app surfaces. */
+export function switchAccountRowLabel(
+  profile: Profile | null,
+  activeMode: AppMode,
+): string {
+  if (!profile || modesForProfile(profile).length <= 1) return 'Switch account';
+  if (activeMode === 'admin') return 'Switch to creator';
+  if (activeMode === 'creator') {
+    return profileIsPlatformAdmin(profile)
+      ? 'Switch view'
+      : 'Switch to campaign manager';
+  }
+  return 'Switch view';
+}
+
 export async function getStoredMode(userId: string): Promise<AppMode | null> {
   const raw = await AsyncStorage.getItem(modeKey(userId));
   if (raw === 'admin' || raw === 'creator' || raw === 'platform') return raw;

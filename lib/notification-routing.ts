@@ -67,7 +67,7 @@ export function routeNotificationTap(
     return;
   }
   if (event === 'account_decided' || event === 'account_submitted') {
-    router.push('/(creator)/setup');
+    router.push('/(creator)/(tabs)');
     return;
   }
   if (event === 'post_live' || event === 'milestone') {

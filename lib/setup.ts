@@ -181,7 +181,7 @@ export function isSetupCompleteFlag(answers: Json | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Campaign manager setup (the temporary admin Setup tab).
+// Campaign manager setup (the temporary admin Onboarding tab).
 
 export type ManagerSetupState = {
   /** The company has at least one brief. */

@@ -20,7 +20,11 @@ export async function openSupportText(body?: string): Promise<void> {
 }
 
 /** Email or text support. */
-export function contactSupport(subject = 'Noni support'): void {
+export function contactSupport(
+  subject = 'Noni support',
+  userName?: string | null,
+): void {
+  const name = userName?.trim() || 'a Noni user';
   Alert.alert('Contact support', 'Email or text the founders.', [
     { text: 'Cancel', style: 'cancel' },
     {
@@ -32,7 +36,7 @@ export function contactSupport(subject = 'Noni support'): void {
     {
       text: 'Text',
       onPress: () => {
-        void openSupportText(subject);
+        void openSupportText(`Hi! I'm ${name}, I have a question about Noni`);
       },
     },
   ]);

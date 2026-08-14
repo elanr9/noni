@@ -21,7 +21,7 @@ import { radiusAdmin } from '../../../theme/tokens';
 
 type SortKey = 'earnedCents' | 'views' | 'postsCompleted';
 
-const SORTS: Array<{ key: SortKey; label: string }> = [
+const ALL_SORTS: Array<{ key: SortKey; label: string }> = [
   { key: 'earnedCents', label: 'Earnings' },
   { key: 'views', label: 'Views' },
   { key: 'postsCompleted', label: 'Posts' },
@@ -81,17 +81,21 @@ async function fetchCreatorExtras(
 }
 
 export default function CreatorsScreen() {
-  const { profile } = useAuth();
+  const { profile, managerAccess, refreshManagerAccess } = useAuth();
   const [rows, setRows] = useState<CreatorLeaderboardRow[]>([]);
   const [extras, setExtras] = useState<Map<string, CreatorExtras>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('earnedCents');
+  const [sortKey, setSortKey] = useState<SortKey>('views');
 
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      setRows(await fetchCreatorLeaderboard(profile.company_id));
+      const [next] = await Promise.all([
+        fetchCreatorLeaderboard(profile.company_id),
+        refreshManagerAccess(),
+      ]);
+      setRows(next);
     } catch (e) {
       Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -102,7 +106,7 @@ export default function CreatorsScreen() {
     void fetchCreatorExtras(profile.company_id)
       .then(setExtras)
       .catch(() => undefined);
-  }, [profile]);
+  }, [profile, refreshManagerAccess]);
 
   useFocusEffect(
     useCallback(() => {
@@ -110,9 +114,15 @@ export default function CreatorsScreen() {
     }, [load]),
   );
 
+  const sorts = managerAccess.viewFinancials
+    ? ALL_SORTS
+    : ALL_SORTS.filter((s) => s.key !== 'earnedCents');
+  const activeSort: SortKey =
+    sortKey === 'earnedCents' && !managerAccess.viewFinancials ? 'views' : sortKey;
+
   const sorted = useMemo(
-    () => [...rows].sort((a, b) => b[sortKey] - a[sortKey]),
-    [rows, sortKey],
+    () => [...rows].sort((a, b) => b[activeSort] - a[activeSort]),
+    [rows, activeSort],
   );
 
   return (
@@ -129,7 +139,7 @@ export default function CreatorsScreen() {
     >
       <AdminHeader title="Creators" />
 
-      <SortChips options={SORTS} value={sortKey} onChange={setSortKey} />
+      <SortChips options={sorts} value={activeSort} onChange={setSortKey} />
 
       <View style={styles.list}>
         {loading ? (
@@ -140,7 +150,11 @@ export default function CreatorsScreen() {
           <EmptyState
             icon="users"
             title="No creators yet"
-            body="Invite creators from Settings and they show up here once they join."
+            body={
+              managerAccess.inviteCreators
+                ? 'Invite creators from Settings and they show up here once they join.'
+                : 'Creators show up here once they join.'
+            }
             compact
           />
         ) : (
@@ -152,7 +166,11 @@ export default function CreatorsScreen() {
                 name={c.creatorName}
                 handle={extra?.handle ?? null}
                 avatarUri={extra?.avatarUri ?? null}
-                earned={formatCents(c.earnedCents)}
+                earned={
+                  managerAccess.viewFinancials
+                    ? formatCents(c.earnedCents)
+                    : null
+                }
                 posts={`${c.postsCompleted}`}
                 views={formatMetric(c.views)}
                 onPress={() =>

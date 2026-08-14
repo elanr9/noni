@@ -102,9 +102,9 @@ export function TextStyleSheet({
               ? {
                   color: textColor,
                   backgroundColor: accentColor,
-                  paddingHorizontal: 9,
-                  paddingVertical: 6,
-                  borderRadius: 8,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 14,
                   overflow: 'hidden',
                 }
               : mode === 'outline'
@@ -197,6 +197,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '700',
+    letterSpacing: -0.3,
     textAlign: 'center',
   },
   label: {

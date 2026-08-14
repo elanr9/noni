@@ -38,8 +38,8 @@ export type TimelineTextOverlay = {
 export const DEFAULT_TEXT_OVERLAY: TimelineTextOverlay = {
   enabled: true,
   mode: 'box',
-  text_color: '#FFFFFF',
-  accent_color: '#EA403F',
+  text_color: '#B73B6B',
+  accent_color: '#F9C9DC',
 };
 
 export type RenderTimeline = {

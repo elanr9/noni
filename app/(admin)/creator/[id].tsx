@@ -95,7 +95,7 @@ async function fetchProfileExtras(
 
 export default function AdminCreatorProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { profile } = useAuth();
+  const { profile, managerAccess } = useAuth();
   const { width: winWidth } = useWindowDimensions();
   const [data, setData] = useState<CreatorDetail | null>(null);
   const [extras, setExtras] = useState<ProfileExtras | null>(null);
@@ -230,7 +230,9 @@ export default function AdminCreatorProfile() {
               credential={extras?.credential ?? null}
               tiktokHandle={extras?.tiktokHandle ?? null}
               instagramHandle={extras?.instagramHandle ?? null}
-              earned={formatCents(earnedCents)}
+              earned={
+                managerAccess.viewFinancials ? formatCents(earnedCents) : null
+              }
               posts={`${postedCount}`}
               views={formatMetric(views)}
             />

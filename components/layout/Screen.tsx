@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Keyboard,
   Platform,
   ScrollView,
@@ -12,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { color, space, type } from '../../theme/tokens';
+import { color, motion, space, type } from '../../theme/tokens';
 
 // The footer is pinned to the bottom of the screen, so an open keyboard would
 // cover it. Some keyboards (the number pad on the phone step) have no return
@@ -44,6 +45,30 @@ function useKeyboardHeight(): number {
   return height;
 }
 
+/** Short fade-up used by screen shells so mounts never pop in. */
+export function useScreenEnter() {
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: motion.fast,
+      easing: motion.easeOut,
+      useNativeDriver: true,
+    }).start();
+  }, [enter]);
+  return {
+    opacity: enter,
+    transform: [
+      {
+        translateY: enter.interpolate({
+          inputRange: [0, 1],
+          outputRange: [8, 0],
+        }),
+      },
+    ],
+  };
+}
+
 export interface ScreenProps {
   children: ReactNode;
   /** Pinned above the home indicator; typically a full-width Button. */
@@ -65,6 +90,7 @@ export function Screen({
   bg = color.white,
 }: ScreenProps) {
   const keyboardHeight = useKeyboardHeight();
+  const enterStyle = useScreenEnter();
 
   const body = scroll ? (
     <ScrollView
@@ -89,10 +115,12 @@ export function Screen({
       ]}
       edges={edges}
     >
-      {body}
-      {footer !== undefined && (
-        <View style={[styles.footer, styles.gutter]}>{footer}</View>
-      )}
+      <Animated.View style={[styles.flex, enterStyle]}>
+        {body}
+        {footer !== undefined && (
+          <View style={[styles.footer, styles.gutter]}>{footer}</View>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 }

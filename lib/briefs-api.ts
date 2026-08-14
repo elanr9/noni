@@ -39,8 +39,8 @@ export type TextOverlay = {
 export const DEFAULT_TEXT_OVERLAY: TextOverlay = {
   enabled: true,
   mode: 'box',
-  text_color: '#FFFFFF',
-  accent_color: '#EA403F',
+  text_color: '#B73B6B',
+  accent_color: '#F9C9DC',
 };
 
 /** Reads the text_overlay jsonb column back into a typed config. */

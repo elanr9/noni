@@ -1,20 +1,27 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Screen } from '../../components/layout/Screen';
+import { FormatTag, TypeTag } from '../../components/creator/Chips';
+import {
+  Bubble,
+  DayDivider,
+  PostRefCard,
+  QuotedReply,
+  VoiceNote,
+} from '../../components/creator/ChatKit';
+import { PostPager, type PostPagerItem } from '../../components/creator/PostPager';
+import { SlideNav } from '../../components/creator/SlideNav';
+import { TeleprompterOverlay } from '../../components/creator/TeleprompterOverlay';
+import { useCreatorToast } from '../../components/creator/Toast';
+import { WeekStrip, type WeekStripDay } from '../../components/creator/WeekStrip';
 import { Button } from '../../components/ui/Button';
-import { EmptyState } from '../../components/ui/EmptyState';
-import { Icon } from '../../components/ui/Icon';
-import { InfoBlock } from '../../components/ui/InfoBlock';
 import { MediaCard } from '../../components/ui/MediaCard';
-import { OptionCard } from '../../components/ui/OptionCard';
-import { ProgressBar } from '../../components/ui/ProgressBar';
-import { StatCard } from '../../components/ui/StatCard';
 import { StatusChip } from '../../components/ui/StatusChip';
-import { TextField } from '../../components/ui/TextField';
+import { dayKey, slotTimeLabel, statusDotColor } from '../../lib/creator-queue';
 import type { TaskStatus } from '../../lib/tasks';
-import { color, space, type as typeTokens } from '../../theme/tokens';
+import { color, radius, space, type as typeTokens } from '../../theme/tokens';
 
 const STATUSES: TaskStatus[] = [
   'assigned',
@@ -24,6 +31,30 @@ const STATUSES: TaskStatus[] = [
   'approved',
   'posted',
 ];
+
+const MOCK_SLIDES = [
+  { text: '3 numbers that decide Sunday' },
+  { text: 'Goal kicks won: 62 percent' },
+  { text: 'Second balls: the quiet stat' },
+  { text: 'Track all three this week' },
+];
+
+function mockWeek(): WeekStripDay[] {
+  const byOffset: TaskStatus[][] = [
+    ['posted', 'posted', 'posted'],
+    ['posted', 'approved'],
+    ['posted', 'posted', 'posted'],
+    ['changes_requested', 'submitted', 'assigned'],
+    ['assigned', 'assigned'],
+    ['assigned'],
+    [],
+  ];
+  return byOffset.map((statuses, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + (i - 3));
+    return { date: dayKey(d), statuses };
+  });
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -36,152 +67,140 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function CreatorKitchenSink() {
   const insets = useSafeAreaInsets();
-  const [selected, setSelected] = useState(0);
-  const [option, setOption] = useState('a');
-  const [stat, setStat] = useState<'views' | 'likes'>('views');
+  const toast = useCreatorToast();
+  const week = useMemo(mockWeek, []);
+  const [selectedDate, setSelectedDate] = useState(week[3].date);
+  const [selectedSlot, setSelectedSlot] = useState('1');
+
+  const pagerItems: PostPagerItem[] = [
+    { key: '0', label: slotTimeLabel(0), status: 'posted' },
+    { key: '1', label: slotTimeLabel(1), status: 'changes_requested' },
+    { key: '2', label: slotTimeLabel(2), status: 'assigned' },
+  ];
 
   return (
-    <Screen
-      scroll
-      footer={
-        <Button variant="primary" size="lg" block>
-          Primary CTA
-        </Button>
-      }
-      contentStyle={{ paddingBottom: insets.bottom + 80 }}
-    >
+    <Screen scroll contentStyle={{ paddingBottom: insets.bottom + 80 }}>
       <Text style={styles.heading}>Creator primitives</Text>
 
-      <Section title="Button">
+      <Section title="FormatTag and TypeTag">
         <View style={styles.row}>
-          <Button variant="primary" size="lg">
-            Record
-          </Button>
-          <Button variant="secondary" size="md">
-            Sign in
-          </Button>
-          <Button variant="tint" size="md">
-            Tint
-          </Button>
-          <Button variant="outline" size="sm">
-            Outline
-          </Button>
-          <Button variant="ghost" size="sm">
-            Ghost
-          </Button>
-          <Button variant="danger" size="sm">
-            Danger
-          </Button>
-          <Button variant="primary" size="md" disabled>
-            Disabled
-          </Button>
-          <Button variant="primary" size="md" icon="play" iconRight="arrow-right">
-            Icons
-          </Button>
+          <FormatTag format="video" />
+          <FormatTag format="photo_carousel" />
+          <TypeTag label="Talking head" typeKey="talking_head" />
+          <TypeTag label="Numbered list" typeKey="numbered_list" />
+          <TypeTag label="How to" typeKey="how_to" />
+          <TypeTag label="Explainer" typeKey="explainer" />
+          <TypeTag label="Contrast" typeKey="contrast" />
+          <TypeTag label="Replay bait" typeKey="replay_bait" />
+          <TypeTag label="No key fallback" />
         </View>
       </Section>
 
-      <Section title="Icon">
+      <Section title="Status dots">
         <View style={styles.row}>
-          {[11, 16, 22, 28, 36].map((size) => (
-            <Icon key={size} name="zap" size={size} color={color.accent} />
+          {STATUSES.map((status) => (
+            <View key={status} style={styles.dotItem}>
+              <View style={[styles.dot, { backgroundColor: statusDotColor(status) }]} />
+              <Text style={styles.dotLabel}>{status}</Text>
+            </View>
           ))}
         </View>
+      </Section>
+
+      <Section title="WeekStrip">
+        <WeekStrip days={week} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+      </Section>
+
+      <Section title="PostPager">
+        <PostPager items={pagerItems} selectedKey={selectedSlot} onSelect={setSelectedSlot} />
+      </Section>
+
+      <Section title="MediaCard with chips">
+        <MediaCard
+          variant="hero"
+          format="slideshow"
+          title="3 numbers that decide Sunday"
+          duration="0:34"
+          mediaHeight={280}
+          chips={
+            <>
+              <FormatTag format="photo_carousel" />
+              <TypeTag label="Numbered list" typeKey="numbered_list" />
+            </>
+          }
+        />
+      </Section>
+
+      <Section title="SlideNav dark">
+        <View style={styles.slideFrameDark}>
+          <SlideNav slides={MOCK_SLIDES} variant="dark" />
+        </View>
+      </Section>
+
+      <Section title="SlideNav light">
+        <View style={styles.slideFrameLight}>
+          <SlideNav slides={MOCK_SLIDES} variant="light" />
+        </View>
+      </Section>
+
+      <Section title="TeleprompterOverlay">
+        <View style={styles.prompterFrame}>
+          <TeleprompterOverlay
+            text="We tagged 400 goal kicks from one U16 season."
+            durationMs={9000}
+          />
+        </View>
+      </Section>
+
+      <Section title="Chat kit">
+        <View style={styles.thread}>
+          <DayDivider label="Monday" />
+          <Bubble side="manager" author="Sasha" time="09:12" avatarInitial="S">
+            Welcome to week 3. The brief is tripod content: setups, angles, and
+            what the footage catches.
+          </Bubble>
+          <Bubble side="creator" time="09:40">
+            Got it. Filming tonight after the U16 session.
+          </Bubble>
+          <DayDivider label="Today" />
+          <Bubble side="manager" author="Sasha" time="10:12" avatarInitial="S">
+            <PostRefCard
+              title="3 numbers that decide Sunday"
+              format="photo_carousel"
+              onPress={() => toast.show('Post reference tapped.')}
+            />
+            <Text style={styles.bubbleBody}>
+              Slide 2 needs the real number, not the placeholder.
+            </Text>
+            <VoiceNote durationLabel="0:18" />
+          </Bubble>
+          <Bubble side="creator" time="10:31">
+            <QuotedReply
+              author="Sasha"
+              excerpt="Slide 2 needs the real number, not the placeholder."
+              onAccent
+            />
+            <Text style={styles.bubbleBodyOnAccent}>
+              On it. Re-uploading in an hour.
+            </Text>
+          </Bubble>
+        </View>
+      </Section>
+
+      <Section title="Toast">
+        <Button
+          variant="primary"
+          size="md"
+          onPress={() => toast.show('Sent for approval. It posts once approved.')}
+        >
+          Show toast
+        </Button>
       </Section>
 
       <Section title="StatusChip">
         <View style={styles.row}>
           {STATUSES.map((status) => (
             <StatusChip key={status} status={status} />
-          ))}
-          <StatusChip status="submitted" label="In review" />
-        </View>
-      </Section>
-
-      <Section title="ProgressBar">
-        <ProgressBar progress={0.5} />
-        <ProgressBar variant="dots" step={2} total={4} />
-      </Section>
-
-      <Section title="OptionCard">
-        <OptionCard
-          label="Under 5 hours"
-          hint="A few clips a week"
-          selected={option === 'a'}
-          onPress={() => setOption('a')}
-        />
-        <OptionCard
-          label="5 to 10 hours"
-          selected={option === 'b'}
-          onPress={() => setOption('b')}
-        />
-      </Section>
-
-      <Section title="TextField">
-        <TextField placeholder="Your name" />
-      </Section>
-
-      <Section title="InfoBlock">
-        <InfoBlock label="Hook">Open on the parent who thinks D1 is the only path.</InfoBlock>
-      </Section>
-
-      <Section title="StatCard">
-        <View style={styles.row}>
-          <StatCard
-            label="Views"
-            value="128k"
-            selected={stat === 'views'}
-            onPress={() => setStat('views')}
-          />
-          <StatCard
-            label="Likes"
-            value="9.4k"
-            selected={stat === 'likes'}
-            onPress={() => setStat('likes')}
-          />
-        </View>
-      </Section>
-
-      <Section title="MediaCard">
-        <MediaCard
-          variant="hero"
-          format="reel"
-          title="Why D2 coaches are the smartest call you can make"
-          time="Due 9pm"
-          contentTypeTag="Talking head"
-          mediaHeight={280}
-        />
-        <View style={styles.row}>
-          <View style={styles.tile}>
-            <MediaCard variant="tile" format="slideshow" title="Three things" meta="12.4k" />
-          </View>
-          <View style={styles.tile}>
-            <MediaCard variant="tile" format="reel" title="Parent myths" meta="To do" />
-          </View>
-        </View>
-      </Section>
-
-      <Section title="EmptyState">
-        <EmptyState
-          icon="inbox"
-          title="Nothing up next"
-          body="When a post is due, it shows up here."
-          actionLabel="View posts"
-          onAction={() => undefined}
-        />
-      </Section>
-
-      <Section title="Segment control stand-in">
-        <View style={styles.row}>
-          {['Calendar', 'Grid'].map((label, i) => (
-            <Button
-              key={label}
-              variant={selected === i ? 'tint' : 'ghost'}
-              size="sm"
-              onPress={() => setSelected(i)}
-            >
-              {label}
-            </Button>
           ))}
         </View>
       </Section>
@@ -213,7 +232,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space[2],
   },
-  tile: {
-    width: '47%',
+  dotItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: radius.pill,
+  },
+  dotLabel: {
+    fontSize: typeTokens.size.label,
+    fontWeight: typeTokens.weight.semibold,
+    color: color.slate500,
+  },
+  slideFrameDark: {
+    height: 280,
+    borderRadius: radius['2xl'],
+    overflow: 'hidden',
+    backgroundColor: color.ink900,
+  },
+  slideFrameLight: {
+    height: 220,
+    borderRadius: radius['2xl'],
+    overflow: 'hidden',
+    backgroundColor: color.blue100,
+  },
+  prompterFrame: {
+    borderRadius: radius['2xl'],
+    backgroundColor: color.ink900,
+    paddingVertical: 34,
+  },
+  thread: {
+    gap: space[4],
+    padding: space[4],
+    borderRadius: radius.lg,
+    backgroundColor: color.offWhite,
+  },
+  bubbleBody: {
+    fontSize: typeTokens.size.bodySm,
+    lineHeight: typeTokens.size.bodySm * typeTokens.leading.body,
+    color: color.ink,
+  },
+  bubbleBodyOnAccent: {
+    fontSize: typeTokens.size.bodySm,
+    lineHeight: typeTokens.size.bodySm * typeTokens.leading.body,
+    color: color.white,
   },
 });

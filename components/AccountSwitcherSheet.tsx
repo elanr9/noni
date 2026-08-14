@@ -9,7 +9,7 @@ import {
   type AppMode,
 } from '../lib/active-mode';
 import { borderWidth, color, radius, type } from '../theme/tokens';
-import { Icon } from './ui/Icon';
+import { Icon, type IconName } from './ui/Icon';
 import { PressableScale } from './ui/PressableScale';
 import { SheetShell } from './ui/SheetShell';
 
@@ -18,6 +18,27 @@ function roleLabel(role: string): string {
   if (role === 'admin') return 'Noni platform';
   return 'Creator';
 }
+
+const MODE_COPY: Record<
+  AppMode,
+  { title: string; body: string; icon: IconName }
+> = {
+  admin: {
+    title: 'Campaign manager',
+    body: 'Review posts, run briefs, and manage creators.',
+    icon: 'users',
+  },
+  creator: {
+    title: 'Creator',
+    body: 'Record, post, and cash out.',
+    icon: 'circle-user-round',
+  },
+  platform: {
+    title: 'Noni platform',
+    body: 'Ops lives on the website.',
+    icon: 'settings',
+  },
+};
 
 function AccountRow({
   title,
@@ -37,7 +58,7 @@ function AccountRow({
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      style={styles.row}
+      style={styles.accountRow}
     >
       <View style={styles.avatar}>
         <Text style={styles.avatarInitial}>{initial}</Text>
@@ -51,8 +72,50 @@ function AccountRow({
         </Text>
       </View>
       {active ? (
-        <Icon name="circle-check-big" size={24} color={color.blue500} />
-      ) : null}
+        <Icon name="circle-check-big" size={22} color={color.blue500} />
+      ) : (
+        <Icon name="chevron-right" size={18} color={color.slate300} />
+      )}
+    </PressableScale>
+  );
+}
+
+function RoleCard({
+  mode,
+  active,
+  onPress,
+}: {
+  mode: AppMode;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const copy = MODE_COPY[mode];
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={active ? `${copy.title}, using` : `Switch to ${copy.title}`}
+      onPress={onPress}
+      style={[styles.roleCard, active && styles.roleCardActive]}
+    >
+      <View style={styles.roleIcon}>
+        <Icon
+          name={copy.icon}
+          size={18}
+          color={active ? color.blue700 : color.slate500}
+        />
+      </View>
+      <View style={styles.meta}>
+        <Text style={styles.roleTitle}>{copy.title}</Text>
+        <Text style={styles.roleBody}>{copy.body}</Text>
+      </View>
+      {active ? (
+        <View style={styles.usingPill}>
+          <Text style={styles.usingText}>Using</Text>
+        </View>
+      ) : (
+        <Icon name="arrow-right" size={18} color={color.slate400} />
+      )}
     </PressableScale>
   );
 }
@@ -77,10 +140,16 @@ export function AccountSwitcherSheet({
   const isPlatform = !!profile && profileIsPlatformAdmin(profile);
   const isDual =
     !!profile && profileIsCampaignManager(profile) && profileCanCreate(profile);
+  const showModes = isPlatform || isDual;
   const showBecomeCreator =
     !!profile && profileIsCampaignManager(profile) && !profile.can_create;
   const displayName = profile?.full_name?.trim() || profile?.id || 'Account';
   const email = accounts.find((a) => a.userId === profile?.id)?.email ?? null;
+  const otherAccounts = accounts.filter((a) => a.userId !== profile?.id);
+
+  const modes: AppMode[] = isPlatform
+    ? ['platform', 'admin', 'creator']
+    : ['admin', 'creator'];
 
   async function onSwitchMode(mode: AppMode) {
     if (mode === activeMode) {
@@ -149,79 +218,83 @@ export function AccountSwitcherSheet({
     }
   }
 
-  const otherAccounts = accounts.filter((a) => a.userId !== profile?.id);
+  const subtitle = showModes
+    ? 'Same email, two sides of Noni. Pick campaign manager or creator.'
+    : showBecomeCreator
+      ? 'Turn on creator mode on this email, or sign in as someone else.'
+      : 'Use another Google account signed in on this phone.';
 
   return (
     <SheetShell visible={visible} onClose={onClose}>
-      <View style={styles.list}>
-        {isPlatform ? (
-          <>
-            <AccountRow
-              title={displayName}
-              subtitle={`Noni admin${email ? ` · ${email}` : ''}`}
-              active={activeMode === 'platform'}
-              onPress={() => void onSwitchMode('platform')}
-            />
-            <AccountRow
-              title={displayName}
-              subtitle={`Campaign manager${email ? ` · ${email}` : ''}`}
-              active={activeMode === 'admin'}
-              onPress={() => void onSwitchMode('admin')}
-            />
-            <AccountRow
-              title={displayName}
-              subtitle={`Creator${email ? ` · ${email}` : ''}`}
-              active={activeMode === 'creator'}
-              onPress={() => void onSwitchMode('creator')}
-            />
-          </>
-        ) : isDual ? (
-          <>
-            <AccountRow
-              title={displayName}
-              subtitle={`Campaign manager${email ? ` · ${email}` : ''}`}
-              active={activeMode === 'admin'}
-              onPress={() => void onSwitchMode('admin')}
-            />
-            <AccountRow
-              title={displayName}
-              subtitle={`Creator${email ? ` · ${email}` : ''}`}
-              active={activeMode === 'creator'}
-              onPress={() => void onSwitchMode('creator')}
-            />
-          </>
-        ) : profile ? (
+      <Text style={styles.title}>Switch account</Text>
+      <Text style={styles.lede}>{subtitle}</Text>
+
+      {showModes ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>This email</Text>
+          {email !== null ? (
+            <Text style={styles.sectionHint} numberOfLines={1}>
+              {displayName}
+              {' · '}
+              {email}
+            </Text>
+          ) : null}
+          <View style={styles.roleStack}>
+            {modes.map((mode) => (
+              <RoleCard
+                key={mode}
+                mode={mode}
+                active={activeMode === mode}
+                onPress={() => void onSwitchMode(mode)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : profile ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Signed in</Text>
           <AccountRow
             title={displayName}
             subtitle={`${roleLabel(profile.role)}${email ? ` · ${email}` : ''}`}
             active
             onPress={onClose}
           />
-        ) : null}
+        </View>
+      ) : null}
 
-        {otherAccounts.map((account) => (
-          <AccountRow
-            key={account.userId}
-            title={account.fullName?.trim() || account.email || 'Account'}
-            subtitle={`${roleLabel(account.role)}${
-              account.email ? ` · ${account.email}` : ''
-            }`}
-            active={false}
-            onPress={() => void onSwitch(account)}
-          />
-        ))}
-      </View>
+      {otherAccounts.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Other accounts</Text>
+          {otherAccounts.map((account) => (
+            <AccountRow
+              key={account.userId}
+              title={account.fullName?.trim() || account.email || 'Account'}
+              subtitle={`${roleLabel(account.role)}${
+                account.email ? ` · ${account.email}` : ''
+              }`}
+              active={false}
+              onPress={() => void onSwitch(account)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {showBecomeCreator ? (
         <PressableScale
           accessibilityRole="button"
           onPress={() => void onBecomeCreator()}
-          style={styles.addRow}
+          style={styles.ctaCard}
         >
-          <View style={styles.addIcon}>
-            <Icon name="plus" size={20} color={color.ink} />
+          <View style={styles.roleIcon}>
+            <Icon name="sparkles" size={18} color={color.blue700} />
           </View>
-          <Text style={styles.addLabel}>Become a creator</Text>
+          <View style={styles.meta}>
+            <Text style={styles.roleTitle}>Become a creator</Text>
+            <Text style={styles.roleBody}>
+              Record and post on this email without signing in again.
+            </Text>
+          </View>
+          <Icon name="arrow-right" size={18} color={color.slate400} />
         </PressableScale>
       ) : (
         <PressableScale
@@ -240,20 +313,93 @@ export function AccountSwitcherSheet({
 }
 
 const styles = StyleSheet.create({
-  list: {
-    gap: 2,
-    paddingTop: 4,
+  title: {
+    fontSize: type.size.cardLg,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    color: color.ink,
   },
-  row: {
+  lede: {
+    marginTop: 8,
+    marginBottom: 18,
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * 1.45,
+    color: color.slate500,
+  },
+  section: {
+    marginBottom: 18,
+  },
+  sectionLabel: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+    color: color.slate400,
+  },
+  sectionHint: {
+    marginTop: 4,
+    marginBottom: 10,
+    fontSize: type.size.chip,
+    fontWeight: '500',
+    color: color.slate500,
+  },
+  roleStack: {
+    gap: 8,
+    marginTop: 10,
+  },
+  roleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: radius.lg,
+    backgroundColor: color.fillQuiet,
+  },
+  roleCardActive: {
+    backgroundColor: color.blue100,
+  },
+  roleIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleTitle: {
+    fontSize: type.size.bodySm,
+    fontWeight: '700',
+    color: color.ink,
+  },
+  roleBody: {
+    marginTop: 2,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.35,
+    color: color.slate500,
+  },
+  usingPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: color.white,
+  },
+  usingText: {
+    fontSize: type.size.micro11,
+    fontWeight: '700',
+    color: color.blue700,
+  },
+  accountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 10,
     paddingHorizontal: 2,
+    marginTop: 6,
   },
   avatar: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: radius.pill,
     backgroundColor: color.fillQuiet,
     alignItems: 'center',
@@ -266,7 +412,7 @@ const styles = StyleSheet.create({
   },
   meta: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
   },
   name: {
     fontSize: type.size.body,
@@ -278,17 +424,25 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: color.slate500,
   },
+  ctaCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: radius.lg,
+    backgroundColor: color.blue100,
+  },
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 12,
     paddingHorizontal: 2,
-    marginTop: 4,
   },
   addIcon: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: radius.pill,
     borderWidth: borderWidth.hair,
     borderColor: color.lineStrong,

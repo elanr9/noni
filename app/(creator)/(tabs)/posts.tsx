@@ -1,46 +1,53 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { useRouter, type Href } from 'expo-router';
+import { LayoutGrid } from 'lucide-react-native';
 
 import { MonthGrid } from '../../../components/creator/MonthGrid';
-import { PostGridTile } from '../../../components/creator/PostGridTile';
+import { PostRow } from '../../../components/creator/PostRow';
+import {
+  fetchCampaignNames,
+  groupWeeks,
+  isPostedStatus,
+  shortDateLabel,
+  viralityTopPercents,
+  weekName,
+  INSTAGRAM_SHARE,
+  TIKTOK_SHARE,
+  type CreatorWeek,
+} from '../../../components/creator/posts-shared';
 import { Screen } from '../../../components/layout/Screen';
-import { PostsSkeleton, SoftToast } from '../../../components/states';
+import { PostsSkeleton } from '../../../components/states';
+import { Dropdown } from '../../../components/ui/Dropdown';
 import { EmptyState } from '../../../components/ui/EmptyState';
-import { Icon } from '../../../components/ui/Icon';
+import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/ui/Segmented';
-import { SkeletonCard } from '../../../components/ui/Skeleton';
-import { StatusChip } from '../../../components/ui/StatusChip';
-import { useAuth } from '../../../lib/auth';
+import {
+  dayKey,
+  slotTimeLabel,
+  statusDotColor,
+  useCreatorQueue,
+} from '../../../lib/creator-queue';
 import { formatCount } from '../../../lib/earnings';
-import type { TaskStatus } from '../../../lib/tasks';
-import {
-  listMyAssignments,
-  parseAssignmentMetrics,
-  type AssignmentWithBrief,
-} from '../../../lib/tasks-api';
-import { formatCents, listLedger, type WalletLedgerRow } from '../../../lib/wallet-api';
-import {
-  borderWidth,
-  color,
-  radius,
-  shadow,
-  space,
-  type,
-} from '../../../theme/tokens';
+import type { AssignmentWithBrief } from '../../../lib/tasks-api';
+import { parseAssignmentMetrics } from '../../../lib/tasks-api';
+import { color, radius, shadow, space, type } from '../../../theme/tokens';
 
-const EARNING_KINDS = new Set(['bounty_credit', 'streak_bonus']);
-const DONE_STATUSES = new Set<TaskStatus>(['posted', 'approved']);
-const GRID_GAP = 6;
+type PostsView = 'calendar' | 'briefs' | 'list';
+type SortKey = 'newest' | 'virality' | 'likes' | 'views';
+
+const SORT_OPTIONS: Array<{ label: string; value: SortKey }> = [
+  { label: 'Newest', value: 'newest' },
+  { label: 'Virality', value: 'virality' },
+  { label: 'Likes', value: 'likes' },
+  { label: 'Views', value: 'views' },
+];
 
 const WEEKDAYS = [
   'Sunday',
@@ -52,85 +59,132 @@ const WEEKDAYS = [
   'Saturday',
 ] as const;
 
-function dayKey(d: Date): string {
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const dd = `${d.getDate()}`.padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${dd}`;
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: PostsView;
+  onChange: (v: PostsView) => void;
+}) {
+  const items: Array<{ key: PostsView; icon: IconName | 'layout-grid'; label: string }> = [
+    { key: 'calendar', icon: 'calendar-days', label: 'Calendar view' },
+    { key: 'briefs', icon: 'layout-grid', label: 'Briefs view' },
+    { key: 'list', icon: 'layout-list', label: 'List view' },
+  ];
+  return (
+    <View style={styles.toggleTrack}>
+      {items.map((item) => {
+        const active = item.key === view;
+        const tint = active ? color.ink : color.slate400;
+        return (
+          <PressableScale
+            key={item.key}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+            accessibilityState={{ selected: active }}
+            onPress={() => onChange(item.key)}
+            style={[styles.toggleItem, active && [styles.toggleItemActive, shadow.shadowCard]]}
+          >
+            {item.icon === 'layout-grid' ? (
+              <LayoutGrid size={18} color={tint} strokeWidth={2} />
+            ) : (
+              <Icon name={item.icon} size={18} color={tint} />
+            )}
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
 }
 
-function formatLabel(format: string): string {
-  return format === 'photo_carousel' ? 'Slideshow' : 'Reel';
+function WeekPill({ status }: { status: CreatorWeek['status'] }) {
+  const paid = status === 'paid';
+  const label = status === 'this' ? 'This week' : paid ? 'Paid' : 'Upcoming';
+  const fg = paid ? color.green : color.blue700;
+  const bg = paid ? color.greenSoft : color.blue100;
+  return (
+    <View style={[styles.weekPill, { backgroundColor: bg }]}>
+      <View style={[styles.weekPillDot, { backgroundColor: fg }]} />
+      <Text style={[styles.weekPillText, { color: fg }]}>{label}</Text>
+    </View>
+  );
 }
 
 export default function PostsScreen() {
-  const { profile } = useAuth();
   const router = useRouter();
-  const { width: windowWidth } = useWindowDimensions();
-  const tileWidth = Math.floor(
-    (windowWidth - space.gutter * 2 - GRID_GAP * 2) / 3,
-  );
+  const { assignments, loading, refetch, assignmentsForDate, changesRequested } =
+    useCreatorQueue();
 
-  const [assignments, setAssignments] = useState<AssignmentWithBrief[]>([]);
-  const [ledger, setLedger] = useState<WalletLedgerRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<PostsView>('calendar');
+  const [platforms, setPlatforms] = useState({ tiktok: true, instagram: true });
+  const [sort, setSort] = useState<SortKey>('newest');
   const [refreshing, setRefreshing] = useState(false);
-  const [view, setView] = useState(0);
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedKey, setSelectedKey] = useState(dayKey(new Date()));
-  const [toast, setToast] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!profile?.id) return;
-    try {
-      const [mine, rows] = await Promise.all([
-        listMyAssignments(profile.id),
-        listLedger(profile.id, 1000),
-      ]);
-      setAssignments(mine);
-      setLedger(rows);
-    } catch {
-      setToast('Could not refresh Posts. Pull to try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [profile?.id]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
+  const [campaignNames, setCampaignNames] = useState<Map<string, string>>(
+    new Map(),
   );
 
-  const byDay = useMemo(() => {
-    const map = new Map<string, AssignmentWithBrief[]>();
-    for (const a of assignments) {
-      const list = map.get(a.scheduled_date) ?? [];
-      list.push(a);
-      map.set(a.scheduled_date, list);
-    }
-    return map;
+  const share =
+    (platforms.tiktok ? TIKTOK_SHARE : 0) +
+    (platforms.instagram ? INSTAGRAM_SHARE : 0);
+  const rowPlatform: 'tiktok' | 'instagram' =
+    !platforms.tiktok && platforms.instagram ? 'instagram' : 'tiktok';
+
+  const togglePlatform = (key: 'tiktok' | 'instagram') => {
+    setPlatforms((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      // At least one platform stays active; every post lives on both.
+      if (!next.tiktok && !next.instagram) return prev;
+      return next;
+    });
+  };
+
+  const weeks = useMemo(() => groupWeeks(assignments), [assignments]);
+  const topPercents = useMemo(
+    () => viralityTopPercents(assignments),
+    [assignments],
+  );
+
+  useEffect(() => {
+    const ids = [
+      ...new Set(
+        assignments
+          .map((a) => a.campaign_id)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    if (ids.length === 0) return;
+    let cancelled = false;
+    fetchCampaignNames(ids)
+      .then((names) => {
+        if (!cancelled) setCampaignNames(names);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [assignments]);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
+  const monthPrefix = `${year}-${`${month + 1}`.padStart(2, '0')}`;
 
-  const monthCounts = useMemo(() => {
-    const counts: Record<number, number> = {};
-    for (const [key, list] of byDay) {
-      const [y, m, d] = key.split('-').map(Number);
-      if (y === year && m === month + 1) {
-        counts[d ?? 0] = list.length;
-      }
+  const dotsByDay = useMemo(() => {
+    const out: Record<number, string[]> = {};
+    for (const a of assignments) {
+      if (!a.scheduled_date.startsWith(monthPrefix)) continue;
+      const day = Number(a.scheduled_date.slice(8, 10));
+      (out[day] ??= []).push(statusDotColor(a.status));
     }
-    return counts;
-  }, [byDay, year, month]);
+    return out;
+  }, [assignments, monthPrefix]);
 
-  const dayAssignments = byDay.get(selectedKey) ?? [];
-  const selectedDayNumber = Number(selectedKey.split('-')[2]);
+  const selectedDayNumber = Number(selectedKey.slice(8, 10));
+  const dayItems = assignmentsForDate(selectedKey);
   const selectedDate = new Date(
     Number(selectedKey.slice(0, 4)),
     Number(selectedKey.slice(5, 7)) - 1,
@@ -139,65 +193,121 @@ export default function PostsScreen() {
   const dayHeading =
     `${WEEKDAYS[selectedDate.getDay()]} ${selectedDayNumber}`.toUpperCase();
 
-  const summary = useMemo(() => {
-    let views = 0;
-    for (const a of assignments) {
-      if (!DONE_STATUSES.has(a.status as TaskStatus)) continue;
-      views += parseAssignmentMetrics(a.metrics).views ?? 0;
+  const listItems = useMemo(() => {
+    const items = [...assignments];
+    const views = (a: AssignmentWithBrief) =>
+      parseAssignmentMetrics(a.metrics).views ?? 0;
+    const likes = (a: AssignmentWithBrief) =>
+      parseAssignmentMetrics(a.metrics).likes ?? 0;
+    switch (sort) {
+      case 'newest':
+        return items.sort((a, b) =>
+          a.scheduled_date === b.scheduled_date
+            ? b.slot_index - a.slot_index
+            : b.scheduled_date.localeCompare(a.scheduled_date),
+        );
+      case 'likes':
+        return items.sort((a, b) => likes(b) - likes(a));
+      case 'views':
+        return items.sort((a, b) => views(b) - views(a));
+      case 'virality':
+        return items.sort(
+          (a, b) =>
+            (topPercents.get(a.id) ?? 101) - (topPercents.get(b.id) ?? 101) ||
+            views(b) - views(a),
+        );
     }
-    let earnedCents = 0;
-    for (const entry of ledger) {
-      if (EARNING_KINDS.has(entry.kind)) earnedCents += entry.amount_cents;
-    }
-    return {
-      posts: assignments.length,
-      views,
-      earnedLabel: formatCents(earnedCents).replace(/\.00$/, ''),
-    };
-  }, [assignments, ledger]);
+  }, [assignments, sort, topPercents]);
 
-  const gridItems = useMemo(
-    () =>
-      [...assignments].sort((a, b) =>
-        a.scheduled_date === b.scheduled_date
-          ? b.slot_index - a.slot_index
-          : b.scheduled_date.localeCompare(a.scheduled_date),
-      ),
-    [assignments],
-  );
-
-  const openAssignment = (a: AssignmentWithBrief) => {
-    if (DONE_STATUSES.has(a.status as TaskStatus)) {
+  const openRow = (a: AssignmentWithBrief) => {
+    if (isPostedStatus(a.status)) {
       router.push(`/(creator)/posts/${a.id}` as Href);
     } else {
-      router.push(`/(creator)/assignment/${a.id}`);
+      router.push(`/(creator)/assignment/${a.id}` as Href);
     }
   };
 
-  const selectDayInMonth = (day: number) => {
-    setSelectedKey(dayKey(new Date(year, month, day)));
-  };
-
-  const shiftMonth = (delta: number) => {
-    const next = new Date(year, month + delta, 1);
-    setCursor(next);
-    const daysIn = new Date(
-      next.getFullYear(),
-      next.getMonth() + 1,
-      0,
-    ).getDate();
-    const keep = Math.min(selectedDayNumber || 1, daysIn);
-    setSelectedKey(
-      dayKey(new Date(next.getFullYear(), next.getMonth(), keep)),
+  const renderRow = (a: AssignmentWithBrief, withDate: boolean) => {
+    const m = parseAssignmentMetrics(a.metrics);
+    return (
+      <PostRow
+        key={a.id}
+        title={a.briefs.title}
+        isPhoto={a.briefs.format === 'photo_carousel'}
+        time={slotTimeLabel(a.slot_index)}
+        date={withDate ? shortDateLabel(a.scheduled_date) : undefined}
+        platform={rowPlatform}
+        views={Math.round((m.views ?? 0) * share)}
+        likes={Math.round((m.likes ?? 0) * share)}
+        topPercent={topPercents.get(a.id)}
+        status={a.status}
+        onPress={() => openRow(a)}
+      />
     );
   };
 
-  const monthPrefix = `${year}-${`${month + 1}`.padStart(2, '0')}`;
+  const firstChange = changesRequested[0];
 
   return (
-    <Screen scroll={false} bg={color.white} contentStyle={styles.screenContent}>
-      <Text style={styles.title}>Posts</Text>
-      <Segmented options={['Calendar', 'Grid']} value={view} onChange={setView} />
+    <Screen scroll={false} bg={color.offWhite} contentStyle={styles.screenContent}>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Posts</Text>
+        <ViewToggle view={view} onChange={setView} />
+      </View>
+
+      <View style={styles.pillsRow}>
+        {(
+          [
+            { key: 'instagram', icon: 'at-sign', label: 'Instagram' },
+            { key: 'tiktok', icon: 'music-2', label: 'TikTok' },
+          ] as const
+        ).map((p) => {
+          const active = platforms[p.key];
+          return (
+            <PressableScale
+              key={p.key}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              onPress={() => togglePlatform(p.key)}
+              style={[styles.accountPill, active && styles.accountPillActive]}
+            >
+              <Icon
+                name={p.icon}
+                size={15}
+                color={active ? color.blue600 : color.slate500}
+              />
+              <Text
+                style={[
+                  styles.accountPillText,
+                  { color: active ? color.blue600 : color.slate500 },
+                ]}
+              >
+                {p.label}
+              </Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      {firstChange !== undefined && (
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Changes requested"
+          onPress={() =>
+            router.push(`/(creator)/posts/changes/${firstChange.id}` as Href)
+          }
+          style={styles.changesBanner}
+        >
+          <Icon name="circle-alert" size={19} color={color.amber} />
+          <View style={styles.changesBody}>
+            <Text style={styles.changesTitle}>Changes requested</Text>
+            <Text style={styles.changesSub} numberOfLines={1}>
+              {firstChange.briefs.title}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={17} color={color.amber} />
+        </PressableScale>
+      )}
 
       <ScrollView
         style={styles.flex}
@@ -208,28 +318,34 @@ export default function PostsScreen() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              void load();
+              void refetch().finally(() => setRefreshing(false));
             }}
           />
         }
       >
-        {view === 0 ? (
+        {loading ? (
+          <PostsSkeleton />
+        ) : view === 'calendar' ? (
           <>
             <MonthGrid
               year={year}
               month={month}
-              postCounts={monthCounts}
+              dotsByDay={dotsByDay}
               selectedDay={
                 selectedKey.startsWith(monthPrefix) ? selectedDayNumber : 0
               }
-              onSelectDay={selectDayInMonth}
-              onPrevMonth={() => shiftMonth(-1)}
-              onNextMonth={() => shiftMonth(1)}
+              onSelectDay={(day) =>
+                setSelectedKey(dayKey(new Date(year, month, day)))
+              }
+              onPrevMonth={() =>
+                setCursor(new Date(year, month - 1, 1))
+              }
+              onNextMonth={() =>
+                setCursor(new Date(year, month + 1, 1))
+              }
             />
-            <Text style={styles.dayHeading}>{dayHeading}</Text>
-            {loading ? (
-              <PostsSkeleton />
-            ) : dayAssignments.length === 0 ? (
+            <Text style={styles.sectionHeading}>{dayHeading}</Text>
+            {dayItems.length === 0 ? (
               <EmptyState
                 icon="calendar-days"
                 title="Nothing this day"
@@ -237,118 +353,81 @@ export default function PostsScreen() {
                 compact
               />
             ) : (
-              dayAssignments.map((a) => {
-                const isPhoto = a.briefs.format === 'photo_carousel';
-                return (
-                  <PressableScale
-                    key={a.id}
-                    accessibilityRole="button"
-                    onPress={() => openAssignment(a)}
-                    style={[styles.dayRow, shadow.shadowCard]}
-                  >
-                    <View style={styles.thumb}>
-                      <Svg
-                        width="100%"
-                        height="100%"
-                        style={StyleSheet.absoluteFill}
-                      >
-                        <Defs>
-                          <LinearGradient
-                            id={`dayThumb${a.id}`}
-                            x1="0"
-                            y1="0"
-                            x2="0.35"
-                            y2="1"
-                          >
-                            <Stop offset="0" stopColor={color.blue100} />
-                            <Stop offset="1" stopColor={color.lineStrong} />
-                          </LinearGradient>
-                        </Defs>
-                        <Rect
-                          x="0"
-                          y="0"
-                          width="100%"
-                          height="100%"
-                          fill={`url(#dayThumb${a.id})`}
-                        />
-                      </Svg>
-                      <Icon
-                        name={isPhoto ? 'images' : 'play'}
-                        size={16}
-                        color={color.slate400}
-                      />
-                    </View>
-                    <View style={styles.dayBody}>
-                      <Text style={styles.dayTitle} numberOfLines={2}>
-                        {a.briefs.title}
-                      </Text>
-                      <View style={styles.dayMeta}>
-                        <StatusChip status={a.status as TaskStatus} />
-                        <Text style={styles.dayFormat}>
-                          {formatLabel(a.briefs.format)}
-                        </Text>
-                      </View>
-                      <Text style={styles.dayDue}>{`Post ${a.slot_index + 1}`}</Text>
-                    </View>
-                  </PressableScale>
-                );
-              })
+              dayItems.map((a) => renderRow(a, false))
             )}
           </>
+        ) : view === 'briefs' ? (
+          weeks.length === 0 ? (
+            <EmptyState
+              icon="layout-list"
+              title="No posts yet"
+              body="Head to Home when your first post lands."
+            />
+          ) : (
+            [...weeks].reverse().map((week) => (
+              <PressableScale
+                key={week.startKey}
+                accessibilityRole="button"
+                onPress={() =>
+                  router.push(`/(creator)/posts/week/${week.startKey}` as Href)
+                }
+                style={[styles.weekCard, shadow.shadowCard]}
+              >
+                <View style={styles.weekTopRow}>
+                  <Text style={styles.weekMicro}>
+                    {`WEEK ${week.index} · ${week.rangeLabel.toUpperCase()}`}
+                  </Text>
+                  <WeekPill status={week.status} />
+                </View>
+                <Text style={styles.weekName} numberOfLines={1}>
+                  {weekName(week, campaignNames)}
+                </Text>
+                <View style={styles.weekStatsRow}>
+                  <Text style={styles.weekStat}>
+                    {`${week.items.length} posts`}
+                  </Text>
+                  <View style={styles.weekStatGroup}>
+                    <Icon name="eye" size={13} color={color.slate500} />
+                    <Text style={styles.weekStat}>
+                      {formatCount(Math.round(week.views * share))}
+                    </Text>
+                  </View>
+                  <View style={styles.weekStatGroup}>
+                    <Icon name="zap" size={13} color={color.slate500} />
+                    <Text style={styles.weekStat}>
+                      {formatCount(Math.round(week.likes * share))}
+                    </Text>
+                  </View>
+                  <Text style={styles.weekEarned}>
+                    {`$${(week.earned * share).toFixed(2)}`}
+                  </Text>
+                  <Icon name="chevron-right" size={16} color={color.slate400} />
+                </View>
+              </PressableScale>
+            ))
+          )
         ) : (
           <>
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>{summary.posts}</Text>
-                <Text style={styles.summaryLabel}>posts</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>
-                  {formatCount(summary.views)}
-                </Text>
-                <Text style={styles.summaryLabel}>views</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>{summary.earnedLabel}</Text>
-                <Text style={styles.summaryLabel}>earned</Text>
-              </View>
+            <View style={styles.sortRow}>
+              <Dropdown<SortKey>
+                options={SORT_OPTIONS}
+                value={sort}
+                onChange={setSort}
+                labelPrefix="Sort"
+              />
             </View>
-
-            {loading ? (
-              <View style={styles.grid}>
-                <SkeletonCard height={197} radius={10} style={{ width: tileWidth }} />
-                <SkeletonCard height={197} radius={10} style={{ width: tileWidth }} />
-                <SkeletonCard height={197} radius={10} style={{ width: tileWidth }} />
-              </View>
-            ) : gridItems.length === 0 ? (
+            {listItems.length === 0 ? (
               <EmptyState
                 icon="layout-list"
                 title="No posts yet"
                 body="Head to Home when your first post lands."
               />
             ) : (
-              <View style={styles.grid}>
-                {gridItems.map((a) => (
-                  <PostGridTile
-                    key={a.id}
-                    width={tileWidth}
-                    status={a.status as TaskStatus}
-                    isPhoto={a.briefs.format === 'photo_carousel'}
-                    views={parseAssignmentMetrics(a.metrics).views ?? 0}
-                    onPress={() => openAssignment(a)}
-                  />
-                ))}
-              </View>
+              listItems.map((a) => renderRow(a, true))
             )}
           </>
         )}
       </ScrollView>
-      <SoftToast
-        visible={toast !== null}
-        message={toast ?? ''}
-        tone="error"
-        onHide={() => setToast(null)}
-      />
     </Screen>
   );
 }
@@ -357,91 +436,162 @@ const styles = StyleSheet.create({
   screenContent: {
     paddingTop: space[5],
     paddingBottom: 0,
-    gap: space[5],
+    gap: space[4],
     flex: 1,
   },
   flex: {
     flex: 1,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
-    fontSize: type.size.titleXl,
-    lineHeight: type.size.titleXl * type.leading.title,
+    fontSize: type.size.title,
+    lineHeight: type.size.title * type.leading.title,
     letterSpacing: type.tracking.title,
-    fontWeight: type.weight.heavy,
+    fontWeight: type.weight.bold,
     color: color.ink,
   },
+  toggleTrack: {
+    flexDirection: 'row',
+    gap: 2,
+    padding: 3,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+  },
+  toggleItem: {
+    width: 44,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleItemActive: {
+    backgroundColor: color.white,
+  },
+  pillsRow: {
+    flexDirection: 'row',
+    gap: space[3],
+  },
+  accountPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    height: 42,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+  },
+  accountPillActive: {
+    backgroundColor: color.blue100,
+  },
+  accountPillText: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+  },
+  changesBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
+    borderRadius: radius.md,
+    backgroundColor: color.amberSoft,
+  },
+  changesBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  changesTitle: {
+    fontSize: 13.5,
+    fontWeight: type.weight.bold,
+    color: color.amber,
+  },
+  changesSub: {
+    fontSize: type.size.label,
+    color: color.slate500,
+  },
   column: {
-    gap: space[5],
+    gap: space[3],
     paddingBottom: 110,
   },
-  dayHeading: {
+  sectionHeading: {
     fontSize: type.size.label,
     fontWeight: type.weight.heavy,
     letterSpacing: type.tracking.label,
     color: color.slate400,
+    paddingTop: space[1],
   },
-  dayRow: {
-    flexDirection: 'row',
-    gap: space[3],
-    padding: space[3],
+  weekCard: {
+    gap: 8,
+    padding: space.cardPad,
     borderRadius: radius.lg,
     backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
+    borderWidth: 1,
     borderColor: color.line,
   },
-  thumb: {
-    width: 54,
-    height: 96,
-    borderRadius: 10,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  dayBody: {
-    flex: 1,
-    minWidth: 0,
-    gap: 7,
-  },
-  dayTitle: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-    lineHeight: type.size.bodySm * type.leading.snug,
-    color: color.ink,
-  },
-  dayMeta: {
+  weekTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: space[2],
   },
-  dayFormat: {
-    fontSize: type.size.chip,
-    color: color.slate500,
-  },
-  dayDue: {
-    fontSize: type.size.chip,
-    color: color.slate500,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 22,
-    paddingVertical: 2,
-  },
-  summaryItem: {
-    gap: 2,
-  },
-  summaryValue: {
-    fontSize: type.size.cardLg,
+  weekMicro: {
+    flexShrink: 1,
+    fontSize: type.size.micro11,
     fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    color: color.slate400,
+  },
+  weekPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: radius.pill,
+  },
+  weekPillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.pill,
+  },
+  weekPillText: {
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.bold,
+  },
+  weekName: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.3,
     color: color.ink,
   },
-  summaryLabel: {
+  weekStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  weekStatGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  weekStat: {
     fontSize: type.size.chip,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: GRID_GAP,
+  weekEarned: {
+    marginLeft: 'auto',
+    fontSize: type.size.meta,
+    fontWeight: type.weight.heavy,
+    color: color.green,
+  },
+  sortRow: {
+    zIndex: 30,
   },
 });

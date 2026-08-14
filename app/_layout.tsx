@@ -15,6 +15,7 @@ import {
   getInitialAuthUrl,
 } from '../lib/auth-session';
 import { missingSupabaseEnv } from '../lib/supabase';
+import { motion, screenTransition } from '../theme/tokens';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -47,7 +48,13 @@ function App() {
   return (
     <AuthProvider>
       <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: screenTransition.fade,
+          animationDuration: motion.base,
+        }}
+      />
     </AuthProvider>
   );
 }

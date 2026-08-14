@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
+import { AccountSwitcherSheet } from '../../../components/AccountSwitcherSheet';
 import {
   AdminScreen,
   Card,
@@ -16,6 +17,7 @@ import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { TextField } from '../../../components/ui/TextField';
 import { inviteCreator } from '../../../lib/admin-api';
+import { switchAccountRowLabel } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
@@ -74,10 +76,12 @@ const NOTIF_ROWS: Array<{ key: 'subs' | 'live' | 'weekly'; label: string; sub: s
 ];
 
 export default function SettingsScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, managerAccess, refreshManagerAccess, signOut, activeMode } =
+    useAuth();
   const router = useRouter();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [open, setOpen] = useState<OpenSheet>(null);
+  const [switcher, setSwitcher] = useState(false);
   const [ended, setEnded] = useState<Ended>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -88,6 +92,7 @@ export default function SettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      void refreshManagerAccess();
       void supabase
         .from('companies')
         .select('name')
@@ -95,14 +100,14 @@ export default function SettingsScreen() {
         .then(({ data }) => {
           if (data !== null) setCompanyName(data.name);
         });
-    }, []),
+    }, [refreshManagerAccess]),
   );
 
   const company = companyName ?? 'your company';
   const inviteValid = name.trim().length > 0 && EMAIL_RE.test(email.trim());
 
   async function sendInvite() {
-    if (!profile) return;
+    if (!profile || !managerAccess.inviteCreators) return;
     setSending(true);
     setInviteError(null);
     try {
@@ -146,21 +151,28 @@ export default function SettingsScreen() {
         <View style={styles.stack}>
         <Card pad={0}>
           <NavRow
-            icon="plus"
-            label="Invite a creator"
-            onPress={() => {
-              setName('');
-              setEmail('');
-              setSent(false);
-              setInviteError(null);
-              setOpen('invite');
-            }}
+            icon="arrow-left-right"
+            label={switchAccountRowLabel(profile, activeMode)}
+            onPress={() => setSwitcher(true)}
           />
+          {managerAccess.inviteCreators ? (
+            <NavRow
+              icon="plus"
+              label="Invite a creator"
+              onPress={() => {
+                setName('');
+                setEmail('');
+                setSent(false);
+                setInviteError(null);
+                setOpen('invite');
+              }}
+            />
+          ) : null}
           <NavRow icon="bell" label="Notifications" onPress={() => setOpen('notifs')} />
           <NavRow
             icon="message-circle"
             label="Contact support"
-            onPress={() => contactSupport('Noni admin support')}
+            onPress={() => contactSupport('Noni admin support', profile?.full_name)}
           />
           <NavRow
             icon="link"
@@ -359,6 +371,11 @@ export default function SettingsScreen() {
           and sign-in are gone for good.
         </Text>
       </Sheet>
+
+      <AccountSwitcherSheet
+        visible={switcher}
+        onClose={() => setSwitcher(false)}
+      />
 
       {ended === 'signedout' && (
         <ConfirmationTakeover

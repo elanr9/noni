@@ -1,23 +1,27 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
+import { CreatorToastProvider } from '../../components/creator/Toast';
 import {
   profileCanCreate,
   profileIsCampaignManager,
   profileIsPlatformAdmin,
 } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
+import { CreatorQueueProvider } from '../../lib/creator-queue';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
-import { color } from '../../theme/tokens';
+import { color, motion, screenTransition } from '../../theme/tokens';
 
 /**
  * Routes a creator may use before setup is complete. Everything else
- * redirects to the setup checklist. Setup routes themselves, chat, and
- * profile stay reachable so the gate can never loop.
+ * redirects to Home, which shows the checklist until setup is done.
+ * Setup routes themselves, chat, and profile stay reachable so the gate
+ * can never loop.
  */
 const SETUP_EXEMPT = [
   '/setup',
   '/account-setup',
+  '/settings',
   '/chat',
   '/messages',
   '/profile',
@@ -77,47 +81,68 @@ export default function CreatorLayout() {
   const exempt = isSetupExempt(pathname);
   if (!setupFlagged && !exempt) {
     if (setup.state === null) return <LoadingScreen />;
-    if (!setup.state.complete) return <Redirect href="/(creator)/setup" />;
+    if (!setup.state.complete) return <Redirect href="/(creator)/(tabs)" />;
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: color.offWhite },
-      }}
-    >
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
-      <Stack.Screen name="balance" options={{ headerShown: false }} />
-      <Stack.Screen name="chat" options={{ headerShown: false }} />
-      <Stack.Screen name="messages/index" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="account-setup"
-        options={{
-          headerShown: true,
-          title: 'Account setup',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: color.offWhite },
-          headerTintColor: color.ink,
-        }}
-      />
-      <Stack.Screen name="setup/index" />
-      <Stack.Screen
-        name="setup/warmup"
-        options={{
-          headerShown: true,
-          title: 'Warm up',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: color.offWhite },
-          headerTintColor: color.ink,
-        }}
-      />
-      <Stack.Screen name="record/[id]" options={{ presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="record/changes/[id]" />
-      <Stack.Screen name="upload/[id]" options={{ presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="post/[id]" />
-      <Stack.Screen name="posts/[id]" />
-    </Stack>
+    <CreatorQueueProvider>
+      <CreatorToastProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: color.offWhite },
+            animation: screenTransition.push,
+            animationDuration: motion.base,
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
+          <Stack.Screen name="balance" options={{ headerShown: false }} />
+          <Stack.Screen name="chat" options={{ headerShown: false }} />
+          <Stack.Screen name="messages/index" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="account-setup"
+            options={{
+              headerShown: true,
+              title: 'Account setup',
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: color.offWhite },
+              headerTintColor: color.ink,
+            }}
+          />
+          <Stack.Screen name="settings" options={{ headerShown: false }} />
+          <Stack.Screen name="setup/index" />
+          <Stack.Screen
+            name="setup/warmup"
+            options={{
+              headerShown: true,
+              title: 'Warm up',
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: color.offWhite },
+              headerTintColor: color.ink,
+            }}
+          />
+          <Stack.Screen
+            name="record/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen name="record/changes/[id]" />
+          <Stack.Screen
+            name="upload/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen name="post/[id]" />
+          <Stack.Screen name="posts/[id]" />
+        </Stack>
+      </CreatorToastProvider>
+    </CreatorQueueProvider>
   );
 }

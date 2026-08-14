@@ -233,9 +233,9 @@ export function PlacementSheet({
                     ? {
                         color: textOverlay.text_color,
                         backgroundColor: textOverlay.accent_color,
-                        paddingHorizontal: canvasW * 0.022,
-                        paddingVertical: canvasW * 0.014,
-                        borderRadius: canvasW * 0.02,
+                        paddingHorizontal: canvasW * 0.032,
+                        paddingVertical: canvasW * 0.022,
+                        borderRadius: canvasW * 0.032,
                         overflow: 'hidden',
                       }
                     : textOverlay.mode === 'outline'
@@ -357,6 +357,7 @@ const styles = StyleSheet.create({
   },
   bubbleText: {
     fontWeight: '700',
+    letterSpacing: -0.3,
     textAlign: 'center',
     maxWidth: '92%',
   },

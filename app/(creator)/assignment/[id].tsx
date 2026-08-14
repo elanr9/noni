@@ -1,13 +1,5 @@
-import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import {
   Stack,
   useFocusEffect,
@@ -15,70 +7,205 @@ import {
   useRouter,
 } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as WebBrowser from 'expo-web-browser';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
+import { FormatTag, TypeTag } from '../../../components/creator/Chips';
+import {
+  estimateDurationLabel,
+  exampleHandle,
+  scriptBlocks,
+  usePostTypeMeta,
+} from '../../../components/creator/PostCard';
+import { SlideNav } from '../../../components/creator/SlideNav';
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { parseChangesNote, ReviewThread } from '../../../components/ReviewThread';
-import { StatusChip } from '../../../components/StatusChip';
-import { color } from '../../../theme/tokens';
-import { useAuth } from '../../../lib/auth';
-import {
-  insertComment,
-  latestChangesNote,
-  listAssignmentReviewEvents,
-  type ReviewEvent,
-} from '../../../lib/review-events';
+import { StatusChip } from '../../../components/ui/StatusChip';
+import { slotTimeLabel } from '../../../lib/creator-queue';
 import {
   getAssignment,
-  markMusicAdded,
-  parseAssignmentMetrics,
   type AssignmentWithBrief,
 } from '../../../lib/tasks-api';
-import {
-  DEFAULT_BOUNTY_AMOUNT_CENTS,
-  DEFAULT_BOUNTY_VIEW_THRESHOLD,
-  fetchBountySettings,
-  type BountySettings,
-} from '../../../lib/bounty';
-import { formatViews } from '../../../components/creator/PostCard';
+import { color, radius, shadow, type } from '../../../theme/tokens';
 
-function formatMoney(cents: number): string {
-  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+function formatSeconds(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** linear-gradient(160deg, blue100, lineStrong) idle frame, as on MediaCard. */
+function IdleGradient() {
+  return (
+    <Svg style={StyleSheet.absoluteFill}>
+      <Defs>
+        <LinearGradient id="taskIdleGrad" x1="0%" y1="0%" x2="34%" y2="94%">
+          <Stop offset="0" stopColor={color.blue100} />
+          <Stop offset="1" stopColor={color.lineStrong} />
+        </LinearGradient>
+      </Defs>
+      <Rect x="0" y="0" width="100%" height="100%" fill="url(#taskIdleGrad)" />
+    </Svg>
+  );
+}
+
+function ExamplePlayer({ assignment }: { assignment: AssignmentWithBrief }) {
+  const brief = assignment.briefs;
+  const slideshow = brief.format === 'photo_carousel';
+  const aspect = slideshow ? 4 / 5 : 9 / 16;
+
+  const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [durationSec, setDurationSec] = useState<number | null>(null);
+
+  const videoSource = !slideshow ? brief.example_url : null;
+  const player = useVideoPlayer(videoSource, (p) => {
+    p.loop = true;
+  });
+
+  useEffect(() => {
+    if (!playing || slideshow) return;
+    const t = setInterval(() => {
+      if (player.duration > 0) {
+        setDurationSec(player.duration);
+        setProgress(Math.min(player.currentTime / player.duration, 1));
+      }
+    }, 250);
+    return () => clearInterval(t);
+  }, [playing, slideshow, player]);
+
+  const togglePlay = () => {
+    if (slideshow || videoSource === null) return;
+    if (playing) {
+      player.pause();
+      setPlaying(false);
+    } else {
+      player.play();
+      setPlaying(true);
+      setStarted(true);
+    }
+  };
+
+  const handle = exampleHandle(brief.example_url);
+  const durationLabel =
+    durationSec !== null
+      ? formatSeconds(durationSec)
+      : estimateDurationLabel(brief);
+
+  // True post dimensions inside the remaining space: fit the aspect box to
+  // the measured frame.
+  let mediaW = 0;
+  let mediaH = 0;
+  if (frame !== null) {
+    mediaH = frame.h;
+    mediaW = mediaH * aspect;
+    if (mediaW > frame.w) {
+      mediaW = frame.w;
+      mediaH = mediaW / aspect;
+    }
+  }
+
+  return (
+    <View
+      style={styles.playerFrame}
+      onLayout={(e) =>
+        setFrame({
+          w: e.nativeEvent.layout.width,
+          h: e.nativeEvent.layout.height,
+        })
+      }
+    >
+      {frame !== null && mediaW > 0 ? (
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={
+            slideshow ? 'Example slideshow' : playing ? 'Pause example' : 'Play example'
+          }
+          onPress={togglePlay}
+          style={[
+            styles.media,
+            shadow.shadowMedia,
+            { width: mediaW, height: mediaH },
+            playing && styles.mediaPlaying,
+          ]}
+        >
+          {slideshow ? (
+            <SlideNav
+              variant="dark"
+              slides={scriptBlocks(brief.script).map((text) => ({ text }))}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <>
+              {!started ? <IdleGradient /> : null}
+              {started && videoSource !== null ? (
+                <VideoView
+                  style={StyleSheet.absoluteFill}
+                  player={player}
+                  contentFit="cover"
+                  nativeControls={false}
+                />
+              ) : null}
+              {!playing ? (
+                <View style={styles.playCenter} pointerEvents="none">
+                  <View style={styles.playCircle}>
+                    <Icon name="play" size={22} color={color.ink} />
+                  </View>
+                </View>
+              ) : null}
+              {started ? (
+                <View style={styles.progressRow} pointerEvents="none">
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { flex: Math.max(progress, 0.001) },
+                      ]}
+                    />
+                    <View style={{ flex: Math.max(1 - progress, 0.001) }} />
+                  </View>
+                  {durationLabel !== undefined ? (
+                    <Text style={styles.progressTime}>{durationLabel}</Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </>
+          )}
+
+          {handle !== null ? (
+            <View style={styles.sourcePill} pointerEvents="none">
+              <Icon name="music-2" size={12} color={color.ink} />
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {handle}
+              </Text>
+            </View>
+          ) : null}
+        </PressableScale>
+      ) : null}
+    </View>
+  );
 }
 
 export default function AssignmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuth();
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
-  const [events, setEvents] = useState<ReviewEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [bounty, setBounty] = useState<BountySettings>({
-    amountCents: DEFAULT_BOUNTY_AMOUNT_CENTS,
-    viewThreshold: DEFAULT_BOUNTY_VIEW_THRESHOLD,
-  });
+  const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const a = await getAssignment(id);
-      setAssignment(a);
-      if (a) setEvents(await listAssignmentReviewEvents(a.id));
+      setAssignment(await getAssignment(id));
     } finally {
       setLoading(false);
     }
   }, [id]);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!profile?.company_id) return;
-      // Defaults stand if the settings read fails.
-      fetchBountySettings(profile.company_id).then(setBounty, () => undefined);
-    }, [profile?.company_id]),
-  );
 
   useFocusEffect(
     useCallback(() => {
@@ -94,6 +221,7 @@ export default function AssignmentDetailScreen() {
       </View>
     );
   }
+
   if (!assignment) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -107,6 +235,8 @@ export default function AssignmentDetailScreen() {
           >
             <Icon name="chevron-left" size={20} color={color.ink} />
           </PressableScale>
+          <Text style={styles.navTitle}>Task</Text>
+          <View style={styles.navSpacer} />
         </View>
         <Text style={styles.missing}>Post not found.</Text>
       </View>
@@ -119,28 +249,12 @@ export default function AssignmentDetailScreen() {
     assignment.status === 'assigned' ||
     assignment.status === 'changes_requested' ||
     assignment.status === 'recorded';
-  const done = assignment.status === 'approved' || assignment.status === 'posted';
-  const needsChanges = assignment.status === 'changes_requested';
-  const changesNote = latestChangesNote(events);
-  const changesSections =
-    needsChanges && changesNote !== null ? parseChangesNote(changesNote) : [];
-  const metrics = parseAssignmentMetrics(assignment.metrics);
-  const bountyPaid = assignment.bounty_credited_at !== null;
-  // Slideshow music loop: live post -> creator adds the song in each app ->
-  // one tap here -> admin's music approval queue -> earnings unlock.
-  const showMusicStep =
-    !isVideo && assignment.status === 'posted' && assignment.music_approved_at === null;
-  const musicMarked = assignment.music_marked_by_creator_at !== null;
-
-  // Legacy carousels (null post_type_id) still record their script as video;
-  // post-approved expects that path for them. Only new-world carousels pick
-  // photos on the upload screen.
+  // Legacy carousels (null post_type_id) still record their script as video.
   const usesUpload = !isVideo && brief.post_type_id !== null;
 
   function onRecord() {
     if (!assignment) return;
-    // Changes-requested opens the Wave 3 1f surface; happy-path detail stays Agent B.
-    if (needsChanges) {
+    if (assignment.status === 'changes_requested') {
       router.push(`/(creator)/record/changes/${assignment.id}`);
       return;
     }
@@ -149,32 +263,6 @@ export default function AssignmentDetailScreen() {
       return;
     }
     router.push(`/(creator)/record/${assignment.id}?assignment=1`);
-  }
-
-  async function onMusicAdded() {
-    if (!assignment) return;
-    try {
-      const updated = await markMusicAdded(assignment.id);
-      setAssignment({ ...assignment, ...updated });
-    } catch (e) {
-      Alert.alert(
-        'Could not send',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    }
-  }
-
-  async function sendComment(text: string) {
-    if (!assignment || !profile || assignment.submission_id === null) {
-      throw new Error('No submission to comment on');
-    }
-    await insertComment({
-      submissionId: assignment.submission_id,
-      authorId: profile.id,
-      note: text,
-      assignmentId: assignment.id,
-    });
-    setEvents(await listAssignmentReviewEvents(assignment.id));
   }
 
   return (
@@ -190,201 +278,45 @@ export default function AssignmentDetailScreen() {
         >
           <Icon name="chevron-left" size={20} color={color.ink} />
         </PressableScale>
-        <StatusChip status={assignment.status} />
+        <Text style={styles.navTitle}>Task</Text>
+        <View style={styles.navSpacer} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.metaRow}>
-          <View style={styles.formatChip}>
-            <Icon
-              name={isVideo ? 'video' : 'images'}
-              size={13}
-              color={color.blue700}
-            />
-            <Text style={styles.formatText}>
-              {isVideo ? 'Reel' : 'Slideshow'}
-            </Text>
-          </View>
+      <View style={styles.column}>
+        <View style={styles.chipRow}>
+          <StatusChip status={assignment.status} />
+          <FormatTag format={brief.format} />
+          {typeMeta !== null ? (
+            <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
+          ) : null}
+          <Text style={styles.postsAt}>
+            Posts {slotTimeLabel(assignment.slot_index)}
+          </Text>
         </View>
 
         <Text style={styles.title}>{brief.title}</Text>
 
-        {needsChanges ? (
-          <View style={styles.changesCard}>
-            <View style={styles.changesHeader}>
-              <Icon name="rotate-ccw" size={15} color={color.amber} />
-              <Text style={styles.changesLabel}>Changes requested</Text>
-            </View>
-            {changesSections.length > 0 ? (
-              <View style={styles.changesList}>
-                {changesSections.map((section, i) => (
-                  <View key={`${section.label ?? 'note'}-${i}`} style={styles.changesItem}>
-                    {section.label !== null ? (
-                      <Text style={styles.changesItemLabel}>{section.label}</Text>
-                    ) : null}
-                    <Text style={styles.changesBody}>{section.text}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.changesBody}>
-                Your reviewer asked for another take. Check the feedback below.
-              </Text>
-            )}
-            <Text style={styles.changesHint}>
-              {isVideo
-                ? 'Fix what is called out, then record again below.'
-                : 'Fix what is called out, then redo your slides below.'}
-            </Text>
-          </View>
-        ) : null}
+        <ExamplePlayer assignment={assignment} />
 
-        {brief.hook ? <Text style={styles.hook}>{brief.hook}</Text> : null}
-        {brief.why_it_works ? (
-          <Text style={styles.why}>{brief.why_it_works}</Text>
-        ) : null}
-
-        {brief.example_url ? (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Watch the example"
-            style={styles.exampleBtn}
-            onPress={() =>
-              void WebBrowser.openBrowserAsync(brief.example_url as string)
-            }
+        {canRecord ? (
+          <View
+            style={[
+              styles.cta,
+              { paddingBottom: Math.max(16, insets.bottom + 4) },
+            ]}
           >
-            <Icon name="play" size={16} color={color.ink} />
-            <Text style={styles.exampleText}>Watch the example</Text>
-          </PressableScale>
-        ) : null}
-
-        {brief.script ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Script</Text>
-            <Text style={styles.blockBody}>{brief.script}</Text>
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              icon={usesUpload ? 'images' : 'video'}
+              onPress={onRecord}
+            >
+              {usesUpload ? 'Create slides' : 'Record'}
+            </Button>
           </View>
         ) : null}
-
-        {brief.caption ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Caption</Text>
-            <Text style={styles.blockBody}>{brief.caption}</Text>
-          </View>
-        ) : null}
-
-        {done ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Your post</Text>
-            {assignment.post_url !== null ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Open the live post"
-                style={styles.postLink}
-                onPress={() =>
-                  void Linking.openURL(assignment.post_url as string)
-                }
-              >
-                <Icon name="play" size={14} color={color.blue700} />
-                <Text style={styles.postLinkText}>Open the live post</Text>
-              </PressableScale>
-            ) : (
-              <Text style={styles.blockBody}>Posting is scheduled.</Text>
-            )}
-            <View style={styles.statsRow}>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>
-                  {metrics.views !== undefined ? formatViews(metrics.views) : '—'}
-                </Text>
-                <Text style={styles.statLabel}>Views</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>
-                  {metrics.likes !== undefined ? formatViews(metrics.likes) : '—'}
-                </Text>
-                <Text style={styles.statLabel}>Likes</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>
-                  {metrics.revenue_cents !== undefined
-                    ? formatMoney(metrics.revenue_cents)
-                    : '—'}
-                </Text>
-                <Text style={styles.statLabel}>Revenue</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>
-                  {bountyPaid
-                    ? formatMoney(assignment.bounty_amount_cents ?? 0)
-                    : `${formatViews(Math.min(metrics.views ?? 0, bounty.viewThreshold))} / ${formatViews(bounty.viewThreshold)}`}
-                </Text>
-                <Text style={styles.statLabel}>
-                  {bountyPaid
-                    ? 'Bounty paid'
-                    : `${formatMoney(bounty.amountCents)} bounty`}
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {showMusicStep ? (
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Music</Text>
-            {musicMarked ? (
-              <Text style={styles.blockBody}>
-                Sent. The admin is confirming the song and your earnings unlock
-                after that.
-              </Text>
-            ) : (
-              <>
-                <Text style={styles.blockBody}>
-                  Open the post in TikTok and Instagram, add the song, then tap
-                  once here.
-                </Text>
-                <Button variant="primary" block onPress={() => void onMusicAdded()}>
-                  Music added
-                </Button>
-              </>
-            )}
-          </View>
-        ) : null}
-
-        <ReviewThread
-          events={events}
-          onSendComment={sendComment}
-          composerEnabled={!done && assignment.submission_id !== null}
-        />
-      </ScrollView>
-
-      {canRecord ? (
-        <View style={[styles.cta, { paddingBottom: Math.max(30, insets.bottom + 12) }]}>
-          <Button
-            variant="primary"
-            size="lg"
-            block
-            icon={usesUpload ? 'images' : 'video'}
-            onPress={onRecord}
-          >
-            {needsChanges
-              ? usesUpload
-                ? 'Redo your slides'
-                : 'Record again'
-              : usesUpload
-                ? 'Create'
-                : 'Record'}
-          </Button>
-          <Text style={styles.caption}>
-            {needsChanges
-              ? 'Only redo what the note calls out.'
-              : brief.script?.trim()
-                ? 'Your script runs in the teleprompter.'
-                : 'No script here. Say it your way.'}
-          </Text>
-        </View>
-      ) : null}
+      </View>
     </View>
   );
 }
@@ -392,18 +324,18 @@ export default function AssignmentDetailScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: color.surface,
+    backgroundColor: color.white,
   },
   loading: {
     flex: 1,
-    backgroundColor: color.surface,
+    backgroundColor: color.white,
     alignItems: 'center',
     justifyContent: 'center',
   },
   missing: {
     paddingHorizontal: 24,
     paddingTop: 12,
-    fontSize: 15,
+    fontSize: type.size.bodySm,
     color: color.textMuted,
   },
   nav: {
@@ -414,167 +346,116 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     minHeight: 46,
   },
+  navTitle: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  navSpacer: {
+    width: 34,
+    height: 34,
+  },
   backBtn: {
     width: 34,
     height: 34,
-    borderRadius: 999,
-    backgroundColor: color.fillQuiet,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scroll: {
+  column: {
+    flex: 1,
     paddingHorizontal: 24,
     paddingTop: 6,
-    paddingBottom: 24,
     gap: 12,
   },
-  metaRow: {
+  chipRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  formatChip: {
+  postsAt: {
+    fontSize: type.size.chip,
+    color: color.slate400,
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 24 * 1.18,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.5,
+    color: color.ink,
+  },
+  playerFrame: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  media: {
+    borderRadius: radius['2xl'],
+    backgroundColor: color.blue100,
+    overflow: 'hidden',
+  },
+  mediaPlaying: {
+    backgroundColor: color.ink900,
+  },
+  playCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA92,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sourcePill: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: 999,
-    backgroundColor: color.blue100,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA92,
+    maxWidth: '85%',
   },
-  formatText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.blue700,
-  },
-  title: {
-    fontSize: 26,
-    lineHeight: 30.7,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+  sourceText: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.bold,
     color: color.ink,
   },
-  hook: {
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: '600',
-    color: color.ink,
-  },
-  why: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: color.slate500,
-  },
-  exampleBtn: {
+  progressRow: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 13,
-    borderRadius: 16,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  exampleText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  block: {
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: 16,
-    padding: 16,
     gap: 8,
   },
-  blockLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.slate400,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-  },
-  blockBody: {
-    fontSize: 15,
-    lineHeight: 22.5,
-    color: color.ink,
-  },
-  postLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  postLinkText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: color.blue700,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    marginTop: 4,
-  },
-  stat: {
+  progressTrack: {
     flex: 1,
-    gap: 2,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  statLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: color.slate400,
-  },
-  changesCard: {
-    backgroundColor: color.amberSoft,
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
-  },
-  changesHeader: {
+    height: 3,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA28,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+    overflow: 'hidden',
   },
-  changesLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.amber,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
+  progressFill: {
+    backgroundColor: color.white,
+    borderRadius: radius.pill,
   },
-  changesList: {
-    gap: 10,
-  },
-  changesItem: {
-    gap: 2,
-  },
-  changesItemLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  changesBody: {
-    fontSize: 15,
-    lineHeight: 22.5,
-    color: color.ink,
-  },
-  changesHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: color.amber,
+  progressTime: {
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.bold,
+    color: color.whiteA90,
   },
   cta: {
-    paddingTop: 14,
-    paddingHorizontal: 24,
-    gap: 10,
-  },
-  caption: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: color.slate400,
-    textAlign: 'center',
+    paddingTop: 2,
   },
 });

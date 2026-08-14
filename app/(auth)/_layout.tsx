@@ -3,6 +3,7 @@ import { Redirect, Stack } from 'expo-router';
 import { LoadingScreen } from '../../components/Screen';
 import { useAuth } from '../../lib/auth';
 import { destinationForProfile } from '../../lib/profile';
+import { motion, screenTransition } from '../../theme/tokens';
 
 export default function AuthLayout() {
   const { session, profile, loading, activeMode } = useAuth();
@@ -18,5 +19,13 @@ export default function AuthLayout() {
     }
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: screenTransition.push,
+        animationDuration: motion.base,
+      }}
+    />
+  );
 }

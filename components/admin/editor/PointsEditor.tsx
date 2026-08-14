@@ -12,6 +12,7 @@ import { PressableScale } from '../../ui/PressableScale';
 import { SectionLabel } from '../shared';
 import { AiPill } from './AiPill';
 import {
+  overlayBoxFill,
   overlayTextContrast,
   type OverlayEditorMode,
   type OverlayStyleValue,
@@ -292,7 +293,7 @@ export function PointsEditor(props: {
                   style={[
                     styles.textPill,
                     overlayBg
-                      ? { backgroundColor: overlayFill }
+                      ? { backgroundColor: overlayBoxFill(overlayFill) }
                       : styles.textPillClear,
                   ]}
                 >
@@ -548,16 +549,18 @@ const styles = StyleSheet.create({
   textPill: {
     minWidth: 0,
     flexShrink: 1,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 10,
   },
   textPillClear: {
     backgroundColor: 'transparent',
   },
   textPillLabel: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontFamily: 'TikTokSans_700Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   textPos: {
     marginLeft: 'auto',

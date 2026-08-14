@@ -21,16 +21,26 @@ export interface DropdownProps<T> {
 export function Dropdown<T>({ options, value, onChange, icon, labelPrefix }: DropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const rotation = useRef(new Animated.Value(0)).current;
+  const menu = useRef(new Animated.Value(0)).current;
   const selected = options.find((o) => o.value === value);
 
   const setOpenAnimated = (next: boolean) => {
+    if (next) menu.setValue(0);
     setOpen(next);
-    Animated.timing(rotation, {
-      toValue: next ? 1 : 0,
-      duration: motion.fast,
-      easing: motion.easeOut,
-      useNativeDriver: true,
-    }).start();
+    Animated.parallel([
+      Animated.timing(rotation, {
+        toValue: next ? 1 : 0,
+        duration: motion.fast,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+      Animated.timing(menu, {
+        toValue: next ? 1 : 0,
+        duration: motion.fast,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   const rotate = rotation.interpolate({
@@ -61,7 +71,29 @@ export function Dropdown<T>({ options, value, onChange, icon, labelPrefix }: Dro
             style={styles.catcher}
             onPress={() => setOpenAnimated(false)}
           />
-          <View style={[styles.menu, shadow.shadowRaised]}>
+          <Animated.View
+            style={[
+              styles.menu,
+              shadow.shadowRaised,
+              {
+                opacity: menu,
+                transform: [
+                  {
+                    scale: menu.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
+                  {
+                    translateY: menu.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-6, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={styles.menuClip}>
             {options.map((option, index) => {
               const isSelected = option.value === value;
@@ -84,7 +116,7 @@ export function Dropdown<T>({ options, value, onChange, icon, labelPrefix }: Dro
               );
             })}
             </View>
-          </View>
+          </Animated.View>
         </>
       )}
     </View>

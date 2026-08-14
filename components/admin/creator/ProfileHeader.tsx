@@ -10,7 +10,7 @@ export interface ProfileHeaderProps {
   credential: string | null;
   tiktokHandle: string | null;
   instagramHandle: string | null;
-  earned: string;
+  earned: string | null;
   posts: string;
   views: string;
 }
@@ -34,7 +34,7 @@ export function ProfileHeader({
       <View style={styles.topRow}>
         <CreatorAvatar uri={avatarUri} name={name} size={64} />
         <View style={styles.stats}>
-          <Stat value={earned} label="Earned" />
+          {earned !== null ? <Stat value={earned} label="Earned" /> : null}
           <Stat value={posts} label="Posts" />
           <Stat value={views} label="Views" />
         </View>

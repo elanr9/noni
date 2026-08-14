@@ -48,9 +48,9 @@ export function SegmentOverlayPreview(props: {
       ? {
           color: overlay.text_color,
           backgroundColor: overlay.accent_color,
-          paddingHorizontal: font * 0.5,
-          paddingVertical: font * 0.32,
-          borderRadius: font * 0.42,
+          paddingHorizontal: font * 0.72,
+          paddingVertical: font * 0.48,
+          borderRadius: font * 0.72,
           overflow: 'hidden' as const,
         }
       : overlay.mode === 'outline'
@@ -124,6 +124,7 @@ const styles = StyleSheet.create({
   },
   text: {
     fontWeight: '700',
+    letterSpacing: -0.3,
     textAlign: 'center',
     maxWidth: '100%',
   },

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   ScrollView,
   StyleSheet,
@@ -11,29 +13,35 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ImagePlus } from 'lucide-react-native';
 
+import { FormatTag, TypeTag } from '../../../components/creator/Chips';
+import { scriptBlocks, usePostTypeMeta } from '../../../components/creator/PostCard';
+import { SlideNav } from '../../../components/creator/SlideNav';
+import { useCreatorToast } from '../../../components/creator/Toast';
 import { DetailSkeleton, SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { color, radius, shadow, space, type } from '../../../theme/tokens';
+import { color, motion, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
   listBriefSegments,
   parseTalkingPoints,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
 import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissions';
 
-type Phase = 'idle' | 'submitting' | 'sent';
+type Phase = 'idle' | 'processing' | 'review';
 
 type Slide = {
   slotIndex: number;
   text: string;
 };
 
-const TOAST_MS = 2600;
+const PROCESSING_MIN_MS = 2_000;
 
 function draftKey(assignmentId: string): string {
   return `noni:slideshow-draft:${assignmentId}`;
@@ -85,19 +93,49 @@ async function clearPhotoDraft(assignmentId: string): Promise<void> {
   await AsyncStorage.removeItem(draftKey(assignmentId));
 }
 
+/** 54px ring spinning 900ms linear (SCREENS §3 processing). */
+function SpinnerRing() {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  return (
+    <Animated.View style={[styles.spinnerRing, { transform: [{ rotate }] }]} />
+  );
+}
+
 export default function UploadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const queue = useCreatorQueue();
+  const toast = useCreatorToast();
 
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [submitting, setSubmitting] = useState(false);
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const reviewSheet = useRef(new Animated.Value(0)).current;
+
+  const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
 
   useEffect(() => {
     if (!id) return;
@@ -126,6 +164,19 @@ export default function UploadScreen() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (phase !== 'review') {
+      reviewSheet.setValue(0);
+      return;
+    }
+    Animated.timing(reviewSheet, {
+      toValue: 1,
+      duration: motion.base,
+      easing: motion.easeOut,
+      useNativeDriver: true,
+    }).start();
+  }, [phase, reviewSheet]);
+
   const brief = assignment?.briefs ?? null;
 
   const slides = useMemo<Slide[]>(() => {
@@ -144,17 +195,20 @@ export default function UploadScreen() {
         };
       });
     }
-    return talkingPoints
+    const fromPoints = talkingPoints
       .map((p) => p.text?.trim() ?? '')
       .filter((t) => t.length > 0)
       .map((text, i) => ({ slotIndex: i, text }));
+    if (fromPoints.length > 0) return fromPoints;
+    return scriptBlocks(brief.script).map((text, i) => ({
+      slotIndex: i,
+      text,
+    }));
   }, [brief, briefSegments]);
 
   const pickedCount = slides.filter((s) => photos[s.slotIndex] !== undefined).length;
   const allPicked = slides.length > 0 && pickedCount === slides.length;
-  const activeSlideIndex = slides.findIndex(
-    (s) => photos[s.slotIndex] === undefined,
-  );
+  const nextEmpty = slides.find((s) => photos[s.slotIndex] === undefined);
 
   async function pickPhoto(slotIndex: number) {
     if (picking || phase !== 'idle' || !assignment) return;
@@ -178,9 +232,15 @@ export default function UploadScreen() {
     }
   }
 
-  async function submit() {
-    if (!profile || !assignment || !allPicked) return;
-    setPhase('submitting');
+  async function processSlideshow() {
+    setPhase('processing');
+    await new Promise<void>((resolve) => setTimeout(resolve, PROCESSING_MIN_MS));
+    setPhase('review');
+  }
+
+  async function sendForApproval() {
+    if (!profile || !assignment || !allPicked || submitting) return;
+    setSubmitting(true);
     try {
       const ordered = slides.map((s) => {
         const photo = photos[s.slotIndex];
@@ -189,7 +249,7 @@ export default function UploadScreen() {
         }
         return photo;
       });
-      await submitAssignmentPhotos({
+      const updated = await submitAssignmentPhotos({
         assignment,
         companyId: profile.company_id,
         creatorId: profile.id,
@@ -200,11 +260,12 @@ export default function UploadScreen() {
       } catch {
         // submission succeeded
       }
-      setPhase('sent');
-      setTimeout(() => router.replace('/(creator)/(tabs)'), TOAST_MS);
+      queue.applyLocal(updated);
+      toast.show('Sent for approval. It posts once approved.');
+      router.replace('/(creator)/(tabs)');
     } catch (e) {
-      setPhase('idle');
-      setToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
+      setSubmitting(false);
+      setErrorToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
     }
   }
 
@@ -228,45 +289,121 @@ export default function UploadScreen() {
     );
   }
 
+  if (phase === 'processing') {
+    return (
+      <View style={[styles.processing, { paddingTop: insets.top }]}>
+        <SpinnerRing />
+        <Text style={styles.processingTitle}>Processing your post…</Text>
+        <Text style={styles.processingSub}>
+          Placing your text on {slides.length}{' '}
+          {slides.length === 1 ? 'slide' : 'slides'} and adding your caption.
+        </Text>
+      </View>
+    );
+  }
+
+  if (phase === 'review') {
+    return (
+      <View style={[styles.review, { paddingTop: insets.top + space[2] }]}>
+        <View style={styles.reviewHeader}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Edit photos"
+            onPress={() => setPhase('idle')}
+          >
+            <Text style={styles.reviewHeaderBtn}>Edit photos</Text>
+          </PressableScale>
+          <Text style={styles.reviewHeaderTitle}>Review</Text>
+          <View style={styles.reviewHeaderSpacer} />
+        </View>
+
+        <View style={styles.reviewStage}>
+          <View style={styles.reviewCard}>
+            <SlideNav
+              variant="dark"
+              slides={slides.map((s) => ({
+                text: s.text.length > 0 ? s.text : undefined,
+                image: photos[s.slotIndex]?.uri,
+              }))}
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
+        </View>
+
+        <Animated.View
+          style={[
+            styles.reviewSheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 14) + 6,
+              transform: [
+                {
+                  translateY: reviewSheet.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [220, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Text style={styles.reviewLabel}>Autofilled from the brief</Text>
+          <Text style={styles.reviewTitle} numberOfLines={2}>
+            {brief.title}
+          </Text>
+          <View style={styles.reviewChips}>
+            <FormatTag format={brief.format} />
+            {typeMeta !== null ? (
+              <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
+            ) : null}
+          </View>
+          {brief.caption ? (
+            <View style={styles.captionBlock}>
+              <Text style={styles.captionLabel}>Caption</Text>
+              <Text style={styles.captionText} numberOfLines={4}>
+                {brief.caption}
+              </Text>
+            </View>
+          ) : null}
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Send for approval"
+            onPress={() => void sendForApproval()}
+            disabled={submitting}
+            style={[styles.sendBtn, submitting && styles.sendBtnOff]}
+          >
+            {submitting ? (
+              <ActivityIndicator color={color.white} />
+            ) : (
+              <Icon name="send" size={19} color={color.white} />
+            )}
+            <Text style={styles.sendText}>
+              {submitting ? 'Sending…' : 'Send for approval'}
+            </Text>
+          </PressableScale>
+        </Animated.View>
+
+        <SoftToast
+          visible={errorToast !== null}
+          message={errorToast ?? ''}
+          tone="error"
+          onHide={() => setErrorToast(null)}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.topBar}>
         <PressableScale
           accessibilityRole="button"
           accessibilityLabel="Close"
-          onPress={() => {
-            if (phase === 'idle') router.back();
-          }}
-          style={styles.backBtn}
+          onPress={() => router.back()}
+          style={styles.closeBtn}
         >
           <Icon name="x" size={20} color={color.ink} />
         </PressableScale>
-        <View style={styles.topMeta}>
-          <Text style={styles.topTitle} numberOfLines={1}>
-            Add pictures
-          </Text>
-          <Text style={styles.topSub}>
-            {pickedCount} of {slides.length} slides
-          </Text>
-        </View>
-        <View style={styles.backBtnSpacer} />
-      </View>
-
-      <View style={styles.stepper}>
-        {slides.map((slide, i) => {
-          const done = photos[slide.slotIndex] !== undefined;
-          const active = i === activeSlideIndex || (allPicked && i === slides.length - 1);
-          return (
-            <View
-              key={slide.slotIndex}
-              style={[
-                styles.stepTrack,
-                done && styles.stepDone,
-                active && !done && styles.stepActive,
-              ]}
-            />
-          );
-        })}
+        <FormatTag format={brief.format} />
       </View>
 
       <ScrollView
@@ -276,91 +413,80 @@ export default function UploadScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.heading}>Pick a photo for each slide</Text>
-        <Text style={styles.subheading}>
-          Slide text is added for you. Choose shots that match what each slide
-          says. Your picks stay saved if you leave.
+        <Text style={styles.title}>{brief.title}</Text>
+        <Text style={styles.sub}>
+          Add a photo for each slide. The text is already on them.
         </Text>
 
         {slides.map((slide, i) => {
           const photo = photos[slide.slotIndex];
           return (
-            <View key={slide.slotIndex} style={styles.slideCard}>
-              <View style={styles.slideHeader}>
-                <View style={styles.slideBadge}>
-                  <Text style={styles.slideBadgeText}>{i + 1}</Text>
-                </View>
+            <View key={slide.slotIndex} style={[styles.slideCard, shadow.shadowCard]}>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={
+                  photo
+                    ? `Swap photo for slide ${i + 1}`
+                    : `Add photo for slide ${i + 1}`
+                }
+                onPress={() => void pickPhoto(slide.slotIndex)}
+                style={[styles.tile, photo !== undefined && styles.tileFilled]}
+              >
+                {photo !== undefined ? (
+                  <>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.tileCheck}>
+                      <Icon name="check" size={11} color={color.white} />
+                    </View>
+                  </>
+                ) : (
+                  <ImagePlus size={20} color={color.blue600} strokeWidth={2} />
+                )}
+              </PressableScale>
+              <View style={styles.slideBody}>
+                <Text style={styles.slideLabel}>Slide {i + 1}</Text>
                 <Text style={styles.slideText}>
                   {slide.text || 'No text on this slide'}
                 </Text>
               </View>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel={
-                  photo ? `Swap photo for slide ${i + 1}` : `Add photo for slide ${i + 1}`
-                }
-                style={[styles.photoSlot, photo ? styles.photoSlotFilled : null]}
-                onPress={() => void pickPhoto(slide.slotIndex)}
-                disabled={phase !== 'idle'}
-              >
-                {photo ? (
-                  <>
-                    <Image
-                      source={{ uri: photo.uri }}
-                      style={styles.photo}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.swapChip}>
-                      <Text style={styles.swapChipText}>Swap photo</Text>
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.addCol}>
-                    <Icon name="images" size={22} color={color.blue600} />
-                    <Text style={styles.addText}>Add photo</Text>
-                  </View>
-                )}
-              </PressableScale>
             </View>
           );
         })}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(30, insets.bottom + 12) }]}>
-        {phase === 'submitting' ? (
-          <View style={styles.submittingRow}>
-            <ActivityIndicator color={color.white} />
-            <Text style={styles.hint}>Uploading your photos…</Text>
-          </View>
+      <View
+        style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 4) }]}
+      >
+        {allPicked ? (
+          <Button variant="primary" size="lg" block onPress={() => void processSlideshow()}>
+            Process slideshow
+          </Button>
         ) : (
           <Button
             variant="primary"
             size="lg"
             block
-            disabled={!allPicked || phase !== 'idle'}
-            onPress={() => void submit()}
+            icon="images"
+            disabled={picking || nextEmpty === undefined}
+            onPress={() => {
+              if (nextEmpty !== undefined) void pickPhoto(nextEmpty.slotIndex);
+            }}
           >
-            {allPicked
-              ? 'Send for review'
-              : `${pickedCount} of ${slides.length} photos picked`}
+            {`Add photos · ${pickedCount} of ${slides.length}`}
           </Button>
         )}
       </View>
 
       <SoftToast
-        visible={toast !== null}
-        message={toast ?? ''}
+        visible={errorToast !== null}
+        message={errorToast ?? ''}
         tone="error"
-        onHide={() => setToast(null)}
+        onHide={() => setErrorToast(null)}
       />
-
-      {phase === 'sent' ? (
-        <View style={[styles.toast, shadow.shadowFloat]} pointerEvents="none">
-          <Text style={styles.toastText}>
-            Sent for review. Approve lands it in your queue.
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -381,12 +507,12 @@ const styles = StyleSheet.create({
   },
   topBar: {
     paddingHorizontal: space.gutter,
-    paddingBottom: space[3],
+    paddingVertical: space[2],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space[3],
+    justifyContent: 'space-between',
   },
-  backBtn: {
+  closeBtn: {
     width: 40,
     height: 40,
     borderRadius: radius.pill,
@@ -394,114 +520,77 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backBtnSpacer: { width: 40, height: 40 },
-  topMeta: { flex: 1, alignItems: 'center', gap: 2 },
-  topTitle: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.heavy,
-    color: color.ink,
-  },
-  topSub: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.slate400,
-  },
-  stepper: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: space.gutter,
-    marginBottom: space[3],
-  },
-  stepTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: radius.pill,
-    backgroundColor: color.line,
-  },
-  stepDone: { backgroundColor: color.blue300 },
-  stepActive: { backgroundColor: color.accent },
   scroll: {
     paddingHorizontal: space.gutter,
-    gap: space.stackGap,
+    paddingTop: space[2],
+    gap: space[3],
   },
-  heading: {
+  title: {
     color: color.ink,
-    fontWeight: type.weight.heavy,
-    fontSize: type.size.titleSm,
-    letterSpacing: type.tracking.title,
-    marginTop: space[2],
+    fontWeight: type.weight.bold,
+    fontSize: 24,
+    lineHeight: 24 * 1.18,
+    letterSpacing: -0.5,
   },
-  subheading: {
-    color: color.textMuted,
+  sub: {
+    color: color.slate500,
     fontSize: type.size.bodySm,
     lineHeight: type.size.bodySm * type.leading.body,
     marginBottom: space[2],
   },
   slideCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     borderRadius: radius.lg,
     backgroundColor: color.white,
     borderWidth: 1,
     borderColor: color.line,
-    padding: space.cardPad,
-    gap: space[3],
-    ...shadow.shadowCard,
+    padding: 12,
   },
-  slideHeader: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  slideBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  slideBadgeText: {
-    color: color.blue700,
-    fontWeight: type.weight.heavy,
-    fontSize: type.size.chip,
-  },
-  slideText: {
-    flex: 1,
-    color: color.ink,
-    fontWeight: type.weight.semibold,
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-  },
-  photoSlot: {
-    height: 200,
+  tile: {
+    width: 62,
+    height: 82,
     borderRadius: radius.sm,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: color.lineStrong,
     borderStyle: 'dashed',
+    backgroundColor: color.offWhite,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    backgroundColor: color.offWhite,
   },
-  photoSlotFilled: {
+  tileFilled: {
     borderStyle: 'solid',
     borderColor: color.line,
   },
-  photo: { ...StyleSheet.absoluteFillObject },
-  addCol: { alignItems: 'center', gap: 8 },
-  addText: {
-    color: color.blue600,
-    fontWeight: type.weight.bold,
-    fontSize: type.size.bodySm,
-  },
-  swapChip: {
+  tileCheck: {
     position: 'absolute',
-    bottom: 10,
-    alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    top: 5,
+    right: 5,
+    width: 18,
+    height: 18,
     borderRadius: radius.pill,
-    backgroundColor: color.scrimStrong,
+    backgroundColor: color.green,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  swapChipText: {
-    color: color.white,
-    fontWeight: type.weight.bold,
-    fontSize: type.size.chip,
+  slideBody: {
+    flex: 1,
+    gap: 4,
+  },
+  slideLabel: {
+    fontSize: type.size.micro,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+    color: color.slate400,
+  },
+  slideText: {
+    color: color.ink,
+    fontWeight: type.weight.semibold,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.snug,
   },
   footer: {
     position: 'absolute',
@@ -509,39 +598,133 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: space.gutter,
-    paddingTop: space[5],
+    paddingTop: space[4],
     backgroundColor: color.offWhite,
   },
-  submittingRow: {
-    flexDirection: 'row',
-    gap: 10,
+  processing: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    height: space.tapPrimary,
-    borderRadius: radius.pill,
-    backgroundColor: color.accent,
+    gap: 16,
+    paddingHorizontal: space[10],
+    backgroundColor: color.ink900,
   },
-  hint: {
+  spinnerRing: {
+    width: 54,
+    height: 54,
+    borderRadius: radius.pill,
+    borderWidth: 4,
+    borderColor: color.whiteA28,
+    borderTopColor: color.accent,
+  },
+  processingTitle: {
+    color: color.white,
+    fontSize: type.size.card,
+    fontWeight: type.weight.heavy,
+    textAlign: 'center',
+  },
+  processingSub: {
+    color: color.whiteA75,
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    textAlign: 'center',
+  },
+  review: {
+    flex: 1,
+    backgroundColor: color.ink900,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: space[7],
+    paddingVertical: space[2],
+  },
+  reviewHeaderBtn: {
     color: color.white,
     fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
+    fontWeight: type.weight.bold,
   },
-  toast: {
-    position: 'absolute',
-    left: space[7],
-    right: space[7],
-    bottom: 112,
-    borderRadius: radius.md,
-    backgroundColor: color.ink,
-    paddingHorizontal: space[5],
-    paddingVertical: 14,
-    alignItems: 'center',
-    zIndex: 30,
-  },
-  toastText: {
+  reviewHeaderTitle: {
     color: color.white,
-    fontWeight: type.weight.semibold,
+    fontSize: type.size.body,
+    fontWeight: type.weight.heavy,
+  },
+  reviewHeaderSpacer: {
+    width: 80,
+  },
+  reviewStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: space[3],
+  },
+  reviewCard: {
+    height: '100%',
+    aspectRatio: 4 / 5,
+    maxWidth: '86%',
+    borderRadius: radius.xl,
+    backgroundColor: color.ink800,
+    overflow: 'hidden',
+  },
+  reviewSheet: {
+    backgroundColor: color.white,
+    borderTopLeftRadius: radius['2xl'],
+    borderTopRightRadius: radius['2xl'],
+    paddingHorizontal: space.gutter,
+    paddingTop: space[6],
+    gap: 10,
+  },
+  reviewLabel: {
+    fontSize: type.size.micro,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+    color: color.slate400,
+  },
+  reviewTitle: {
+    fontSize: 19,
+    lineHeight: 19 * 1.25,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.3,
+    color: color.ink,
+  },
+  reviewChips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  captionBlock: {
+    gap: 4,
+  },
+  captionLabel: {
+    fontSize: type.size.micro,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    textTransform: 'uppercase',
+    color: color.slate400,
+  },
+  captionText: {
     fontSize: type.size.meta,
-    textAlign: 'center',
+    lineHeight: type.size.meta * type.leading.body,
+    color: color.slate500,
+  },
+  sendBtn: {
+    marginTop: 4,
+    height: 60,
+    borderRadius: radius.pill,
+    backgroundColor: color.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  sendBtnOff: {
+    opacity: 0.7,
+  },
+  sendText: {
+    color: color.white,
+    fontSize: type.size.action,
+    fontWeight: type.weight.heavy,
   },
 });

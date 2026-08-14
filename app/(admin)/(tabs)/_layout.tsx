@@ -6,7 +6,7 @@ import type { IconName } from '../../../components/ui/Icon';
 import { listAssignmentQueue } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
-import { color } from '../../../theme/tokens';
+import { color, screenTransition } from '../../../theme/tokens';
 
 // Trends is cut per MVP v2; Settings hides here and opens from the gear on
 // Analytics; the Briefs tab is the calendar route (week list + calendar view
@@ -20,11 +20,14 @@ const ADMIN_ITEMS: Record<string, { icon: IconName; label: string }> = {
   analytics: { icon: 'chart-column', label: 'Analytics' },
 };
 
-// Fresh campaign managers get a temporary Setup tab that retires when their
-// checklist is done. The platform admin never sees it.
-const SETUP_ITEMS: Record<string, { icon: IconName; label: string }> = {
-  setup: { icon: 'sparkles', label: 'Setup' },
-  ...ADMIN_ITEMS,
+// Fresh campaign managers get Onboarding on the left in place of Creators.
+// The tab retires once the checklist is done. The platform admin never sees it.
+const ONBOARDING_ITEMS: Record<string, { icon: IconName; label: string }> = {
+  setup: { icon: 'sparkles', label: 'Onboarding' },
+  index: { icon: 'inbox', label: 'Review' },
+  calendar: { icon: 'plus', label: 'Briefs' },
+  library: { icon: 'layout-list', label: 'Library' },
+  analytics: { icon: 'chart-column', label: 'Analytics' },
 };
 
 export default function AdminTabsLayout() {
@@ -46,16 +49,17 @@ export default function AdminTabsLayout() {
   return (
     <Tabs
       tabBar={(props) => (
-        <TabBar {...props} items={showSetup ? SETUP_ITEMS : ADMIN_ITEMS} />
+        <TabBar {...props} items={showSetup ? ONBOARDING_ITEMS : ADMIN_ITEMS} />
       )}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: color.offWhite },
+        animation: screenTransition.tab,
       }}
     >
       <Tabs.Screen
         name="setup"
-        options={{ title: 'Setup', href: showSetup ? undefined : null }}
+        options={{ title: 'Onboarding', href: showSetup ? undefined : null }}
       />
       <Tabs.Screen
         name="index"
@@ -67,7 +71,10 @@ export default function AdminTabsLayout() {
       <Tabs.Screen name="calendar" options={{ title: 'Briefs' }} />
       <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
       <Tabs.Screen name="library" options={{ title: 'Library' }} />
-      <Tabs.Screen name="creators" options={{ title: 'Creators' }} />
+      <Tabs.Screen
+        name="creators"
+        options={{ title: 'Creators', href: showSetup ? null : undefined }}
+      />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
       <Tabs.Screen name="trends" options={{ title: 'Trends', href: null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', href: null }} />

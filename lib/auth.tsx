@@ -58,14 +58,53 @@ const ALL_PERMISSIONS: CompanyPermissions = {
   manage_publish_time: true,
 };
 
+/** Company-wide campaign manager access, from companies.settings.manager_access. */
+export type ManagerAccess = {
+  viewFinancials: boolean;
+  viewSignups: boolean;
+  inviteCreators: boolean;
+};
+
+export const DEFAULT_MANAGER_ACCESS: ManagerAccess = {
+  viewFinancials: false,
+  viewSignups: true,
+  inviteCreators: false,
+};
+
+const FULL_MANAGER_ACCESS: ManagerAccess = {
+  viewFinancials: true,
+  viewSignups: true,
+  inviteCreators: true,
+};
+
+export function parseManagerAccess(settings: unknown): ManagerAccess {
+  const root =
+    settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? (settings as Record<string, unknown>)
+      : {};
+  const raw =
+    root.manager_access &&
+    typeof root.manager_access === 'object' &&
+    !Array.isArray(root.manager_access)
+      ? (root.manager_access as Record<string, unknown>)
+      : {};
+  return {
+    viewFinancials: raw.view_financials === true,
+    viewSignups: raw.view_signups !== false,
+    inviteCreators: raw.invite_creators === true,
+  };
+}
+
 type AuthState = {
   session: Session | null;
   profile: Profile | null;
   permissions: CompanyPermissions;
+  managerAccess: ManagerAccess;
   loading: boolean;
   accounts: StoredAccount[];
   activeMode: AppMode;
   refreshProfile: () => Promise<void>;
+  refreshManagerAccess: () => Promise<void>;
   refreshAccounts: () => Promise<void>;
   setActiveMode: (mode: AppMode) => Promise<void>;
   enableCreatorMode: () => Promise<void>;
@@ -125,6 +164,26 @@ async function fetchPermissions(
   };
 }
 
+export async function fetchManagerAccess(
+  profile: Profile | null,
+): Promise<ManagerAccess> {
+  if (!profile) return DEFAULT_MANAGER_ACCESS;
+  if (profile.role === 'admin' || profile.role === 'company_admin') {
+    return FULL_MANAGER_ACCESS;
+  }
+  if (!profile.company_id) return DEFAULT_MANAGER_ACCESS;
+  const { data, error } = await supabase
+    .from('companies')
+    .select('settings')
+    .eq('id', profile.company_id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error('manager access lookup failed', error.message);
+    return DEFAULT_MANAGER_ACCESS;
+  }
+  return parseManagerAccess(data.settings);
+}
+
 async function activateStoredAccount(userId: string): Promise<Profile | null> {
   const target = await getStoredAccount(userId);
   if (!target) {
@@ -157,6 +216,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [permissions, setPermissions] = useState<CompanyPermissions>(NO_PERMISSIONS);
+  const [managerAccess, setManagerAccess] = useState<ManagerAccess>(
+    DEFAULT_MANAGER_ACCESS,
+  );
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
   const [activeMode, setActiveModeState] = useState<AppMode>('admin');
   const [loading, setLoading] = useState(true);
@@ -184,17 +246,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userId = session?.user?.id;
     if (!userId) {
       setProfile(null);
+      setPermissions(NO_PERMISSIONS);
+      setManagerAccess(DEFAULT_MANAGER_ACCESS);
       return;
     }
     const next = await fetchProfile(userId);
     setProfile(next);
-    setPermissions(await fetchPermissions(next));
+    const [perms, access] = await Promise.all([
+      fetchPermissions(next),
+      fetchManagerAccess(next),
+    ]);
+    setPermissions(perms);
+    setManagerAccess(access);
     await applyProfileMode(next);
     if (session) {
       await upsertStoredAccount(session, next);
       await refreshAccounts();
     }
   }, [session, refreshAccounts, applyProfileMode]);
+
+  const refreshManagerAccess = useCallback(async () => {
+    setManagerAccess(await fetchManagerAccess(profile));
+  }, [profile]);
 
   useEffect(() => {
     let mounted = true;
@@ -210,7 +283,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const next = await fetchProfile(data.session.user.id);
           if (!mounted) return;
           setProfile(next);
-          setPermissions(await fetchPermissions(next));
+          const [perms, access] = await Promise.all([
+            fetchPermissions(next),
+            fetchManagerAccess(next),
+          ]);
+          if (!mounted) return;
+          setPermissions(perms);
+          setManagerAccess(access);
           await applyProfileMode(next);
           await upsertStoredAccount(data.session, next);
           if (mounted) await refreshAccounts();
@@ -228,13 +307,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextSession?.user) {
         const next = await fetchProfile(nextSession.user.id);
         setProfile(next);
-        setPermissions(await fetchPermissions(next));
+        const [perms, access] = await Promise.all([
+          fetchPermissions(next),
+          fetchManagerAccess(next),
+        ]);
+        setPermissions(perms);
+        setManagerAccess(access);
         await applyProfileMode(next);
         await upsertStoredAccount(nextSession, next);
         await refreshAccounts();
       } else {
         setProfile(null);
         setPermissions(NO_PERMISSIONS);
+        setManagerAccess(DEFAULT_MANAGER_ACCESS);
         setActiveModeState('admin');
       }
       setLoading(false);
@@ -283,7 +368,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const next = await fetchProfile(profile.id);
     if (!next) throw new Error('Could not refresh profile.');
     setProfile(next);
-    setPermissions(await fetchPermissions(next));
+    const [perms, access] = await Promise.all([
+      fetchPermissions(next),
+      fetchManagerAccess(next),
+    ]);
+    setPermissions(perms);
+    setManagerAccess(access);
     await upsertStoredAccount(session, next);
     await refreshAccounts();
     try {
@@ -325,6 +415,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     await supabase.auth.signOut({ scope: 'local' });
     setProfile(null);
+    setPermissions(NO_PERMISSIONS);
+    setManagerAccess(DEFAULT_MANAGER_ACCESS);
     router.replace('/(auth)/login');
   }, [session, profile, refreshAccounts]);
 
@@ -345,12 +437,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.replace(destinationForProfile(nextProfile, true, mode));
       } catch {
         setProfile(null);
+        setPermissions(NO_PERMISSIONS);
+        setManagerAccess(DEFAULT_MANAGER_ACCESS);
         await refreshAccounts();
         router.replace('/(auth)/login');
       }
       return;
     }
     setProfile(null);
+    setPermissions(NO_PERMISSIONS);
+    setManagerAccess(DEFAULT_MANAGER_ACCESS);
   }, [session?.user?.id, refreshAccounts]);
 
   const value = useMemo(
@@ -358,10 +454,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       profile,
       permissions,
+      managerAccess,
       loading,
       accounts,
       activeMode,
       refreshProfile,
+      refreshManagerAccess,
       refreshAccounts,
       setActiveMode,
       enableCreatorMode,
@@ -373,10 +471,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       profile,
       permissions,
+      managerAccess,
       loading,
       accounts,
       activeMode,
       refreshProfile,
+      refreshManagerAccess,
       refreshAccounts,
       setActiveMode,
       enableCreatorMode,

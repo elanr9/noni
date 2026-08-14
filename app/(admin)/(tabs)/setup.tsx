@@ -1,12 +1,11 @@
-// Temporary Setup tab for freshly invited campaign managers. The checklist
-// derives from live company data and the tab retires once everything is done.
-import { useCallback, useState } from 'react';
+// Temporary Onboarding tab for freshly invited campaign managers. Replaces
+// Creators on the left until the checklist is done, then Review takes over.
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { InviteCreatorSheet } from '../../../components/admin/InviteCreatorSheet';
 import { Screen } from '../../../components/layout/Screen';
-import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
@@ -76,7 +75,7 @@ function StepRow({
 
 export default function ManagerSetupScreen() {
   const router = useRouter();
-  const { profile, permissions, refreshProfile } = useAuth();
+  const { profile, managerAccess, refreshProfile, refreshManagerAccess } = useAuth();
   const [state, setState] = useState<ManagerSetupState | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSending, setInviteSending] = useState(false);
@@ -85,13 +84,14 @@ export default function ManagerSetupScreen() {
     profile !== null && isManagerSetupCompleteFlag(profile.onboarding_answers);
   // Managers without the invite permission only need the brief step; the
   // company admin invites creators from the web dashboard.
-  const needsCreators = permissions.invite_members;
+  const needsCreators = managerAccess.inviteCreators;
   const complete =
     alreadyComplete ||
     (state !== null && state.brief && (!needsCreators || state.creators));
 
   const refresh = useCallback(async () => {
     if (!profile || alreadyComplete) return;
+    await refreshManagerAccess();
     const next = await fetchManagerSetupState(
       profile.company_id,
       profile.onboarding_answers,
@@ -103,13 +103,18 @@ export default function ManagerSetupScreen() {
       await markManagerSetupComplete(profile.id).catch(() => undefined);
       await refreshProfile();
     }
-  }, [profile, alreadyComplete, needsCreators, refreshProfile]);
+  }, [profile, alreadyComplete, needsCreators, refreshProfile, refreshManagerAccess]);
 
   useFocusEffect(
     useCallback(() => {
       void refresh();
     }, [refresh]),
   );
+
+  useEffect(() => {
+    if (!complete) return;
+    router.replace('/(admin)/(tabs)');
+  }, [complete, router]);
 
   async function sendInvite(name: string, email: string) {
     if (!profile) return;
@@ -139,23 +144,7 @@ export default function ManagerSetupScreen() {
           Boolean,
         ).length;
 
-  if (complete) {
-    return (
-      <Screen bg={color.offWhite} contentStyle={styles.doneContent}>
-        <View style={styles.doneIcon}>
-          <Icon name="check" size={28} color={color.green} />
-        </View>
-        <Text style={[styles.title, styles.centered]}>You are set.</Text>
-        <Text style={[styles.subtitle, styles.centered]}>
-          Review is where approvals happen. Everything after an approve is
-          automatic.
-        </Text>
-        <Button size="lg" onPress={() => router.replace('/(admin)/(tabs)')}>
-          Go to Review
-        </Button>
-      </Screen>
-    );
-  }
+  if (complete) return null;
 
   return (
     <Screen bg={color.offWhite} scroll contentStyle={styles.content}>
@@ -289,23 +278,5 @@ const styles = StyleSheet.create({
     fontSize: type.size.meta,
     lineHeight: type.size.meta * type.leading.body,
     color: color.slate400,
-  },
-  doneContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[5],
-    paddingBottom: space[11] * 2,
-  },
-  doneIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.pill,
-    backgroundColor: color.greenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  centered: {
-    textAlign: 'center',
   },
 });

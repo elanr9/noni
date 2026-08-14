@@ -26,8 +26,8 @@ export type AppDestination =
   | '/company-admin';
 
 /**
- * The temporary admin Setup tab retires once the manager finishes their
- * checklist; the flag lives in profiles.onboarding_answers.
+ * The temporary admin Onboarding tab (replaces Creators) retires once the
+ * manager finishes their checklist; the flag lives in profiles.onboarding_answers.
  */
 export function isManagerSetupCompleteFlag(answers: Json | null): boolean {
   return (
@@ -66,7 +66,7 @@ export function destinationForProfile(
   }
   if (profileIsCampaignManager(profile)) {
     // Company admins already finished setup on the web. Fresh invited
-    // managers land on the temporary Setup tab until the checklist is done.
+    // managers land on the temporary Onboarding tab until the checklist is done.
     if (profile.role === 'company_admin') return '/(admin)/(tabs)';
     return isManagerSetupCompleteFlag(profile.onboarding_answers)
       ? '/(admin)/(tabs)'

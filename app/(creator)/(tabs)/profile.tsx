@@ -1,16 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, StyleSheet, Text, View } from 'react-native';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  Alert,
+  Animated,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AccountSwitcherCaret } from '../../../components/AccountSwitcherCaret';
-import {
-  SoftToast,
-  UnlinkedSocials,
-} from '../../../components/states';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
@@ -19,19 +30,27 @@ import {
   getSocialConnectUrl,
   type SocialConnectStatus,
 } from '../../../lib/admin-api';
+import {
+  profileCanCreate,
+  profileIsCampaignManager,
+} from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
+import { useSetupState } from '../../../lib/setup';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
 import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
 import {
   borderWidth,
   color,
+  motion,
   radius,
   shadow,
   space,
   type,
 } from '../../../theme/tokens';
+
+const TERMS_URL = 'https://www.usenoni.app/terms';
 
 type AccountInfo = {
   connected: boolean;
@@ -39,15 +58,11 @@ type AccountInfo = {
   followers: number | null;
 };
 
-function chatSeenKey(creatorId: string): string {
-  return `noni.chat.seenAt.${creatorId}`;
-}
-
 async function unreadAdminCount(
   companyId: string,
   creatorId: string,
 ): Promise<number> {
-  const seenAt = await AsyncStorage.getItem(chatSeenKey(creatorId));
+  const seenAt = await AsyncStorage.getItem(`noni.chat.seenAt.${creatorId}`);
   let query = supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
@@ -96,92 +111,60 @@ function accountSub(info: AccountInfo): string {
   if (!info.handle) return 'Connected';
   const handle = `@${info.handle.replace(/^@/, '')}`;
   return info.followers !== null
-    ? `${handle}, ${formatFollowers(info.followers)} followers`
+    ? `${handle} · ${formatFollowers(info.followers)} followers`
     : handle;
 }
 
-function AccountRow({
-  icon,
-  label,
-  info,
-  loading,
-  busy,
-  onConnect,
-}: {
-  icon: IconName;
-  label: string;
-  info: AccountInfo;
-  loading: boolean;
-  busy: boolean;
-  onConnect: () => void;
-}) {
-  return (
-    <PressableScale
-      accessibilityRole="button"
-      disabled={info.connected || loading || busy}
-      onPress={info.connected ? undefined : onConnect}
-      style={styles.accountCard}
-    >
-      <View style={styles.iconBubble}>
-        <Icon name={icon} size={18} color={color.blue600} />
-      </View>
-      <View style={styles.accountText}>
-        <Text style={styles.rowTitle}>{label}</Text>
-        {loading ? (
-          <SkeletonLine width={140} height={14} radius={6} style={styles.subSkeleton} />
-        ) : (
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {accountSub(info)}
-          </Text>
-        )}
-      </View>
-      {!loading &&
-        (info.connected ? (
-          <Text style={styles.connected}>Connected</Text>
-        ) : (
-          <Text style={styles.connectCta}>Connect</Text>
-        ))}
-    </PressableScale>
-  );
+function GroupCard({ children }: { children: ReactNode }) {
+  return <View style={[styles.groupCard, shadow.shadowCard]}>{children}</View>;
 }
 
-function NavRow({
+function Row({
   icon,
   label,
   sub,
   badge,
+  danger = false,
+  right,
+  last = false,
   onPress,
 }: {
   icon: IconName;
   label: string;
   sub?: string;
   badge?: number;
-  onPress: () => void;
+  danger?: boolean;
+  right?: ReactNode;
+  last?: boolean;
+  onPress?: () => void;
 }) {
   return (
     <PressableScale
       accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
-      style={styles.navCard}
+      style={[styles.row, !last && styles.rowBorder]}
     >
-      <View style={styles.iconBubble}>
-        <Icon name={icon} size={18} color={color.blue600} />
-      </View>
-      <View style={styles.accountText}>
-        <Text style={styles.rowTitle}>{label}</Text>
-        {sub !== undefined ? (
-          <Text style={styles.rowSub} numberOfLines={1}>
+      <Icon name={icon} size={19} color={danger ? color.danger : color.slate500} />
+      <View style={styles.rowText}>
+        <Text style={[styles.rowLabel, danger && { color: color.danger }]}>
+          {label}
+        </Text>
+        {sub !== undefined && (
+          <Text numberOfLines={1} style={styles.rowSub}>
             {sub}
           </Text>
-        ) : null}
+        )}
       </View>
-      {badge !== undefined && badge > 0 ? (
+      {right !== undefined ? (
+        right
+      ) : badge !== undefined && badge > 0 ? (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{badge > 99 ? '99+' : String(badge)}</Text>
         </View>
-      ) : (
-        <Icon name="chevron-right" size={18} color={color.slate400} />
-      )}
+      ) : !danger ? (
+        <Icon name="chevron-right" size={17} color={color.slate300} />
+      ) : null}
     </PressableScale>
   );
 }
@@ -189,24 +172,26 @@ function NavRow({
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { profile, signOut, refreshProfile } = useAuth();
+  const { profile, refreshProfile, setActiveMode, signOut } = useAuth();
+  const setup = useSetupState(profile);
 
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [connectBusy, setConnectBusy] = useState(false);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [editBusy, setEditBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [availableCents, setAvailableCents] = useState<number | null>(null);
   const [unread, setUnread] = useState(0);
-  const [toast, setToast] = useState<string | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  const pop = useRef(new Animated.Value(0)).current;
 
   const loadStatus = useCallback(async () => {
     try {
       setStatus(await getSocialConnectStatus());
     } catch {
       setStatus(null);
-      setToast('Could not load connected accounts. Pull to try again.');
     } finally {
       setStatusLoading(false);
     }
@@ -271,35 +256,46 @@ export default function ProfileScreen() {
     };
   }, [profile?.avatar_path]);
 
+  function openSwitcher() {
+    setSwitcherOpen(true);
+    pop.setValue(0);
+    Animated.timing(pop, {
+      toValue: 1,
+      duration: motion.fast,
+      easing: motion.easeOut,
+      useNativeDriver: true,
+    }).start();
+  }
+
   async function connect() {
+    if (connectBusy) return;
     setConnectBusy(true);
     try {
       const url = await getSocialConnectUrl();
       await WebBrowser.openBrowserAsync(url);
       await loadStatus();
     } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Connect failed. Try again.');
+      Alert.alert('Connect failed', e instanceof Error ? e.message : 'Try again');
     } finally {
       setConnectBusy(false);
     }
   }
 
-  async function editAvatar() {
-    if (!profile || editBusy) return;
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
+  async function pickAvatar() {
+    if (!profile || avatarBusy) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Camera needed', 'Noni needs the camera for your avatar selfie.');
+      Alert.alert('Photos needed', 'Noni needs photo access for your profile picture.');
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
+    const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      cameraType: ImagePicker.CameraType.front,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
     });
     if (result.canceled || !result.assets[0]) return;
-    setEditBusy(true);
+    setAvatarBusy(true);
     try {
       const path = await uploadAvatar(profile.company_id, profile.id, result.assets[0].uri);
       await saveCreatorBasics(profile.id, profile.full_name ?? '', path);
@@ -307,137 +303,323 @@ export default function ProfileScreen() {
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
     } finally {
-      setEditBusy(false);
+      setAvatarBusy(false);
     }
   }
 
-  function openSettings() {
-    Alert.alert('Settings', 'Notifications and privacy', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Contact support',
-        onPress: () => {
-          contactSupport('Noni support');
-        },
-      },
-      { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
-    ]);
+  async function switchToManager() {
+    setSwitcherOpen(false);
+    try {
+      await setActiveMode('admin');
+    } catch (e) {
+      Alert.alert('Could not switch', e instanceof Error ? e.message : 'Try again');
+    }
   }
+
+  function confirmSignOut() {
+    Alert.alert(
+      'Sign out?',
+      'You can sign back in anytime with the same email.',
+      [
+        { text: 'Stay signed in', style: 'cancel' },
+        { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
+      ],
+    );
+  }
+
+  function deleteAccount() {
+    Alert.alert(
+      'Delete account',
+      'Account deletion goes through support so your posts and balance are handled correctly.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Contact support',
+          onPress: () => contactSupport('Delete my Noni account', profile?.full_name),
+        },
+      ],
+    );
+  }
+
+  if (!profile) return null;
 
   const accounts = status?.social_accounts ?? {};
   const instagram = parseAccount(accounts.instagram);
   const tiktok = parseAccount(accounts.tiktok);
 
-  const name = profile?.full_name?.trim() || 'Creator';
+  const name = profile.full_name?.trim() || 'Creator';
   const initial = name.charAt(0).toUpperCase();
-  const handle = status?.profile
-    ? `@${status.profile.replace(/^@/, '')}`
-    : null;
-  const missingSocials: Array<'tiktok' | 'instagram'> = [];
-  if (!statusLoading && !tiktok.connected) missingSocials.push('tiktok');
-  if (!statusLoading && !instagram.connected) missingSocials.push('instagram');
+  const handle = status?.profile ? `@${status.profile.replace(/^@/, '')}` : null;
+  const company = companyName ?? 'Your company';
+  const companyInitial = company.charAt(0).toUpperCase();
+  const canManage =
+    profileIsCampaignManager(profile) && profileCanCreate(profile);
+  const bankConnected = setup.state?.bank === 'done';
+  const version = Constants.expoConfig?.version ?? '1.0.0';
+
+  const popStyle = {
+    opacity: pop,
+    transform: [
+      { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+      { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) },
+    ],
+  };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
-      <AccountSwitcherCaret name={name} style={styles.caret} />
-
-      <View style={styles.header}>
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + space[2] },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Edit avatar"
-          disabled={editBusy}
-          onPress={() => void editAvatar()}
+          accessibilityLabel="Switch role"
+          onPress={openSwitcher}
+          style={styles.rolePill}
         >
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-          ) : (
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitial}>{initial}</Text>
-            </View>
-          )}
-        </PressableScale>
-        <View style={styles.headerText}>
-          {handle !== null ? (
-            <Text style={styles.handle} numberOfLines={1}>
-              {handle}
-            </Text>
-          ) : null}
-          {companyName !== null ? (
-            <Text style={styles.company} numberOfLines={1}>
-              Posting for {companyName}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-
-      <Text style={styles.sectionLabel}>Your accounts</Text>
-      {missingSocials.length >= 2 ? (
-        <UnlinkedSocials
-          missing={missingSocials}
-          onConnect={() => void connect()}
-        />
-      ) : (
-        <View style={styles.stack}>
-          <AccountRow
-            icon="music-2"
-            label="TikTok"
-            info={tiktok}
-            loading={statusLoading}
-            busy={connectBusy}
-            onConnect={() => void connect()}
-          />
-          <AccountRow
-            icon="at-sign"
-            label="Instagram"
-            info={instagram}
-            loading={statusLoading}
-            busy={connectBusy}
-            onConnect={() => void connect()}
-          />
-        </View>
-      )}
-
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel="Open balance"
-        onPress={() => router.push('/(creator)/balance' as Href)}
-        style={[styles.balanceCard, shadow.shadowAccent]}
-      >
-        <View style={styles.balanceText}>
-          <Text style={styles.balanceLabel}>Available to cash out</Text>
-          <Text style={styles.balanceValue}>
-            {availableCents !== null ? formatCents(availableCents) : '$0.00'}
+          <View style={styles.roleTile}>
+            <Text style={styles.roleTileText}>{companyInitial}</Text>
+          </View>
+          <Text numberOfLines={1} style={styles.rolePillText}>
+            {company} Creator
           </Text>
-        </View>
-        <Icon name="chevron-right" size={20} color={color.white} />
-      </PressableScale>
+          <View style={styles.chevrons}>
+            <Icon name="chevron-up" size={11} color={color.slate400} />
+            <Icon name="chevron-down" size={11} color={color.slate400} />
+          </View>
+        </PressableScale>
 
-      <View style={styles.stack}>
-        <NavRow
-          icon="message-circle"
-          label="Messages"
-          badge={unread}
-          onPress={() => router.push('/(creator)/messages' as Href)}
-        />
-        <NavRow
-          icon="settings"
-          label="Account setup"
-          sub="Name, bio and verification"
-          onPress={() => router.push('/(creator)/account-setup' as Href)}
-        />
-        <NavRow
-          icon="settings"
-          label="Settings"
-          sub="Notifications and privacy"
-          onPress={openSettings}
-        />
-      </View>
-      <SoftToast
-        visible={toast !== null}
-        message={toast ?? ''}
-        tone="error"
-        onHide={() => setToast(null)}
-      />
+        <View style={styles.identity}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+            disabled={avatarBusy}
+            onPress={() => void pickAvatar()}
+            style={styles.avatarWrap}
+          >
+            {avatarUrl !== null ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback]}>
+                <Text style={styles.avatarInitial}>{initial}</Text>
+              </View>
+            )}
+            <View style={styles.cameraBadge}>
+              <Icon name="camera" size={13} color={color.white} />
+            </View>
+          </PressableScale>
+          <View style={styles.identityText}>
+            <Text numberOfLines={1} style={styles.name}>
+              {name}
+            </Text>
+            <Text numberOfLines={1} style={styles.identitySub}>
+              {handle ?? 'Tap the photo to add one'}
+            </Text>
+          </View>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Edit account setup"
+            onPress={() => router.push('/(creator)/account-setup' as Href)}
+            style={styles.editBtn}
+          >
+            <Text style={styles.editBtnText}>Edit</Text>
+          </PressableScale>
+        </View>
+
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Open earnings"
+          onPress={() => router.push('/(creator)/balance' as Href)}
+          style={styles.earningsCard}
+        >
+          <View style={styles.earningsText}>
+            <Text style={styles.earningsLabel}>CURRENT EARNINGS</Text>
+            <Text style={styles.earningsAmount}>
+              {availableCents !== null ? formatCents(availableCents) : '$0.00'}
+            </Text>
+            <Text style={styles.earningsSub}>
+              {bankConnected
+                ? 'Pays out Sunday at 8PM Eastern'
+                : 'Connect your bank to get paid'}
+            </Text>
+          </View>
+          <View style={styles.earningsChevron}>
+            <Icon name="chevron-right" size={18} color={color.ink} />
+          </View>
+        </PressableScale>
+
+        <View style={styles.group}>
+          <Text style={styles.groupLabel}>Your accounts</Text>
+          <GroupCard>
+            {(
+              [
+                { icon: 'at-sign' as IconName, label: 'Instagram', info: instagram },
+                { icon: 'music-2' as IconName, label: 'TikTok', info: tiktok },
+              ]
+            ).map((row, i) => (
+              <View
+                key={row.label}
+                style={[styles.row, i === 0 && styles.rowBorder]}
+              >
+                <Icon name={row.icon} size={19} color={color.slate500} />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>{row.label}</Text>
+                  {statusLoading ? (
+                    <SkeletonLine width={140} height={13} radius={6} />
+                  ) : (
+                    <Text numberOfLines={1} style={styles.rowSub}>
+                      {accountSub(row.info)}
+                    </Text>
+                  )}
+                </View>
+                {!statusLoading &&
+                  (row.info.connected ? (
+                    <View style={styles.connectedChip}>
+                      <View style={styles.connectedDot} />
+                      <Text style={styles.connectedText}>Connected</Text>
+                    </View>
+                  ) : (
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel={`Connect ${row.label}`}
+                      disabled={connectBusy}
+                      onPress={() => void connect()}
+                      style={styles.connectBtn}
+                    >
+                      <Text style={styles.connectBtnText}>Connect</Text>
+                    </PressableScale>
+                  ))}
+              </View>
+            ))}
+          </GroupCard>
+        </View>
+
+        <View style={styles.group}>
+          <Text style={styles.groupLabel}>Inbox and setup</Text>
+          <GroupCard>
+            <Row
+              icon="message-circle"
+              label="Messages"
+              badge={unread}
+              onPress={() => router.push('/(creator)/messages' as Href)}
+            />
+            <Row
+              icon="settings"
+              label="Account setup"
+              sub="Name, bio and verification"
+              last
+              onPress={() => router.push('/(creator)/account-setup' as Href)}
+            />
+          </GroupCard>
+        </View>
+
+        <View style={styles.group}>
+          <Text style={styles.groupLabel}>Settings</Text>
+          <GroupCard>
+            {canManage && (
+              <Row
+                icon="arrow-left-right"
+                label="Switch to campaign manager"
+                onPress={() => void switchToManager()}
+              />
+            )}
+            <Row
+              icon="bell"
+              label="Notifications"
+              onPress={() => router.push('/(creator)/settings' as Href)}
+            />
+            <Row
+              icon="message-circle"
+              label="Contact support"
+              last
+              onPress={() => contactSupport('Noni creator support', profile.full_name)}
+            />
+          </GroupCard>
+        </View>
+
+        <View style={styles.group}>
+          <Text style={styles.groupLabel}>Legal</Text>
+          <GroupCard>
+            <Row
+              icon="key-round"
+              label="Privacy and terms"
+              onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)}
+            />
+            <Row
+              icon="trash-2"
+              label="Delete account"
+              danger
+              last
+              onPress={deleteAccount}
+            />
+          </GroupCard>
+        </View>
+
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          onPress={confirmSignOut}
+          style={styles.signOut}
+        >
+          <Text style={styles.signOutText}>Sign out</Text>
+        </PressableScale>
+
+        <Text style={styles.footer}>
+          {`Signed in as creator · ${company} · Noni ${version}`}
+        </Text>
+      </ScrollView>
+
+      {switcherOpen && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close role switcher"
+          style={styles.popScrim}
+          onPress={() => setSwitcherOpen(false)}
+        >
+          <Animated.View
+            style={[
+              styles.popover,
+              shadow.shadowRaised,
+              { top: insets.top + 56 },
+              popStyle,
+            ]}
+          >
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={`${company} Creator, current role`}
+              onPress={() => setSwitcherOpen(false)}
+              style={styles.popRow}
+            >
+              <View style={styles.roleTile}>
+                <Text style={styles.roleTileText}>{companyInitial}</Text>
+              </View>
+              <Text numberOfLines={1} style={styles.popRowText}>
+                {company} Creator
+              </Text>
+              <Icon name="check" size={16} color={color.accent} />
+            </PressableScale>
+            {canManage && (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Switch to ${company} Campaign Manager`}
+                onPress={() => void switchToManager()}
+                style={[styles.popRow, styles.popRowBorder]}
+              >
+                <View style={styles.roleTile}>
+                  <Text style={styles.roleTileText}>{companyInitial}</Text>
+                </View>
+                <Text numberOfLines={1} style={styles.popRowText}>
+                  {company} Campaign Manager
+                </Text>
+              </PressableScale>
+            )}
+          </Animated.View>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -446,142 +628,196 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: color.offWhite,
+  },
+  flex: {
+    flex: 1,
+  },
+  content: {
     paddingHorizontal: space.gutter,
-    paddingBottom: 96,
-    gap: space[5],
+    paddingBottom: 130,
+    gap: space[6],
   },
-  caret: {
-    marginBottom: 4,
-  },
-  header: {
+  rolePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space[5],
-  },
-  avatar: {
-    width: 72,
-    height: 72,
+    alignSelf: 'flex-start',
+    gap: space[2],
+    paddingVertical: 7,
+    paddingHorizontal: 10,
     borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+    maxWidth: '86%',
+  },
+  roleTile: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     backgroundColor: color.blue100,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarImage: {
-    width: 72,
-    height: 72,
-    borderRadius: radius.pill,
-  },
-  avatarInitial: {
-    fontSize: 28,
+  roleTileText: {
+    fontSize: type.size.label,
     fontWeight: type.weight.heavy,
     color: color.blue700,
   },
-  headerText: {
+  rolePillText: {
+    flexShrink: 1,
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  chevrons: {
+    alignItems: 'center',
+    marginVertical: -2,
+  },
+  identity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[5],
+  },
+  avatarWrap: {
+    width: 68,
+    height: 68,
+  },
+  avatar: {
+    width: 68,
+    height: 68,
+    borderRadius: radius.pill,
+  },
+  avatarFallback: {
+    backgroundColor: color.blue100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    fontSize: 26,
+    fontWeight: type.weight.heavy,
+    color: color.blue700,
+  },
+  cameraBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: color.accent,
+    borderWidth: 2,
+    borderColor: color.offWhite,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  identityText: {
     flex: 1,
     minWidth: 0,
-    gap: 4,
+    gap: 3,
   },
-  handle: {
-    fontSize: type.size.bodySm,
+  name: {
+    fontSize: 21,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.3,
+    color: color.ink,
+  },
+  identitySub: {
+    fontSize: type.size.meta,
     fontWeight: type.weight.regular,
     color: color.slate500,
   },
-  company: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.regular,
-    color: color.slate400,
+  editBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: color.borderStrong,
+    backgroundColor: color.white,
   },
-  sectionLabel: {
+  editBtnText: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  earningsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    padding: space.cardPad,
+    borderRadius: radius.xl,
+    backgroundColor: color.blue100,
+  },
+  earningsText: {
+    flex: 1,
+    gap: 4,
+  },
+  earningsLabel: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    letterSpacing: type.tracking.label,
+    color: color.blue700,
+  },
+  earningsAmount: {
+    fontSize: 32,
+    fontWeight: type.weight.heavy,
+    letterSpacing: -0.8,
+    color: color.ink,
+  },
+  earningsSub: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
+  },
+  earningsChevron: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  group: {
+    gap: space[2],
+  },
+  groupLabel: {
     fontSize: type.size.label,
     fontWeight: type.weight.heavy,
     letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
     color: color.slate400,
-    marginBottom: -4,
+    marginLeft: 2,
   },
-  stack: {
-    gap: 10,
-  },
-  accountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: space[5],
-    paddingHorizontal: space.cardPad,
-    borderRadius: radius.lg,
+  groupCard: {
     backgroundColor: color.white,
+    borderRadius: radius.lg,
     borderWidth: borderWidth.hair,
     borderColor: color.line,
+    overflow: 'hidden',
   },
-  navCard: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingVertical: space[5],
-    paddingHorizontal: space.cardPad,
-    borderRadius: radius.lg,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
+    gap: space[3],
+    minHeight: 56,
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
   },
-  iconBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
+  rowBorder: {
+    borderBottomWidth: borderWidth.hair,
+    borderBottomColor: color.line,
   },
-  accountText: {
+  rowText: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
+    gap: 2,
   },
-  rowTitle: {
-    fontSize: type.size.body,
-    fontWeight: type.weight.bold,
+  rowLabel: {
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.semibold,
     color: color.ink,
   },
   rowSub: {
     fontSize: type.size.chip,
     fontWeight: type.weight.regular,
     color: color.slate500,
-  },
-  subSkeleton: {
-    marginTop: 2,
-  },
-  connected: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.green,
-  },
-  connectCta: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.accent,
-  },
-  balanceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: space.cardPad,
-    borderRadius: radius.lg,
-    backgroundColor: color.blue500,
-  },
-  balanceText: {
-    flex: 1,
-    gap: 2,
-  },
-  balanceLabel: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  balanceValue: {
-    fontSize: 30,
-    fontWeight: type.weight.heavy,
-    letterSpacing: -0.8,
-    color: color.white,
   },
   badge: {
     minWidth: 22,
@@ -596,5 +832,85 @@ const styles = StyleSheet.create({
     fontSize: type.size.label,
     fontWeight: type.weight.heavy,
     color: color.white,
+  },
+  connectedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: radius.pill,
+    backgroundColor: color.greenSoft,
+  },
+  connectedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.pill,
+    backgroundColor: color.green,
+  },
+  connectedText: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.green,
+  },
+  connectBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue100,
+  },
+  connectBtnText: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
+  },
+  signOut: {
+    alignSelf: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: radius.pill,
+  },
+  signOutText: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    color: color.slate500,
+  },
+  footer: {
+    textAlign: 'center',
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
+    color: color.slate300,
+    marginTop: -space[2],
+  },
+  popScrim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  popover: {
+    position: 'absolute',
+    left: space.gutter,
+    right: space.gutter + 40,
+    borderRadius: radius.md,
+    backgroundColor: color.white,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+    overflow: 'hidden',
+  },
+  popRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingVertical: space[4],
+    paddingHorizontal: space[4],
+  },
+  popRowBorder: {
+    borderTopWidth: borderWidth.hair,
+    borderTopColor: color.line,
+  },
+  popRowText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    color: color.ink,
   },
 });

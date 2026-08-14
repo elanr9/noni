@@ -4,7 +4,7 @@ alwaysApply: true
 ---
 
 This is Noni, an Expo (React Native, TypeScript) app. Spec: NONI_SPEC.md, read it first.
-Backend is Supabase: auth, Postgres with RLS, storage, edge functions.
+Backend is Supabase: auth, Postgres with RLS, storage, edge functions. Never use the Supabase MCP (wrong project). Always use SUPABASE_ACCESS_TOKEN from .env.local — see SUPABASE_ACCESS.md.
 Posting goes through Upload-Post only, never platform APIs directly.
 The loop: scrape trends + Claude fill creator queues automatically; creators record; admins only approve; after Approve everything (edit, post, track) is automatic. Humans appear exactly twice.
 Every table and query is scoped by company_id. No exceptions.

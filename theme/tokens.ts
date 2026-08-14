@@ -259,3 +259,11 @@ export const motion = {
   /** Design token includes overshoot; product rule is no bounce — prefer easeOut in UI. */
   easeSpring: Easing.bezier(0.34, 1.32, 0.64, 1),
 } as const;
+
+/** Expo Router native-stack / tabs animation names. */
+export const screenTransition = {
+  push: 'slide_from_right',
+  modal: 'slide_from_bottom',
+  fade: 'fade',
+  tab: 'fade',
+} as const;

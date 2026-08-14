@@ -1,8 +1,9 @@
 // Analytics explorer data. Engagement (views, likes, saves) comes from
 // post_metrics snapshots, sign-ups and sales from conversion_daily (synced
 // from the FieldVision product DB), per-post earnings from wallet_ledger
-// bounty credits, paid-out totals from payouts. Money surfaces are gated in
-// the UI by the Stripe connect date: dollars exist only from that day.
+// bounty credits, paid-out totals from payouts. Sign-ups and sales only
+// count from the day the first campaign started on Noni. Money surfaces
+// are also gated in the UI by the Stripe connect date.
 
 import type { ContentFormat } from './admin-review-types';
 import { supabase } from './supabase';
@@ -241,12 +242,25 @@ function pctDelta(current: number, previous: number): number | null {
 
 const WINDOW_DAYS = 84;
 
+/** The day the company started its first campaign on Noni (YYYY-MM-DD). */
+export function firstCampaignDayOf(
+  rows: Array<{ starts_on: string | null; created_at: string | null }>,
+): string | null {
+  let first: string | null = null;
+  for (const row of rows) {
+    const day = row.starts_on ?? row.created_at?.slice(0, 10) ?? null;
+    if (day && (first === null || day < first)) first = day;
+  }
+  return first;
+}
+
 export async function fetchCompanyAnalytics(
   companyId: string,
 ): Promise<CompanyAnalytics> {
   // Posts carry no date filter: old posts still accrue views inside the
   // window. RLS scopes them to the caller's company.
-  const [postsRes, conversionsRes, ledgerRes, payoutsRes] = await Promise.all([
+  const [postsRes, conversionsRes, ledgerRes, payoutsRes, campaignsRes] =
+    await Promise.all([
     supabase
       .from('posts')
       .select(
@@ -271,14 +285,23 @@ export async function fetchCompanyAnalytics(
       .select('amount_cents, created_at, completed_at')
       .eq('company_id', companyId)
       .eq('status', 'paid'),
+    supabase
+      .from('campaigns')
+      .select('starts_on, created_at')
+      .eq('company_id', companyId),
   ]);
   if (postsRes.error) throw postsRes.error;
   if (conversionsRes.error) throw conversionsRes.error;
   if (ledgerRes.error) throw ledgerRes.error;
   if (payoutsRes.error) throw payoutsRes.error;
+  if (campaignsRes.error) throw campaignsRes.error;
+
+  const firstCampaignDay = firstCampaignDayOf(campaignsRes.data ?? []);
+  const conversions = (
+    (conversionsRes.data ?? []) as ConversionRow[]
+  ).filter((r) => firstCampaignDay !== null && r.day >= firstCampaignDay);
 
   const rows = (postsRes.data ?? []) as unknown as PostRow[];
-  const conversions = (conversionsRes.data ?? []) as ConversionRow[];
 
   const earnedByPostId = new Map<string, number>();
   for (const entry of ledgerRes.data ?? []) {

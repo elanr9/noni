@@ -10,7 +10,7 @@ export interface CreatorCardProps {
   /** Preferred linked handle; null renders a quiet placeholder. */
   handle: string | null;
   avatarUri: string | null;
-  earned: string;
+  earned: string | null;
   posts: string;
   views: string;
   onPress: () => void;
@@ -48,7 +48,7 @@ export function CreatorCard({
         </View>
       </View>
       <View style={styles.stats}>
-        <StatBlock label="Earned" value={earned} />
+        {earned !== null ? <StatBlock label="Earned" value={earned} /> : null}
         <StatBlock label="Posts" value={posts} />
         <StatBlock label="Views" value={views} />
       </View>

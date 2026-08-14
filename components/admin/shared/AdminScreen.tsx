@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  Animated,
   ScrollView,
   StyleSheet,
   View,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useScreenEnter } from '../../layout/Screen';
 import { color, space } from '../../../theme/tokens';
 
 export interface AdminScreenProps {
@@ -31,26 +33,29 @@ export function AdminScreen({
 }: AdminScreenProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = actionBar ? 120 : space[8];
+  const enterStyle = useScreenEnter();
 
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
-      {scroll ? (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-          contentContainerStyle={[styles.content, { paddingBottom: bottomPad }, contentStyle]}
-        >
-          {children}
-        </ScrollView>
-      ) : (
-        <View style={[styles.fill, contentStyle]}>{children}</View>
-      )}
+      <Animated.View style={[styles.fill, enterStyle]}>
+        {scroll ? (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            refreshControl={refreshControl}
+            contentContainerStyle={[styles.content, { paddingBottom: bottomPad }, contentStyle]}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={[styles.fill, contentStyle]}>{children}</View>
+        )}
 
-      {actionBar !== undefined && (
-        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          {actionBar}
-        </View>
-      )}
+        {actionBar !== undefined && (
+          <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            {actionBar}
+          </View>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 }

@@ -3,52 +3,51 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { earningsForViews, formatCount } from '../../lib/earnings';
 import type { TaskStatus } from '../../lib/tasks';
-import { color, shadow } from '../../theme/tokens';
-import { StatusChip } from '../StatusChip';
-import { Button } from '../ui/Button';
-import { Icon, type IconName } from '../ui/Icon';
+import { color, radius, shadow, type } from '../../theme/tokens';
+import { StatusChip } from '../ui/StatusChip';
+import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 
+/**
+ * The post row every Posts list shares (SCREENS §4): white card, 40px thumb,
+ * meta row (platform icon · date · time · Top {n}% chip), 1-line title,
+ * views + likes, earnings line with the $20-tier progress bar.
+ */
+
 export interface PostRowProps {
-  platform: string | null;
-  /** "08:30" */
-  time: string;
-  /** "29 Jul" — rendered before the time when provided (list view). */
-  date?: string;
   title: string;
-  views: number;
-  likes: number;
   /** Static photo/carousel posts show the images glyph instead of play. */
   isPhoto: boolean;
-  onPress?: () => void;
-  /** When set, a status chip renders on the trailing edge of the meta row. */
+  /** "09:00" */
+  time: string;
+  /** "28 Jul" — rendered before the time when provided (list view). */
+  date?: string;
+  platform?: 'tiktok' | 'instagram';
+  views: number;
+  likes: number;
+  /** "Top {n}%" green chip renders when this is 10 or under. */
+  topPercent?: number;
+  /** Rows that are not live yet show a status chip and hide the numbers. */
   status?: TaskStatus;
-  /** Set false to hide the stats and earnings rows (posts with no live numbers). */
-  showMetrics?: boolean;
-  /** With onAction, renders a small primary button under the row body. */
-  actionLabel?: string;
-  actionIcon?: IconName;
-  onAction?: () => void;
+  onPress?: () => void;
 }
 
 export function PostRow({
-  platform,
+  title,
+  isPhoto,
   time,
   date,
-  title,
+  platform = 'tiktok',
   views,
   likes,
-  isPhoto,
-  onPress,
+  topPercent,
   status,
-  showMetrics,
-  actionLabel,
-  actionIcon,
-  onAction,
+  onPress,
 }: PostRowProps) {
+  const live = status === undefined || status === 'posted' || status === 'approved';
   const { earned, next, toGo } = earningsForViews(views);
   const fillPercent = ((earned % 20) / 20) * 100;
-  const isInstagram = (platform ?? '').toLowerCase().includes('insta');
+  const showTopChip = topPercent !== undefined && topPercent <= 10;
 
   return (
     <PressableScale
@@ -60,8 +59,8 @@ export function PostRow({
         <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
           <Defs>
             <LinearGradient id="postRowThumb" x1="0" y1="0" x2="0.35" y2="1">
-              <Stop offset="0" stopColor="#E7F4FD" />
-              <Stop offset="1" stopColor="#DCE7F0" />
+              <Stop offset="0" stopColor={color.blue100} />
+              <Stop offset="1" stopColor={color.mediaGradEnd} />
             </LinearGradient>
           </Defs>
           <Rect x="0" y="0" width="100%" height="100%" fill="url(#postRowThumb)" />
@@ -71,12 +70,20 @@ export function PostRow({
       <View style={styles.body}>
         <View style={styles.metaRow}>
           <Icon
-            name={isInstagram ? 'at-sign' : 'music-2'}
+            name={platform === 'instagram' ? 'at-sign' : 'music-2'}
             size={13}
             color={color.slate400}
           />
-          <Text style={styles.meta}>{date !== undefined ? `${date} · ${time}` : time}</Text>
-          {status !== undefined && (
+          <Text style={styles.meta}>
+            {date !== undefined ? `${date} · ${time}` : time}
+          </Text>
+          {showTopChip && (
+            <View style={styles.topChip}>
+              <Icon name="trending-up" size={11} color={color.green} />
+              <Text style={styles.topChipText}>{`Top ${topPercent}%`}</Text>
+            </View>
+          )}
+          {status !== undefined && !live && (
             <View style={styles.chipSlot}>
               <StatusChip status={status} />
             </View>
@@ -85,7 +92,7 @@ export function PostRow({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        {showMetrics !== false && (
+        {live && (
           <>
             <View style={styles.statsRow}>
               <View style={styles.stat}>
@@ -108,13 +115,6 @@ export function PostRow({
             </View>
           </>
         )}
-        {actionLabel !== undefined && onAction !== undefined && (
-          <View style={styles.actionRow}>
-            <Button variant="primary" size="sm" icon={actionIcon} onPress={onAction}>
-              {actionLabel}
-            </Button>
-          </View>
-        )}
       </View>
     </PressableScale>
   );
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
     borderWidth: 1,
     borderColor: color.line,
-    borderRadius: 16,
+    borderRadius: radius.md,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -140,6 +140,7 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    minWidth: 0,
     gap: 4,
   },
   metaRow: {
@@ -147,21 +148,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
   },
+  meta: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
+    color: color.slate400,
+  },
+  topChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    backgroundColor: color.greenSoft,
+  },
+  topChipText: {
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.bold,
+    color: color.green,
+  },
   chipSlot: {
     marginLeft: 'auto',
   },
-  actionRow: {
-    marginTop: 4,
-  },
-  meta: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: color.slate400,
-  },
   title: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18.9,
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    lineHeight: type.size.meta * type.leading.snug,
     letterSpacing: -0.2,
     color: color.ink,
   },
@@ -176,8 +188,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   statText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
   earningsRow: {
@@ -186,25 +198,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   amount: {
-    fontSize: 13,
-    fontWeight: '800',
+    fontSize: type.size.chip,
+    fontWeight: type.weight.heavy,
     color: color.green,
   },
   track: {
     flex: 1,
     height: 5,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     backgroundColor: color.fillQuiet,
     overflow: 'hidden',
   },
   fill: {
     height: '100%',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     backgroundColor: color.green,
   },
   toGo: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.semibold,
     color: color.slate500,
   },
 });

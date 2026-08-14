@@ -21,8 +21,11 @@ import { PressableScale } from '../../ui/PressableScale';
 const SCREEN_BG = '#10161D';
 const RAIL_BG = 'rgba(16,22,29,0.45)';
 const TOOL_HIT = { top: 1, bottom: 1, left: 1, right: 1 } as const;
-const FONT_SIZES = [18, 22, 28] as const;
+const FONT_SIZES = [20, 26, 32] as const;
 type FontSize = (typeof FONT_SIZES)[number];
+const OVERLAY_FONT = 'TikTokSans_700Bold';
+/** TikTok Classic default: hot pink, washed into a pastel box. */
+export const DEFAULT_OVERLAY_FILL = '#EB4C89';
 
 export type OverlayEditorMode = 'text' | 'media';
 
@@ -60,11 +63,16 @@ const PLACEMENT_ORDER: OverlayPlacementId[] = [
 ];
 
 const SWATCHES = [
-  color.white,
-  color.ink,
-  color.blue500,
-  color.green,
-  color.amber,
+  '#FFFFFF',
+  '#000000',
+  '#EA403F',
+  '#FF933D',
+  '#F2CD46',
+  '#78C25E',
+  '#3496F0',
+  '#5756D4',
+  '#F7D7E9',
+  '#EB4C89',
 ] as const;
 
 function hexEq(a: string, b: string): boolean {
@@ -83,10 +91,58 @@ export function parseOverlayStyle(value: unknown): OverlayStyleValue {
   return parsed;
 }
 
+function parseHex(hex: string): { r: number; g: number; b: number } | null {
+  const raw = hex.replace('#', '').trim();
+  const n =
+    raw.length === 3 && raw[0] && raw[1] && raw[2]
+      ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+      : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(n)) return null;
+  return {
+    r: parseInt(n.slice(0, 2), 16),
+    g: parseInt(n.slice(2, 4), 16),
+    b: parseInt(n.slice(4, 6), 16),
+  };
+}
+
+function toHex(r: number, g: number, b: number): string {
+  const byte = (n: number) =>
+    Math.max(0, Math.min(255, Math.round(n)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${byte(r)}${byte(g)}${byte(b)}`;
+}
+
+function mixHex(a: string, b: string, t: number): string | null {
+  const from = parseHex(a);
+  const to = parseHex(b);
+  if (!from || !to) return null;
+  return toHex(
+    from.r + (to.r - from.r) * t,
+    from.g + (to.g - from.g) * t,
+    from.b + (to.b - from.b) * t,
+  );
+}
+
+function luminance(hex: string): number | null {
+  const p = parseHex(hex);
+  if (!p) return null;
+  return (0.299 * p.r + 0.587 * p.g + 0.114 * p.b) / 255;
+}
+
+/** Pastel wash of the picked color — TikTok/Reels Classic box fill. */
+export function overlayBoxFill(fill: string): string {
+  const lum = luminance(fill);
+  if (lum == null || lum > 0.82 || lum < 0.18) return fill;
+  return mixHex(fill, '#FFFFFF', 0.7) ?? fill;
+}
+
+/** Darker same-hue letters on the pastel box (white/black stay high-contrast). */
 export function overlayTextContrast(fill: string): string {
-  return hexEq(fill, color.white) || hexEq(fill, color.amber)
-    ? color.ink
-    : color.white;
+  const lum = luminance(fill);
+  if (lum == null || lum > 0.82) return color.ink;
+  if (lum < 0.18) return color.white;
+  return mixHex(fill, '#000000', 0.22) ?? fill;
 }
 
 export function overlayPlacementFromCoords(
@@ -121,7 +177,7 @@ export function overlayPlacementLabel(
 }
 
 function resolveSwatch(raw: string | undefined): string {
-  if (!raw) return color.white;
+  if (!raw) return DEFAULT_OVERLAY_FILL;
   const hit = SWATCHES.find((s) => hexEq(s, raw));
   return hit ?? raw;
 }
@@ -182,7 +238,7 @@ export function OverlayEditor(props: {
   const [pick, setPick] = useState<OverlayPlacementId>(
     overlayPlacementFromCoords(screenshotX, screenshotY, screenshotWidth),
   );
-  const [fontSize, setFontSize] = useState<FontSize>(22);
+  const [fontSize, setFontSize] = useState<FontSize>(26);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -194,7 +250,7 @@ export function OverlayEditor(props: {
     setPick(
       overlayPlacementFromCoords(screenshotX, screenshotY, screenshotWidth),
     );
-    setFontSize(22);
+    setFontSize(26);
     // Snapshot when the composer opens or the point changes, not on each parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, resetKey]);
@@ -252,7 +308,7 @@ export function OverlayEditor(props: {
 
   function cycleFont() {
     const next = FONT_SIZES[(FONT_SIZES.indexOf(fontSize) + 1) % FONT_SIZES.length];
-    setFontSize(next ?? 22);
+    setFontSize(next ?? 26);
   }
 
   const media = screenshotUrl ? (
@@ -412,12 +468,16 @@ export function OverlayEditor(props: {
             <View
               style={[
                 styles.pill,
-                bg ? { backgroundColor: fill } : styles.pillClear,
+                bg
+                  ? { backgroundColor: overlayBoxFill(fill) }
+                  : styles.pillClear,
               ]}
             >
               <TextInput
                 ref={inputRef}
                 autoFocus
+                multiline
+                scrollEnabled={false}
                 value={text}
                 onChangeText={setText}
                 placeholder=""
@@ -429,7 +489,7 @@ export function OverlayEditor(props: {
                   {
                     color: bg ? contrast : fill,
                     fontSize,
-                    lineHeight: fontSize * 1.25,
+                    lineHeight: fontSize * 1.22,
                     textShadowColor: bg ? 'transparent' : 'rgba(0,0,0,0.6)',
                     textShadowOffset: bg
                       ? { width: 0, height: 0 }
@@ -629,10 +689,10 @@ const styles = StyleSheet.create({
   },
   pill: {
     minWidth: 48,
-    minHeight: 44,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    minHeight: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 16,
     maxWidth: '100%',
     justifyContent: 'center',
   },
@@ -640,12 +700,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   input: {
-    fontWeight: '800',
+    fontFamily: OVERLAY_FONT,
+    fontWeight: '700',
+    letterSpacing: -0.3,
     padding: 0,
     margin: 0,
     minWidth: 24,
     maxWidth: '100%',
     textAlign: 'center',
+    includeFontPadding: false,
   },
   bottom: {
     position: 'relative',
@@ -654,14 +717,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 6,
     paddingHorizontal: 16,
   },
   swatchRing: {
-    width: 35,
-    height: 35,
-    borderRadius: 11,
-    borderWidth: 2.5,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
     borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
@@ -670,9 +733,9 @@ const styles = StyleSheet.create({
     borderColor: color.white,
   },
   swatch: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   swatchIdle: {
     borderWidth: 1.5,

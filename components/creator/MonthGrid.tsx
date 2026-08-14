@@ -1,8 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { color, radius, space, type } from '../../theme/tokens';
+import { color, radius, shadow, space, type } from '../../theme/tokens';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
+
+/**
+ * Calendar month card (SCREENS §4): up to 3 status-colored dots per day,
+ * selected day accent, today tinted.
+ */
 
 const MONTHS = [
   'January',
@@ -21,12 +26,15 @@ const MONTHS = [
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;
 
+const MAX_DOTS = 3;
+
 export interface MonthGridProps {
   year: number;
   /** 0-based month. */
   month: number;
-  /** Post count per day of month. */
-  postCounts: Readonly<Record<number, number>>;
+  /** Status dot colors per day of month (statusDotColor), first 3 render. */
+  dotsByDay: Readonly<Record<number, readonly string[]>>;
+  /** 0 selects nothing. */
   selectedDay: number;
   onSelectDay: (day: number) => void;
   onPrevMonth?: () => void;
@@ -36,7 +44,7 @@ export interface MonthGridProps {
 export function MonthGrid({
   year,
   month,
-  postCounts,
+  dotsByDay,
   selectedDay,
   onSelectDay,
   onPrevMonth,
@@ -44,6 +52,9 @@ export function MonthGrid({
 }: MonthGridProps) {
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const now = new Date();
+  const today =
+    now.getFullYear() === year && now.getMonth() === month ? now.getDate() : 0;
 
   const cells: Array<number | null> = [
     ...Array.from({ length: firstWeekday }, () => null),
@@ -51,9 +62,9 @@ export function MonthGrid({
   ];
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, shadow.shadowCard]}>
       <View style={styles.header}>
-        <Text style={styles.month}>{MONTHS[month]}</Text>
+        <Text style={styles.month}>{`${MONTHS[month]} ${year}`}</Text>
         <View style={styles.nav}>
           <PressableScale
             accessibilityRole="button"
@@ -85,27 +96,38 @@ export function MonthGrid({
       <View style={styles.grid}>
         {cells.map((day, i) => {
           if (day === null) return <View key={`b${i}`} style={styles.cellSlot} />;
-          const count = postCounts[day] ?? 0;
+          const dots = (dotsByDay[day] ?? []).slice(0, MAX_DOTS);
           const isSelected = day === selectedDay;
-          const dots = Math.min(count, 2);
+          const isToday = day === today;
           return (
             <View key={day} style={styles.cellSlot}>
               <PressableScale
                 accessibilityRole="button"
                 accessibilityState={{ selected: isSelected }}
                 onPress={() => onSelectDay(day)}
-                style={[styles.cell, isSelected && styles.cellSelected]}
+                style={[
+                  styles.cell,
+                  isToday && !isSelected && styles.cellToday,
+                  isSelected && styles.cellSelected,
+                ]}
               >
                 <Text
-                  style={[styles.number, isSelected && styles.numberSelected]}
+                  style={[
+                    styles.number,
+                    isToday && !isSelected && styles.numberToday,
+                    isSelected && styles.numberSelected,
+                  ]}
                 >
                   {day}
                 </Text>
                 <View style={styles.dots}>
-                  {Array.from({ length: dots }, (_, d) => (
+                  {dots.map((dotColor, d) => (
                     <View
                       key={d}
-                      style={[styles.dot, isSelected && styles.dotSelected]}
+                      style={[
+                        styles.dot,
+                        { backgroundColor: isSelected ? color.white : dotColor },
+                      ]}
                     />
                   ))}
                 </View>
@@ -123,6 +145,11 @@ const CELL_WIDTH = `${100 / 7}%` as const;
 const styles = StyleSheet.create({
   root: {
     gap: space[2],
+    padding: space[4],
+    borderRadius: radius.lg,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
   },
   header: {
     flexDirection: 'row',
@@ -170,13 +197,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
+  cellToday: {
+    backgroundColor: color.blue100,
+  },
   cellSelected: {
-    backgroundColor: color.ink,
+    backgroundColor: color.accent,
   },
   number: {
     fontSize: type.size.bodySm,
     fontWeight: type.weight.semibold,
     color: color.ink,
+  },
+  numberToday: {
+    fontWeight: type.weight.heavy,
+    color: color.blue700,
   },
   numberSelected: {
     fontWeight: type.weight.heavy,
@@ -191,9 +225,5 @@ const styles = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: radius.pill,
-    backgroundColor: color.blue500,
-  },
-  dotSelected: {
-    backgroundColor: color.white,
   },
 });

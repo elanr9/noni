@@ -57,7 +57,7 @@ function PostVideo({ uri }: { uri: string }) {
 
 export default function AdminCreatorPostDetail() {
   const { assignmentId } = useLocalSearchParams<{ assignmentId: string }>();
-  const { profile } = useAuth();
+  const { profile, managerAccess } = useAuth();
   const [data, setData] = useState<AssignmentPostDetail | null>(null);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -124,11 +124,13 @@ export default function AdminCreatorPostDetail() {
                 value={formatMetric(data.totals.views)}
                 style={styles.statTile}
               />
-              <StatBlock
-                label="Payout"
-                value={payoutCents !== null ? formatCents(payoutCents) : 'None'}
-                style={styles.statTile}
-              />
+              {managerAccess.viewFinancials ? (
+                <StatBlock
+                  label="Payout"
+                  value={payoutCents !== null ? formatCents(payoutCents) : 'None'}
+                  style={styles.statTile}
+                />
+              ) : null}
               <StatBlock
                 label="Saves"
                 value={

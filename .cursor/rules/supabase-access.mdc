@@ -1,0 +1,8 @@
+---
+description: Use .env.local SUPABASE_ACCESS_TOKEN for Noni, never MCP
+alwaysApply: true
+---
+
+Never use the Supabase MCP for Noni. It is the FieldVision project, not Noni.
+
+Noni project ref: `zdcmmzofnrdqbwexuqnm`. Token lives in `.env.local` as `SUPABASE_ACCESS_TOKEN` (with `SUPABASE_PROJECT_REF`). Read `SUPABASE_ACCESS.md`. Query via the Management API or `scripts/apply-migration.ts`. Never call `mcp_auth` / user-supabase MCP against Noni.

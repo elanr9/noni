@@ -11,10 +11,10 @@
 // preset permission toggles from the invite (all off unless the admin chose
 // otherwise).
 //
-// creator invites: sent by the same callers as campaign_manager invites,
-// either from the web dashboard or from the app's roster screen. The email
-// routes to the App Store; signing in with Google on the invited email
-// creates the creator on the inviting company.
+// creator invites: sent by the company admin from the web dashboard, or by
+// a campaign manager when companies.settings.manager_access.invite_creators
+// is on. The email routes to the App Store; signing in with Google on the
+// invited email creates the creator on the inviting company.
 //
 // Existing accounts accept from https://www.usenoni.app/invite/[token] while
 // signed in, which runs on the service role and overrides their profile.
@@ -70,6 +70,41 @@ function sanitizePermissions(input: Record<string, boolean> | undefined): Record
     if (input[key] === true) out[key] = true;
   }
   return out;
+}
+
+/* Company admins toggle this on the web Team page
+   (companies.settings.manager_access.invite_creators). */
+async function companyAllowsCreatorInvites(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<boolean> {
+  const { data } = await admin
+    .from('companies')
+    .select('settings')
+    .eq('id', companyId)
+    .maybeSingle();
+  const settings = (data?.settings ?? {}) as Record<string, unknown>;
+  const access =
+    settings.manager_access &&
+    typeof settings.manager_access === 'object' &&
+    !Array.isArray(settings.manager_access)
+      ? (settings.manager_access as Record<string, unknown>)
+      : {};
+  return access.invite_creators === true;
+}
+
+async function managerMayInvite(
+  admin: SupabaseClient,
+  userId: string,
+  companyId: string,
+  role: InviteRole | undefined,
+): Promise<boolean> {
+  if (role === 'creator') return await companyAllowsCreatorInvites(admin, companyId);
+  return await hasPermission(
+    admin,
+    { userId, companyId, platformAdmin: false, companyAdmin: false },
+    'invite_members',
+  );
 }
 
 async function sendInviteEmail(
@@ -340,8 +375,9 @@ Deno.serve(async (req) => {
     if (action === 'accept') return await handleAccept(admin, user, body ?? {});
 
     // Platform admin invites anywhere (any role). Company admins invite
-    // campaign managers into their own company. Campaign managers holding
-    // invite_members can invite managers into their own company.
+    // campaign managers and creators into their own company. Campaign
+    // managers holding invite_members can invite other managers; creator
+    // invites also need companies.settings.manager_access.invite_creators.
     const { data: callerProfile } = await admin
       .from('profiles')
       .select('role, company_id')
@@ -353,32 +389,26 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'only Noni ops can invite a company admin' }, 403);
       }
       const companyAdmin = callerProfile?.role === 'company_admin';
-      const allowed =
-        companyAdmin ||
-        (callerProfile?.role === 'campaign_manager' &&
-          (await hasPermission(
-            admin,
-            {
-              userId: user.id,
-              companyId: callerProfile.company_id ?? '',
-              platformAdmin: false,
-              companyAdmin: false,
-            },
-            'invite_members',
-          )));
-      if (!allowed) return jsonResponse({ error: 'forbidden' }, 403);
-      if (action === 'invite' && body?.company_id !== callerProfile?.company_id) {
-        return jsonResponse({ error: 'can only invite into your own company' }, 403);
-      }
+      const companyId = callerProfile?.company_id ?? '';
+      let inviteRole: InviteRole | undefined = body?.role;
       if (action === 'resend') {
         const { data: target } = await admin
           .from('company_invites')
-          .select('company_id')
+          .select('company_id, role')
           .eq('id', body?.invite_id ?? '')
           .maybeSingle();
-        if (target?.company_id !== callerProfile?.company_id) {
+        if (target?.company_id !== companyId) {
           return jsonResponse({ error: 'forbidden' }, 403);
         }
+        inviteRole = target?.role as InviteRole | undefined;
+      }
+      const allowed =
+        companyAdmin ||
+        (callerProfile?.role === 'campaign_manager' &&
+          (await managerMayInvite(admin, user.id, companyId, inviteRole)));
+      if (!allowed) return jsonResponse({ error: 'forbidden' }, 403);
+      if (action === 'invite' && body?.company_id !== companyId) {
+        return jsonResponse({ error: 'can only invite into your own company' }, 403);
       }
     }
 

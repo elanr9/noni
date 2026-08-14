@@ -60,9 +60,9 @@ function textProps(overlay: TimelineTextOverlay): Record<string, string> {
     font_size_maximum: '4.4 vmin',
     fill_color: overlay.text_color,
     background_color: overlay.accent_color,
-    background_x_padding: '42%',
-    background_y_padding: '32%',
-    background_border_radius: '36%',
+    background_x_padding: '58%',
+    background_y_padding: '42%',
+    background_border_radius: '52%',
   };
 }
 
