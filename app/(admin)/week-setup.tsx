@@ -3,7 +3,7 @@
 // weights scaled to those targets. Types stay editable on the grid.
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, Stack } from 'expo-router';
 
 import { AdminScreen, PushHeader, SectionLabel } from '../../components/admin/shared';
 import { Button } from '../../components/ui/Button';
@@ -11,6 +11,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { TextField } from '../../components/ui/TextField';
 import { useAuth } from '../../lib/auth';
 import {
+  briefWeekRangeLabel,
   createWeek,
   listCampaigns,
   listPostTypes,
@@ -153,7 +154,7 @@ export default function WeekSetupScreen() {
           slideshowTarget,
         ),
       };
-      await createWeek({
+      const campaign = await createWeek({
         companyId: profile.company_id,
         createdBy: profile.id,
         name: `Week of ${formatDropDate(dropDate)}`,
@@ -163,7 +164,7 @@ export default function WeekSetupScreen() {
         typeSplit,
         postTypes,
       });
-      router.replace('/(admin)/(tabs)/create');
+      router.replace(`/(admin)/week/${campaign.id}`);
     } catch (e) {
       const message =
         e instanceof Error ? e.message : 'Could not start the week';
@@ -174,7 +175,9 @@ export default function WeekSetupScreen() {
   }
 
   return (
-    <AdminScreen
+    <>
+      <Stack.Screen options={{ headerShown: false, title: 'Week setup' }} />
+      <AdminScreen
       actionBar={
         <View style={styles.footerRow}>
           <Button
@@ -198,7 +201,11 @@ export default function WeekSetupScreen() {
       }
     >
       <PushHeader
-        title={weekNumber !== null ? `Week ${weekNumber}` : 'New week'}
+        title={
+          weekNumber !== null
+            ? `Week ${weekNumber} · ${briefWeekRangeLabel(dropDate)}`
+            : `Week · ${briefWeekRangeLabel(dropDate)}`
+        }
         subtitle="Week setup"
         onBack={() => router.back()}
       />
@@ -256,6 +263,7 @@ export default function WeekSetupScreen() {
         </View>
       </View>
     </AdminScreen>
+    </>
   );
 }
 

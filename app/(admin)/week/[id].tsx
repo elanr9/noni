@@ -1,10 +1,9 @@
 // One week's detail. Next week is the planning entry: an empty state until
 // week setup stamps the grid, then lanes, split chips and the stamped rows.
-// Published weeks show the lanes summary plus posts made. Legacy briefs
-// (null post_type_id) still open in the old sheet.
+// Live weeks keep the grid. Done weeks open the past-brief archive.
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, Stack, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
 
 import {
   BriefEditSheet,
@@ -28,22 +27,24 @@ import {
 } from '../../../components/admin/grid/WeekFooter';
 import { WeekTargetsSheet } from '../../../components/admin/grid/WeekTargetsSheet';
 import {
-  LaneSummaryCard,
-  PostsMadeList,
-} from '../../../components/admin/WeekOverview';
-import {
   AdminScreen,
+  Card,
+  MsgButton,
   PushHeader,
+  Segmented,
   SkeletonCard,
+  Thumb,
 } from '../../../components/admin/shared';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { formatMetric } from '../../../lib/analytics';
+import { useAuth } from '../../../lib/auth';
 import {
   briefRowState,
   briefWeekRangeLabel,
   briefWeekStatus,
   getCampaign,
+  listBriefWeeks,
   listCampaignBriefs,
   listCampaigns,
   listWeekPosts,
@@ -54,12 +55,14 @@ import {
   updateBrief,
   updateCampaignTargets,
   type BriefFormat,
+  type BriefWeekStats,
   type Campaign,
   type CampaignBriefItem,
   type WeekPostItem,
 } from '../../../lib/briefs-api';
+import { unreadManagerMessageCount } from '../../../lib/manager-messages-api';
 import { supabase } from '../../../lib/supabase';
-import { color, type } from '../../../theme/tokens';
+import { color, radiusAdmin, shadow, type } from '../../../theme/tokens';
 
 function mondayOf(iso: string): Date {
   const d = new Date(`${iso}T00:00:00`);
@@ -79,6 +82,24 @@ function isoDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function formatViews(n: number): string {
+  return formatMetric(Math.round(n)).replace(/k/g, 'K');
+}
+
+function formatSales(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString('en-US')}`;
+}
+
+function formatLabel(format: BriefFormat): string {
+  return format === 'photo_carousel' ? 'Slideshow' : 'Reel';
+}
+
+function postedDayMeta(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
+  return `${weekday} ${d.getDate()}`;
 }
 
 /**
@@ -117,21 +138,147 @@ function padHooks(options: string[]): string[] {
   return [options[0] ?? '', options[1] ?? ''];
 }
 
+function PastWeekBody({
+  campaignId,
+  dropDate,
+  posts,
+  stats,
+  showSales,
+}: {
+  campaignId: string;
+  dropDate: string;
+  posts: WeekPostItem[] | null;
+  stats: BriefWeekStats | null;
+  showSales: boolean;
+}) {
+  const [fmt, setFmt] = useState(0);
+  const list = posts ?? [];
+  const viewsPerDay =
+    stats?.viewsPerDay ?? list.reduce((sum, p) => sum + p.views, 0) / 7;
+  const salesCents =
+    stats?.salesCents ?? list.reduce((sum, p) => sum + p.salesCents, 0);
+  const postCount = stats?.posts ?? list.length;
+  const filtered =
+    fmt === 0
+      ? list
+      : list.filter((p) =>
+          fmt === 1 ? p.format === 'video' : p.format === 'photo_carousel',
+        );
+  const monday = mondayOf(dropDate);
+  const counts = new Map<string, number>();
+  for (const p of list) {
+    counts.set(p.postedDay, (counts.get(p.postedDay) ?? 0) + 1);
+  }
+  const statCards: { label: string; value: string; money?: boolean }[] = [
+    { label: 'Views/day', value: formatViews(viewsPerDay) },
+  ];
+  if (showSales) {
+    statCards.push({ label: 'Sales', value: formatSales(salesCents), money: true });
+  }
+  statCards.push({ label: 'Posts', value: String(postCount) });
+
+  return (
+    <View style={styles.pastStack}>
+      <View style={styles.statRow}>
+        {statCards.map((s) => (
+          <Card key={s.label} pad={12} style={styles.statCard}>
+            <Text style={[styles.statValue, s.money ? styles.statMoney : null]}>
+              {s.value}
+            </Text>
+            <Text style={styles.statLabel}>{s.label}</Text>
+          </Card>
+        ))}
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.dayRow}
+      >
+        {Array.from({ length: 7 }, (_, i) => {
+          const d = addDays(monday, i);
+          const iso = isoDate(d);
+          const n = counts.get(iso) ?? 0;
+          return (
+            <PressableScale
+              key={iso}
+              accessibilityRole="button"
+              accessibilityLabel={`${d.toLocaleDateString(undefined, { weekday: 'long' })}, ${n} posts`}
+              onPress={() =>
+                router.push({
+                  pathname: '/(admin)/week-day',
+                  params: { id: campaignId, date: iso },
+                })
+              }
+              style={[styles.dayChip, shadow.shadowCard]}
+            >
+              <Text style={styles.dayWeekday}>
+                {d.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
+              </Text>
+              <Text style={styles.dayNum}>{d.getDate()}</Text>
+              <Text style={styles.dayCount}>{`${n} posts`}</Text>
+            </PressableScale>
+          );
+        })}
+      </ScrollView>
+      <Segmented
+        options={[
+          { label: 'All' },
+          { label: 'Videos' },
+          { label: 'Slideshows' },
+        ]}
+        value={fmt}
+        onChange={setFmt}
+      />
+      <View style={styles.pastPosts}>
+        {filtered.map((p) => (
+          <Card key={p.postId} pad={12} style={styles.pastRow}>
+            <Thumb format={p.format} width={38} height={50} radius={9} />
+            <View style={styles.pastBody}>
+              <Text numberOfLines={1} style={styles.pastTitle}>
+                {p.title}
+              </Text>
+              <Text numberOfLines={1} style={styles.pastMeta}>
+                {`${p.creatorName} · ${formatLabel(p.format)} · ${postedDayMeta(p.postedDay)}`}
+              </Text>
+            </View>
+            <View style={styles.pastMetrics}>
+              <Text style={styles.pastViews}>{formatViews(p.views)}</Text>
+              {showSales ? (
+                <Text style={styles.pastSales}>{formatSales(p.salesCents)}</Text>
+              ) : null}
+            </View>
+          </Card>
+        ))}
+      </View>
+      {showSales ? (
+        <Text style={styles.footnote}>
+          Sales show because sales tracking is on in Settings.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export default function WeekDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { managerAccess } = useAuth();
+  const showSales = managerAccess.viewFinancials;
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [weekNumber, setWeekNumber] = useState<number | null>(null);
   const [items, setItems] = useState<CampaignBriefItem[]>([]);
   const [posts, setPosts] = useState<WeekPostItem[] | null>(null);
+  const [stats, setStats] = useState<BriefWeekStats | null>(null);
   const [hashtagBank, setHashtagBank] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lane, setLane] = useState<Lane>('video');
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [legacyItem, setLegacyItem] = useState<CampaignBriefItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [targetsVisible, setTargetsVisible] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -139,20 +286,31 @@ export default function WeekDetailScreen() {
       const latest = await getCampaign(id);
       setCampaign(latest);
       if (!latest) return;
-      const [campaignItems, { data: brand }, all] = await Promise.all([
+      const weekStatus = briefWeekStatus(latest).status;
+      const [campaignItems, { data: brand }, all, doneData, nextUnread] = await Promise.all([
         listCampaignBriefs(latest.id),
         supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
         listCampaigns(),
+        weekStatus === 'done'
+          ? Promise.all([listWeekPosts(latest.id), listBriefWeeks()])
+          : Promise.resolve(null),
+        unreadManagerMessageCount().catch(() => 0),
       ]);
       setItems(campaignItems);
       setHashtagBank(brand?.hashtag_bank ?? []);
+      setUnread(nextUnread);
       const asc = [...all].sort((a, b) =>
         (a.drop_date ?? '') < (b.drop_date ?? '') ? -1 : 1,
       );
       const idx = asc.findIndex((c) => c.id === latest.id);
       setWeekNumber(idx >= 0 ? idx + 1 : asc.length + 1);
-      if (latest.status === 'published') {
-        setPosts(await listWeekPosts(latest.id));
+      if (doneData) {
+        const [weekPosts, weeks] = doneData;
+        setPosts(weekPosts);
+        setStats(weeks.find((w) => w.campaign.id === latest.id)?.stats ?? null);
+      } else {
+        setPosts(null);
+        setStats(null);
       }
     } finally {
       setLoading(false);
@@ -166,13 +324,13 @@ export default function WeekDetailScreen() {
     }, [load]),
   );
 
-  const published = campaign?.status === 'published';
   const editable = campaign?.status === 'draft';
   const hasStampedPosts = items.some((i) => i.briefs.post_type_id !== null);
   const needsWeekSetup = editable && !hasStampedPosts;
   const { status, dayOfWeek } = campaign
     ? briefWeekStatus(campaign)
     : { status: 'next' as const, dayOfWeek: null };
+  const isDone = status === 'done';
 
   const rows = useMemo(
     () =>
@@ -192,6 +350,9 @@ export default function WeekDetailScreen() {
         r.state === 'filled' || r.state === 'complete' || r.state === 'killed',
     ).length;
   const activeRows = lane === 'video' ? videoRows : slideshowRows;
+  const visibleRows = typeFilter
+    ? activeRows.filter((r) => r.item.briefs.post_types?.key === typeFilter)
+    : activeRows;
 
   const typeSplit = useMemo(
     () =>
@@ -241,7 +402,9 @@ export default function WeekDetailScreen() {
         : ' · done';
   const subtitle =
     campaign?.drop_date != null
-      ? `${briefWeekRangeLabel(campaign.drop_date)}${metaSuffix}`
+      ? isDone
+        ? `${briefWeekRangeLabel(campaign.drop_date)} · complete`
+        : `${briefWeekRangeLabel(campaign.drop_date)}${metaSuffix}`
       : undefined;
 
   function openRow(item: CampaignBriefItem) {
@@ -388,6 +551,7 @@ export default function WeekDetailScreen() {
 
   return (
     <>
+      <Stack.Screen options={{ headerShown: false, title: 'Week' }} />
       <AdminScreen
         refreshControl={
           <RefreshControl
@@ -420,6 +584,12 @@ export default function WeekDetailScreen() {
           title={weekNumber !== null ? `Week ${weekNumber}` : (campaign?.name ?? 'Week')}
           subtitle={subtitle}
           onBack={() => router.back()}
+          trailing={
+            <MsgButton
+              count={unread}
+              onPress={() => router.push('/(admin)/messages' as Href)}
+            />
+          }
         />
 
         {loading ? (
@@ -442,28 +612,22 @@ export default function WeekDetailScreen() {
             onAction={() => router.push('/(admin)/week-setup')}
             style={styles.empty}
           />
-        ) : published ? (
-          <View style={styles.stack}>
-            <View style={styles.lanesRow}>
-              <LaneSummaryCard
-                icon="video"
-                label="Videos"
-                done={doneCount(videoRows)}
-                target={videoTarget}
-              />
-              <LaneSummaryCard
-                icon="images"
-                label="Slideshows"
-                done={doneCount(slideshowRows)}
-                target={slideshowTarget}
-              />
+        ) : isDone && campaign.drop_date ? (
+          posts === null ? (
+            <View style={styles.stack}>
+              <SkeletonCard height={78} />
+              <SkeletonCard height={72} />
+              <SkeletonCard height={72} />
             </View>
-            <PostsMadeList
-              posts={posts ?? []}
-              loading={posts === null}
-              formatViews={formatMetric}
+          ) : (
+            <PastWeekBody
+              campaignId={campaign.id}
+              dropDate={campaign.drop_date}
+              posts={posts}
+              stats={stats}
+              showSales={showSales}
             />
-          </View>
+          )
         ) : (
           <View style={styles.stack}>
             <LaneSwitcher
@@ -473,19 +637,32 @@ export default function WeekDetailScreen() {
                 done: doneCount(slideshowRows),
                 target: slideshowTarget,
               }}
-              onChange={setLane}
+              onChange={(next) => {
+                setLane(next);
+                setTypeFilter(null);
+              }}
             />
-            <View style={styles.targetsRow}>
-              <PressableScale
-                accessibilityRole="button"
-                onPress={() => setTargetsVisible(true)}
-              >
-                <Text style={styles.targetsEdit}>Edit targets</Text>
-              </PressableScale>
-            </View>
-            <SplitHeader chips={splitChips} />
+            {editable ? (
+              <View style={styles.targetsRow}>
+                <PressableScale
+                  accessibilityRole="button"
+                  onPress={() => setTargetsVisible(true)}
+                >
+                  <Text style={styles.targetsEdit}>Edit targets</Text>
+                </PressableScale>
+              </View>
+            ) : null}
+            <SplitHeader
+              split={splitChips}
+              rows={activeRows.map((r) => ({
+                key: r.item.briefs.post_types?.key ?? '',
+                state: r.state,
+              }))}
+              active={typeFilter}
+              onSelect={setTypeFilter}
+            />
             <View style={styles.rows}>
-              {activeRows.map((row, i) => (
+              {visibleRows.map((row, i) => (
                 <BriefRow
                   key={row.item.brief_id}
                   index={i + 1}
@@ -494,7 +671,7 @@ export default function WeekDetailScreen() {
                   onPress={() => openRow(row.item)}
                 />
               ))}
-              {activeRows.length === 0 ? (
+              {visibleRows.length === 0 ? (
                 <Text style={styles.emptyGrid}>No posts on this side yet.</Text>
               ) : null}
             </View>
@@ -531,9 +708,107 @@ const styles = StyleSheet.create({
   stack: {
     gap: 12,
   },
-  lanesRow: {
+  pastStack: {
+    gap: 12,
+  },
+  statRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
+  },
+  statCard: {
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    color: color.ink,
+  },
+  statMoney: {
+    color: color.green,
+  },
+  statLabel: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    color: color.slate400,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingBottom: 2,
+  },
+  dayChip: {
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radiusAdmin.md,
+    backgroundColor: color.white,
+  },
+  dayWeekday: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    color: color.slate400,
+  },
+  dayNum: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: color.ink,
+  },
+  dayCount: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: color.blue600,
+  },
+  pastPosts: {
+    gap: 8,
+  },
+  pastRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+  },
+  pastBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pastTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    color: color.ink,
+  },
+  pastMeta: {
+    marginTop: 2,
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  pastMetrics: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+  },
+  pastViews: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    color: color.ink,
+  },
+  pastSales: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: color.green,
+  },
+  footnote: {
+    marginHorizontal: 2,
+    fontSize: 12.5,
+    fontWeight: '400',
+    lineHeight: 12.5 * 1.45,
+    color: color.slate400,
   },
   rows: {
     gap: 10,

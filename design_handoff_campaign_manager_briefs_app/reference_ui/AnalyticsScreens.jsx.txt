@@ -1,0 +1,499 @@
+/* Analytics — the same explorer engine as the usenoni.app admin console
+   (Filters · Sort by · time range · Graph|Calendar), rebuilt for the phone.
+   Settings is the manager's own account only: invites, notifications,
+   support, sign out, delete. Company brain, billing and team live on the
+   web admin console. */
+
+const aK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : '' + Math.round(n);
+const aM = (n) => '$' + n.toLocaleString('en-US');
+/* Money exists only from the day the admin connected the company's Stripe.
+   Views and posts are platform data and are always there; anything in
+   dollars starts on sinceDay and earlier days simply have no money. */
+const A_STRIPE = { sinceDay: 11, since: 'Aug 11' };
+const aDayNum = (date) => +String(date).split(' ')[1];
+const aMoneyOn = (stripe, day) => stripe && day >= A_STRIPE.sinceDay;
+
+const A_CREATORS = [
+  { id: 'c1', name: 'Fabri Duarte', viewsN: 842000, posts: 34 },
+  { id: 'c2', name: 'Mara Ionescu', viewsN: 611000, posts: 28 },
+  { id: 'c3', name: 'Deniz Aksoy', viewsN: 447000, posts: 21 },
+];
+const A_POSTS = [
+  { id: 'p1', title: 'Half-time talk, but with data', creator: 'Fabri Duarte', short: 'Fabri', format: 'video', date: 'Aug 11', viewsN: 84200, earned: 190 },
+  { id: 'p2', title: 'Why your winger fades after 70 minutes', creator: 'Mara Ionescu', short: 'Mara', format: 'video', date: 'Aug 10', viewsN: 61300, earned: 140 },
+  { id: 'p3', title: 'Reading a pass map in 20 seconds', creator: 'Deniz Aksoy', short: 'Deniz', format: 'video', date: 'Aug 9', viewsN: 47800, earned: 110 },
+  { id: 'p4', title: '4 drills we tagged this week', creator: 'Mara Ionescu', short: 'Mara', format: 'photo_carousel', date: 'Aug 8', viewsN: 32800, earned: 75 },
+  { id: 'p5', title: '5 things coaches check before they reply', creator: 'Fabri Duarte', short: 'Fabri', format: 'photo_carousel', date: 'Aug 6', viewsN: 28400, earned: 65 },
+  { id: 'p6', title: 'Highlight reel vs full match film', creator: 'Mara Ionescu', short: 'Mara', format: 'video', date: 'Aug 5', viewsN: 15800, earned: 36 },
+  { id: 'p7', title: 'The tripod setup that took 90 seconds', creator: 'Fabri Duarte', short: 'Fabri', format: 'video', date: 'Aug 4', viewsN: 19600, earned: 45 },
+  { id: 'p8', title: '3 stats that decide Sunday', creator: 'Deniz Aksoy', short: 'Deniz', format: 'photo_carousel', date: 'Aug 2', viewsN: 12100, earned: 28 },
+];
+/* day → [views, sign-ups, sales $] */
+const A_DAILY = { 1: [8400, 9, 95], 2: [12100, 14, 120], 3: [9800, 11, 90], 4: [16200, 18, 150], 5: [14800, 16, 140], 6: [18900, 21, 180], 7: [11400, 12, 105], 8: [22600, 26, 240], 9: [25100, 24, 220], 10: [27400, 31, 260], 11: [33800, 38, 340], 12: [9600, 8, 70] };
+const aDayPosts = (d) => A_POSTS.filter((q) => q.date === 'Aug ' + d);
+const A_WEEKLY = [58, 64, 71, 80, 92, 101, 96, 112, 124, 118, 131, 142]; /* k views per week */
+const A_FORMATS = { Reel: 78, Slideshow: 40 };
+const A_RANGES = ['Last 24 hours', 'Last 7 days', 'Last 2 weeks', 'Last month', 'Last 12 weeks'];
+const A_SORTS = ['Views over time', 'Top creators', 'Top posts', 'Formats'];
+
+function aRangeData(range, weekly) {
+  const lastW = weekly[weekly.length - 1] || 0;
+  const wave = (n, base, amp, rise) => Array.from({ length: n }, (_, i) => Math.max(0.1, +(base * (1 + amp * Math.sin(i * 1.35 + 0.8) + rise * i / n)).toFixed(1)));
+  if (range === 'Last 24 hours') return { data: wave(12, lastW / 7 / 10, 0.45, 0.5), labels: ['2a', '10a', '6p'] };
+  if (range === 'Last 7 days') return { data: wave(7, lastW / 7, 0.3, 0.25), labels: ['Wed', 'Sat', 'Tue'] };
+  if (range === 'Last 2 weeks') return { data: wave(14, lastW / 7, 0.35, 0.3), labels: ['Jul 30', 'Aug 5', 'Aug 11'] };
+  if (range === 'Last month') return { data: weekly.slice(-5), labels: ['Jul 13', 'Jul 27', 'Aug 10'] };
+  return { data: weekly, labels: ['May 25', 'Jul 6', 'Aug 3'] };
+}
+
+function MAreaChart({ series, labels }) {
+  const W = 350, H = 170, P = { t: 12, r: 8, b: 22, l: 34 };
+  const max = Math.max(...series) * 1.15;
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const pts = series.map((v, i) => [P.l + iw * i / (series.length - 1), P.t + ih * (1 - v / max)]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const last = pts[pts.length - 1];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      {[0, 0.5, 1].map((f, i) => (
+        <g key={i}>
+          <line x1={P.l} x2={W - P.r} y1={P.t + ih * f} y2={P.t + ih * f} stroke="var(--line)" strokeWidth="1"></line>
+          <text x={P.l - 7} y={P.t + ih * f + 4} textAnchor="end" style={{ font: '600 10px var(--font-ui)', fill: 'var(--slate-400)' }}>{aK(max * (1 - f) * 1000)}</text>
+        </g>
+      ))}
+      <path d={`${line} L ${(P.l + iw).toFixed(1)} ${P.t + ih} L ${P.l} ${P.t + ih} Z`} fill="rgba(27,166,238,0.10)"></path>
+      <path d={line} fill="none" stroke="var(--blue-500)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"></path>
+      <circle cx={last[0]} cy={last[1]} r="4.5" fill="var(--blue-500)" stroke="#fff" strokeWidth="2"></circle>
+      {labels.map((w, i) => <text key={w + i} x={P.l + iw * (labels.length > 1 ? i / (labels.length - 1) : 0)} y={H - 6} textAnchor={i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle'} style={{ font: '600 10px var(--font-ui)', fill: 'var(--slate-400)' }}>{w}</text>)}
+    </svg>
+  );
+}
+
+/* Anchored menu pill — same behaviour as the web console dropdowns. */
+function MMenu({ trigger, active, children }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const out = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener('pointerdown', out);
+    return () => window.removeEventListener('pointerdown', out);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button type="button" onClick={() => setOpen(!open)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: 'var(--shadow-card)', background: active ? 'var(--blue-100)' : 'var(--white)', font: '700 13px var(--font-ui)', color: active ? 'var(--blue-700)' : 'var(--ink)' }}>
+        {trigger}<Icon name="chevron-down" size={13} color={active ? 'var(--blue-700)' : 'var(--slate-400)'} />
+      </button>
+      {open ? (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 80, minWidth: 180, background: 'var(--white)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-raised)', padding: 6 }}>
+          {children((fn) => { fn(); setOpen(false); })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MItem({ label, on, pick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <button type="button" onClick={pick} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', background: 'transparent', whiteSpace: 'nowrap', font: '700 13px var(--font-ui)', color: 'var(--ink)' }}>
+      <span style={{ flex: 1 }}>{label}</span>
+      {on ? <Icon name="check" size={13} color="var(--blue-700)" /> : null}
+    </button>
+  );
+}
+
+function RankRow({ rank, name, views, max, onOpen }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div role="button" onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', cursor: 'pointer' }}>
+      <span style={{ width: 24, flex: '0 0 auto', font: '800 13px var(--font-ui)', color: rank === 1 ? 'var(--blue-700)' : 'var(--slate-400)' }}>#{rank}</span>
+      <Avatar name={name} size={30} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ flex: 1, font: '700 13.5px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+          <span style={{ font: '700 12.5px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap' }}>{aK(views)} views</span>
+        </div>
+        <span style={{ display: 'block', marginTop: 5, height: 8, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden' }}>
+          <span style={{ display: 'block', width: Math.round((views / max) * 100) + '%', height: '100%', borderRadius: 999, background: 'var(--blue-500)' }}></span>
+        </span>
+      </div>
+      <Icon name="chevron-right" size={15} color="var(--slate-300)" />
+    </div>
+  );
+}
+
+function APostRow({ q, onOpen, border = true, stripe = true }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const money = aMoneyOn(stripe, aDayNum(q.date));
+  return (
+    <div role="button" onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 0', borderBottom: border ? '1px solid var(--line)' : 'none', cursor: 'pointer' }}>
+      <Thumb format={q.format} w={38} h={50} radius={9} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 13.5px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.title}</div>
+        <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{q.short} · {formatLabel(q.format)} · {q.date}</div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ font: '700 13.5px var(--font-ui)', color: 'var(--ink)' }}>{aK(q.viewsN)}</div>
+        {money ? <div style={{ font: '700 11.5px var(--font-ui)', color: 'var(--green)' }}>{aM(q.earned)}</div> : null}
+      </div>
+      <Icon name="chevron-right" size={15} color="var(--slate-300)" />
+    </div>
+  );
+}
+
+/* Post detail — total, earned, TikTok vs Instagram, Open post. */
+function MPostDetail({ post, onBack, stripe = true }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const money = aMoneyOn(stripe, aDayNum(post.date));
+  const tt = Math.round(post.viewsN * 0.76), ig = post.viewsN - tt;
+  const col = (name, icon, v) => (
+    <div style={{ flex: 1, minWidth: 0, borderRadius: 14, border: '1px solid var(--line)', padding: 13 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+        <Icon name={icon} size={14} color="var(--ink)" /><span style={{ font: '700 13px var(--font-ui)', color: 'var(--ink)' }}>{name}</span>
+      </div>
+      {[['Views', aK(v)], ['Likes', aK(Math.round(v * 0.085))], ['Saves', aK(Math.round(v * 0.016))]].map(([l, x]) => (
+        <div key={l} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 0' }}>
+          <span style={{ flex: 1, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{l}</span>
+          <span style={{ font: '700 13.5px var(--font-ui)', color: 'var(--ink)' }}>{x}</span>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <button type="button" onClick={onBack} aria-label="Back" style={{ width: 32, height: 32, flex: '0 0 auto', borderRadius: 999, border: '1px solid var(--line)', cursor: 'pointer', background: 'var(--white)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="chevron-left" size={16} color="var(--ink)" />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{post.title}</div>
+          <div style={{ marginTop: 1, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{post.short} · {formatLabel(post.format)} · {post.date}</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, padding: '12px 14px', borderRadius: 14, background: 'var(--fill-quiet)', marginBottom: 12 }}>
+        {[['Total views', aK(post.viewsN)], ['Earned', money ? aM(post.earned) : 'Not tracked'], ['Posted', post.date]].map(([l, v]) => (
+          <span key={l} style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', font: '600 11px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{l}</span>
+            <span style={{ display: 'block', marginTop: 2, font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)', whiteSpace: 'nowrap' }}>{v}</span>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+        {col('TikTok', 'music-2', tt)}
+        {col('Instagram', 'at-sign', ig)}
+      </div>
+      <Button size="sm" variant="tint" icon="share-2">Open post</Button>
+    </div>
+  );
+}
+
+function MDayDetail({ day, onOpenPost, onClose, stripe = true }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const [views, signups, sales] = A_DAILY[day] || [0, 0, 0];
+  const money = aMoneyOn(stripe, day);
+  const posts = aDayPosts(day);
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ flex: '0 0 auto', font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>Aug {day}</span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'right', font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><b style={{ color: 'var(--ink)' }}>{aK(views)}</b> views · <b style={{ color: 'var(--ink)' }}>{signups}</b> sign-ups{money ? <> · <b style={{ color: 'var(--ink)' }}>{aM(sales)}</b> sales</> : null}</span>
+        <button type="button" onClick={onClose} aria-label="Close" style={{ width: 26, height: 26, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="x" size={13} color="var(--slate-500)" />
+        </button>
+      </div>
+      {stripe && !money ? <p style={{ margin: '0 0 8px', font: '600 12px/1.4 var(--font-ui)', color: 'var(--slate-400)' }}>No money data for this day. Stripe was connected {A_STRIPE.since}.</p> : null}
+      <SectionLabel style={{ padding: 0 }}>Posted Aug {day}</SectionLabel>
+      {posts.length === 0 ? <p style={{ margin: '8px 0 0', font: '600 12.5px var(--font-ui)', color: 'var(--slate-400)' }}>Nothing posted this day.</p>
+        : posts.map((q, i) => <APostRow key={q.id} q={q} stripe={stripe} border={i < posts.length - 1} onOpen={() => onOpenPost(q)} />)}
+    </div>
+  );
+}
+
+/* Daily-activity month. Badge = sign-ups and sales, dot = posts published. */
+function MMonthCal({ onPick, selected, stripe = true }) {
+  const offset = 6; /* Aug 1, 2026 is a Saturday */
+  const cells = [...Array.from({ length: offset }, () => null), ...Array.from({ length: 31 }, (_, i) => i + 1)];
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 6 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <span key={d + i} style={{ textAlign: 'center', font: '800 10px var(--font-ui)', letterSpacing: '0.6px', color: 'var(--slate-400)' }}>{d}</span>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {cells.map((d, i) => {
+          if (!d) return <span key={'e' + i}></span>;
+          const has = A_DAILY[d]; const posts = aDayPosts(d).length;
+          const future = d > 12; const on = selected === d;
+          return (
+            <button key={d} type="button" onClick={has ? () => onPick(d) : undefined}
+              style={{ minHeight: 38, borderRadius: 9, border: on ? '1.5px solid var(--blue-500)' : '1px solid var(--line)', background: on ? 'var(--blue-100)' : 'var(--white)', cursor: has ? 'pointer' : 'default', opacity: future ? 0.4 : 1, padding: '4px 4px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, font: '700 11px var(--font-ui)', color: 'var(--ink)' }}>{d}{posts ? <span style={{ width: 4, height: 4, borderRadius: 999, background: 'var(--blue-500)' }}></span> : null}</span>
+              {has && aMoneyOn(stripe, d) ? <span style={{ font: '700 9px var(--font-ui)', color: 'var(--blue-700)', whiteSpace: 'nowrap' }}>{aM(has[2])}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <p style={{ margin: '8px 0 0', font: '600 11px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stripe ? `$ = sales, tracked since ${A_STRIPE.since} · dot = posts` : '$ appears once Stripe is connected · dot = posts'}</p>
+    </div>
+  );
+}
+
+function AnalyticsScreen({ state = 'default', view = 'graph', sort, onSettings, onOpenCreator }) {
+  const { Icon, EmptyState } = window.NoniDesignSystem_710e43;
+  const [mode, setMode] = React.useState(view === 'calendar' ? 1 : 0);
+  const [range, setRange] = React.useState('Last 7 days');
+  const [sortBy, setSortBy] = React.useState(sort || 'Views over time');
+  const [formatF, setFormatF] = React.useState('All formats');
+  const [creatorF, setCreatorF] = React.useState('All creators');
+  const [day, setDay] = React.useState(null);
+  const [post, setPost] = React.useState(null);
+  const loading = state === 'loading';
+  const empty = state === 'empty';
+
+  const nF = (formatF !== 'All formats' ? 1 : 0) + (creatorF !== 'All creators' ? 1 : 0);
+  const fmtTotal = A_FORMATS.Reel + A_FORMATS.Slideshow;
+  const fmtShare = formatF === 'All formats' ? 1 : A_FORMATS[formatF] / fmtTotal;
+  const crTotal = A_CREATORS.reduce((n, p) => n + p.viewsN, 0);
+  const crObj = A_CREATORS.find((p) => p.name === creatorF);
+  const crShare = crObj ? crObj.viewsN / crTotal : 1;
+  const chart = aRangeData(range, A_WEEKLY.map((v) => +(v * fmtShare * crShare).toFixed(1)));
+  const ranked = (crObj ? [crObj] : A_CREATORS).map((p) => ({ ...p, v: Math.round(p.viewsN * fmtShare) })).sort((a, b) => b.v - a.v);
+  const maxCr = Math.max(...ranked.map((p) => p.v), 1);
+  const posts = A_POSTS.filter((q) => (formatF === 'All formats' || formatLabel(q.format) === formatF) && (creatorF === 'All creators' || q.creator === creatorF)).sort((a, b) => b.viewsN - a.viewsN);
+  const fmtEntries = Object.entries(A_FORMATS).filter(([k]) => formatF === 'All formats' || k === formatF).map(([k, v]) => [k, Math.round(v * crShare)]);
+  const maxFmt = Math.max(...fmtEntries.map(([, v]) => v), 1);
+  const cut = (formatF !== 'All formats' ? ' · ' + formatF + 's' : '') + (crObj ? ' · ' + crObj.name.split(' ')[0] : '');
+
+  return (
+    <AdminScreen>
+      <AdminHeader title="Analytics"
+        right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!loading && !empty ? (
+            <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+              {['Graph', 'Calendar'].map((t, i) => (
+                <button key={t} type="button" onClick={() => { setMode(i); setPost(null); }}
+                  style={{ padding: '7px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: mode === i ? 'var(--white)' : 'transparent', boxShadow: mode === i ? 'var(--shadow-card)' : 'none', font: '700 12.5px var(--font-ui)', color: mode === i ? 'var(--ink)' : 'var(--slate-400)' }}>{t}</button>
+              ))}
+            </div>) : null}
+          <button type="button" onClick={onSettings} aria-label="Settings" style={{ width: 38, height: 38, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="settings" size={19} color="var(--slate-500)" />
+          </button>
+        </div>} />
+
+      {loading ? (<><SkeletonCard height={96} /><SkeletonCard height={44} /><SkeletonCard height={280} /></>) : null}
+      {!loading && empty ? <EmptyState icon="chart-column" title="No numbers yet" body="Metrics start landing the day the first post goes live." style={{ marginTop: 40 }} /> : null}
+
+      {!loading && !empty ? (
+        <>
+          <Card pad={12} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+            {[['Views', '1.9M', '+34%'], ['Posts', '118', '+12 wk'], ['Sign-ups', '1,240', '+22%'], ['Paid out', '$410', `since ${A_STRIPE.since}`]].map(([l, v, d]) => (
+              <span key={l} style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', font: '600 10.5px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{l}</span>
+                <span style={{ display: 'block', marginTop: 2, font: '700 17px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)', whiteSpace: 'nowrap' }}>{v}</span>
+                <span style={{ display: 'block', marginTop: 1, font: '600 10.5px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{d}</span>
+              </span>
+            ))}
+          </Card>
+
+          {mode === 0 ? (
+            <Card pad={16}>
+              {post ? <MPostDetail post={post} onBack={() => setPost(null)} /> : (
+                <>
+                  <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <MMenu trigger={nF ? 'Filters · ' + nF : 'Filters'} active={nF > 0}>
+                      {(close) => (
+                        <>
+                          <SectionLabel style={{ padding: '6px 12px 2px' }}>Format</SectionLabel>
+                          {['All formats', 'Reel', 'Slideshow'].map((f) => <MItem key={f} label={f} on={formatF === f} pick={() => close(() => setFormatF(f))} />)}
+                          <SectionLabel style={{ padding: '8px 12px 2px', borderTop: '1px solid var(--line)', marginTop: 6 }}>Creator</SectionLabel>
+                          {['All creators', ...A_CREATORS.map((p) => p.name)].map((c) => <MItem key={c} label={c} on={creatorF === c} pick={() => close(() => setCreatorF(c))} />)}
+                        </>
+                      )}
+                    </MMenu>
+                    <MMenu trigger="Sort by">
+                      {(close) => A_SORTS.map((s) => <MItem key={s} label={s} on={sortBy === s} pick={() => close(() => setSortBy(s))} />)}
+                    </MMenu>
+                    <MMenu trigger={range}>
+                      {(close) => A_RANGES.map((r) => <MItem key={r} label={r} on={range === r} pick={() => close(() => setRange(r))} />)}
+                    </MMenu>
+                  </div>
+                  {sortBy === 'Views over time' ? (
+                    <>
+                      <SectionLabel style={{ padding: '0 0 10px' }}>Views · {range.toLowerCase()}{cut}</SectionLabel>
+                      <MAreaChart series={chart.data} labels={chart.labels} />
+                    </>) : null}
+                  {sortBy === 'Top creators' ? (
+                    <>
+                      <SectionLabel style={{ padding: 0 }}>Top creators{cut}</SectionLabel>
+                      {ranked.map((p, i) => <RankRow key={p.id} rank={i + 1} name={p.name} views={p.v} max={maxCr} onOpen={() => onOpenCreator && onOpenCreator(p.id)} />)}
+                    </>) : null}
+                  {sortBy === 'Top posts' ? (
+                    <>
+                      <SectionLabel style={{ padding: 0 }}>Top posts{cut}</SectionLabel>
+                      {posts.length === 0 ? <p style={{ margin: '10px 0 2px', font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}>No posts match these filters.</p>
+                        : posts.map((q, i) => <APostRow key={q.id} q={q} border={i < posts.length - 1} onOpen={() => setPost(q)} />)}
+                    </>) : null}
+                  {sortBy === 'Formats' ? (
+                    <>
+                      <SectionLabel style={{ padding: '0 0 12px' }}>Posts by format{crObj ? ' · ' + crObj.name.split(' ')[0] : ''}</SectionLabel>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+                        {fmtEntries.map(([k, v]) => (
+                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ width: 74, font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>{k}s</span>
+                            <span style={{ flex: 1, height: 9, borderRadius: 999, background: 'var(--fill-quiet)', overflow: 'hidden' }}>
+                              <span style={{ display: 'block', width: Math.round(100 * v / maxFmt) + '%', height: '100%', borderRadius: 999, background: 'var(--blue-500)' }}></span>
+                            </span>
+                            <span style={{ width: 34, textAlign: 'right', font: '700 12.5px var(--font-ui)', color: 'var(--ink)' }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>) : null}
+                </>
+              )}
+            </Card>
+          ) : (
+            <>
+              <Card pad={12}>
+                <SectionLabel style={{ padding: '0 0 8px' }}>Daily activity · August</SectionLabel>
+                <MMonthCal selected={day} onPick={(d) => { setDay(d); setPost(null); }} />
+              </Card>
+              {day ? (
+                <Card pad={12}>
+                  {post ? <MPostDetail post={post} onBack={() => setPost(null)} /> : <MDayDetail day={day} onOpenPost={setPost} onClose={() => setDay(null)} />}
+                </Card>) : null}
+            </>
+          )}
+        </>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* ————— Settings ————— */
+
+function MToggle({ on, onChange }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
+      style={{ width: 46, height: 28, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', padding: 2, background: on ? 'var(--blue-500)' : 'var(--line-strong)', transition: 'background var(--dur-fast) var(--ease-out)' }}>
+      <span style={{ display: 'block', width: 24, height: 24, borderRadius: 999, background: 'var(--white)', boxShadow: 'var(--shadow-card)', transform: on ? 'translateX(18px)' : 'translateX(0)', transition: 'transform var(--dur-fast) var(--ease-out)' }}></span>
+    </button>
+  );
+}
+
+function SettingsScreen({ onBack, sheet = null, animateSheet = true }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [open, setOpen] = React.useState(sheet); /* 'invite' | 'notifs' | 'delete' | 'signout' | 'terms' | null */
+  const [ended, setEnded] = React.useState(null); /* 'signedout' | 'deleted' */
+  const [sent, setSent] = React.useState(false);
+  const [notifs, setNotifs] = React.useState({ subs: true, live: true, weekly: false });
+  const field = (ph, mt) => <div style={{ padding: 13, marginTop: mt ? 10 : 0, borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '600 15px var(--font-ui)', color: 'var(--slate-400)' }}>{ph}</div>;
+  return (
+    <AdminScreen bottom={40} pad={false}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 40px' }}>
+        <PushHeader title="Settings" onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Card pad={0}>
+            <NavRow icon="plus" label="Invite a creator" onClick={() => { setSent(false); setOpen('invite'); }} />
+            <NavRow icon="bell" label="Notifications" onClick={() => setOpen('notifs')} />
+            <NavRow icon="message-circle" label="Contact support" />
+            <NavRow icon="copy" label="Terms and conditions" last onClick={() => setOpen('terms')} />
+          </Card>
+          <Card pad={0}>
+            <NavRow icon="log-out" label="Sign out" tone="danger" onClick={() => setOpen('signout')} />
+            <NavRow icon="trash-2" label="Delete account" tone="danger" last onClick={() => setOpen('delete')} />
+          </Card>
+          <p style={{ margin: '0 2px', textAlign: 'center', font: '600 12px var(--font-ui)', color: 'var(--slate-300)' }}>Signed in as campaign manager · {A.company.name}</p>
+        </div>
+      </div>
+
+      {open === 'invite' ? (
+        <Sheet title={sent ? 'Invite sent' : 'Invite a creator'} subtitle={sent ? null : 'They get an email that signs them into the creator app for ' + A.company.name + '. No setup on their end.'} onClose={() => setOpen(null)} animate={animateSheet} maxHeight="70%"
+          footer={sent ? <Button variant="primary" size="lg" block onClick={() => setOpen(null)}>Done</Button> : <Button variant="primary" size="lg" block onClick={() => setSent(true)}>Send invite</Button>}>
+          {sent ? (
+            <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '4px 0' }}>
+              <Icon name="circle-check-big" size={20} color="var(--green)" style={{ flex: '0 0 auto', marginTop: 1 }} />
+              <p style={{ margin: 0, font: '400 15px/1.5 var(--font-ui)', color: 'var(--ink)' }}>Sofia is invited. Her email is already bound to {A.company.name}, so signing in lands her in the creator app with nothing to configure.</p>
+            </div>
+          ) : (
+            <div>
+              {field('Name')}
+              {field('Email', true)}
+            </div>
+          )}
+        </Sheet>
+      ) : null}
+
+      {open === 'notifs' ? (
+        <Sheet title="Notifications" subtitle="What Noni pings you about." onClose={() => setOpen(null)} animate={animateSheet} maxHeight="70%"
+          footer={<Button variant="primary" size="lg" block onClick={() => setOpen(null)}>Done</Button>}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {[['subs', 'New submissions', 'A creator sends something for review'], ['live', 'Posts going live', 'An approved post publishes'], ['weekly', 'Weekly summary', 'Views, sign-ups and earnings every Monday']].map(([k, l, s], i, arr) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{l}</div>
+                  <div style={{ marginTop: 2, font: '400 13px/1.4 var(--font-ui)', color: 'var(--slate-400)' }}>{s}</div>
+                </div>
+                <MToggle on={notifs[k]} onChange={(v) => setNotifs({ ...notifs, [k]: v })} />
+              </div>
+            ))}
+          </div>
+        </Sheet>
+      ) : null}
+
+      {open === 'terms' ? (
+        <Sheet title="Terms and conditions" subtitle="The short version. The full text lives on usenoni.app/terms." onClose={() => setOpen(null)} animate={animateSheet} maxHeight="78%"
+          footer={<Button variant="primary" size="lg" block onClick={() => setOpen(null)}>Done</Button>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 4 }}>
+            {[['Your account', 'You use Noni on behalf of ' + A.company.name + '. Your access can be granted or revoked by the company admin at any time.'],
+              ['Content and approvals', 'Approving a post publishes it to the linked creator accounts. You are responsible for reviewing content before it goes live.'],
+              ['Payments', 'Creator earnings unlock on your approvals and are paid from the company budget. Noni does not hold funds on your behalf.'],
+              ['Data', 'Analytics come from the connected platforms and Stripe. Noni stores only what it needs to run briefs, approvals and payouts.'],
+              ['Leaving', 'Deleting your account removes your access and preferences. Posts, creators and company data stay with the company.']].map(([h, b]) => (
+              <div key={h}>
+                <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{h}</div>
+                <p style={{ margin: '5px 0 0', font: '400 14px/1.5 var(--font-ui)', color: 'var(--ink)' }}>{b}</p>
+              </div>
+            ))}
+          </div>
+        </Sheet>
+      ) : null}
+
+      {open === 'signout' ? (
+        <Sheet title="Sign out?" subtitle="Are you sure? You can sign back in anytime with the same email." onClose={() => setOpen(null)} animate={animateSheet} maxHeight="40%"
+          footer={
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button type="button" onClick={() => { setOpen(null); setEnded('signedout'); }} style={{ width: '100%', padding: '17px 20px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--danger)', color: 'var(--white)', font: '700 17px var(--font-ui)' }}>Sign out</button>
+              <Button variant="ghost" size="lg" block onClick={() => setOpen(null)}>Stay signed in</Button>
+            </div>}>
+          <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>Pending approvals stay in the queue for {A.company.name}. Nothing is lost.</p>
+        </Sheet>
+      ) : null}
+
+      {open === 'delete' ? (
+        <Sheet title="Delete your account?" subtitle="Are you sure? This removes you as a campaign manager. Posts, creators and company data stay with the company." onClose={() => setOpen(null)} animate={animateSheet} maxHeight="50%"
+          footer={
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button type="button" onClick={() => { setOpen(null); setEnded('deleted'); }} style={{ width: '100%', padding: '17px 20px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--danger)', color: 'var(--white)', font: '700 17px var(--font-ui)' }}>Delete account</button>
+              <Button variant="ghost" size="lg" block onClick={() => setOpen(null)}>Keep my account</Button>
+            </div>}>
+          <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>Your admin can invite you again later, but your notification preferences and sign-in are gone for good.</p>
+        </Sheet>
+      ) : null}
+
+      {ended ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'var(--off-white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 32px', textAlign: 'center' }}>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: ended === 'deleted' ? 'var(--danger-soft)' : 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name={ended === 'deleted' ? 'trash-2' : 'log-out'} size={28} color={ended === 'deleted' ? 'var(--danger)' : 'var(--blue-700)'} />
+          </span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{ended === 'deleted' ? 'Account deleted' : 'Signed out'}</h2>
+          <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{ended === 'deleted' ? `You no longer have access to ${A.company.name} on Noni.` : 'Sign back in anytime with the same email.'}</p>
+          <Button variant="primary" size="lg" block onClick={() => setEnded(null)} style={{ marginTop: 8 }}>{ended === 'deleted' ? 'Back' : 'Sign back in'}</Button>
+        </div>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+Object.assign(window, { AnalyticsScreen, SettingsScreen, MPostDetail, MDayDetail, MMonthCal, MAreaChart, MMenu, MItem, aRangeData, A_WEEKLY, A_RANGES });

@@ -1,0 +1,345 @@
+/* The two gates that are not post review: music on a live slideshow, and the
+   one-time creator account approval (which is also the account-linking
+   moment). Plus the account template both sides read from. */
+
+function MusicApproval({ item, creator, state = 'default', onBack, onApproved }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const [done, setDone] = React.useState(state === 'approved');
+  const [req, setReq] = React.useState(false);
+  const [reasons, setReasons] = React.useState([]);
+  const [note, setNote] = React.useState('');
+  const [sent, setSent] = React.useState(false);
+  const canSend = reasons.length > 0 || note.trim().length > 0;
+  const toggleReason = (r) => setReasons(reasons.includes(r) ? reasons.filter((x) => x !== r) : [...reasons, r]);
+  const closeReq = () => { setReq(false); setReasons([]); setNote(''); };
+  const slides = window.NONI_ADMIN.slides.slice(0, item.slides);
+  const [i, setI] = React.useState(0);
+
+  return (
+    <AdminScreen bottom={96} pad={false} footer={
+      <ActionBar>
+        <Button variant="outline" size="md" block onClick={() => setReq(true)} style={{ flex: '0 0 42%' }}>Request Changes</Button>
+        <Button variant="approve" size="md" icon="check" block onClick={() => { setDone(true); onApproved && onApproved(); }} style={{ flex: 1 }}>Accept Song</Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 96px' }}>
+        <PushHeader title="Music approval" meta={`${creator.name} · ${item.posted}`} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ position: 'relative', height: 330, borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)' }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '44px 34px 52px' }}>
+              <p style={{ margin: 0, textAlign: 'center', font: '800 17px/1.3 var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{slides[i].overlay}</p>
+            </div>
+            <div style={{ position: 'absolute', top: 14, left: 0, right: 0, display: 'flex', gap: 5, justifyContent: 'center' }}>
+              {slides.map((_, n) => (
+                <span key={n} onClick={() => setI(n)} style={{ width: n === i ? 18 : 6, height: 6, borderRadius: 999, cursor: 'pointer', background: n === i ? 'var(--ink)' : 'rgba(15,23,32,0.24)', transition: 'width var(--dur-fast) var(--ease-out)' }}></span>
+              ))}
+            </div>
+            <span style={{ position: 'absolute', bottom: 12, left: 12 }}><FormatChip format={item.format} size="sm" /></span>
+            {i > 0 ? <button type="button" onClick={() => setI(i - 1)} aria-label="Previous slide" style={{ position: 'absolute', top: '50%', left: 10, transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--glass)', backdropFilter: 'blur(18px)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={17} color="var(--ink)" /></button> : null}
+            {i < slides.length - 1 ? <button type="button" onClick={() => setI(i + 1)} aria-label="Next slide" style={{ position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--glass)', backdropFilter: 'blur(18px)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-right" size={17} color="var(--ink)" /></button> : null}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SectionLabel>Check the live post</SectionLabel>
+            {[['music-2', 'Open on TikTok', `@${creator.tiktok}`], ['at-sign', 'Open on Instagram', `@${creator.instagram}`]].map(([icon, label, handle]) => (
+              <Card key={label} pad={13} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                <Icon name={icon} size={18} color="var(--slate-500)" />
+                <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{label}</span>
+                <span style={{ font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}>{handle}</span>
+                <Icon name="arrow-right" size={16} color="var(--slate-300)" />
+              </Card>
+            ))}
+          </div>
+          <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>
+            Approving unlocks this post's earnings. Videos never enter this queue.
+          </p>
+        </div>
+      </div>
+      {req ? (
+        <Sheet title="Request changes" subtitle={`Goes to ${creator.short}`} onClose={closeReq} maxHeight="84%"
+          footer={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="ghost" size="lg" block onClick={closeReq} style={{ flex: '0 0 28%' }}>Cancel</Button>
+              <Button variant="primary" size="lg" icon="send" block disabled={!canSend} onClick={() => { setReq(false); setSent(true); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Send back</Button>
+            </div>
+          }>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {['Song is not on the post', 'Different song than the brief', 'Only added on one platform'].map((r) => {
+              const on = reasons.includes(r);
+              return (
+                <button key={r} type="button" onClick={() => toggleReason(r)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 13px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', textAlign: 'left', border: 'none', background: on ? 'var(--blue-100)' : 'var(--fill-quiet)', font: '600 14px var(--font-ui)', color: on ? 'var(--blue-700)' : 'var(--ink)', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 6, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--line-strong)' }}>
+                    {on ? <Icon name="check" size={12} color="var(--white)" /> : null}
+                  </span>
+                  {r}
+                </button>
+              );
+            })}
+          </div>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Anything specific, in your words"
+            style={{ marginTop: 11, width: '100%', boxSizing: 'border-box', resize: 'none', padding: 13, borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '400 14px/1.5 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+        </Sheet>
+      ) : null}
+      {sent ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: `0 ${window.GUT}px`, textAlign: 'center' }}>
+          <button type="button" onClick={() => setSent(false)} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="chevron-left" size={20} color="var(--ink)" />
+          </button>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={28} color="var(--blue-600)" /></span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Sent back</h2>
+          <p style={{ margin: 0, maxWidth: 290, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>
+            {creator.short} sees your notes and fixes the song on the live post. It lands back in this queue when they mark it added again.
+          </p>
+          <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+        </div>
+      ) : null}
+      {done ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: `0 ${window.GUT}px`, textAlign: 'center' }}>
+          <button type="button" onClick={() => setDone(false)} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="chevron-left" size={20} color="var(--ink)" />
+          </button>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--green-soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={32} color="var(--green)" /></span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Song approved</h2>
+          <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>Earnings for this post are unlocked. {creator.short} sees it in their wallet tonight.</p>
+          <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+        </div>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Once per creator. Reads like post review: even-sized cards, one per part
+   of the submission. Tap a card to view it in a sheet, then request changes
+   on that part or go back. Approval and handle capture are the same moment. */
+function AccountApproval({ item, creator, state = 'default', onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const sentBack = item.state === 'needs_changes';
+  const [notes, setNotes] = React.useState(state === 'reject' ? { feed: 'For You is mostly gym content. Rewarm it on college soccer before resubmitting.' } : {});
+  const [phase, setPhase] = React.useState(null); /* 'approved' | 'sent' */
+  const [open, setOpen] = React.useState(null);
+  const [noteMode, setNoteMode] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const count = Object.keys(notes).length;
+  const close = () => { setOpen(null); setNoteMode(false); setDraft(''); };
+
+  const parts = [
+    { key: 'ig', label: item.ig.label, meta: item.ig.need, kind: 'clip', len: item.ig.got },
+    { key: 'tt', label: item.tt.label, meta: item.tt.need, kind: 'clip', len: item.tt.got },
+    { key: 'shots', label: 'Profile screenshots', meta: 'Both platforms, bio visible', kind: 'shots' },
+    { key: 'feed', label: 'Feed test', meta: 'For You is college soccer', kind: 'feed' },
+    { key: 'handles', label: 'Handles to link', meta: `@${item.tiktok} · @${item.instagram}`, kind: 'handles' },
+  ];
+
+  if (phase) return (
+    <AdminScreen pad={false}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 32px', textAlign: 'center' }}>
+        <span style={{ width: 68, height: 68, borderRadius: 999, background: phase === 'approved' ? 'var(--green-soft)' : 'var(--amber-soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={phase === 'approved' ? 'check' : 'circle-alert'} size={30} color={phase === 'approved' ? 'var(--green)' : 'var(--amber)'} />
+        </span>
+        <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{phase === 'approved' ? `${creator.short} is approved` : `Sent back to ${creator.short}`}</h2>
+        <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{phase === 'approved' ? `@${item.tiktok} and @${item.instagram} are linked. Their first brief lands tomorrow morning.` : 'They see your notes on their setup screen and resubmit. It lands back in this queue.'}</p>
+        <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+      </div>
+    </AdminScreen>
+  );
+
+  const thumb = (p, size = 'card') => {
+    const box = { borderRadius: 9, background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+    if (p.kind === 'clip') return (
+      <span style={{ ...box, position: 'relative', width: 40, height: 52 }}>
+        <span style={{ width: 22, height: 22, borderRadius: 999, background: 'rgba(255,255,255,0.88)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={10} color="var(--ink)" /></span>
+        <span style={{ position: 'absolute', bottom: 3, right: 3, padding: '1px 5px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 9px var(--font-ui)' }}>{p.len}</span>
+      </span>
+    );
+    const icon = p.kind === 'shots' ? 'images' : p.kind === 'feed' ? 'zap' : 'at-sign';
+    return <span style={{ ...box, width: 40, height: 52 }}><Icon name={icon} size={16} color="var(--blue-300)" /></span>;
+  };
+
+  return (
+    <AdminScreen bottom={100} pad={false} footer={
+      <ActionBar>
+        <Button variant="outline" size="md" block disabled={count === 0} onClick={() => setPhase('sent')} style={{ flex: '0 0 47%', whiteSpace: 'nowrap' }}>{count === 0 ? 'Send back' : `Send back · ${count}`}</Button>
+        <Button variant="primary" size="md" icon="check" block onClick={() => setPhase('approved')} style={{ flex: 1 }}>Approve and link</Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 100px' }}>
+        <PushHeader title="Account approval" meta={item.submitted} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Card pad={14} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <Avatar name={creator.name} size={46} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{creator.name}</div>
+              <div style={{ marginTop: 2, font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>{creator.credential}</div>
+            </div>
+            <TypeChip tone={sentBack ? 'warn' : 'quiet'}>{sentBack ? 'Needs changes' : 'Pending'}</TypeChip>
+          </Card>
+
+          {sentBack ? (
+            <Card pad={13} style={{ background: 'var(--amber-soft)', borderColor: 'rgba(224,138,22,0.3)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <Icon name="circle-alert" size={16} color="var(--amber)" style={{ flex: '0 0 auto', marginTop: 1 }} />
+                <div>
+                  <div style={{ font: '700 13px var(--font-ui)', color: '#8A5A0E' }}>{item.reason}</div>
+                  <p style={{ margin: '4px 0 0', font: '400 13px/1.45 var(--font-ui)', color: '#8A5A0E' }}>{item.note}</p>
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
+          <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>
+            Tap a part to check it. Request changes on anything that is wrong, the rest counts as approved.
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {parts.map((p) => {
+              const noted = notes[p.key] != null;
+              return (
+                <button key={p.key} type="button" onClick={() => setOpen(p)}
+                  style={{ textAlign: 'left', padding: 12, borderRadius: 'var(--radius-lg)', border: `1px solid ${noted ? 'var(--blue-500)' : 'var(--border)'}`, background: 'var(--white)', boxShadow: 'var(--shadow-card)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 9, minHeight: 122, boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                    {thumb(p)}
+                    <span style={{ flex: 1 }}></span>
+                    {noted
+                      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, font: '700 11px var(--font-ui)', color: 'var(--blue-700)' }}><Icon name="pencil" size={12} />Changes</span>
+                      : <Icon name="circle-check-big" size={17} color="var(--green)" />}
+                  </div>
+                  <div>
+                    <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{p.label}</div>
+                    <div style={{ marginTop: 3, font: '600 12px/1.35 var(--font-ui)', color: 'var(--slate-500)' }}>{p.meta}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {open ? (
+        <Sheet title={open.label} subtitle={open.meta} onClose={close} maxHeight="84%"
+          footer={noteMode ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="ghost" size="lg" block onClick={() => { setNoteMode(false); setDraft(''); }} style={{ flex: '0 0 28%' }}>Cancel</Button>
+              <Button variant="primary" size="lg" block disabled={!draft.trim()} onClick={() => { setNotes({ ...notes, [open.key]: draft.trim() }); close(); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Save note</Button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="ghost" size="lg" block onClick={close} style={{ flex: '0 0 28%' }}>Back</Button>
+              <Button variant="primary" size="lg" icon="pencil" block onClick={() => { setDraft(notes[open.key] || ''); setNoteMode(true); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Request changes</Button>
+            </div>
+          )}>
+          {open.kind === 'clip' ? (
+            <div style={{ position: 'relative', width: 'min(100%, 200px)', aspectRatio: '9 / 16', margin: '0 auto', borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)' }}>
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ width: 40, height: 40, borderRadius: 999, background: 'rgba(255,255,255,0.88)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={16} color="var(--ink)" /></span>
+              </span>
+              <span style={{ position: 'absolute', bottom: 10, right: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 11px var(--font-ui)' }}>{open.len}</span>
+            </div>
+          ) : null}
+          {open.kind === 'shots' ? (
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              {['TikTok', 'Instagram'].map((t) => (
+                <div key={t} style={{ position: 'relative', width: 132, aspectRatio: '9 / 16', borderRadius: 'var(--radius-lg)', overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="images" size={20} color="var(--blue-300)" />
+                  <span style={{ position: 'absolute', bottom: 8, left: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 10px var(--font-ui)' }}>{t}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {open.kind === 'feed' ? (
+            <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+              <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: 'var(--ink)' }}>
+                For You has to be college soccer and recruiting. A cold or off-topic feed throttles every post this creator will ever make.
+              </p>
+            </div>
+          ) : null}
+          {open.kind === 'handles' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[['music-2', 'TikTok', item.tiktok], ['at-sign', 'Instagram', item.instagram]].map(([icon, label, handle]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 13px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', background: 'var(--white)' }}>
+                  <Icon name={icon} size={17} color="var(--slate-400)" />
+                  <span style={{ font: '600 13px var(--font-ui)', color: 'var(--slate-400)', width: 66 }}>{label}</span>
+                  <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>@{handle}</span>
+                </div>
+              ))}
+              <p style={{ margin: '2px 2px 0', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Captured on approval. Upload-Post needs both before anything can go out.</p>
+            </div>
+          ) : null}
+          {notes[open.key] != null && !noteMode ? (
+            <div style={{ marginTop: 12, padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <Icon name="message-circle" size={14} color="var(--blue-600)" style={{ flex: '0 0 auto', marginTop: 2 }} />
+              <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{notes[open.key]}</span>
+              <button type="button" onClick={() => { const n = { ...notes }; delete n[open.key]; setNotes(n); }} aria-label="Remove note" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
+                <Icon name="x" size={14} color="var(--slate-400)" />
+              </button>
+            </div>
+          ) : null}
+          {noteMode ? (
+            <div style={{ marginTop: 12, padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)' }}>
+              <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} rows={3}
+                placeholder={`What should ${creator.short} change here`}
+                style={{ width: '100%', boxSizing: 'border-box', resize: 'none', padding: 11, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--blue-300)', background: 'var(--white)', font: '400 14px/1.45 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+            </div>
+          ) : null}
+        </Sheet>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Company-scoped. Creators see the same values on their setup screen, so the
+   standard is visible before they submit rather than after they fail. */
+function AccountTemplate({ onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const bio = 'D1 soccer film + recruiting\nEvery match tagged with FieldVision AI\nComment D1 for the breakdown';
+  return (
+    <AdminScreen bottom={40} pad={false}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 40px' }}>
+        <PushHeader title="Account template" meta="FieldVision AI" onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>
+            What a creator account should look like. They copy it, they do not retype it.
+          </p>
+          <Card pad={14}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Bio</span>
+              <Button size="sm" variant="tint" icon="copy">Copy</Button>
+            </div>
+            <p style={{ margin: '10px 0 0', whiteSpace: 'pre-line', font: '400 15px/1.5 var(--font-ui)', color: 'var(--ink)' }}>{bio}</p>
+          </Card>
+          <Card pad={14}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ width: 56, height: 56, borderRadius: 999, flex: '0 0 auto', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="circle-user-round" size={24} color="var(--blue-300)" />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>Profile picture</div>
+                <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-500)' }}>1080 × 1080 PNG</div>
+              </div>
+              <Button size="sm" variant="tint" icon="download">Download</Button>
+            </div>
+          </Card>
+          <Card pad={14}>
+            <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Link in bio</div>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 13px', borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+              <Icon name="link" size={16} color="var(--slate-400)" />
+              <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>fieldvisionai.com</span>
+              <Icon name="copy" size={16} color="var(--slate-400)" />
+            </div>
+          </Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SectionLabel>Example account</SectionLabel>
+            <Card pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+              <Thumb format="photo_carousel" w={54} h={72} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>@fabri.d1soccer</div>
+                <div style={{ marginTop: 3, font: '400 13px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>This is the bar. Same bio shape, same grid, no gym content.</div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+Object.assign(window, { MusicApproval, AccountApproval, AccountTemplate });

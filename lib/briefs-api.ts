@@ -390,6 +390,7 @@ export async function updateBriefSegment(
     screenshot_y?: number | null;
     screenshot_width?: number | null;
     layout?: 'standard' | 'green_screen';
+    overlay_style?: Json;
   },
 ): Promise<void> {
   const { error } = await supabase
@@ -1184,6 +1185,10 @@ export type BriefWeekStats = {
   viewsPerDay: number;
   /** Posts posted per creator per elapsed day. */
   postsPerCreatorPerDay: number;
+  /** Week totals for archive cards. */
+  salesCents: number;
+  posts: number;
+  views: number;
 };
 
 export type BriefWeekSummary = {
@@ -1223,6 +1228,9 @@ function emptyWeekStats(): BriefWeekStats {
     earnCentsPerDay: 0,
     viewsPerDay: 0,
     postsPerCreatorPerDay: 0,
+    salesCents: 0,
+    posts: 0,
+    views: 0,
   };
 }
 
@@ -1333,6 +1341,9 @@ async function fetchBriefWeekStats(
       earnCentsPerDay: revenueCents / days,
       viewsPerDay: totals.views / days,
       postsPerCreatorPerDay: creators > 0 ? totals.posted / days / creators : 0,
+      salesCents: revenueCents,
+      posts: totals.posted,
+      views: totals.views,
     });
   }
   return result;
@@ -1410,12 +1421,16 @@ export async function listBriefWeeks(): Promise<BriefWeekSummary[]> {
 
 export type WeekPostItem = {
   postId: string;
+  assignmentId: string | null;
   title: string;
   creatorName: string;
   format: BriefFormat;
   /** e.g. "Jul 24". */
   when: string;
+  /** Posted calendar day YYYY-MM-DD. */
+  postedDay: string;
   views: number;
+  salesCents: number;
 };
 
 /** Posts made from a published week, newest first, for the week summary. */
@@ -1425,7 +1440,7 @@ export async function listWeekPosts(campaignId: string): Promise<WeekPostItem[]>
     .select(
       `id, posted_at,
        post_metrics ( views, fetched_at ),
-       assignments!inner ( campaign_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) )`,
+       assignments!inner ( id, campaign_id, task_id, company_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) )`,
     )
     .eq('assignments.campaign_id', campaignId)
     .not('posted_at', 'is', null)
@@ -1437,25 +1452,88 @@ export async function listWeekPosts(campaignId: string): Promise<WeekPostItem[]>
     posted_at: string | null;
     post_metrics: WeekMetricSnapshot[];
     assignments: {
+      id: string;
+      task_id: string | null;
+      company_id: string;
       briefs: { title: string | null; format: string | null } | null;
       profiles: { full_name: string | null } | null;
     } | null;
   };
-  return ((data ?? []) as unknown as Row[]).map((row) => ({
-    postId: row.id,
-    title: row.assignments?.briefs?.title ?? 'Post',
-    creatorName: row.assignments?.profiles?.full_name ?? 'Creator',
-    format:
-      row.assignments?.briefs?.format === 'photo_carousel'
-        ? 'photo_carousel'
-        : 'video',
-    when:
-      row.posted_at === null
-        ? ''
-        : new Date(row.posted_at).toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-          }),
-    views: weekLatestViews(row.post_metrics),
+  const rows = (data ?? []) as unknown as Row[];
+  const companyId = rows[0]?.assignments?.company_id;
+  const salesByAssignment = new Map<string, number>();
+  const salesByTask = new Map<string, number>();
+  if (companyId) {
+    const { data: events, error: eventsError } = await supabase
+      .from('revenue_events')
+      .select('amount_cents, attribution_links(task_id, assignment_id)')
+      .eq('company_id', companyId);
+    if (eventsError) throw eventsError;
+    for (const row of events ?? []) {
+      const link = Array.isArray(row.attribution_links)
+        ? row.attribution_links[0]
+        : row.attribution_links;
+      const cents = row.amount_cents ?? 0;
+      if (link?.assignment_id) {
+        salesByAssignment.set(
+          link.assignment_id,
+          (salesByAssignment.get(link.assignment_id) ?? 0) + cents,
+        );
+      } else if (link?.task_id) {
+        salesByTask.set(link.task_id, (salesByTask.get(link.task_id) ?? 0) + cents);
+      }
+    }
+  }
+  return rows.map((row) => {
+    const postedAt = row.posted_at;
+    const postedDay =
+      postedAt === null ? '' : briefWeekIso(new Date(postedAt));
+    const assignmentId = row.assignments?.id ?? null;
+    const taskId = row.assignments?.task_id ?? null;
+    const salesCents =
+      (assignmentId ? salesByAssignment.get(assignmentId) ?? 0 : 0) +
+      (taskId ? salesByTask.get(taskId) ?? 0 : 0);
+    return {
+      postId: row.id,
+      assignmentId,
+      title: row.assignments?.briefs?.title ?? 'Post',
+      creatorName: row.assignments?.profiles?.full_name ?? 'Creator',
+      format:
+        row.assignments?.briefs?.format === 'photo_carousel'
+          ? 'photo_carousel'
+          : 'video',
+      when:
+        postedAt === null
+          ? ''
+          : new Date(postedAt).toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+            }),
+      postedDay,
+      views: weekLatestViews(row.post_metrics),
+      salesCents,
+    };
+  });
+}
+
+export type CampaignManager = {
+  id: string;
+  name: string;
+};
+
+/** Campaign managers and the company admin on this account. */
+export async function listCampaignManagers(
+  companyId: string,
+): Promise<CampaignManager[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('company_id', companyId)
+    .in('role', ['campaign_manager', 'company_admin'])
+    .order('full_name');
+  if (error) throw error;
+  return (data ?? []).map((p) => ({
+    id: p.id,
+    name: p.full_name?.trim() || 'Manager',
   }));
 }

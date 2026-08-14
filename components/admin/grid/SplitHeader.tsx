@@ -1,26 +1,39 @@
-// Admin handoff §6 — the split header. Chips come from the week pool; a
-// type that drifts from plan gets an amber border and shows actual/planned.
-// This is the only place drift is reported.
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+// Type chips are filter buttons: tap to show that type, tap again to clear.
+import { ScrollView, StyleSheet, Text } from 'react-native';
 
-import { color, postTypeTone, radiusAdmin } from '../../../theme/tokens';
-import { PostTypeChip } from '../shared';
+import { color, radiusAdmin } from '../../../theme/tokens';
+import { Icon } from '../../ui/Icon';
+import { PressableScale } from '../../ui/PressableScale';
+import type { GridRowState } from './BriefRow';
 
 export interface SplitChip {
   key: string;
   label: string;
-  actual: number;
-  planned: number;
+  actual?: number;
+  planned?: number;
+}
+
+export interface SplitRow {
+  key: string;
+  state: GridRowState;
+}
+
+function isDone(state: GridRowState): boolean {
+  return state === 'complete' || state === 'filled' || state === 'killed';
 }
 
 export function SplitHeader({
-  chips,
-  onChipPress,
+  split,
+  rows = [],
+  active,
+  onSelect,
 }: {
-  chips: SplitChip[];
-  onChipPress?: (chip: SplitChip) => void;
+  split: SplitChip[];
+  rows?: SplitRow[];
+  active: string | null;
+  onSelect: (key: string | null) => void;
 }) {
-  if (chips.length === 0) return null;
+  if (split.length === 0) return null;
   return (
     <ScrollView
       horizontal
@@ -28,36 +41,42 @@ export function SplitHeader({
       style={styles.scroll}
       contentContainerStyle={styles.row}
     >
-      {chips.map((chip) => {
-        let body;
-        if (chip.actual === chip.planned) {
-          body = <PostTypeChip typeKey={chip.key} label={chip.label} />;
-        } else {
-          const tone =
-            chip.key in postTypeTone
-              ? postTypeTone[chip.key as keyof typeof postTypeTone]
-              : { bg: color.fillQuiet, fg: color.slate500 };
-          body = (
-            <View style={[styles.drifted, { backgroundColor: tone.bg }]}>
-              <Text numberOfLines={1} style={[styles.driftedLabel, { color: tone.fg }]}>
-                {chip.label}
-              </Text>
-              <Text style={styles.driftedCount}>
-                {chip.actual}/{chip.planned}
-              </Text>
-            </View>
-          );
-        }
-        if (!onChipPress) return <View key={chip.key}>{body}</View>;
+      {split.map((chip) => {
+        const typeRows = rows.filter((r) => r.key === chip.key);
+        const total = typeRows.length || chip.actual || 0;
+        const done = typeRows.filter((r) => isDone(r.state)).length;
+        const complete = total > 0 && done >= total;
+        const on = active === chip.key;
         return (
-          <Pressable
+          <PressableScale
             key={chip.key}
             accessibilityRole="button"
-            accessibilityLabel={`About ${chip.label}`}
-            onPress={() => onChipPress(chip)}
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={`${chip.label} ${done} of ${total}`}
+            onPress={() => onSelect(on ? null : chip.key)}
+            style={[
+              styles.chip,
+              {
+                backgroundColor: on ? color.blue50 : color.white,
+                borderColor: on
+                  ? color.blue500
+                  : complete
+                    ? 'rgba(31,168,110,0.45)'
+                    : 'rgba(224,138,22,0.5)',
+              },
+            ]}
           >
-            {body}
-          </Pressable>
+            <Text style={styles.label}>{chip.label}</Text>
+            <Text
+              style={[
+                styles.count,
+                { color: complete ? color.green : color.amber },
+              ]}
+            >
+              {`${done}/${total}`}
+            </Text>
+            {complete ? <Icon name="check" size={13} color={color.green} /> : null}
+          </PressableScale>
         );
       })}
     </ScrollView>
@@ -72,24 +91,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    paddingBottom: 2,
   },
-  drifted: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingVertical: 3.5,
-    paddingHorizontal: 10,
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 11,
     borderRadius: radiusAdmin.pill,
     borderWidth: 1.5,
-    borderColor: color.amber,
   },
-  driftedLabel: {
+  label: {
     fontSize: 12,
     fontWeight: '700',
+    color: color.slate500,
   },
-  driftedCount: {
+  count: {
     fontSize: 12,
     fontWeight: '700',
-    color: color.amber,
   },
 });

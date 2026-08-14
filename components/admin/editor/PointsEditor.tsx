@@ -1,6 +1,6 @@
-// Admin handoff §8 step 5 — one card per talking point: numbered badge,
-// text, screenshot slot, Move control. The plug card is starred. Spoken
-// content only; overlay text lives on brief_segments, never here.
+// Admin handoff §8 step 5. One card per talking point: numbered badge,
+// text, screenshot slot, Move control. The plug card is starred. Overlay
+// chrome lives on brief_segments and opens OverlayEditor.
 import type { JSX } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
@@ -11,6 +11,15 @@ import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { SectionLabel } from '../shared';
 import { AiPill } from './AiPill';
+import {
+  overlayTextContrast,
+  type OverlayEditorMode,
+  type OverlayStyleValue,
+} from './OverlayEditor';
+
+function shotLabel(url: string): string {
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url) ? 'Recording' : 'Screenshot';
+}
 
 export function PointsEditor(props: {
   points: TalkingPoint[];
@@ -29,13 +38,14 @@ export function PointsEditor(props: {
   onAttachScreenshot: (index: number) => void;
   onMoveScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
-  /** Opens the drag-to-place sheet for this point's screenshot and text. */
-  onPlaceScreenshot: (index: number) => void;
-  /** Whether this point's segment shows on-screen text (placeable). */
-  hasTextForIndex: (index: number) => boolean;
-  /** Recording layout for this point's segment; toggles green screen. */
+  /** Kept for the parent; overlay media mode replaces PlacementSheet. */
+  onPlaceScreenshot?: (index: number) => void;
+  /** Recording layout for this point's segment. */
   layoutForIndex: (index: number) => 'standard' | 'green_screen';
-  onToggleLayout: (index: number) => void;
+  overlayTextForIndex: (index: number) => string | undefined;
+  overlayStyleForIndex: (index: number) => OverlayStyleValue;
+  placementLabelForIndex: (index: number) => string;
+  onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
 }): JSX.Element {
   const {
     points,
@@ -51,11 +61,11 @@ export function PointsEditor(props: {
     screenshotBusyIndex,
     onAttachScreenshot,
     onMoveScreenshot,
-    onRemoveScreenshot,
-    onPlaceScreenshot,
-    hasTextForIndex,
     layoutForIndex,
-    onToggleLayout,
+    overlayTextForIndex,
+    overlayStyleForIndex,
+    placementLabelForIndex,
+    onOpenOverlay,
   } = props;
 
   const slotNoun = family === 'photo_carousel' ? 'Slide' : 'Clip';
@@ -122,6 +132,11 @@ export function PointsEditor(props: {
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
         const greenScreen = layoutForIndex(i) === 'green_screen';
+        const overlayText = overlayTextForIndex(i);
+        const overlayStyle = overlayStyleForIndex(i);
+        const placeLabel = placementLabelForIndex(i);
+        const overlayFill = overlayStyle.color ?? color.white;
+        const overlayBg = overlayStyle.bg ?? true;
         const plug = point.is_product;
         return (
           <View
@@ -205,104 +220,118 @@ export function PointsEditor(props: {
               style={styles.text}
             />
 
-            {shotUrl !== undefined ? (
-              <View style={styles.shotRow}>
+            <View style={styles.shotRow}>
+              {shotUrl !== undefined ? (
                 <PressableScale
                   accessibilityRole="button"
-                  accessibilityLabel={`Position the screenshot on point ${i + 1}`}
+                  accessibilityLabel={`Replace the ${shotLabel(shotUrl).toLowerCase()} on point ${i + 1}`}
                   disabled={shotBusy}
-                  onPress={() => onPlaceScreenshot(i)}
+                  onPress={() => onAttachScreenshot(i)}
                   style={styles.shotPress}
                 >
                   <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
-                  <View style={styles.shotText}>
-                    <Text style={styles.shotName} numberOfLines={1}>
-                      Screenshot
-                    </Text>
-                    <Text style={styles.shotHint} numberOfLines={1}>
-                      Tap to position
+                  <Text style={styles.shotName} numberOfLines={1}>
+                    {shotBusy ? 'Uploading…' : shotLabel(shotUrl)}
+                  </Text>
+                </PressableScale>
+              ) : (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add a screenshot or recording to point ${i + 1}`}
+                  disabled={shotBusy}
+                  onPress={() => onAttachScreenshot(i)}
+                  style={styles.addShot}
+                >
+                  <Icon name="images" size={14} color={color.slate400} />
+                  <Text style={styles.addShotText} numberOfLines={1}>
+                    {shotBusy ? 'Uploading…' : 'Add screenshot or recording'}
+                  </Text>
+                </PressableScale>
+              )}
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Move the screenshot on point ${i + 1}`}
+                disabled={shotBusy || shotUrl === undefined}
+                onPress={() => onMoveScreenshot(i)}
+                style={styles.movePill}
+              >
+                <Text style={styles.movePillText}>{slotNoun}</Text>
+                <Icon name="chevron-down" size={13} color={color.slate400} />
+              </PressableScale>
+            </View>
+            {shotUrl !== undefined ? (
+              <View style={styles.gsRow}>
+                {greenScreen ? (
+                  <View style={styles.gsChip}>
+                    <Icon name="switch-camera" size={13} color={color.green} />
+                    <Text style={styles.gsChipText} numberOfLines={1}>
+                      Green screen · fills the background
                     </Text>
                   </View>
-                </PressableScale>
+                ) : null}
                 <PressableScale
                   accessibilityRole="button"
-                  accessibilityLabel={`Move the screenshot on point ${i + 1}`}
+                  accessibilityLabel={`Place the screenshot on point ${i + 1}`}
                   disabled={shotBusy}
-                  onPress={() => onMoveScreenshot(i)}
+                  onPress={() => onOpenOverlay(i, 'media')}
                   style={styles.movePill}
                 >
-                  <Text style={styles.movePillText}>
-                    {shotBusy ? '…' : `${slotNoun} ${i + 1}`}
-                  </Text>
-                  <Icon name="chevron-down" size={13} color={color.slate500} />
-                </PressableScale>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove the screenshot on point ${i + 1}`}
-                  disabled={shotBusy}
-                  onPress={() => onRemoveScreenshot(i)}
-                  style={styles.shotRemove}
-                >
-                  <Icon name="x" size={13} color={color.slate400} />
+                  <Text style={styles.movePillText}>{placeLabel}</Text>
+                  <Icon name="chevron-down" size={13} color={color.slate400} />
                 </PressableScale>
               </View>
             ) : null}
-            {shotUrl !== undefined ? (
+            {overlayText ? (
               <PressableScale
                 accessibilityRole="button"
-                accessibilityLabel={`Toggle green screen on point ${i + 1}`}
-                disabled={shotBusy}
-                onPress={() => onToggleLayout(i)}
-                style={[styles.gsRow, greenScreen && styles.gsRowOn]}
+                accessibilityLabel={`Edit overlay text on point ${i + 1}`}
+                onPress={() => onOpenOverlay(i, 'text')}
+                style={styles.textPreview}
               >
-                <Icon
-                  name={greenScreen ? 'circle-check-big' : 'switch-camera'}
-                  size={14}
-                  color={greenScreen ? color.blue600 : color.slate400}
-                />
-                <View style={styles.gsText}>
-                  <Text style={[styles.gsLabel, greenScreen && styles.gsLabelOn]}>
-                    Green screen
-                  </Text>
-                  <Text style={styles.gsHint}>
-                    {greenScreen
-                      ? 'Screenshot becomes the background and the creator is cut out over it'
-                      : 'Screenshot floats as a card over the creator'}
+                <View
+                  style={[
+                    styles.textPill,
+                    overlayBg
+                      ? { backgroundColor: overlayFill }
+                      : styles.textPillClear,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.textPillLabel,
+                      {
+                        color: overlayBg
+                          ? overlayTextContrast(overlayFill)
+                          : overlayFill,
+                      },
+                    ]}
+                  >
+                    {overlayText}
                   </Text>
                 </View>
+                <Text style={styles.textPos}>{placeLabel}</Text>
               </PressableScale>
-            ) : null}
-            {shotUrl === undefined ? (
+            ) : (
               <PressableScale
                 accessibilityRole="button"
-                accessibilityLabel={`Add a screenshot to point ${i + 1}`}
-                disabled={shotBusy}
-                onPress={() => onAttachScreenshot(i)}
-                style={styles.addShot}
+                accessibilityLabel={`Add overlay text on point ${i + 1}`}
+                onPress={() => onOpenOverlay(i, 'text')}
+                style={styles.addText}
               >
-                <Icon name="plus" size={14} color={color.slate400} />
-                <Text style={styles.addShotText}>
-                  {shotBusy ? 'Uploading…' : 'Add screenshot'}
-                </Text>
+                <Icon name="pencil" size={13} color={color.slate400} />
+                <Text style={styles.addShotText}>Add text</Text>
               </PressableScale>
-            ) : null}
-            {shotUrl === undefined && hasTextForIndex(i) ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel={`Position the on-screen text for point ${i + 1}`}
-                onPress={() => onPlaceScreenshot(i)}
-                style={styles.gsRow}
-              >
-                <Icon name="pencil" size={14} color={color.slate400} />
-                <View style={styles.gsText}>
-                  <Text style={styles.gsLabel}>On screen text</Text>
-                  <Text style={styles.gsHint}>Tap to position it on the video</Text>
-                </View>
-              </PressableScale>
-            ) : null}
+            )}
           </View>
         );
       })}
+
+      <Text style={styles.helper}>
+        {family === 'photo_carousel'
+          ? 'The screenshot or recording pops up on the slide you choose.'
+          : 'The screenshot or recording pops up on the clip you choose.'}
+      </Text>
 
       <PressableScale
         accessibilityRole="button"
@@ -417,13 +446,15 @@ const styles = StyleSheet.create({
   shotRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   shotPress: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 9,
   },
   shotThumb: {
     width: 30,
@@ -431,84 +462,114 @@ const styles = StyleSheet.create({
     borderRadius: radiusAdmin.sm,
     backgroundColor: color.fillQuiet,
   },
-  shotText: {
-    flex: 1,
-    gap: 1,
-  },
   shotName: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 12,
     fontWeight: '600',
     color: color.slate500,
   },
-  shotHint: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: color.blue600,
-  },
   movePill: {
+    flexShrink: 0,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    gap: 5,
+    paddingHorizontal: 11,
     borderRadius: radiusAdmin.pill,
     backgroundColor: color.fillQuiet,
   },
   movePillText: {
     fontSize: 12,
     fontWeight: '700',
-    color: color.slate500,
-  },
-  shotRemove: {
-    width: 28,
-    height: 28,
-    borderRadius: radiusAdmin.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: color.ink,
   },
   gsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: radiusAdmin.md,
-    backgroundColor: color.fillQuiet,
   },
-  gsRowOn: {
-    backgroundColor: color.blue100,
-  },
-  gsText: {
+  gsChip: {
     flex: 1,
-    gap: 1,
-  },
-  gsLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  gsLabelOn: {
-    color: color.blue700,
-  },
-  gsHint: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: color.slate400,
-  },
-  addShot: {
+    minWidth: 0,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: radiusAdmin.md,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.sm,
+    backgroundColor: color.greenSoft,
+  },
+  gsChipText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: color.green,
+  },
+  addShot: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.sm,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: color.lineStrong,
+  },
+  addText: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.sm,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: color.lineStrong,
   },
   addShotText: {
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  textPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    minHeight: 44,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: radiusAdmin.sm,
+    backgroundColor: color.ink900,
+  },
+  textPill: {
+    minWidth: 0,
+    flexShrink: 1,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  textPillClear: {
+    backgroundColor: 'transparent',
+  },
+  textPillLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  textPos: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    fontSize: 11,
     fontWeight: '600',
+    color: color.whiteA60,
+  },
+  helper: {
+    fontSize: 12.5,
+    fontWeight: '400',
+    lineHeight: 12.5 * 1.45,
     color: color.slate400,
   },
   addPoint: {

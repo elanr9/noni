@@ -1,0 +1,218 @@
+/* First run for a brand-new campaign manager account (no week yet, Week 1),
+   plus the multi-manager collaboration surfaces: every manager sees the same
+   weeks, presence shows who is filling what, and each week has one shared
+   thread. */
+
+const MANAGERS = [
+  { name: 'You', me: true },
+  { name: 'Maya' },
+  { name: 'Jordan' },
+];
+
+function AvatarStack({ people, size = 30 }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+      {people.map((p, i) => (
+        <span key={p.name} style={{ marginLeft: i ? -8 : 0, borderRadius: 999, boxShadow: '0 0 0 2px var(--white)', display: 'inline-flex' }}>
+          <Avatar name={p.name} size={size} tone={p.me ? 'brand' : 'quiet'} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/* 01 — Briefs, brand-new account. Nothing exists yet; the screen teaches the
+   loop in three lines and offers exactly one action. */
+function FirstBriefs({ onStart }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <AdminScreen>
+      <AdminHeader title="Briefs" subtitle="A week is one shared pool of posts for the whole roster." right={<MsgButton count={2} />} />
+      <Card pad={20} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 6 }}>
+        <span style={{ width: 52, height: 52, flex: '0 0 auto', borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="layout-list" size={24} color="var(--blue-700)" />
+        </span>
+        <div>
+          <h2 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Start your first brief!</h2>
+        </div>
+        <Button variant="primary" size="md" block onClick={onStart}><span style={{ whiteSpace: 'nowrap' }}>Start week 1</span></Button>
+      </Card>
+    </AdminScreen>
+  );
+}
+
+/* 03 — the Briefs tab as a list of week cards: Next week always on top, then
+   every week before it, most recent to oldest. Each card clicks into that
+   week. Status dot: orange while in progress, green once complete. */
+function SharedWeekBriefs({ onOpenWeek }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const weeks = [
+    { label: 'Week 2', range: 'Aug 24 to 30', status: 'next' },
+    { label: 'Week 1', range: 'Aug 17 to 23', status: 'done', complete: true, stats: [['52K', 'views/day'], ['$1,240', 'sales'], ['30', 'posts']] },
+  ];
+  return (
+    <AdminScreen gap={10}>
+      <AdminHeader title="Briefs" subtitle="A week is one shared pool of posts for the whole roster." right={<MsgButton count={3} />} />
+      {weeks.map((w) => (
+        <Card key={w.label} pad={16} onClick={() => onOpenWeek && onOpenWeek(w)} style={{ display: 'flex', flexDirection: 'column', gap: 14, cursor: 'pointer' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 19px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{w.label}</div>
+              <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 7, font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}>
+                {w.status !== 'next' ? <span style={{ width: 8, height: 8, flex: '0 0 auto', borderRadius: 999, background: w.complete ? 'var(--green)' : 'var(--amber)' }} /> : null}
+                {w.range} · {w.status === 'next' ? 'opens Sunday' : w.complete ? 'complete' : 'in progress'}
+              </div>
+            </div>
+            {w.status === 'next' ? <TypeChip tone="brand">Next week</TypeChip> : <AvatarStack people={MANAGERS} />}
+            <Icon name="chevron-right" size={16} color="var(--slate-300)" style={{ flex: '0 0 auto' }} />
+          </div>
+          {w.stats ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {w.stats.map(([v, l]) => (
+                <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 999, background: 'var(--off-white)', font: '600 11.5px var(--font-ui)', color: 'var(--slate-500)' }}>
+                  <span style={{ font: '700 12px var(--font-ui)', color: 'var(--ink)' }}>{v}</span>{l}
+                </span>
+              ))}
+            </div>
+          ) : w.lanes ? (
+            <div style={{ display: 'flex', gap: 10 }}>
+              {w.lanes.map(([icon, label, done, total]) => (
+                <div key={label} style={{ flex: 1, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--fill-quiet)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 12px var(--font-ui)', color: 'var(--slate-500)' }}>
+                    <Icon name={icon} size={13} color="var(--slate-500)" />{label}
+                  </span>
+                  <span style={{ font: '700 22px var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>{done}<span style={{ font: '700 14px var(--font-display)', color: 'var(--slate-400)' }}> / {total}</span></span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ margin: 0, font: '400 12.5px/1.4 var(--font-ui)', color: 'var(--slate-400)' }}>Not planned yet. Opens Sunday, tap to start it.</p>
+          )}
+        </Card>
+      ))}
+    </AdminScreen>
+  );
+}
+
+/* A finished week, opened. Every post the roster made, videos and slideshows
+   together, filterable by format. Days are tappable; sales show because sales
+   tracking is on in Settings. */
+const PAST_DAYS = [['Mon', 17, 4], ['Tue', 18, 5], ['Wed', 19, 4], ['Thu', 20, 5], ['Fri', 21, 4], ['Sat', 22, 4], ['Sun', 23, 4]];
+const PAST_POSTS = [
+  { title: '5 things coaches check before they reply', creator: 'Mara', format: 'video', day: 'Mon 17', views: '84K', sales: '$96' },
+  { title: '3 stats that decide Sunday', creator: 'Sofia', format: 'photo_carousel', day: 'Mon 17', views: '41K', sales: '$52' },
+  { title: 'The tripod setup that took 90 seconds', creator: 'Deniz', format: 'video', day: 'Tue 18', views: '52K', sales: '$61' },
+  { title: 'How to film a match from one corner', creator: 'Mara', format: 'photo_carousel', day: 'Wed 19', views: '38K', sales: '$44' },
+  { title: 'Highlight reel vs full match film', creator: 'Jae', format: 'video', day: 'Thu 20', views: '61K', sales: '$73' },
+  { title: 'Why your winger fades after 70 minutes', creator: 'Sofia', format: 'video', day: 'Fri 21', views: '47K', sales: '$58' },
+];
+
+function PastPostRow({ p, showDay }) {
+  return (
+    <Card pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center', cursor: 'pointer' }}>
+      <Thumb format={p.format} w={38} h={50} radius={9} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</div>
+        <div style={{ marginTop: 2, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>{p.creator} · {formatLabel(p.format)}{showDay ? ` · ${p.day}` : ''}</div>
+      </div>
+      <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+        <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{p.views}</div>
+        <div style={{ font: '700 11px var(--font-ui)', color: 'var(--green)' }}>{p.sales}</div>
+      </div>
+    </Card>
+  );
+}
+
+function PastBriefScreen({ onBack, onOpenDay }) {
+  const [fmt, setFmt] = React.useState(0);
+  const posts = fmt === 0 ? PAST_POSTS : PAST_POSTS.filter((p) => (fmt === 1 ? isReel(p.format) : !isReel(p.format)));
+  return (
+    <AdminScreen pad={false}>
+      <PushHeader title="Week 1" meta="Aug 17 to 23 · complete" onBack={onBack} right={<MsgButton count={3} />} />
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `2px ${window.GUT}px 40px`, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
+          {[['52K', 'Views/day'], ['$1,240', 'Sales'], ['30', 'Posts']].map(([v, l]) => (
+            <Card key={l} pad={12} style={{ flex: 1 }}>
+              <div style={{ font: '700 20px var(--font-display)', letterSpacing: '-0.4px', color: l === 'Sales' ? 'var(--green)' : 'var(--ink)' }}>{v}</div>
+              <div style={{ marginTop: 2, font: '700 11px var(--font-ui)', letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{l}</div>
+            </Card>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2, flex: '0 0 auto' }}>
+          {PAST_DAYS.map(([d, n, count]) => (
+            <button key={n} type="button" onClick={() => onOpenDay && onOpenDay(d)}
+              style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '8px 12px', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', background: 'var(--white)', boxShadow: 'var(--shadow-card)' }}>
+              <span style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{d}</span>
+              <span style={{ font: '700 16px var(--font-display)', color: 'var(--ink)' }}>{n}</span>
+              <span style={{ font: '600 10.5px var(--font-ui)', color: 'var(--blue-600)' }}>{count} posts</span>
+            </button>
+          ))}
+        </div>
+        <Segmented items={['All', 'Videos', 'Slideshows']} active={fmt} onSelect={setFmt} style={{ flex: '0 0 auto' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {posts.map((p) => <PastPostRow key={p.title} p={p} showDay />)}
+        </div>
+        <p style={{ margin: '0 2px', font: '400 12.5px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Sales show because sales tracking is on in Settings.</p>
+      </div>
+    </AdminScreen>
+  );
+}
+
+/* One day of a finished week: what each creator posted and what it sold. */
+function BriefDayScreen({ onBack }) {
+  const posts = [
+    { title: 'The tripod setup that took 90 seconds', creator: 'Deniz', format: 'video', views: '52K', sales: '$61' },
+    { title: 'One corner beats four parents with phones', creator: 'Mara', format: 'photo_carousel', views: '33K', sales: '$38' },
+    { title: 'Count the runs before minute 30', creator: 'Sofia', format: 'video', views: '44K', sales: '$49' },
+    { title: 'Getting your first film clip tagged', creator: 'Jae', format: 'photo_carousel', views: '27K', sales: '$31' },
+    { title: 'Show him the map, not the stopwatch', creator: 'Deniz', format: 'video', views: '39K', sales: '$33' },
+  ];
+  return (
+    <AdminScreen pad={false}>
+      <PushHeader title="Tuesday, Aug 18" meta="Week 1 · 5 posts · $212 in sales" onBack={onBack} />
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `2px ${window.GUT}px 40px`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {posts.map((p) => (
+          <Card key={p.title} pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+            <Avatar name={p.creator} size={34} />
+            <Thumb format={p.format} w={34} h={46} radius={8} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</div>
+              <div style={{ marginTop: 2, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>{p.creator} · {formatLabel(p.format)}</div>
+            </div>
+            <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+              <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{p.views}</div>
+              <div style={{ font: '700 11px var(--font-ui)', color: 'var(--green)' }}>{p.sales}</div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </AdminScreen>
+  );
+}
+
+/* Handoff sheet — the entire Briefs tab in story order: first run, week
+   setup, the shared week, the opened brief, an opened post, and messaging. */
+function FirstWeekBoard() {
+  const WEEK1 = { id: 1, label: 'Week 1', range: 'Aug 17 to 23', status: 'live', day: 3, vDone: 4, vT: 20, sDone: 2, sT: 10 };
+  const items = [
+    ['01 Briefs · new account', <FirstBriefs />],
+    ['02 Week setup · week 1', <WeekSetup step={0} title="Week 1 · Aug 17 to 23" />],
+    ['03 Briefs · week list', <SharedWeekBriefs />],
+    ['04 Past brief · week 1 opened', <PastBriefScreen />],
+    ['05 Past brief · day detail', <BriefDayScreen />],
+    ['06 Brief · opened, videos lane', <BriefsScreen sel={WEEK1} />],
+    ['07 Brief · slideshows lane', <BriefsScreen sel={WEEK1} lane={1} />],
+    ['08 Post editor · talking points', <PostEditor step={4} />],
+    ['09 Editor · add text', <PostEditor step={4} sheet="overlay" animateSheet={false} />],
+    ['10 Editor · place screenshot', <PostEditor step={4} sheet="place" animateSheet={false} />],
+    ['11 Messages · home', <MessagesHome />],
+    ['12 Week 1 brief · group chat', <BriefChat />],
+    ['13 DM · Maya', <DMChat />],
+  ];
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 32, padding: 40, justifyContent: 'center' }}>
+      {items.map(([label, node]) => <Phone key={label} label={label}>{node}</Phone>)}
+    </div>
+  );
+}
+Object.assign(window, { FirstBriefs, SharedWeekBriefs, PastBriefScreen, BriefDayScreen, FirstWeekBoard, AvatarStack, MANAGERS });

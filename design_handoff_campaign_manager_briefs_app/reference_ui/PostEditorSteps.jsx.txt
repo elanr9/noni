@@ -1,0 +1,233 @@
+/* Post editor, steps 5 to 7, plus the shared field vocabulary the earlier
+   steps use. One field group per screen: nothing here scrolls past two
+   decisions. */
+
+/* A written value looks like a written value. Placeholder grey means the AI
+   has not been asked yet — nothing generates on open. */
+function EditorField({ label, meta, action, children, style }) {
+  return (
+    <Card pad={15} style={style}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
+        <span style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{label}</span>
+        {meta ? <span style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-300)', whiteSpace: 'nowrap' }}>{meta}</span> : null}
+        <span style={{ flex: 1 }} />
+        {action}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function AiAction({ label = 'Fill with AI', icon = 'sparkles', onClick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 12px var(--font-ui)', whiteSpace: 'nowrap' }}>
+      <Icon name={icon} size={13} color="var(--blue-700)" />{label}
+    </button>
+  );
+}
+
+function StepNote({ children }) {
+  return <p style={{ margin: '0 2px', font: '400 13px/1.5 var(--font-ui)', color: 'var(--slate-400)' }}>{children}</p>;
+}
+
+function DerivedNote({ children }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)' }}>
+      <Icon name="layout-list" size={16} color="var(--blue-600)" style={{ flex: '0 0 auto' }} />
+      <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{children}</span>
+    </div>
+  );
+}
+
+/* Step 5 — talking points. N cards, count derived from the type. The plug
+   card is starred; it is never its own clip. */
+function PointsStep({ post, blank, onShot, onMove, onOverlay, onPlace }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const slide = !window.isReel(post.format);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <DerivedNote>{post.derived}</DerivedNote>
+      {post.points.map((pt) => (
+        <Card key={pt.n} pad={14} style={{ borderColor: pt.plug ? 'var(--blue-300)' : 'var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+            <span style={{ width: 24, height: 24, flex: '0 0 auto', borderRadius: 999, background: pt.plug ? 'var(--blue-500)' : 'var(--fill-quiet)', color: pt.plug ? 'var(--white)' : 'var(--slate-500)', font: '700 12px var(--font-display)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{pt.n}</span>
+            {pt.plug ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 11px var(--font-ui)', letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--blue-700)', whiteSpace: 'nowrap' }}>
+                <Icon name="zap" size={12} color="var(--blue-600)" />Plug rides here
+              </span>
+            ) : (
+              <span style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.3px', textTransform: 'uppercase', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>Point {pt.n}</span>
+            )}
+            <span style={{ flex: 1 }} />
+            <button type="button" aria-label="Rewrite this point" style={{ width: 26, height: 26, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="sparkles" size={13} color="var(--blue-700)" />
+            </button>
+          </div>
+          <p style={{ margin: 0, font: '400 15px/1.45 var(--font-ui)', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+            {blank ? 'Nothing written yet' : pt.text}
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+            {pt.shot && !blank ? (
+              <button type="button" onClick={onShot} style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 0, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                <Thumb format={post.format} w={30} h={40} />
+                <span style={{ flex: 1, minWidth: 0, font: '600 12px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pt.shot}</span>
+              </button>
+            ) : (
+              <button type="button" onClick={onShot}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0, padding: '9px 11px', borderRadius: 'var(--radius-sm)', border: '1.5px dashed var(--line-strong)', background: 'transparent', cursor: 'pointer', font: '700 12px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap' }}>
+                <Icon name="images" size={14} color="var(--slate-400)" />Add screenshot or recording
+              </button>
+            )}
+            <button type="button" onClick={onMove}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flex: '0 0 auto', padding: '9px 11px', borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', cursor: 'pointer', font: '700 12px var(--font-ui)', color: 'var(--ink)' }}>
+              {blank ? (slide ? 'Slide' : 'Clip') : pt.move}<Icon name="chevron-down" size={13} color="var(--slate-400)" />
+            </button>
+          </div>
+          {pt.green && pt.shot && !blank ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, padding: '8px 11px', borderRadius: 'var(--radius-sm)', background: 'var(--green-soft)', font: '700 11.5px var(--font-ui)', color: 'var(--green)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <Icon name="switch-camera" size={13} color="var(--green)" style={{ flex: '0 0 auto' }} />Green screen · fills the background
+              </span>
+              <button type="button" onClick={onPlace}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flex: '0 0 auto', padding: '9px 11px', borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', cursor: 'pointer', font: '700 12px var(--font-ui)', color: 'var(--ink)' }}>
+                {pt.place || 'Place'}<Icon name="chevron-down" size={13} color="var(--slate-400)" />
+              </button>
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            {pt.overlay && !blank ? (
+              <button type="button" onClick={onOverlay} style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--ink-900)', cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '3px 8px', borderRadius: 6, background: pt.overlay.bg ? pt.overlay.color : 'transparent', color: pt.overlay.bg ? 'var(--ink)' : pt.overlay.color, font: '800 11px var(--font-ui)' }}>{pt.overlay.text}</span>
+                <span style={{ marginLeft: 'auto', flex: '0 0 auto', font: '600 11px var(--font-ui)', color: 'rgba(255,255,255,0.55)' }}>{pt.overlay.pos}</span>
+              </button>
+            ) : (
+              <button type="button" onClick={onOverlay}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0, padding: '9px 11px', borderRadius: 'var(--radius-sm)', border: '1.5px dashed var(--line-strong)', background: 'transparent', cursor: 'pointer', font: '700 12px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap' }}>
+                <Icon name="pencil" size={13} color="var(--slate-400)" />Add text
+              </button>
+            )}
+          </div>
+        </Card>
+      ))}
+      <StepNote>
+        The screenshot or recording pops up on the {slide ? 'slide' : 'clip'} you choose. On a green screen {slide ? 'slide' : 'clip'} it fills the background, and text lays over it wherever you place it.
+      </StepNote>
+    </div>
+  );
+}
+
+/* Step 6 — caption and hashtags on one screen, because Instagram needs the
+   tags inside the caption and the admin should see the merged result. */
+function CaptionStep({ post, blank }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const merged = `${post.caption} ${post.hashtags.join(' ')}`;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <EditorField label="Caption" meta={blank ? null : `${post.caption.length} of 200`} action={<AiAction />}>
+        <p style={{ margin: 0, font: '400 15px/1.5 var(--font-ui)', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+          {blank ? 'Search phrase goes in the first sentence' : post.caption}
+        </p>
+      </EditorField>
+
+      <EditorField label="Hashtags" meta={blank ? '3 to 5' : `${post.hashtags.length} of 5`} action={<AiAction label="Suggest" />}>
+        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+          {(blank ? [] : post.hashtags).map((h) => (
+            <span key={h} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 11px', borderRadius: 999, background: 'var(--blue-100)', font: '700 13px var(--font-ui)', color: 'var(--blue-700)' }}>
+              {h}<Icon name="x" size={12} color="var(--blue-600)" />
+            </span>
+          ))}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 11px', borderRadius: 999, border: '1.5px dashed var(--line-strong)', font: '700 13px var(--font-ui)', color: 'var(--slate-400)' }}>
+            <Icon name="plus" size={13} color="var(--slate-400)" />Add
+          </span>
+        </div>
+      </EditorField>
+
+      <div style={{ padding: 15, borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Merged preview</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>Instagram and TikTok</span>
+        </div>
+        <div style={{ padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Avatar name="FieldVision" size={24} />
+            <span style={{ font: '700 13px var(--font-ui)', color: 'var(--ink)' }}>fieldvision.ai</span>
+          </div>
+          <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: blank ? 'var(--slate-300)' : 'var(--ink)' }}>
+            {blank ? 'Caption and tags appear here together' : merged}
+          </p>
+        </div>
+        <StepNote>Instagram reads hashtags inside the caption, so both platforms post the same string.</StepNote>
+      </div>
+    </div>
+  );
+}
+
+/* Step 7 — AI review. A step the admin takes, never a gate. It never blocks
+   and never silently edits: every suggestion needs a tap. */
+function ReviewStep({ post, applied, onToggle }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const R = post.review;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 16, borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+        <ScoreDial value={R.overall} label="overall" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>
+            {R.overall >= 80 ? 'Reads spoken' : 'Reads mostly spoken'}
+          </div>
+          <p style={{ margin: '5px 0 0', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>
+            {R.overall >= 80 ? 'One suggestion left. Save whenever you are ready.' : 'Two lines still read as written copy. Fix them or save as is.'}
+          </p>
+        </div>
+      </div>
+
+      {R.sections.map((s) => (
+        <Card key={s.key} pad={14}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <span style={{ flex: 1, font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{s.key}</span>
+            <ScoreBar value={s.score} />
+            <span style={{ width: 24, textAlign: 'right', font: '700 13px var(--font-ui)', color: s.score >= 80 ? 'var(--green)' : s.score >= 65 ? 'var(--amber)' : 'var(--danger)' }}>{s.score}</span>
+          </div>
+          <p style={{ margin: '8px 0 0', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>{s.note}</p>
+          {s.fix ? (
+            <div style={{ marginTop: 11, padding: 12, borderRadius: 'var(--radius-sm)', background: applied[s.key] ? 'var(--green-soft)' : 'var(--blue-50)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <Icon name={applied[s.key] ? 'check' : 'sparkles'} size={13} color={applied[s.key] ? 'var(--green)' : 'var(--blue-600)'} style={{ flex: '0 0 auto', marginTop: 2 }} />
+                <span style={{ font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{applied[s.key] ? 'Applied. The section will rescore on save.' : s.fix}</span>
+              </div>
+              {applied[s.key] ? null : (
+                <div style={{ marginTop: 10, display: 'flex', gap: 7 }}>
+                  <Button size="sm" variant="tint" onClick={() => onToggle && onToggle(s.key)}>Apply</Button>
+                  <Button size="sm" variant="ghost">Ignore</Button>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </Card>
+      ))}
+
+      <Card pad={14}>
+        <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Checks</div>
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {R.checks.map((c) => (
+            <div key={c.label} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+              <Icon name={c.pass ? 'check' : 'circle-alert'} size={14} color={c.pass ? 'var(--green)' : 'var(--amber)'} style={{ flex: '0 0 auto', marginTop: 2 }} />
+              <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: c.pass ? 'var(--slate-500)' : 'var(--ink)' }}>
+                {c.label}
+                {c.quote ? <span style={{ display: 'block', marginTop: 3, font: '400 13px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>{c.quote}</span> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <StepNote>Review never blocks. Save the post at any score and the override is logged with the check that fired.</StepNote>
+    </div>
+  );
+}
+
+Object.assign(window, { EditorField, AiAction, StepNote, DerivedNote, PointsStep, CaptionStep, ReviewStep });

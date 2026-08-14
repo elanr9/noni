@@ -1,0 +1,51 @@
+function LoginScreen({ onNext }) {
+  const { Button } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px 24px 30px', position: 'relative', overflow: 'hidden', background: 'var(--white)' }}>
+      <span style={{ position: 'absolute', top: -180, left: -120, width: 420, height: 420, borderRadius: 999, background: 'var(--blue-50)' }}></span>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0, textAlign: 'center', position: 'relative' }}>
+        <svg width="150" height="150" viewBox="0 0 160 160" role="img" aria-label="Noni rocket">
+          <g transform="rotate(45 80 80) translate(20 2)">
+            <path fillRule="evenodd" fill="var(--blue-300)" d="M60 8C78 28 85 54 85 80L85 104 35 104 35 80C35 54 42 28 60 8ZM74 58a14 14 0 1 1-28 0a14 14 0 1 1 28 0Z"></path>
+            <path d="M35 76C22 86 17 100 17 114L37 102Z" fill="var(--blue-300)"></path>
+            <path d="M85 76C98 86 103 100 103 114L83 102Z" fill="var(--blue-300)"></path>
+            <g stroke="var(--blue-300)" strokeWidth="11" strokeLinecap="round" fill="none">
+              <path d="M60 122L60 144"></path><path d="M42 118L38 132"></path><path d="M78 118L82 132"></path>
+            </g>
+          </g>
+        </svg>
+        <p style={{ margin: '18px 0 0', font: '800 17px var(--font-rounded)', letterSpacing: '-0.2px', color: 'var(--blue-600)' }}>Welcome to Noni!</p>
+        <h1 style={{ margin: '8px 0 0', font: '800 40px/1.05 var(--font-display)', letterSpacing: '-1.2px', color: 'var(--ink)' }}>UGC Made Easy</h1>
+        <p style={{ margin: '14px 0 0', maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>Sign in with the Google account your invite was sent to.</p>
+      </div>
+      <button type="button" onClick={onNext}
+        style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 'var(--radius-pill)', border: '1.5px solid var(--border-strong)', cursor: 'pointer', background: 'var(--white)', font: '700 16px var(--font-ui)', letterSpacing: '-0.1px', color: 'var(--ink)', position: 'relative' }}>
+        <svg width="19" height="19" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+        </svg>
+        Continue with Google
+      </button>
+    </div>
+  );
+}
+
+function MagicLinkScreen({ onNext }) {
+  const { Wordmark, Icon, Button } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px 24px 30px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, textAlign: 'center' }}>
+        <span style={{ width: 84, height: 84, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="link" size={34} color="var(--blue-500)" />
+        </span>
+        <h1 style={{ margin: 0, font: '700 30px/1.15 var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>Check your email</h1>
+        <p style={{ margin: 0, maxWidth: 280, font: '400 16px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>We sent a link to elan@fieldvision.ai. Open it on this phone and you're in.</p>
+      </div>
+      <Button block variant="tint" onClick={onNext}>I opened the link</Button>
+    </div>
+  );
+}
+
+Object.assign(window, { LoginScreen, MagicLinkScreen });

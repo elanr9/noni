@@ -1,0 +1,196 @@
+/* Messaging for campaign managers. One group chat per brief plus direct
+   messages, reached from the MsgButton on every Briefs surface. Bubbles
+   support replies, forwards, voice notes and uploads. */
+
+const CHAT_NS = () => window.NoniDesignSystem_710e43;
+
+/* --- shared chat vocabulary --- */
+
+function ChatBubble({ who, time, me, quote, forward, children, reactions }) {
+  const { Icon } = CHAT_NS();
+  return (
+    <div style={{ display: 'flex', gap: 9, flexDirection: me ? 'row-reverse' : 'row', alignItems: 'flex-end' }}>
+      {!me ? <Avatar name={who} size={28} tone="quiet" /> : null}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: me ? 'flex-end' : 'flex-start', maxWidth: '82%' }}>
+        <span style={{ font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)', padding: '0 4px', whiteSpace: 'nowrap' }}>{me ? time : `${who} · ${time}`}</span>
+        <div style={{ padding: '10px 13px', borderRadius: 18, borderBottomRightRadius: me ? 6 : 18, borderBottomLeftRadius: me ? 18 : 6, background: me ? 'var(--blue-500)' : 'var(--white)', color: me ? 'var(--white)' : 'var(--ink)', boxShadow: me ? 'var(--shadow-accent)' : 'var(--shadow-card)', font: '400 14.5px/1.45 var(--font-ui)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {forward ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '600 11.5px var(--font-ui)', color: me ? 'rgba(255,255,255,0.75)' : 'var(--slate-400)' }}>
+              <Icon name="share-2" size={12} color={me ? 'rgba(255,255,255,0.75)' : 'var(--slate-400)'} />{forward}
+            </span>
+          ) : null}
+          {quote ? (
+            <div style={{ display: 'flex', gap: 8, padding: '7px 10px', borderRadius: 10, background: me ? 'rgba(255,255,255,0.16)' : 'var(--fill-quiet)' }}>
+              <span style={{ width: 3, flex: '0 0 auto', borderRadius: 999, background: me ? 'rgba(255,255,255,0.6)' : 'var(--blue-300)' }} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', font: '700 11.5px var(--font-ui)', color: me ? 'var(--white)' : 'var(--blue-700)' }}>{quote[0]}</span>
+                <span style={{ display: 'block', marginTop: 1, font: '400 12.5px/1.35 var(--font-ui)', color: me ? 'rgba(255,255,255,0.8)' : 'var(--slate-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 210 }}>{quote[1]}</span>
+              </span>
+            </div>
+          ) : null}
+          {children}
+        </div>
+        {reactions ? (
+          <div style={{ display: 'flex', gap: 4, marginTop: -1, padding: '0 4px' }}>
+            {reactions.map(([icon, n]) => (
+              <span key={icon} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999, background: 'var(--white)', boxShadow: 'var(--shadow-card)', font: '700 11px var(--font-ui)', color: 'var(--slate-500)' }}>
+                <Icon name={icon} size={11} color="var(--blue-600)" />{n}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function VoiceNote({ me, duration }) {
+  const { Icon } = CHAT_NS();
+  const bars = [6, 12, 9, 16, 11, 18, 8, 14, 10, 16, 7, 13, 9, 15, 6, 11, 8, 13];
+  const fg = me ? 'var(--white)' : 'var(--blue-600)';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 999, background: me ? 'rgba(255,255,255,0.22)' : 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="play" size={13} color={fg} />
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+        {bars.map((h, i) => <span key={i} style={{ width: 3, height: h, borderRadius: 999, background: me ? (i < 8 ? 'var(--white)' : 'rgba(255,255,255,0.4)') : (i < 8 ? 'var(--blue-500)' : 'var(--blue-100)') }} />)}
+      </span>
+      <span style={{ font: '700 12px var(--font-ui)', color: me ? 'rgba(255,255,255,0.85)' : 'var(--slate-500)' }}>{duration}</span>
+    </span>
+  );
+}
+
+function UploadThumbs({ n = 2, caption }) {
+  const { Icon } = CHAT_NS();
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <span style={{ display: 'flex', gap: 6 }}>
+        {Array.from({ length: n }).map((_, i) => (
+          <span key={i} style={{ width: 96, height: 120, borderRadius: 12, background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="images" size={22} color="var(--blue-300)" />
+          </span>
+        ))}
+      </span>
+      {caption ? <span>{caption}</span> : null}
+    </span>
+  );
+}
+
+function PostRef({ me, label }) {
+  const { Icon } = CHAT_NS();
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 12, background: me ? 'rgba(255,255,255,0.16)' : 'var(--fill-quiet)' }}>
+      <Icon name="video" size={14} color={me ? 'var(--white)' : 'var(--blue-700)'} />
+      <span style={{ flex: 1, font: '700 12.5px var(--font-ui)', color: me ? 'var(--white)' : 'var(--ink)' }}>{label}</span>
+      <Icon name="chevron-right" size={13} color={me ? 'rgba(255,255,255,0.7)' : 'var(--slate-400)'} />
+    </span>
+  );
+}
+
+function Composer({ placeholder }) {
+  const { Icon } = CHAT_NS();
+  const round = (bg, shadow) => ({ width: 42, height: 42, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: bg, boxShadow: shadow || 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' });
+  return (
+    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '12px 16px 24px', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--off-white)' }}>
+      <button type="button" aria-label="Add attachment" style={round('var(--white)', 'var(--shadow-card)')}>
+        <Icon name="plus" size={18} color="var(--slate-500)" />
+      </button>
+      <div style={{ flex: 1, height: 44, minWidth: 0, borderRadius: 999, background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'flex', alignItems: 'center', gap: 8, padding: '0 6px 0 16px' }}>
+        <span style={{ flex: 1, minWidth: 0, font: '400 14px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{placeholder}</span>
+        <button type="button" aria-label="Record voice note" style={{ width: 34, height: 34, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="mic" size={15} color="var(--slate-500)" />
+        </button>
+      </div>
+      <button type="button" aria-label="Send" style={round('var(--blue-500)', 'var(--shadow-accent)')}>
+        <Icon name="send" size={17} color="var(--white)" />
+      </button>
+    </div>
+  );
+}
+
+function ChatScreen({ title, meta, right, placeholder, onBack, children }) {
+  return (
+    <AdminScreen pad={false} bottom={0} footer={<Composer placeholder={placeholder} />}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <PushHeader title={title} meta={meta} onBack={onBack} right={right} />
+        <div style={{ padding: `10px ${window.GUT}px 100px`, display: 'flex', flexDirection: 'column', gap: 15 }}>{children}</div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+const ChatDivider = ({ children }) => (
+  <span style={{ alignSelf: 'center', font: '600 11.5px var(--font-ui)', letterSpacing: '0.3px', color: 'var(--slate-400)', padding: '5px 12px', borderRadius: 999, background: 'var(--fill-quiet)' }}>{children}</span>
+);
+
+/* --- screens --- */
+
+function MessagesHome({ onBack, onOpenChat }) {
+  const { Icon } = CHAT_NS();
+  const Row = ({ avatar, title, preview, time, unread, onClick }) => (
+    <Card pad={13} onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+      {avatar}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 14.5px var(--font-ui)', color: 'var(--ink)' }}>{title}</div>
+        <div style={{ marginTop: 2, font: `${unread ? 700 : 600} 12.5px var(--font-ui)`, color: unread ? 'var(--ink)' : 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flex: '0 0 auto' }}>
+        <span style={{ font: '600 11.5px var(--font-ui)', color: unread ? 'var(--blue-600)' : 'var(--slate-400)' }}>{time}</span>
+        {unread ? <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, background: 'var(--blue-500)', color: 'var(--white)', font: '700 11px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{unread}</span> : null}
+      </div>
+    </Card>
+  );
+  const briefAvatar = (
+    <span style={{ width: 42, height: 42, flex: '0 0 auto', borderRadius: 14, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name="layout-list" size={19} color="var(--blue-700)" />
+    </span>
+  );
+  return (
+    <AdminScreen pad={false}>
+      <PushHeader title="Messages" meta="Campaign managers on this account" onBack={onBack} />
+      <div style={{ padding: `2px ${window.GUT}px 40px`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <SectionLabel style={{ padding: '4px 2px 2px' }}>Brief chats</SectionLabel>
+        <Row avatar={briefAvatar} title="Week 1 brief" preview="Jordan sent a voice note" time="5m" unread={3} onClick={() => onOpenChat && onOpenChat('brief')} />
+        <SectionLabel style={{ padding: '10px 2px 2px' }}>Direct messages</SectionLabel>
+        <Row avatar={<Avatar name="Maya" size={42} />} title="Maya" preview="Can you take the outros tonight?" time="12m" unread={2} onClick={() => onOpenChat && onOpenChat('maya')} />
+        <Row avatar={<Avatar name="Jordan" size={42} tone="quiet" />} title="Jordan" preview="You: Forwarded Post 12" time="1h" onClick={() => onOpenChat && onOpenChat('jordan')} />
+      </div>
+    </AdminScreen>
+  );
+}
+
+function BriefChat({ onBack }) {
+  return (
+    <ChatScreen title="Week 1 brief" meta="You, Maya and Jordan" right={<AvatarStack people={MANAGERS} size={26} />} placeholder="Message Week 1 brief" onBack={onBack}>
+      <ChatDivider>Every manager on the account is in this chat</ChatDivider>
+      <ChatBubble who="Maya" time="9:12 AM" reactions={[['heart', 2]]}>Taking the five talking heads. I still have the demo clips from the last shoot.</ChatBubble>
+      <ChatBubble who="Jordan" time="9:20 AM" quote={['Maya', 'Taking the five talking heads. I still have the demo clips…']}>Perfect. I will cover the numbered lists then.</ChatBubble>
+      <ChatBubble who="You" time="9:24 AM" me><VoiceNote me duration="0:42" /></ChatBubble>
+      <ChatBubble who="Maya" time="9:31 AM"><UploadThumbs n={2} caption="B roll options for the pricing hook." /></ChatBubble>
+      <ChatBubble who="Jordan" time="9:40 AM" forward="Forwarded from Week 1 · Post 12">
+        <PostRef label="Post 12 · Numbered list" />
+        This hook reads flat to me. Swap it for the pricing angle?
+      </ChatBubble>
+      <ChatBubble who="You" time="9:41 AM" me>Swap it. I will fill the outros tonight.</ChatBubble>
+    </ChatScreen>
+  );
+}
+
+function DMChat({ onBack }) {
+  return (
+    <ChatScreen title="Maya" meta="Campaign manager · active now" right={<Avatar name="Maya" size={32} />} placeholder="Message Maya" onBack={onBack}>
+      <ChatDivider>Today</ChatDivider>
+      <ChatBubble who="Maya" time="8:52 AM">Can you take the outros tonight?</ChatBubble>
+      <ChatBubble who="You" time="8:55 AM" me quote={['Maya', 'Can you take the outros tonight?']}>Yes, right after review.</ChatBubble>
+      <ChatBubble who="Maya" time="9:02 AM"><VoiceNote duration="0:18" /></ChatBubble>
+      <ChatBubble who="You" time="9:05 AM" me forward="Forwarded from Week 1 brief">
+        <PostRef me label="Post 14 · Talking head" />
+        Look at 14 too while you are in there.
+      </ChatBubble>
+      <ChatBubble who="Maya" time="9:06 AM" reactions={[['heart', 1]]}>On it.</ChatBubble>
+    </ChatScreen>
+  );
+}
+
+Object.assign(window, { MessagesHome, BriefChat, DMChat, ChatBubble, VoiceNote, Composer });

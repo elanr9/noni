@@ -477,6 +477,7 @@ export type Database = {
           id: string
           kind: string
           layout: string
+          overlay_style: Json
           overlay_text: string | null
           screenshot_url: string | null
           screenshot_width: number | null
@@ -494,6 +495,7 @@ export type Database = {
           id?: string
           kind: string
           layout?: string
+          overlay_style?: Json
           overlay_text?: string | null
           screenshot_url?: string | null
           screenshot_width?: number | null
@@ -511,6 +513,7 @@ export type Database = {
           id?: string
           kind?: string
           layout?: string
+          overlay_style?: Json
           overlay_text?: string | null
           screenshot_url?: string | null
           screenshot_width?: number | null
@@ -2172,6 +2175,225 @@ export type Database = {
           },
         ]
       }
+      manager_chat_reads: {
+        Row: {
+          chat_id: string
+          last_read_at: string
+          profile_id: string
+        }
+        Insert: {
+          chat_id: string
+          last_read_at?: string
+          profile_id: string
+        }
+        Update: {
+          chat_id?: string
+          last_read_at?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_chat_reads_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "manager_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chat_reads_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      manager_chats: {
+        Row: {
+          campaign_id: string | null
+          company_id: string
+          created_at: string
+          id: string
+          kind: string
+          user_a: string | null
+          user_b: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          user_a?: string | null
+          user_b?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          user_a?: string | null
+          user_b?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_chats_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chats_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chats_user_a_fkey"
+            columns: ["user_a"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chats_user_b_fkey"
+            columns: ["user_b"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      manager_message_reactions: {
+        Row: {
+          created_at: string
+          emoji: string
+          message_id: string
+          profile_id: string
+        }
+        Insert: {
+          created_at?: string
+          emoji: string
+          message_id: string
+          profile_id: string
+        }
+        Update: {
+          created_at?: string
+          emoji?: string
+          message_id?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "manager_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_message_reactions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      manager_messages: {
+        Row: {
+          assignment_id: string | null
+          author_id: string
+          body: string
+          brief_id: string | null
+          chat_id: string
+          company_id: string
+          created_at: string
+          forward_label: string | null
+          id: string
+          media_kind: string | null
+          media_path: string | null
+          reply_to_id: string | null
+          voice_duration_ms: number | null
+        }
+        Insert: {
+          assignment_id?: string | null
+          author_id: string
+          body?: string
+          brief_id?: string | null
+          chat_id: string
+          company_id: string
+          created_at?: string
+          forward_label?: string | null
+          id?: string
+          media_kind?: string | null
+          media_path?: string | null
+          reply_to_id?: string | null
+          voice_duration_ms?: number | null
+        }
+        Update: {
+          assignment_id?: string | null
+          author_id?: string
+          body?: string
+          brief_id?: string | null
+          chat_id?: string
+          company_id?: string
+          created_at?: string
+          forward_label?: string | null
+          id?: string
+          media_kind?: string | null
+          media_path?: string | null
+          reply_to_id?: string | null
+          voice_duration_ms?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_messages_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_messages_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_messages_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "manager_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_messages_reply_to_id_fkey"
+            columns: ["reply_to_id"]
+            isOneToOne: false
+            referencedRelation: "manager_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           assignment_id: string | null
@@ -3475,6 +3697,10 @@ export type Database = {
         Returns: Json
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
+      seed_company_post_types: {
+        Args: { p_company_id: string }
+        Returns: undefined
+      }
       spend_company_credits_for_earning: {
         Args: {
           p_assignment: string
@@ -3512,6 +3738,7 @@ export type Database = {
           id: string
           kind: string
           layout: string
+          overlay_style: Json
           overlay_text: string | null
           screenshot_url: string | null
           screenshot_width: number | null

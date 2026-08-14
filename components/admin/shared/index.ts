@@ -1,5 +1,7 @@
 export { ActionBar, type ActionBarProps } from './ActionBar';
 export { AdminHeader, type AdminHeaderProps } from './AdminHeader';
+export { AvatarStack, type StackPerson } from './AvatarStack';
+export { MsgButton, type MsgButtonProps } from './MsgButton';
 export { AdminScreen, type AdminScreenProps } from './AdminScreen';
 export { Card, type CardProps } from './Card';
 export { CheckboxReasonRow, type CheckboxReasonRowProps } from './CheckboxReasonRow';

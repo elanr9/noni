@@ -1,0 +1,334 @@
+/* Review detail. The default view is the post the way it will appear on the
+   platform: one 9:16 frame at true dimensions, handle and caption over it,
+   two actions. Nothing about the render manifest is on this screen — the
+   question here is only "does this go out or come back".
+
+   Request changes flips into suggestion mode: the spoken sections and the
+   caption as cards, each one openable with a note. Notes ride back to the
+   creator attached to the post card they re-record from. */
+
+function ReviewDetail({ item, creator, state = 'default', mode: mode0 = 'view', animateSheet = true, onBack, onChat, onApproved }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [mode, setMode] = React.useState(state === 'changes' ? 'changes' : mode0);
+  const [done, setDone] = React.useState(state === 'approved');
+  const [slide, setSlide] = React.useState(0);
+  const reel = window.isReel(item.format);
+
+  const caption = reel
+    ? 'Why my winger fades after 70 minutes: he runs the wrong runs, not too few. Full breakdown below.'
+    : 'Three numbers decide most Sunday matches. Save this before the weekend. Comment D1 for the template.';
+  const tags = reel ? '#collegesoccer #soccerrecruiting #matchfilm' : '#collegesoccer #matchfilm #u17';
+
+  if (mode === 'changes') {
+    return <RevisionMode item={item} creator={creator} state={state} onBack={() => setMode('view')} />;
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--ink-900)', position: 'relative' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '9 / 16', flex: '0 0 auto', overflow: 'hidden', background: reel ? 'linear-gradient(170deg,#1B242E 0%,#0B0F14 100%)' : 'linear-gradient(160deg,#E7F4FD 0%,#C9DCEB 100%)' }}>
+        {reel
+          ? <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={46} color="rgba(255,255,255,0.26)" /></div>
+          : <SlideFrame slides={A.slides} index={slide} onIndex={setSlide} />}
+
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 16px 34px', background: 'linear-gradient(180deg,rgba(11,15,20,0.55) 0%,rgba(11,15,20,0) 100%)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" onClick={onBack} aria-label="Back" style={{ width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(18px)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="chevron-left" size={20} color="var(--white)" />
+          </button>
+          <span style={{ flex: 1 }} />
+          {item.attempt > 1 ? <span style={{ padding: '6px 11px', borderRadius: 999, background: 'rgba(224,138,22,0.92)', color: 'var(--white)', font: '700 12px var(--font-ui)' }}>Take {item.attempt}</span> : null}
+          <span style={{ padding: '6px 11px', borderRadius: 999, background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(18px)', color: 'var(--white)', font: '700 12px var(--font-ui)' }}>1 of 5</span>
+          <button type="button" onClick={onChat} aria-label={`Message ${creator.short}`} style={{ width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(18px)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="message-circle" size={18} color="var(--white)" />
+          </button>
+        </div>
+
+        {reel ? (
+          <div style={{ position: 'absolute', left: 16, right: 16, bottom: 148, display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <div style={{ height: 3, borderRadius: 999, background: 'rgba(255,255,255,0.3)', position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '34%', borderRadius: 999, background: 'var(--white)' }} />
+              <span style={{ position: 'absolute', left: '34%', top: -4, width: 11, height: 11, borderRadius: 999, background: 'var(--white)', transform: 'translateX(-50%)' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', font: '700 11px var(--font-ui)', color: 'rgba(255,255,255,0.65)' }}><span>0:13</span><span>{item.duration}</span></div>
+          </div>
+        ) : null}
+
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '52px 16px 16px', background: 'linear-gradient(180deg,rgba(11,15,20,0) 0%,rgba(11,15,20,0.72) 55%,rgba(11,15,20,0.86) 100%)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Avatar name={creator.name} size={30} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 14px var(--font-ui)', color: 'var(--white)' }}>@{creator.tiktok}</div>
+              <div style={{ font: '600 11px var(--font-ui)', color: 'rgba(255,255,255,0.62)' }}>{item.typeLabel} · {item.age}</div>
+            </div>
+            <FormatChip format={item.format} size="sm" onDark />
+          </div>
+          <p style={{ margin: 0, font: '400 14px/1.42 var(--font-ui)', color: 'var(--white)' }}>{caption}</p>
+          <p style={{ margin: 0, font: '600 13px var(--font-ui)', color: 'rgba(255,255,255,0.72)' }}>{tags}</p>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, background: 'var(--white)', display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px' }}>
+        <Button variant="outline" size="md" onClick={() => setMode('changes')} style={{ flex: '0 0 46%', whiteSpace: 'nowrap' }}>Request changes</Button>
+        <Button variant="primary" size="md" icon="check" block onClick={() => { setDone(true); onApproved && onApproved(); }} style={{ flex: 1 }}>Approve</Button>
+      </div>
+
+      {done ? <ApprovedOverlay item={item} creator={creator} onBack={onBack} /> : null}
+    </div>
+  );
+}
+
+/* Slideshow frame — real slides in the same 9:16 box, swipe dots at the top
+   so they clear the caption. */
+function SlideFrame({ slides, index, onIndex }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const s = slides[index];
+  return (
+    <>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '96px 44px 190px' }}>
+        <p style={{ margin: 0, textAlign: 'center', font: '800 25px/1.26 var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>{s.overlay}</p>
+      </div>
+      {s.shot ? (
+        <span style={{ position: 'absolute', top: 58, right: 16, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 999, background: 'rgba(11,15,20,0.5)', color: 'var(--white)', font: '700 11px var(--font-ui)' }}>
+          <Icon name="images" size={11} />Screenshot
+        </span>
+      ) : null}
+      <div style={{ position: 'absolute', top: 62, left: 0, right: 0, display: 'flex', gap: 5, justifyContent: 'center' }}>
+        {slides.map((_, i) => (
+          <span key={i} onClick={() => onIndex(i)} style={{ width: i === index ? 18 : 6, height: 6, borderRadius: 999, cursor: 'pointer', background: i === index ? 'var(--ink)' : 'rgba(15,23,32,0.24)', transition: 'width var(--dur-fast) var(--ease-out)' }} />
+        ))}
+      </div>
+      {index > 0 ? <PagerArrow dir="left" onClick={() => onIndex(index - 1)} /> : null}
+      {index < slides.length - 1 ? <PagerArrow dir="right" onClick={() => onIndex(index + 1)} /> : null}
+    </>
+  );
+}
+
+function PagerArrow({ dir, onClick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <button type="button" onClick={onClick} aria-label={dir === 'left' ? 'Previous slide' : 'Next slide'}
+      style={{ position: 'absolute', top: '46%', [dir]: 10, transform: 'translateY(-50%)', width: 34, height: 34, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--glass)', backdropFilter: 'blur(18px)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name={dir === 'left' ? 'chevron-left' : 'chevron-right'} size={18} color="var(--ink)" />
+    </button>
+  );
+}
+
+/* Suggestion mode. One card per spoken section. The caption is not here —
+   the campaign manager writes it in the brief, so it is placed automatically
+   and there is nothing for the creator to re-record. Tap a card,
+   a note box opens under it; save and the note sticks to that section. Or
+   switch to one note for the whole post. Only the sections with notes go
+   back — everything else stays approved. */
+function RevisionMode({ item, creator, state = 'default', onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const reel = window.isReel(item.format);
+
+  const sections = reel
+    ? A.segments.map((s) => ({ key: s.slot, label: s.slot, text: s.text, len: s.len }))
+    : A.slides.map((s) => ({ key: `Slide ${s.n}`, label: `Slide ${s.n}`, text: s.overlay }));
+
+  const seeded = state === 'noted' ? { 'Point 3': 'Audio clips at 0:04. Same setup, just move the phone off the fence rail.' } : {};
+  const [notes, setNotes] = React.useState(seeded);
+  const [open, setOpen] = React.useState(state === 'typing' ? 'Point 3' : null);
+  const [draft, setDraft] = React.useState(state === 'typing' ? 'Audio clips at 0:04. Same setup, just move' : '');
+  const [whole, setWhole] = React.useState(state === 'whole');
+  const [wholeNotes, setWholeNotes] = React.useState(state === 'whole' ? ['Great energy, wrong room. Shoot the whole thing outside at the pitch — the echo is killing every line.'] : ['']);
+  const [sent, setSent] = React.useState(state === 'sent');
+  const [watch, setWatch] = React.useState(null); /* section being re-watched */
+  const [modalPlaying, setModalPlaying] = React.useState(true);
+  const [noteMode, setNoteMode] = React.useState(false);
+  const [sheetNote, setSheetNote] = React.useState('');
+  const closeWatch = () => { setWatch(null); setNoteMode(false); setSheetNote(''); };
+
+  const count = whole ? wholeNotes.filter((t) => t.trim()).length : Object.keys(notes).length;
+  const openCard = (key) => { setOpen(key); setDraft(notes[key] || ''); };
+  const save = () => { setNotes({ ...notes, [open]: draft.trim() }); setOpen(null); setDraft(''); };
+  const clear = (key) => { const n = { ...notes }; delete n[key]; setNotes(n); };
+
+  return (
+    <AdminScreen bottom={100} pad={false} footer={
+      <ActionBar>
+        <Button variant="ghost" size="md" onClick={onBack} style={{ flex: '0 0 30%' }}>Cancel</Button>
+        <Button variant="primary" size="md" icon="send" block disabled={count === 0} onClick={() => setSent(true)} style={{ flex: 1, whiteSpace: 'nowrap' }}>
+          {count === 0 ? 'Send back' : `Send back · ${count} ${count === 1 ? 'note' : 'notes'}`}
+        </Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, padding: '0 0 100px' }}>
+        <PushHeader title={`What should ${creator.short} fix?`} meta={item.title} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Segmented items={['Section by section', 'Whole post']} active={whole ? 1 : 0} onSelect={(i) => setWhole(i === 1)} />
+
+          {whole ? (
+            <Card pad={14}>
+              <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Notes for the whole post</div>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {wholeNotes.map((t, i) => (
+                  <div key={i} style={{ position: 'relative' }}>
+                    <textarea value={t} onChange={(e) => setWholeNotes(wholeNotes.map((x, j) => (j === i ? e.target.value : x)))} rows={3}
+                      placeholder={i === 0 ? `What has to change before ${creator.short} records again` : 'Another note'}
+                      style={{ width: '100%', boxSizing: 'border-box', resize: 'none', padding: '13px 38px 13px 13px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '400 15px/1.5 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+                    {wholeNotes.length > 1 ? (
+                      <button type="button" onClick={() => setWholeNotes(wholeNotes.filter((_, j) => j !== i))} aria-label="Remove note" style={{ position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name="x" size={13} color="var(--slate-400)" />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setWholeNotes([...wholeNotes, ''])} disabled={!wholeNotes[wholeNotes.length - 1].trim()}
+                style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 999, border: 'none', cursor: wholeNotes[wholeNotes.length - 1].trim() ? 'pointer' : 'default', opacity: wholeNotes[wholeNotes.length - 1].trim() ? 1 : 0.45, background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 13px var(--font-ui)' }}>
+                <Icon name="plus" size={14} />Add another note
+              </button>
+            </Card>
+          ) : (
+            <>
+              <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>
+                Tap a section to leave a note. Only the sections you note come back — the rest stay approved.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {sections.map((s) => {
+                  const noted = notes[s.key] != null;
+                  const isOpen = open === s.key;
+                  return (
+                    <div key={s.key} style={{ background: 'var(--white)', border: `1px solid ${noted || isOpen ? 'var(--blue-500)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-card)', overflow: 'hidden', transition: 'border-color var(--dur-fast) var(--ease-out)' }}>
+                      <button type="button" onClick={() => { setWatch(s); setModalPlaying(true); }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: 12, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+                          <span style={{ position: 'relative', width: 46, height: 62, flex: '0 0 auto', borderRadius: 9, overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {reel ? (
+                              <span style={{ width: 24, height: 24, borderRadius: 999, background: 'rgba(255,255,255,0.88)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <Icon name="play" size={11} color="var(--ink)" />
+                              </span>
+                            ) : <Icon name="images" size={16} color="var(--blue-300)" />}
+                            {s.len ? <span style={{ position: 'absolute', bottom: 3, right: 3, padding: '1px 5px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 9px var(--font-ui)' }}>{s.len}</span> : null}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ flex: '0 0 auto', whiteSpace: 'nowrap', font: '700 11px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: noted ? 'var(--blue-700)' : 'var(--slate-400)' }}>{s.label}</span>
+                              <span style={{ flex: 1 }} />
+                              {noted
+                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 11px var(--font-ui)', color: 'var(--blue-700)' }}><Icon name="pencil" size={12} />Note added</span>
+                                : <span role="button" aria-label={`Add note to ${s.label}`} onClick={(e) => { e.stopPropagation(); isOpen ? setOpen(null) : openCard(s.key); }} style={{ display: 'inline-flex', padding: 4, margin: -4, cursor: 'pointer' }}><Icon name="plus" size={15} color="var(--slate-300)" /></span>}
+                            </div>
+                            <p style={{ margin: '5px 0 0', font: '400 13.5px/1.45 var(--font-ui)', color: 'var(--ink)' }}>{s.text}</p>
+                          </div>
+                        </div>
+                      </button>
+
+                      {noted && !isOpen ? (
+                        <div style={{ margin: '0 13px 13px', padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <Icon name="message-circle" size={14} color="var(--blue-600)" style={{ flex: '0 0 auto', marginTop: 2 }} />
+                          <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{notes[s.key]}</span>
+                          <button type="button" onClick={() => clear(s.key)} aria-label="Remove note" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}>
+                            <Icon name="x" size={14} color="var(--slate-400)" />
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {isOpen ? (
+                        <div style={{ margin: '0 13px 13px', padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)' }}>
+                          <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} rows={3}
+                            placeholder="What to change here"
+                            style={{ width: '100%', boxSizing: 'border-box', resize: 'none', padding: 11, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--blue-300)', background: 'var(--white)', font: '400 14px/1.45 var(--font-ui)', color: 'var(--ink)', outline: 'none' }} />
+                          <div style={{ marginTop: 9, display: 'flex', gap: 7, justifyContent: 'flex-end' }}>
+                            <Button size="sm" variant="ghost" onClick={() => setOpen(null)}>Cancel</Button>
+                            <Button size="sm" variant="primary" disabled={!draft.trim()} onClick={save}>Save note</Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {watch ? (
+        <Sheet title={watch.label} subtitle={watch.len ? `${watch.len} · ${creator.short}'s clip` : `${creator.short}'s slide`} onClose={closeWatch} maxHeight="84%"
+          footer={noteMode ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="ghost" size="lg" block onClick={() => { setNoteMode(false); setSheetNote(''); }} style={{ flex: '0 0 28%' }}>Cancel</Button>
+              <Button variant="primary" size="lg" block disabled={!sheetNote.trim()} onClick={() => { setNotes({ ...notes, [watch.key]: sheetNote.trim() }); closeWatch(); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Save note</Button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="ghost" size="lg" block onClick={closeWatch} style={{ flex: '0 0 28%' }}>Back</Button>
+              <Button variant="primary" size="lg" icon="pencil" block onClick={() => { setSheetNote(notes[watch.key] || ''); setNoteMode(true); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Request changes</Button>
+            </div>
+          )}>
+          <div style={{ position: 'relative', width: noteMode ? 'min(100%, 160px)' : 'min(100%, 236px)', aspectRatio: '9 / 16', margin: '0 auto', borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', boxShadow: 'var(--shadow-media)', transition: 'width var(--dur-fast) var(--ease-out)' }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: noteMode ? '28px 14px 44px' : '40px 22px 62px' }}>
+              <p style={{ margin: 0, textAlign: 'center', font: `800 ${noteMode ? 12 : 15}px/1.3 var(--font-display)`, letterSpacing: '-0.3px', color: 'var(--ink)' }}>{watch.text}</p>
+            </div>
+            {reel ? (
+              <button type="button" onClick={() => setModalPlaying(!modalPlaying)} aria-label={modalPlaying ? 'Pause' : 'Play'}
+                style={{ position: 'absolute', bottom: 12, left: 12, width: noteMode ? 28 : 36, height: noteMode ? 28 : 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: modalPlaying ? 'var(--blue-500)' : 'rgba(255,255,255,0.88)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={modalPlaying ? 'pause' : 'play'} size={noteMode ? 12 : 15} color={modalPlaying ? 'var(--white)' : 'var(--ink)'} />
+              </button>) : null}
+            {watch.len && !noteMode ? <span style={{ position: 'absolute', bottom: 22, right: 14, padding: '2px 8px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 11px var(--font-ui)' }}>{watch.len}</span> : null}
+            {reel && modalPlaying ? <span style={{ position: 'absolute', left: 0, bottom: 0, height: 3, background: 'var(--blue-500)', animation: 'noni-progress 6s linear infinite' }}></span> : null}
+          </div>
+          {noteMode ? (
+            <div style={{ marginTop: 12, padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)' }}>
+              <textarea autoFocus value={sheetNote} onChange={(e) => setSheetNote(e.target.value)} rows={3}
+                placeholder={`What should ${creator.short} change in this ${watch.len ? 'clip' : 'slide'}`}
+                style={{ width: '100%', boxSizing: 'border-box', resize: 'none', padding: 11, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--blue-300)', background: 'var(--white)', font: '400 14px/1.45 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+            </div>
+          ) : null}
+        </Sheet>
+      ) : null}
+
+      {sent ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: `0 ${window.GUT}px`, textAlign: 'center' }}>
+          <button type="button" onClick={() => setSent(false)} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="chevron-left" size={20} color="var(--ink)" />
+          </button>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={28} color="var(--blue-600)" /></span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Sent back</h2>
+          <p style={{ margin: 0, maxWidth: 290, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>
+            {creator.short} gets this post back with your notes on the sections you marked. Nothing else has to be re-recorded.
+          </p>
+          <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Next in queue</Button>
+        </div>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Approve is the last human touch. Say what happens next, then get out. */
+function ApprovedOverlay({ item, creator, onBack }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const reel = window.isReel(item.format);
+  const steps = reel
+    ? [['zap', 'Clips stitched and overlays burned in'], ['share-2', 'Posted to TikTok and Instagram at the slot time'], ['trending-up', 'Views and revenue tracked from the first hour']]
+    : [['zap', 'Slides assembled with their overlay text'], ['share-2', 'Posted with auto-add music on TikTok, silent on Instagram'], ['music-2', `${creator.short} adds the song, then it comes back for one tap`]];
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: `0 ${window.GUT}px`, gap: 22 }}>
+      <button type="button" onClick={onBack} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="chevron-left" size={20} color="var(--ink)" />
+      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}>
+        <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--green-soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="check" size={32} color="var(--green)" />
+        </span>
+        <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Approved</h2>
+        <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{item.title} is out of your hands. Noni takes it from here.</p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {steps.map(([icon, text]) => (
+          <div key={text} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 14px', borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+            <Icon name={icon} size={18} color="var(--blue-600)" />
+            <span style={{ font: '600 14px/1.35 var(--font-ui)', color: 'var(--ink)' }}>{text}</span>
+          </div>
+        ))}
+      </div>
+      <Button variant="primary" size="lg" block onClick={onBack}>Next in queue</Button>
+    </div>
+  );
+}
+
+Object.assign(window, { ReviewDetail, SlideFrame, PagerArrow, RevisionMode, ApprovedOverlay });

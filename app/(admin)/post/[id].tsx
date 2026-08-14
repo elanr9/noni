@@ -12,12 +12,17 @@ import { CtaCard } from '../../../components/admin/editor/CtaCard';
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import { MoveSheet, type MoveSlot } from '../../../components/admin/editor/MoveSheet';
-import { PlacementSheet } from '../../../components/admin/editor/PlacementSheet';
+import {
+  OverlayEditor,
+  overlayPlacementLabel,
+  parseOverlayStyle,
+  type OverlayEditorMode,
+  type OverlaySavePatch,
+} from '../../../components/admin/editor/OverlayEditor';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { StepDots } from '../../../components/admin/editor/StepDots';
-import { TextStyleSheet } from '../../../components/admin/editor/TextStyleSheet';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
 import { TypePicker } from '../../../components/admin/editor/TypePicker';
 import {
@@ -27,7 +32,6 @@ import {
 import { PushHeader } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/admin/shared/Segmented';
 import { useAuth } from '../../../lib/auth';
 import {
   appendBannedPhrases,
@@ -51,7 +55,6 @@ import {
   updateBrief,
   updateBriefSegment,
   uploadSegmentScreenshot,
-  parseTextOverlay,
   type BriefReviewEventInput,
   type BriefReviewResult,
   type BriefSegment,
@@ -61,7 +64,6 @@ import {
   type RegenDraftPayload,
   type RegenField,
   type TalkingPoint,
-  type TextOverlay,
 } from '../../../lib/briefs-api';
 import { supabase } from '../../../lib/supabase';
 import { color, motion, radius, type } from '../../../theme/tokens';
@@ -193,11 +195,6 @@ export default function PostEditorScreen() {
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [exampleUrl, setExampleUrl] = useState<string | null>(null);
   const [killReason, setKillReason] = useState<string | null>(null);
-  const [textOverlay, setTextOverlay] = useState<TextOverlay>(
-    parseTextOverlay(null),
-  );
-  const [textStyleVisible, setTextStyleVisible] = useState(false);
-  const [textStyleSaving, setTextStyleSaving] = useState(false);
 
   const [pendingOverlayLabels, setPendingOverlayLabels] = useState<
     (string | null)[] | null
@@ -230,9 +227,9 @@ export default function PostEditorScreen() {
   const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
   /** Which point's screenshot the Move sheet is placing; null means closed. */
   const [moveIndex, setMoveIndex] = useState<number | null>(null);
-  /** Which point's screenshot the Placement sheet is positioning; null means closed. */
-  const [placeIndex, setPlaceIndex] = useState<number | null>(null);
-  const [placeSaving, setPlaceSaving] = useState(false);
+  const [overlayIndex, setOverlayIndex] = useState<number | null>(null);
+  const [overlayMode, setOverlayMode] = useState<OverlayEditorMode>('text');
+  const [overlaySaving, setOverlaySaving] = useState(false);
   /** The brand account shown on the merged caption preview. */
   const [accountName, setAccountName] = useState('');
 
@@ -322,7 +319,6 @@ export default function PostEditorScreen() {
         setGenerationId(brief.generation_id);
         setExampleUrl(brief.example_url);
         setKillReason(brief.kill_reason);
-        setTextOverlay(parseTextOverlay(brief.text_overlay));
         setBaseline(
           deriveSnapshot({
             hook: brief.hook,
@@ -849,26 +845,6 @@ export default function PostEditorScreen() {
     }
   }
 
-  /** Brief-level on-screen text config; saves immediately like segment edits. */
-  async function saveTextOverlay(next: TextOverlay) {
-    if (!id) return;
-    const prev = textOverlay;
-    setTextOverlay(next);
-    setTextStyleSaving(true);
-    try {
-      await updateBrief(id, { text_overlay: next });
-      setTextStyleVisible(false);
-    } catch (e) {
-      setTextOverlay(prev);
-      Alert.alert(
-        'Could not save text style',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setTextStyleSaving(false);
-    }
-  }
-
   /** Flip a point's recording layout between standard and green screen. */
   async function toggleLayoutForPoint(pointIndex: number) {
     const segment = segmentForPointIndex(pointIndex);
@@ -890,46 +866,76 @@ export default function PostEditorScreen() {
     }
   }
 
-  /** Placement sheet save: normalized screenshot + text positions. */
-  async function savePlacement(pos: {
-    x: number;
-    y: number;
-    width: number;
-    textY: number | null;
-  }) {
-    const pointIndex = placeIndex;
+  async function openOverlay(pointIndex: number, mode: OverlayEditorMode) {
+    const rows = await ensureSegmentsDerived();
+    if (rows.length === 0) {
+      Alert.alert('Save first', 'Could not prepare this point.');
+      return;
+    }
+    setOverlayMode(mode);
+    setOverlayIndex(pointIndex);
+  }
+
+  async function saveOverlay(patch: OverlaySavePatch) {
+    const pointIndex = overlayIndex;
     if (pointIndex === null) return;
     const segment = segmentForPointIndex(pointIndex);
     if (!segment) {
-      setPlaceIndex(null);
-      return;
+      Alert.alert('No clip yet', 'Save the post so clips exist, then add text.');
+      throw new Error('No clip yet');
     }
-    setPlaceSaving(true);
+    setOverlaySaving(true);
     try {
-      const patch: {
-        screenshot_x?: number;
-        screenshot_y?: number;
-        screenshot_width?: number;
-        text_y?: number;
-      } = {};
-      if (segment.screenshot_url) {
-        patch.screenshot_x = pos.x;
-        patch.screenshot_y = pos.y;
-        patch.screenshot_width = pos.width;
-      }
-      if (pos.textY !== null) patch.text_y = pos.textY;
       await updateBriefSegment(segment.id, patch);
       setSegments((prev) =>
-        prev.map((s) => (s.id === segment.id ? { ...s, ...patch } : s)),
+        prev.map((s) =>
+          s.id === segment.id
+            ? {
+                ...s,
+                overlay_text: patch.overlay_text,
+                show_on_screen: patch.show_on_screen,
+                overlay_style: patch.overlay_style,
+                screenshot_x: patch.screenshot_x,
+                screenshot_y: patch.screenshot_y,
+                screenshot_width: patch.screenshot_width,
+              }
+            : s,
+        ),
       );
-      setPlaceIndex(null);
     } catch (e) {
       Alert.alert(
-        'Could not save placement',
+        'Could not save overlay',
         e instanceof Error ? e.message : 'Try again',
       );
+      throw e;
     } finally {
-      setPlaceSaving(false);
+      setOverlaySaving(false);
+    }
+  }
+
+  async function deleteOverlayText() {
+    const pointIndex = overlayIndex;
+    if (pointIndex === null) return;
+    const segment = segmentForPointIndex(pointIndex);
+    if (!segment) return;
+    try {
+      await updateBriefSegment(segment.id, {
+        overlay_text: '',
+        show_on_screen: false,
+      });
+      setSegments((prev) =>
+        prev.map((s) =>
+          s.id === segment.id
+            ? { ...s, overlay_text: '', show_on_screen: false }
+            : s,
+        ),
+      );
+    } catch (e) {
+      Alert.alert(
+        'Could not delete text',
+        e instanceof Error ? e.message : 'Try again',
+      );
+      throw e;
     }
   }
 
@@ -1093,8 +1099,8 @@ export default function PostEditorScreen() {
   }));
   const movingFrom =
     moveIndex !== null ? (segmentForPointIndex(moveIndex) ?? null) : null;
-  const placingSegment =
-    placeIndex !== null ? (segmentForPointIndex(placeIndex) ?? null) : null;
+  const overlaySegment =
+    overlayIndex !== null ? (segmentForPointIndex(overlayIndex) ?? null) : null;
 
   // Clip and slide counts are derived from the type, never entered.
   const pointCount =
@@ -1238,27 +1244,6 @@ export default function PostEditorScreen() {
 
         {step === 'points' ? (
           <View style={styles.section}>
-            <View style={styles.textStyleBlock}>
-              <View style={styles.textStyleRow}>
-                <Text style={styles.textStyleLabel}>On screen text</Text>
-                {textOverlay.enabled ? (
-                  <PressableScale
-                    accessibilityRole="button"
-                    onPress={() => setTextStyleVisible(true)}
-                    style={styles.textStyleEdit}
-                  >
-                    <Text style={styles.textStyleEditLabel}>Edit style</Text>
-                  </PressableScale>
-                ) : null}
-              </View>
-              <Segmented
-                options={[{ label: 'On' }, { label: 'Off' }]}
-                value={textOverlay.enabled ? 0 : 1}
-                onChange={(i) =>
-                  void saveTextOverlay({ ...textOverlay, enabled: i === 0 })
-                }
-              />
-            </View>
             <PointsEditor
               points={points}
               minPoints={currentType?.min_points ?? null}
@@ -1279,21 +1264,27 @@ export default function PostEditorScreen() {
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onMoveScreenshot={moveScreenshotFromPoint}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              onPlaceScreenshot={setPlaceIndex}
-              hasTextForIndex={(i) => {
-                const s = segmentForPointIndex(i);
-                return Boolean(
-                  textOverlay.enabled &&
-                    s?.show_on_screen &&
-                    s.overlay_text?.trim(),
-                );
-              }}
               layoutForIndex={(i) =>
                 segmentForPointIndex(i)?.layout === 'green_screen'
                   ? 'green_screen'
                   : 'standard'
               }
-              onToggleLayout={(i) => void toggleLayoutForPoint(i)}
+              overlayTextForIndex={(i) => {
+                const t = segmentForPointIndex(i)?.overlay_text?.trim();
+                return t ? t : undefined;
+              }}
+              overlayStyleForIndex={(i) =>
+                parseOverlayStyle(segmentForPointIndex(i)?.overlay_style)
+              }
+              placementLabelForIndex={(i) => {
+                const s = segmentForPointIndex(i);
+                return overlayPlacementLabel(
+                  s?.screenshot_x,
+                  s?.screenshot_y,
+                  s?.screenshot_width,
+                );
+              }}
+              onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
           </View>
         ) : null}
@@ -1381,6 +1372,32 @@ export default function PostEditorScreen() {
         onFillFromLink={(url, context) => void fillFrom({ url, context })}
       />
 
+      {overlayIndex !== null ? (
+        <OverlayEditor
+          visible
+          mode={overlayMode}
+          resetKey={overlaySegment?.id ?? String(overlayIndex)}
+          screenshotUrl={
+            overlaySegment?.screenshot_url
+              ? screenshotUrls[overlaySegment.id]
+              : undefined
+          }
+          overlayText={overlaySegment?.overlay_text ?? ''}
+          overlayStyle={parseOverlayStyle(overlaySegment?.overlay_style)}
+          screenshotX={overlaySegment?.screenshot_x ?? null}
+          screenshotY={overlaySegment?.screenshot_y ?? null}
+          screenshotWidth={overlaySegment?.screenshot_width ?? null}
+          greenScreen={overlaySegment?.layout === 'green_screen'}
+          saving={overlaySaving}
+          onClose={() => setOverlayIndex(null)}
+          onSave={saveOverlay}
+          onSwapMedia={() => setShotPickerIndex(overlayIndex)}
+          onToggleGreenScreen={() => void toggleLayoutForPoint(overlayIndex)}
+          onRemoveMedia={() => void removeScreenshotFromPoint(overlayIndex)}
+          onDeleteText={deleteOverlayText}
+        />
+      ) : null}
+
       <CameraRollSheet
         visible={shotPickerIndex !== null}
         library={noniLibrary}
@@ -1398,34 +1415,6 @@ export default function PostEditorScreen() {
         currentSegmentId={movingFrom?.id ?? null}
         onClose={() => setMoveIndex(null)}
         onPick={(segmentId) => void placeScreenshot(segmentId)}
-      />
-
-      <PlacementSheet
-        visible={placeIndex !== null}
-        imageUrl={
-          placingSegment ? (screenshotUrls[placingSegment.id] ?? null) : null
-        }
-        overlayText={
-          placingSegment?.show_on_screen && textOverlay.enabled
-            ? placingSegment.overlay_text?.trim() || null
-            : null
-        }
-        textOverlay={textOverlay}
-        initialX={placingSegment?.screenshot_x ?? null}
-        initialY={placingSegment?.screenshot_y ?? null}
-        initialWidth={placingSegment?.screenshot_width ?? null}
-        initialTextY={placingSegment?.text_y ?? null}
-        saving={placeSaving}
-        onClose={() => setPlaceIndex(null)}
-        onSave={(pos) => void savePlacement(pos)}
-      />
-
-      <TextStyleSheet
-        visible={textStyleVisible}
-        initial={textOverlay}
-        saving={textStyleSaving}
-        onClose={() => setTextStyleVisible(false)}
-        onSave={(next) => void saveTextOverlay(next)}
       />
 
       <LibraryPickerSheet
@@ -1517,28 +1506,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   section: { gap: 10, marginBottom: 8 },
-  textStyleBlock: { gap: 8 },
-  textStyleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  textStyleLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: color.slate500,
-  },
-  textStyleEdit: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: color.fillQuiet,
-  },
-  textStyleEditLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: color.blue500,
-  },
   footer: {
     flexDirection: 'row',
     gap: 10,

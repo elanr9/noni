@@ -29,10 +29,6 @@ import {
   AdminScreen,
   SkeletonCard,
 } from '../../../components/admin/shared';
-import {
-  FormatInfoSheet,
-  type FormatInfo,
-} from '../../../components/FormatInfoSheet';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import {
   listWeekAssignments,
@@ -125,7 +121,7 @@ export default function BriefsScreen() {
   const [publishing, setPublishing] = useState(false);
   const [targetsVisible, setTargetsVisible] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
-  const [infoFormat, setInfoFormat] = useState<FormatInfo | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -182,6 +178,9 @@ export default function BriefsScreen() {
   const videoRows = laneRows('video');
   const slideshowRows = laneRows('photo_carousel');
   const activeRows = lane === 'video' ? videoRows : slideshowRows;
+  const visibleRows = typeFilter
+    ? activeRows.filter((r) => r.item.briefs.post_types?.key === typeFilter)
+    : activeRows;
 
   const typeSplit = useMemo(
     () =>
@@ -358,7 +357,10 @@ export default function BriefsScreen() {
               done: doneCount(slideshowRows),
               target: campaign.slideshow_target ?? 10,
             }}
-            onChange={setLane}
+            onChange={(next) => {
+              setLane(next);
+              setTypeFilter(null);
+            }}
           />
           {editable ? (
             <View style={styles.targetsRow}>
@@ -370,9 +372,17 @@ export default function BriefsScreen() {
               </PressableScale>
             </View>
           ) : null}
-          <SplitHeader chips={splitChips} onChipPress={setInfoFormat} />
+          <SplitHeader
+            split={splitChips}
+            rows={activeRows.map((r) => ({
+              key: r.item.briefs.post_types?.key ?? '',
+              state: r.state,
+            }))}
+            active={typeFilter}
+            onSelect={setTypeFilter}
+          />
           <View style={styles.rows}>
-            {activeRows.map((row, i) => (
+            {visibleRows.map((row, i) => (
               <BriefRow
                 key={row.item.brief_id}
                 index={i + 1}
@@ -385,8 +395,6 @@ export default function BriefsScreen() {
           </View>
         </View>
       )}
-
-      <FormatInfoSheet format={infoFormat} onClose={() => setInfoFormat(null)} />
 
       <WeekTargetsSheet
         visible={targetsVisible}
