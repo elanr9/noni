@@ -8,7 +8,7 @@ import {
   profileIsPlatformAdmin,
   type AppMode,
 } from '../lib/active-mode';
-import { borderWidth, color, radius, type } from '../theme/tokens';
+import { color, radius, type } from '../theme/tokens';
 import { Icon, type IconName } from './ui/Icon';
 import { PressableScale } from './ui/PressableScale';
 import { SheetShell } from './ui/SheetShell';
@@ -19,25 +19,10 @@ function roleLabel(role: string): string {
   return 'Creator';
 }
 
-const MODE_COPY: Record<
-  AppMode,
-  { title: string; body: string; icon: IconName }
-> = {
-  admin: {
-    title: 'Campaign manager',
-    body: 'Review posts, run briefs, and manage creators.',
-    icon: 'users',
-  },
-  creator: {
-    title: 'Creator',
-    body: 'Record, post, and cash out.',
-    icon: 'circle-user-round',
-  },
-  platform: {
-    title: 'Noni platform',
-    body: 'Ops lives on the website.',
-    icon: 'settings',
-  },
+const MODE_COPY: Record<AppMode, { title: string; icon: IconName }> = {
+  admin: { title: 'Campaign Manager', icon: 'users' },
+  creator: { title: 'Creator', icon: 'circle-user-round' },
+  platform: { title: 'Noni platform', icon: 'settings' },
 };
 
 function AccountRow({
@@ -107,7 +92,6 @@ function RoleCard({
       </View>
       <View style={styles.meta}>
         <Text style={styles.roleTitle}>{copy.title}</Text>
-        <Text style={styles.roleBody}>{copy.body}</Text>
       </View>
       {active ? (
         <View style={styles.usingPill}>
@@ -147,9 +131,7 @@ export function AccountSwitcherSheet({
   const email = accounts.find((a) => a.userId === profile?.id)?.email ?? null;
   const otherAccounts = accounts.filter((a) => a.userId !== profile?.id);
 
-  const modes: AppMode[] = isPlatform
-    ? ['platform', 'admin', 'creator']
-    : ['admin', 'creator'];
+  const modes: AppMode[] = ['admin', 'creator'];
 
   async function onSwitchMode(mode: AppMode) {
     if (mode === activeMode) {
@@ -206,28 +188,9 @@ export function AccountSwitcherSheet({
     }
   }
 
-  async function onAdd() {
-    try {
-      onClose();
-      await addAccount();
-    } catch (e) {
-      Alert.alert(
-        'Could not continue',
-        e instanceof Error ? e.message : 'Try again.',
-      );
-    }
-  }
-
-  const subtitle = showModes
-    ? 'Same email, two sides of Noni. Pick campaign manager or creator.'
-    : showBecomeCreator
-      ? 'Turn on creator mode on this email, or sign in as someone else.'
-      : 'Use another Google account signed in on this phone.';
-
   return (
     <SheetShell visible={visible} onClose={onClose}>
       <Text style={styles.title}>Switch account</Text>
-      <Text style={styles.lede}>{subtitle}</Text>
 
       {showModes ? (
         <View style={styles.section}>
@@ -296,18 +259,7 @@ export function AccountSwitcherSheet({
           </View>
           <Icon name="arrow-right" size={18} color={color.slate400} />
         </PressableScale>
-      ) : (
-        <PressableScale
-          accessibilityRole="button"
-          onPress={() => void onAdd()}
-          style={styles.addRow}
-        >
-          <View style={styles.addIcon}>
-            <Icon name="plus" size={20} color={color.ink} />
-          </View>
-          <Text style={styles.addLabel}>Add account</Text>
-        </PressableScale>
-      )}
+      ) : null}
     </SheetShell>
   );
 }
@@ -319,14 +271,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
     color: color.ink,
   },
-  lede: {
-    marginTop: 8,
-    marginBottom: 18,
-    fontSize: type.size.meta,
-    lineHeight: type.size.meta * 1.45,
-    color: color.slate500,
-  },
   section: {
+    marginTop: 18,
     marginBottom: 18,
   },
   sectionLabel: {
@@ -432,27 +378,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: radius.lg,
     backgroundColor: color.blue100,
-  },
-  addRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 2,
-  },
-  addIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.pill,
-    borderWidth: borderWidth.hair,
-    borderColor: color.lineStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addLabel: {
-    flex: 1,
-    fontSize: type.size.body,
-    fontWeight: '600',
-    color: color.ink,
   },
 });

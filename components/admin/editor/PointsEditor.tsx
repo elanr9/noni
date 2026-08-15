@@ -28,6 +28,8 @@ export function PointsEditor(props: {
   maxPoints: number | null;
   /** Clip on videos, Slide on slideshows — naming only, never a count field. */
   family: 'video' | 'photo_carousel';
+  /** The plug sentence from the CTA step, shown inside the plug point. */
+  cta: string;
   busyAll: boolean;
   busyIndex: number | null;
   onChange: (points: TalkingPoint[]) => void;
@@ -37,15 +39,9 @@ export function PointsEditor(props: {
   screenshotUrlForIndex: (index: number) => string | undefined;
   screenshotBusyIndex: number | null;
   onAttachScreenshot: (index: number) => void;
-  onMoveScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
-  /** Kept for the parent; overlay media mode replaces PlacementSheet. */
-  onPlaceScreenshot?: (index: number) => void;
-  /** Recording layout for this point's segment. */
-  layoutForIndex: (index: number) => 'standard' | 'green_screen';
   overlayTextForIndex: (index: number) => string | undefined;
   overlayStyleForIndex: (index: number) => OverlayStyleValue;
-  placementLabelForIndex: (index: number) => string;
   onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
 }): JSX.Element {
   const {
@@ -53,6 +49,7 @@ export function PointsEditor(props: {
     minPoints,
     maxPoints,
     family,
+    cta,
     busyAll,
     busyIndex,
     onChange,
@@ -61,15 +58,11 @@ export function PointsEditor(props: {
     screenshotUrlForIndex,
     screenshotBusyIndex,
     onAttachScreenshot,
-    onMoveScreenshot,
-    layoutForIndex,
+    onRemoveScreenshot,
     overlayTextForIndex,
     overlayStyleForIndex,
-    placementLabelForIndex,
     onOpenOverlay,
   } = props;
-
-  const slotNoun = family === 'photo_carousel' ? 'Slide' : 'Clip';
 
   function updatePoint(id: string, text: string) {
     onChange(
@@ -132,10 +125,8 @@ export function PointsEditor(props: {
         const busy = busyIndex === i;
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
-        const greenScreen = layoutForIndex(i) === 'green_screen';
         const overlayText = overlayTextForIndex(i);
         const overlayStyle = overlayStyleForIndex(i);
-        const placeLabel = placementLabelForIndex(i);
         const overlayFill = overlayStyle.color ?? color.white;
         const overlayBg = overlayStyle.bg ?? true;
         const plug = point.is_product;
@@ -153,7 +144,7 @@ export function PointsEditor(props: {
               {plug ? (
                 <View style={styles.plugTag}>
                   <Icon name="zap" size={13} color={color.blue600} />
-                  <Text style={styles.plugTagText}>Plug rides here</Text>
+                  <Text style={styles.plugTagText}>Plug</Text>
                 </View>
               ) : (
                 <PressableScale
@@ -162,7 +153,7 @@ export function PointsEditor(props: {
                   onPress={() => markProduct(point.id)}
                   style={styles.plugGhost}
                 >
-                  <Text style={styles.plugGhostText}>Plug here</Text>
+                  <Text style={styles.plugGhostText}>Add plug</Text>
                 </PressableScale>
               )}
               <View style={styles.tools}>
@@ -206,6 +197,17 @@ export function PointsEditor(props: {
               </View>
             </View>
 
+            {plug ? (
+              <View style={styles.ctaBox}>
+                <Icon name="zap" size={13} color={color.blue600} />
+                <Text style={styles.ctaBoxText}>
+                  {cta.trim()
+                    ? cta.trim()
+                    : 'No CTA written yet. Add it on the CTA step.'}
+                </Text>
+              </View>
+            ) : null}
+
             <TextInput
               multiline
               value={point.text ?? ''}
@@ -223,18 +225,29 @@ export function PointsEditor(props: {
 
             <View style={styles.shotRow}>
               {shotUrl !== undefined ? (
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Replace the ${shotLabel(shotUrl).toLowerCase()} on point ${i + 1}`}
-                  disabled={shotBusy}
-                  onPress={() => onAttachScreenshot(i)}
-                  style={styles.shotPress}
-                >
-                  <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
-                  <Text style={styles.shotName} numberOfLines={1}>
-                    {shotBusy ? 'Uploading…' : shotLabel(shotUrl)}
-                  </Text>
-                </PressableScale>
+                <>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Place the ${shotLabel(shotUrl).toLowerCase()} on point ${i + 1}`}
+                    disabled={shotBusy}
+                    onPress={() => onOpenOverlay(i, 'media')}
+                    style={styles.shotPress}
+                  >
+                    <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
+                    <Text style={styles.shotName} numberOfLines={1}>
+                      {shotBusy ? 'Uploading…' : shotLabel(shotUrl)}
+                    </Text>
+                  </PressableScale>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove the ${shotLabel(shotUrl).toLowerCase()} on point ${i + 1}`}
+                    disabled={shotBusy}
+                    onPress={() => onRemoveScreenshot(i)}
+                    style={styles.toolBtn}
+                  >
+                    <Icon name="x" size={13} color={color.slate500} />
+                  </PressableScale>
+                </>
               ) : (
                 <PressableScale
                   accessibilityRole="button"
@@ -249,39 +262,7 @@ export function PointsEditor(props: {
                   </Text>
                 </PressableScale>
               )}
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel={`Move the screenshot on point ${i + 1}`}
-                disabled={shotBusy || shotUrl === undefined}
-                onPress={() => onMoveScreenshot(i)}
-                style={styles.movePill}
-              >
-                <Text style={styles.movePillText}>{slotNoun}</Text>
-                <Icon name="chevron-down" size={13} color={color.slate400} />
-              </PressableScale>
             </View>
-            {shotUrl !== undefined ? (
-              <View style={styles.gsRow}>
-                {greenScreen ? (
-                  <View style={styles.gsChip}>
-                    <Icon name="switch-camera" size={13} color={color.green} />
-                    <Text style={styles.gsChipText} numberOfLines={1}>
-                      Green screen · fills the background
-                    </Text>
-                  </View>
-                ) : null}
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Place the screenshot on point ${i + 1}`}
-                  disabled={shotBusy}
-                  onPress={() => onOpenOverlay(i, 'media')}
-                  style={styles.movePill}
-                >
-                  <Text style={styles.movePillText}>{placeLabel}</Text>
-                  <Icon name="chevron-down" size={13} color={color.slate400} />
-                </PressableScale>
-              </View>
-            ) : null}
             {overlayText ? (
               <PressableScale
                 accessibilityRole="button"
@@ -311,7 +292,6 @@ export function PointsEditor(props: {
                     {overlayText}
                   </Text>
                 </View>
-                <Text style={styles.textPos}>{placeLabel}</Text>
               </PressableScale>
             ) : (
               <PressableScale
@@ -330,8 +310,8 @@ export function PointsEditor(props: {
 
       <Text style={styles.helper}>
         {family === 'photo_carousel'
-          ? 'The screenshot or recording pops up on the slide you choose.'
-          : 'The screenshot or recording pops up on the clip you choose.'}
+          ? 'Tap a screenshot to move and resize it on its slide.'
+          : 'Tap a screenshot to move and resize it on its clip.'}
       </Text>
 
       <PressableScale
@@ -469,43 +449,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: color.slate500,
   },
-  movePill: {
-    flexShrink: 0,
-    minHeight: 44,
+  ctaBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 11,
-    borderRadius: radiusAdmin.pill,
-    backgroundColor: color.fillQuiet,
-  },
-  movePillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: color.ink,
-  },
-  gsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  gsChip: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    gap: 7,
+    paddingVertical: 9,
     paddingHorizontal: 11,
     borderRadius: radiusAdmin.sm,
-    backgroundColor: color.greenSoft,
+    backgroundColor: color.blue100,
   },
-  gsChipText: {
+  ctaBoxText: {
     flex: 1,
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: color.green,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 12.5 * 1.4,
+    color: color.blue700,
   },
   addShot: {
     flex: 1,
@@ -561,13 +519,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: -0.2,
-  },
-  textPos: {
-    marginLeft: 'auto',
-    flexShrink: 0,
-    fontSize: 11,
-    fontWeight: '600',
-    color: color.whiteA60,
   },
   helper: {
     fontSize: 12.5,

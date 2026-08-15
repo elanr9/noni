@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AccountSwitcherSheet } from '../../components/AccountSwitcherSheet';
@@ -12,7 +12,7 @@ import {
 } from '../../components/admin/shared';
 import { Button } from '../../components/ui/Button';
 import { Icon, type IconName } from '../../components/ui/Icon';
-import { switchAccountRowLabel } from '../../lib/active-mode';
+import { modesForProfile, switchAccountRowLabel } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
 import { getCompany } from '../../lib/onboarding';
 import { contactSupport } from '../../lib/support';
@@ -72,7 +72,7 @@ const NOTIF_ROWS: Array<{
 ];
 
 export default function CreatorSettingsScreen() {
-  const { profile, signOut, activeMode } = useAuth();
+  const { profile, signOut, activeMode, setActiveMode } = useAuth();
   const router = useRouter();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [open, setOpen] = useState<OpenSheet>(null);
@@ -92,6 +92,22 @@ export default function CreatorSettingsScreen() {
 
   const company = companyName ?? 'your company';
 
+  // One tap back to campaign manager; the sheet only covers other accounts.
+  async function onSwitchRole() {
+    if (profile && modesForProfile(profile).includes('admin')) {
+      try {
+        await setActiveMode('admin');
+      } catch (e) {
+        Alert.alert(
+          'Could not switch',
+          e instanceof Error ? e.message : 'Try again',
+        );
+      }
+      return;
+    }
+    setSwitcher(true);
+  }
+
   return (
     <>
       <AdminScreen>
@@ -102,7 +118,7 @@ export default function CreatorSettingsScreen() {
             <NavRow
               icon="arrow-left-right"
               label={switchAccountRowLabel(profile, activeMode)}
-              onPress={() => setSwitcher(true)}
+              onPress={() => void onSwitchRole()}
             />
             <NavRow icon="bell" label="Notifications" onPress={() => setOpen('notifs')} />
             <NavRow

@@ -74,6 +74,7 @@ const styles = StyleSheet.create({
   },
   actionBar: {
     position: 'absolute',
+    zIndex: 2,
     left: 0,
     right: 0,
     bottom: 0,

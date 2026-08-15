@@ -11,10 +11,8 @@ import { CaptionStep } from '../../../components/admin/editor/CaptionStep';
 import { CtaCard } from '../../../components/admin/editor/CtaCard';
 import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
-import { MoveSheet, type MoveSlot } from '../../../components/admin/editor/MoveSheet';
 import {
   OverlayEditor,
-  overlayPlacementLabel,
   parseOverlayStyle,
   type OverlayEditorMode,
   type OverlaySavePatch,
@@ -225,8 +223,6 @@ export default function PostEditorScreen() {
   const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
   /** Which point the camera roll sheet is picking for; null means closed. */
   const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
-  /** Which point's screenshot the Move sheet is placing; null means closed. */
-  const [moveIndex, setMoveIndex] = useState<number | null>(null);
   const [overlayIndex, setOverlayIndex] = useState<number | null>(null);
   const [overlayMode, setOverlayMode] = useState<OverlayEditorMode>('text');
   const [overlaySaving, setOverlaySaving] = useState(false);
@@ -814,6 +810,9 @@ export default function PostEditorScreen() {
       );
       const url = await signedScreenshotUrl(path);
       setScreenshotUrls((prev) => ({ ...prev, [segment.id]: url }));
+      // Straight into placement: the composer opens on the fresh screenshot.
+      setOverlayMode('media');
+      setOverlayIndex(pointIndex);
     } catch (e) {
       Alert.alert(
         'Could not attach',
@@ -845,27 +844,6 @@ export default function PostEditorScreen() {
     }
   }
 
-  /** Flip a point's recording layout between standard and green screen. */
-  async function toggleLayoutForPoint(pointIndex: number) {
-    const segment = segmentForPointIndex(pointIndex);
-    if (!segment?.screenshot_url) return;
-    const next = segment.layout === 'green_screen' ? 'standard' : 'green_screen';
-    setShotBusyIndex(pointIndex);
-    try {
-      await updateBriefSegment(segment.id, { layout: next });
-      setSegments((prev) =>
-        prev.map((s) => (s.id === segment.id ? { ...s, layout: next } : s)),
-      );
-    } catch (e) {
-      Alert.alert(
-        'Could not switch layout',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setShotBusyIndex(null);
-    }
-  }
-
   async function openOverlay(pointIndex: number, mode: OverlayEditorMode) {
     const rows = await ensureSegmentsDerived();
     if (rows.length === 0) {
@@ -888,19 +866,7 @@ export default function PostEditorScreen() {
     try {
       await updateBriefSegment(segment.id, patch);
       setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segment.id
-            ? {
-                ...s,
-                overlay_text: patch.overlay_text,
-                show_on_screen: patch.show_on_screen,
-                overlay_style: patch.overlay_style,
-                screenshot_x: patch.screenshot_x,
-                screenshot_y: patch.screenshot_y,
-                screenshot_width: patch.screenshot_width,
-              }
-            : s,
-        ),
+        prev.map((s) => (s.id === segment.id ? { ...s, ...patch } : s)),
       );
     } catch (e) {
       Alert.alert(
@@ -936,65 +902,6 @@ export default function PostEditorScreen() {
         e instanceof Error ? e.message : 'Try again',
       );
       throw e;
-    }
-  }
-
-  function moveScreenshotFromPoint(pointIndex: number) {
-    const from = segmentForPointIndex(pointIndex);
-    if (!from?.screenshot_url) return;
-    if (segments.length <= 1) {
-      Alert.alert('Nowhere to move', 'Only one clip exists on this post.');
-      return;
-    }
-    setMoveIndex(pointIndex);
-  }
-
-  /**
-   * One screenshot per slot, one slot per screenshot: moving onto an
-   * occupied slot swaps the two. Ordered so no slot ever holds two paths.
-   */
-  async function placeScreenshot(targetId: string) {
-    const pointIndex = moveIndex;
-    setMoveIndex(null);
-    if (pointIndex === null) return;
-    const from = segmentForPointIndex(pointIndex);
-    const target = segments.find((s) => s.id === targetId);
-    if (!from?.screenshot_url || !target || target.id === from.id) return;
-    setShotBusyIndex(pointIndex);
-    try {
-      const fromPath = from.screenshot_url;
-      const targetPath = target.screenshot_url;
-      await updateBriefSegment(from.id, { screenshot_url: null });
-      await updateBriefSegment(target.id, { screenshot_url: fromPath });
-      if (targetPath) {
-        await updateBriefSegment(from.id, { screenshot_url: targetPath });
-      }
-      setSegments((prev) =>
-        prev.map((s) => {
-          if (s.id === from.id) return { ...s, screenshot_url: targetPath ?? null };
-          if (s.id === target.id) return { ...s, screenshot_url: fromPath };
-          return s;
-        }),
-      );
-      setScreenshotUrls((prev) => {
-        const next = { ...prev };
-        const fromUrl = prev[from.id];
-        const targetUrl = prev[target.id];
-        if (targetPath && targetUrl) {
-          next[from.id] = targetUrl;
-        } else {
-          delete next[from.id];
-        }
-        if (fromUrl) next[target.id] = fromUrl;
-        return next;
-      });
-    } catch (e) {
-      Alert.alert(
-        'Could not move',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setShotBusyIndex(null);
     }
   }
 
@@ -1084,21 +991,6 @@ export default function PostEditorScreen() {
   const family: 'video' | 'photo_carousel' =
     currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
 
-  // The Move sheet's slot list, in segment order, derived from the type.
-  const moveSlots: MoveSlot[] = segments.map((s) => ({
-    segmentId: s.id,
-    label:
-      s.kind === 'hook'
-        ? 'Hook'
-        : s.kind === 'outro'
-          ? 'Outro'
-          : s.kind === 'slide'
-            ? `Slide ${(s.talking_point_index ?? 0) + 1}`
-            : `Clip ${(s.talking_point_index ?? 0) + 1}`,
-    occupied: s.screenshot_url !== null,
-  }));
-  const movingFrom =
-    moveIndex !== null ? (segmentForPointIndex(moveIndex) ?? null) : null;
   const overlaySegment =
     overlayIndex !== null ? (segmentForPointIndex(overlayIndex) ?? null) : null;
 
@@ -1249,6 +1141,7 @@ export default function PostEditorScreen() {
               minPoints={currentType?.min_points ?? null}
               maxPoints={currentType?.max_points ?? null}
               family={family}
+              cta={cta}
               busyAll={regenBusy === 'talking_points'}
               busyIndex={regenBusy === 'talking_point' ? regenPointIndex : null}
               onChange={setPoints}
@@ -1262,13 +1155,7 @@ export default function PostEditorScreen() {
               }}
               screenshotBusyIndex={shotBusyIndex}
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
-              onMoveScreenshot={moveScreenshotFromPoint}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              layoutForIndex={(i) =>
-                segmentForPointIndex(i)?.layout === 'green_screen'
-                  ? 'green_screen'
-                  : 'standard'
-              }
               overlayTextForIndex={(i) => {
                 const t = segmentForPointIndex(i)?.overlay_text?.trim();
                 return t ? t : undefined;
@@ -1276,14 +1163,6 @@ export default function PostEditorScreen() {
               overlayStyleForIndex={(i) =>
                 parseOverlayStyle(segmentForPointIndex(i)?.overlay_style)
               }
-              placementLabelForIndex={(i) => {
-                const s = segmentForPointIndex(i);
-                return overlayPlacementLabel(
-                  s?.screenshot_x,
-                  s?.screenshot_y,
-                  s?.screenshot_width,
-                );
-              }}
               onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
           </View>
@@ -1384,16 +1263,13 @@ export default function PostEditorScreen() {
           }
           overlayText={overlaySegment?.overlay_text ?? ''}
           overlayStyle={parseOverlayStyle(overlaySegment?.overlay_style)}
+          textY={overlaySegment?.text_y ?? null}
           screenshotX={overlaySegment?.screenshot_x ?? null}
           screenshotY={overlaySegment?.screenshot_y ?? null}
           screenshotWidth={overlaySegment?.screenshot_width ?? null}
-          greenScreen={overlaySegment?.layout === 'green_screen'}
           saving={overlaySaving}
           onClose={() => setOverlayIndex(null)}
           onSave={saveOverlay}
-          onSwapMedia={() => setShotPickerIndex(overlayIndex)}
-          onToggleGreenScreen={() => void toggleLayoutForPoint(overlayIndex)}
-          onRemoveMedia={() => void removeScreenshotFromPoint(overlayIndex)}
           onDeleteText={deleteOverlayText}
         />
       ) : null}
@@ -1407,14 +1283,6 @@ export default function PostEditorScreen() {
           setShotPickerIndex(null);
           if (index !== null) void uploadShotForPoint(index, uri);
         }}
-      />
-
-      <MoveSheet
-        visible={moveIndex !== null}
-        slots={moveSlots}
-        currentSegmentId={movingFrom?.id ?? null}
-        onClose={() => setMoveIndex(null)}
-        onPick={(segmentId) => void placeScreenshot(segmentId)}
       />
 
       <LibraryPickerSheet

@@ -670,6 +670,26 @@ export async function createCampaign(params: {
  * as the provisional title (briefs.title is NOT NULL) until a fill
  * replaces it.
  */
+/** Campaigns that already have typed brief rows. Nested PostgREST filters
+ *  on `briefs.post_type_id` return empty, which hid real weeks and made
+ *  Start week try to delete them. */
+async function stampedCampaignIds(
+  campaignIds: string[],
+): Promise<Set<string>> {
+  const stamped = new Set<string>();
+  if (campaignIds.length === 0) return stamped;
+  const { data, error } = await supabase
+    .from('campaign_briefs')
+    .select('campaign_id, briefs(post_type_id)')
+    .in('campaign_id', campaignIds);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const brief = Array.isArray(row.briefs) ? row.briefs[0] : row.briefs;
+    if (brief?.post_type_id) stamped.add(row.campaign_id);
+  }
+  return stamped;
+}
+
 export async function createWeek(params: {
   companyId: string;
   createdBy: string;
@@ -680,6 +700,20 @@ export async function createWeek(params: {
   typeSplit: Record<string, number>;
   postTypes: PostType[];
 }): Promise<Campaign> {
+  const { data: existing, error: existingError } = await supabase
+    .from('campaigns')
+    .select('*')
+    .eq('company_id', params.companyId)
+    .eq('drop_date', params.dropDate)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) {
+    const already = await stampedCampaignIds([existing.id]);
+    if (already.has(existing.id)) return existing;
+  }
+
   // Drop empty leftover drafts so Start week never stacks two cards on the
   // same Sunday (happened when an old campaign had no stamped posts).
   const { data: draftCamps, error: draftError } = await supabase
@@ -688,15 +722,10 @@ export async function createWeek(params: {
     .eq('company_id', params.companyId)
     .eq('status', 'draft');
   if (draftError) throw draftError;
+  const draftIds = (draftCamps ?? []).map((d) => d.id);
+  const stampedDrafts = await stampedCampaignIds(draftIds);
   for (const draft of draftCamps ?? []) {
-    const { data: stamped, error: stampedError } = await supabase
-      .from('campaign_briefs')
-      .select('brief_id, briefs!inner(post_type_id)')
-      .eq('campaign_id', draft.id)
-      .not('briefs.post_type_id', 'is', null)
-      .limit(1);
-    if (stampedError) throw stampedError;
-    if ((stamped ?? []).length > 0) continue;
+    if (stampedDrafts.has(draft.id)) continue;
     const { error: unlinkError } = await supabase
       .from('campaign_briefs')
       .delete()
@@ -819,18 +848,7 @@ export async function listCampaigns(): Promise<Campaign[]> {
   if (all.length === 0) return [];
   // Hide leftover drafts that never got week-setup stamps (same drop date
   // doubles that look like two Week cards).
-  const { data: stampedLinks, error: stampedError } = await supabase
-    .from('campaign_briefs')
-    .select('campaign_id, briefs!inner(post_type_id)')
-    .in(
-      'campaign_id',
-      all.map((c) => c.id),
-    )
-    .not('briefs.post_type_id', 'is', null);
-  if (stampedError) throw stampedError;
-  const stampedIds = new Set(
-    (stampedLinks ?? []).map((row) => row.campaign_id as string),
-  );
+  const stampedIds = await stampedCampaignIds(all.map((c) => c.id));
   return all.filter(
     (c) => c.status === 'published' || stampedIds.has(c.id),
   );

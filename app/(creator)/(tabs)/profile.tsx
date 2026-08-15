@@ -30,10 +30,7 @@ import {
   getSocialConnectUrl,
   type SocialConnectStatus,
 } from '../../../lib/admin-api';
-import {
-  profileCanCreate,
-  profileIsCampaignManager,
-} from '../../../lib/active-mode';
+import { modesForProfile } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
 import { useSetupState } from '../../../lib/setup';
@@ -352,8 +349,7 @@ export default function ProfileScreen() {
   const handle = status?.profile ? `@${status.profile.replace(/^@/, '')}` : null;
   const company = companyName ?? 'Your company';
   const companyInitial = company.charAt(0).toUpperCase();
-  const canManage =
-    profileIsCampaignManager(profile) && profileCanCreate(profile);
+  const canManage = modesForProfile(profile).includes('admin');
   const bankConnected = setup.state?.bank === 'done';
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -385,7 +381,7 @@ export default function ProfileScreen() {
             <Text style={styles.roleTileText}>{companyInitial}</Text>
           </View>
           <Text numberOfLines={1} style={styles.rolePillText}>
-            {company} Creator
+            Creator
           </Text>
           <View style={styles.chevrons}>
             <Icon name="chevron-up" size={11} color={color.slate400} />
@@ -590,7 +586,7 @@ export default function ProfileScreen() {
           >
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel={`${company} Creator, current role`}
+              accessibilityLabel="Creator, current role"
               onPress={() => setSwitcherOpen(false)}
               style={styles.popRow}
             >
@@ -598,14 +594,14 @@ export default function ProfileScreen() {
                 <Text style={styles.roleTileText}>{companyInitial}</Text>
               </View>
               <Text numberOfLines={1} style={styles.popRowText}>
-                {company} Creator
+                Creator
               </Text>
               <Icon name="check" size={16} color={color.accent} />
             </PressableScale>
             {canManage && (
               <PressableScale
                 accessibilityRole="button"
-                accessibilityLabel={`Switch to ${company} Campaign Manager`}
+                accessibilityLabel="Switch to Campaign Manager"
                 onPress={() => void switchToManager()}
                 style={[styles.popRow, styles.popRowBorder]}
               >
@@ -613,7 +609,7 @@ export default function ProfileScreen() {
                   <Text style={styles.roleTileText}>{companyInitial}</Text>
                 </View>
                 <Text numberOfLines={1} style={styles.popRowText}>
-                  {company} Campaign Manager
+                  Campaign Manager
                 </Text>
               </PressableScale>
             )}

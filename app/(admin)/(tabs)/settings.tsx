@@ -2,7 +2,7 @@
 // support, sign out, delete. Company brain, billing and team live on the
 // web admin console.
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AccountSwitcherSheet } from '../../../components/AccountSwitcherSheet';
@@ -17,7 +17,7 @@ import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { TextField } from '../../../components/ui/TextField';
 import { inviteCreator } from '../../../lib/admin-api';
-import { switchAccountRowLabel } from '../../../lib/active-mode';
+import { modesForProfile, switchAccountRowLabel } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
@@ -76,8 +76,14 @@ const NOTIF_ROWS: Array<{ key: 'subs' | 'live' | 'weekly'; label: string; sub: s
 ];
 
 export default function SettingsScreen() {
-  const { profile, managerAccess, refreshManagerAccess, signOut, activeMode } =
-    useAuth();
+  const {
+    profile,
+    managerAccess,
+    refreshManagerAccess,
+    signOut,
+    activeMode,
+    setActiveMode,
+  } = useAuth();
   const router = useRouter();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [open, setOpen] = useState<OpenSheet>(null);
@@ -105,6 +111,23 @@ export default function SettingsScreen() {
 
   const company = companyName ?? 'your company';
   const inviteValid = name.trim().length > 0 && EMAIL_RE.test(email.trim());
+
+  // Same one-tap switch creators get; the sheet is only the fallback for
+  // managers who have not turned on creator mode yet.
+  async function onSwitchRole() {
+    if (profile && modesForProfile(profile).includes('creator')) {
+      try {
+        await setActiveMode('creator');
+      } catch (e) {
+        Alert.alert(
+          'Could not switch',
+          e instanceof Error ? e.message : 'Try again',
+        );
+      }
+      return;
+    }
+    setSwitcher(true);
+  }
 
   async function sendInvite() {
     if (!profile || !managerAccess.inviteCreators) return;
@@ -153,7 +176,7 @@ export default function SettingsScreen() {
           <NavRow
             icon="arrow-left-right"
             label={switchAccountRowLabel(profile, activeMode)}
-            onPress={() => setSwitcher(true)}
+            onPress={() => void onSwitchRole()}
           />
           {managerAccess.inviteCreators ? (
             <NavRow

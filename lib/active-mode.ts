@@ -57,11 +57,7 @@ export function switchAccountRowLabel(
 ): string {
   if (!profile || modesForProfile(profile).length <= 1) return 'Switch account';
   if (activeMode === 'admin') return 'Switch to creator';
-  if (activeMode === 'creator') {
-    return profileIsPlatformAdmin(profile)
-      ? 'Switch view'
-      : 'Switch to campaign manager';
-  }
+  if (activeMode === 'creator') return 'Switch to campaign manager';
   return 'Switch view';
 }
 
