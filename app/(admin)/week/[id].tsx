@@ -1,8 +1,9 @@
 // One week's detail. Next week is the planning entry: an empty state until
 // week setup stamps the grid, then lanes, split chips and the stamped rows.
 // Live weeks keep the grid. Done weeks open the past-brief archive.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Stack, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
 
 import {
@@ -279,6 +280,23 @@ export default function WeekDetailScreen() {
   const [targetsVisible, setTargetsVisible] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [stripDismissed, setStripDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    void AsyncStorage.getItem(`noni.weekStrip.dismissed:${id}`)
+      .then((v) => setStripDismissed(v === '1'))
+      .catch(() => undefined);
+  }, [id]);
+
+  function dismissStrip() {
+    setStripDismissed(true);
+    if (id) {
+      void AsyncStorage.setItem(`noni.weekStrip.dismissed:${id}`, '1').catch(
+        () => undefined,
+      );
+    }
+  }
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -547,7 +565,12 @@ export default function WeekDetailScreen() {
     }
   }
 
-  const showFooter = editable && hasStampedPosts && rows.length > 0;
+  const gridActive = editable && hasStampedPosts && rows.length > 0;
+  const showFooter =
+    gridActive && !(phase === 'in_progress' && stripDismissed);
+  const showHeaderCount =
+    gridActive && phase === 'in_progress' && stripDismissed;
+  const madeCount = rows.length - leftCount;
 
   return (
     <>
@@ -576,6 +599,7 @@ export default function WeekDetailScreen() {
               publishing={publishing}
               onPublish={confirmPublish}
               onStartNext={() => router.push('/(admin)/week-setup')}
+              onDismiss={dismissStrip}
             />
           ) : undefined
         }
@@ -585,10 +609,19 @@ export default function WeekDetailScreen() {
           subtitle={subtitle}
           onBack={() => router.back()}
           trailing={
-            <MsgButton
-              count={unread}
-              onPress={() => router.push('/(admin)/messages' as Href)}
-            />
+            <>
+              {showHeaderCount ? (
+                <View style={[styles.countPill, shadow.shadowCard]}>
+                  <Text style={styles.countPillText}>
+                    {`${madeCount} of ${rows.length} posts`}
+                  </Text>
+                </View>
+              ) : null}
+              <MsgButton
+                count={unread}
+                onPress={() => router.push('/(admin)/messages' as Href)}
+              />
+            </>
           }
         />
 
@@ -835,6 +868,19 @@ const styles = StyleSheet.create({
   },
   targetsEdit: {
     fontSize: type.size.meta,
+    fontWeight: '700',
+    color: color.blue600,
+  },
+  countPill: {
+    height: 28,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countPillText: {
+    fontSize: 12,
     fontWeight: '700',
     color: color.blue600,
   },

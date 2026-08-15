@@ -5,6 +5,8 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
+import { Icon } from '../../ui/Icon';
+import { PressableScale } from '../../ui/PressableScale';
 
 export type WeekPhase = 'in_progress' | 'complete' | 'published';
 
@@ -18,6 +20,8 @@ export interface WeekFooterProps {
   publishing: boolean;
   onPublish: () => void;
   onStartNext: () => void;
+  /** When set, the in-progress strip shows an X that calls this. */
+  onDismiss?: () => void;
 }
 
 export function WeekFooter({
@@ -28,6 +32,7 @@ export function WeekFooter({
   publishing,
   onPublish,
   onStartNext,
+  onDismiss,
 }: WeekFooterProps) {
   if (phase === 'in_progress') {
     return (
@@ -39,6 +44,17 @@ export function WeekFooter({
           {left} posts left this week. Publish opens when all thirty are
           complete.
         </Text>
+        {onDismiss !== undefined ? (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            hitSlop={8}
+            onPress={onDismiss}
+            style={styles.dismiss}
+          >
+            <Icon name="x" size={16} color={color.slate400} />
+          </PressableScale>
+        ) : null}
       </View>
     );
   }
@@ -105,6 +121,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 13 * 1.45,
     color: color.slate500,
+  },
+  dismiss: {
+    width: 26,
+    height: 26,
+    borderRadius: radiusAdmin.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   stack: {
     gap: 8,
