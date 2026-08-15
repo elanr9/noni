@@ -304,7 +304,7 @@ async function runAssembly(params: {
     const { data: segmentRows } = await admin
       .from('brief_segments')
       .select(
-        'slot_index, kind, layout, overlay_text, show_on_screen, text_y, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+        'slot_index, kind, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
       )
       .eq('brief_id', briefId)
       .eq('company_id', companyId)

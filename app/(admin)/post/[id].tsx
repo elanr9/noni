@@ -13,10 +13,10 @@ import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import {
   OverlayEditor,
-  parseOverlayStyle,
   type OverlayEditorMode,
   type OverlaySavePatch,
 } from '../../../components/admin/editor/OverlayEditor';
+import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
@@ -879,32 +879,6 @@ export default function PostEditorScreen() {
     }
   }
 
-  async function deleteOverlayText() {
-    const pointIndex = overlayIndex;
-    if (pointIndex === null) return;
-    const segment = segmentForPointIndex(pointIndex);
-    if (!segment) return;
-    try {
-      await updateBriefSegment(segment.id, {
-        overlay_text: '',
-        show_on_screen: false,
-      });
-      setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segment.id
-            ? { ...s, overlay_text: '', show_on_screen: false }
-            : s,
-        ),
-      );
-    } catch (e) {
-      Alert.alert(
-        'Could not delete text',
-        e instanceof Error ? e.message : 'Try again',
-      );
-      throw e;
-    }
-  }
-
   function toggleHashtag(tag: string) {
     setHashtags((prev) => {
       if (prev.includes(tag)) return prev.filter((t) => t !== tag);
@@ -1156,13 +1130,13 @@ export default function PostEditorScreen() {
               screenshotBusyIndex={shotBusyIndex}
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              overlayTextForIndex={(i) => {
-                const t = segmentForPointIndex(i)?.overlay_text?.trim();
-                return t ? t : undefined;
+              overlayBoxesForIndex={(i) => {
+                const seg = segmentForPointIndex(i);
+                return parseOverlayBoxes(seg?.overlay_style, {
+                  text: seg?.overlay_text,
+                  textY: seg?.text_y,
+                });
               }}
-              overlayStyleForIndex={(i) =>
-                parseOverlayStyle(segmentForPointIndex(i)?.overlay_style)
-              }
               onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
           </View>
@@ -1261,16 +1235,16 @@ export default function PostEditorScreen() {
               ? screenshotUrls[overlaySegment.id]
               : undefined
           }
-          overlayText={overlaySegment?.overlay_text ?? ''}
-          overlayStyle={parseOverlayStyle(overlaySegment?.overlay_style)}
-          textY={overlaySegment?.text_y ?? null}
+          boxes={parseOverlayBoxes(overlaySegment?.overlay_style, {
+            text: overlaySegment?.overlay_text,
+            textY: overlaySegment?.text_y,
+          })}
           screenshotX={overlaySegment?.screenshot_x ?? null}
           screenshotY={overlaySegment?.screenshot_y ?? null}
           screenshotWidth={overlaySegment?.screenshot_width ?? null}
           saving={overlaySaving}
           onClose={() => setOverlayIndex(null)}
           onSave={saveOverlay}
-          onDeleteText={deleteOverlayText}
         />
       ) : null}
 

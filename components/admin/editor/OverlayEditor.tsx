@@ -1,7 +1,9 @@
-// Story-style overlay composer. Text mode: live input already focused;
-// Done closes the keyboard, then the text drags and pinches freely and
-// "Add text" commits. Media mode: just the screenshot, dragged and pinched
-// into place, with three snap chips.
+// Story-style overlay composer with multiple text boxes. Text mode: each box
+// drags and pinches anywhere on the stage, an Instagram-style slider on the
+// left resizes the active box (which re-wraps the line breaks), a still tap
+// opens the keyboard, "Add text" starts another box, and Done saves it all.
+// Media mode: the screenshot drags and pinches from anywhere on the screen,
+// with three snap chips.
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Dimensions,
@@ -17,8 +19,21 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Crypto from 'expo-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  DEFAULT_BOX_SIZE,
+  DEFAULT_OVERLAY_FILL,
+  DEFAULT_TEXT_Y,
+  MAX_BOX_SIZE,
+  MIN_BOX_SIZE,
+  overlayBoxFill,
+  overlayTextContrast,
+  serializeOverlayBoxes,
+  type OverlayBox,
+} from '../../../lib/overlay-boxes';
+import type { Json } from '../../../lib/types';
 import { color, radiusAdmin } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
@@ -26,28 +41,16 @@ import { PressableScale } from '../../ui/PressableScale';
 const SCREEN_BG = '#10161D';
 const RAIL_BG = 'rgba(16,22,29,0.45)';
 const TOOL_HIT = { top: 1, bottom: 1, left: 1, right: 1 } as const;
-const FONT_SIZES = [20, 26, 32] as const;
-const MIN_FONT = 14;
-const MAX_FONT = 64;
 const OVERLAY_FONT = 'TikTokSans_700Bold';
-/** TikTok Classic default: hot pink, washed into a pastel box. */
-export const DEFAULT_OVERLAY_FILL = '#EB4C89';
+/** Extra grab area around a box so small text is still easy to catch. */
+const HIT_SLOP = 26;
 
 export type OverlayEditorMode = 'text' | 'media';
-
-export type OverlayStyleValue = {
-  color?: string;
-  bg?: boolean;
-  /** Editor font size; the render pass still sets its own scale. */
-  size?: number;
-  /** Horizontal text center as a stage fraction (render centers regardless). */
-  x?: number;
-};
 
 export type OverlaySavePatch = {
   overlay_text?: string;
   show_on_screen?: boolean;
-  overlay_style?: { color: string; bg: boolean; size: number; x: number };
+  overlay_style?: { [key: string]: Json | undefined };
   text_y?: number;
   screenshot_x?: number;
   screenshot_y?: number;
@@ -62,7 +65,6 @@ const MEDIA_PRESETS = [
 ] as const;
 
 const DEFAULT_SHOT = { x: 0.23, y: 0.19, w: 0.46 };
-const DEFAULT_TEXT_Y = 0.45;
 
 const SWATCHES = [
   '#FFFFFF',
@@ -81,82 +83,20 @@ function hexEq(a: string, b: string): boolean {
   return a.replace('#', '').toLowerCase() === b.replace('#', '').toLowerCase();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export function parseOverlayStyle(value: unknown): OverlayStyleValue {
-  if (!isRecord(value)) return {};
-  const parsed: OverlayStyleValue = {};
-  if (typeof value.color === 'string') parsed.color = value.color;
-  if (typeof value.bg === 'boolean') parsed.bg = value.bg;
-  if (typeof value.size === 'number') parsed.size = value.size;
-  if (typeof value.x === 'number') parsed.x = value.x;
-  return parsed;
-}
-
-function parseHex(hex: string): { r: number; g: number; b: number } | null {
-  const raw = hex.replace('#', '').trim();
-  const n =
-    raw.length === 3 && raw[0] && raw[1] && raw[2]
-      ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
-      : raw;
-  if (!/^[0-9a-fA-F]{6}$/.test(n)) return null;
-  return {
-    r: parseInt(n.slice(0, 2), 16),
-    g: parseInt(n.slice(2, 4), 16),
-    b: parseInt(n.slice(4, 6), 16),
-  };
-}
-
-function toHex(r: number, g: number, b: number): string {
-  const byte = (n: number) =>
-    Math.max(0, Math.min(255, Math.round(n)))
-      .toString(16)
-      .padStart(2, '0');
-  return `#${byte(r)}${byte(g)}${byte(b)}`;
-}
-
-function mixHex(a: string, b: string, t: number): string | null {
-  const from = parseHex(a);
-  const to = parseHex(b);
-  if (!from || !to) return null;
-  return toHex(
-    from.r + (to.r - from.r) * t,
-    from.g + (to.g - from.g) * t,
-    from.b + (to.b - from.b) * t,
-  );
-}
-
-function luminance(hex: string): number | null {
-  const p = parseHex(hex);
-  if (!p) return null;
-  return (0.299 * p.r + 0.587 * p.g + 0.114 * p.b) / 255;
-}
-
-/** Pastel wash of the picked color — TikTok/Reels Classic box fill. */
-export function overlayBoxFill(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82 || lum < 0.18) return fill;
-  return mixHex(fill, '#FFFFFF', 0.7) ?? fill;
-}
-
-/** Darker same-hue letters on the pastel box (white/black stay high-contrast). */
-export function overlayTextContrast(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82) return color.ink;
-  if (lum < 0.18) return color.white;
-  return mixHex(fill, '#000000', 0.22) ?? fill;
-}
-
-function resolveSwatch(raw: string | undefined): string {
-  if (!raw) return DEFAULT_OVERLAY_FILL;
-  const hit = SWATCHES.find((s) => hexEq(s, raw));
-  return hit ?? raw;
-}
-
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function newBox(fill: string): OverlayBox {
+  return {
+    id: Crypto.randomUUID(),
+    text: '',
+    color: fill,
+    bg: true,
+    size: DEFAULT_BOX_SIZE,
+    x: 0.5,
+    y: DEFAULT_TEXT_Y,
+  };
 }
 
 type ShotPos = { x: number; y: number; w: number };
@@ -167,32 +107,27 @@ export function OverlayEditor(props: {
   /** Changes when a different point opens so local draft state resets. */
   resetKey: string;
   screenshotUrl?: string;
-  overlayText: string;
-  overlayStyle: OverlayStyleValue;
-  textY: number | null;
+  /** Parsed boxes for this segment (parseOverlayBoxes on the caller). */
+  boxes: OverlayBox[];
   screenshotX: number | null;
   screenshotY: number | null;
   screenshotWidth: number | null;
   saving?: boolean;
   onClose: () => void;
   onSave: (patch: OverlaySavePatch) => void | Promise<void>;
-  onDeleteText: () => void | Promise<void>;
 }): JSX.Element {
   const {
     visible,
     mode,
     resetKey,
     screenshotUrl,
-    overlayText,
-    overlayStyle,
-    textY,
+    boxes: initialBoxes,
     screenshotX,
     screenshotY,
     screenshotWidth,
     saving = false,
     onClose,
     onSave,
-    onDeleteText,
   } = props;
 
   const insets = useSafeAreaInsets();
@@ -202,21 +137,20 @@ export function OverlayEditor(props: {
   const stageRef = useRef(stage);
   stageRef.current = stage;
 
-  const [text, setText] = useState(overlayText);
-  const [fill, setFill] = useState(resolveSwatch(overlayStyle.color));
-  const [bg, setBg] = useState(overlayStyle.bg ?? true);
-  const [fontSize, setFontSize] = useState(overlayStyle.size ?? 26);
-  const [editing, setEditing] = useState(mode === 'text');
+  const [boxes, setBoxes] = useState<OverlayBox[]>(initialBoxes);
+  const boxesRef = useRef(boxes);
+  boxesRef.current = boxes;
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Fractional centers; refs mirror state so the PanResponders never go stale.
+  /** Measured pill sizes per box id, for drag hit tests. */
+  const boxLayouts = useRef<Record<string, { w: number; h: number }>>({});
+
   const [shot, setShot] = useState<ShotPos>(DEFAULT_SHOT);
   const shotRef = useRef(shot);
-  const [textPos, setTextPos] = useState({ x: 0.5, y: DEFAULT_TEXT_Y });
-  const textPosRef = useRef(textPos);
-  const fontRef = useRef(fontSize);
-  fontRef.current = fontSize;
-
   const [aspect, setAspect] = useState(9 / 16);
 
   function updateShot(next: ShotPos) {
@@ -224,18 +158,32 @@ export function OverlayEditor(props: {
     setShot(next);
   }
 
-  function updateTextPos(next: { x: number; y: number }) {
-    textPosRef.current = next;
-    setTextPos(next);
+  function patchBox(id: string, patch: Partial<OverlayBox>) {
+    const next = boxesRef.current.map((b) =>
+      b.id === id ? { ...b, ...patch } : b,
+    );
+    boxesRef.current = next;
+    setBoxes(next);
+  }
+
+  function startNewBox() {
+    const last = boxesRef.current[boxesRef.current.length - 1];
+    const box = newBox(last?.color ?? DEFAULT_OVERLAY_FILL);
+    const next = [...boxesRef.current, box];
+    boxesRef.current = next;
+    setBoxes(next);
+    setActiveId(box.id);
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 60);
   }
 
   useEffect(() => {
     if (!visible) return;
-    setText(overlayText);
-    setFill(resolveSwatch(overlayStyle.color));
-    setBg(overlayStyle.bg ?? true);
-    setFontSize(overlayStyle.size ?? 26);
-    setEditing(mode === 'text');
+    boxesRef.current = initialBoxes;
+    setBoxes(initialBoxes);
+    boxLayouts.current = {};
+    setActiveId(initialBoxes[0]?.id ?? null);
+    setEditing(false);
     const nextShot = {
       x: screenshotX ?? DEFAULT_SHOT.x,
       y: screenshotY ?? DEFAULT_SHOT.y,
@@ -243,18 +191,22 @@ export function OverlayEditor(props: {
     };
     shotRef.current = nextShot;
     setShot(nextShot);
-    const nextText = { x: overlayStyle.x ?? 0.5, y: textY ?? DEFAULT_TEXT_Y };
-    textPosRef.current = nextText;
-    setTextPos(nextText);
+    if (mode === 'text' && initialBoxes.length === 0) {
+      const box = newBox(DEFAULT_OVERLAY_FILL);
+      boxesRef.current = [box];
+      setBoxes([box]);
+      setActiveId(box.id);
+      setEditing(true);
+    }
     // Snapshot when the composer opens or the point changes, not on each parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, resetKey]);
 
   useEffect(() => {
-    if (!visible || mode !== 'text') return;
+    if (!visible || !editing) return;
     const t = setTimeout(() => inputRef.current?.focus(), 80);
     return () => clearTimeout(t);
-  }, [visible, mode, resetKey]);
+  }, [visible, editing, resetKey]);
 
   useEffect(() => {
     if (!screenshotUrl) return;
@@ -267,8 +219,10 @@ export function OverlayEditor(props: {
     );
   }, [screenshotUrl]);
 
-  const gesture = useRef({ x0: 0, y0: 0, scale0: 0, dist0: 0 });
+  const gesture = useRef({ x0: 0, y0: 0, scale0: 0, dist0: 0, boxId: '' });
 
+  // Media mode: the WHOLE stage drags and pinches the screenshot, so two
+  // fingers land anywhere and still resize it.
   const mediaPan = useMemo(
     () =>
       PanResponder.create({
@@ -280,6 +234,7 @@ export function OverlayEditor(props: {
             y0: shotRef.current.y,
             scale0: shotRef.current.w,
             dist0: 0,
+            boxId: '',
           };
         },
         onPanResponderMove: (evt, gs) => {
@@ -311,20 +266,46 @@ export function OverlayEditor(props: {
     [],
   );
 
+  function boxAtPoint(px: number, py: number): OverlayBox | null {
+    const { w, h } = stageRef.current;
+    // Topmost box wins, so walk the list backwards.
+    for (let i = boxesRef.current.length - 1; i >= 0; i--) {
+      const box = boxesRef.current[i];
+      if (!box) continue;
+      const layout = boxLayouts.current[box.id] ?? { w: 120, h: 56 };
+      const halfW = layout.w / 2 + HIT_SLOP;
+      const halfH = layout.h / 2 + HIT_SLOP;
+      if (Math.abs(px - box.x * w) <= halfW && Math.abs(py - box.y * h) <= halfH) {
+        return box;
+      }
+    }
+    return null;
+  }
+
+  // Text mode drag stage: the gesture must START on a box, then one finger
+  // drags it and a second finger pinches it from anywhere on the screen.
   const textPan = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
+        onStartShouldSetPanResponder: (evt) =>
+          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null,
+        onMoveShouldSetPanResponder: (evt) =>
+          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null,
+        onPanResponderGrant: (evt) => {
+          const hit = boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+          if (!hit) return;
+          setActiveId(hit.id);
           gesture.current = {
-            x0: textPosRef.current.x,
-            y0: textPosRef.current.y,
-            scale0: fontRef.current,
+            x0: hit.x,
+            y0: hit.y,
+            scale0: hit.size,
             dist0: 0,
+            boxId: hit.id,
           };
         },
         onPanResponderMove: (evt, gs) => {
+          const id = gesture.current.boxId;
+          if (!id) return;
           const touches = evt.nativeEvent.touches;
           const a = touches[0];
           const b = touches[1];
@@ -332,35 +313,61 @@ export function OverlayEditor(props: {
             const d = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
             if (gesture.current.dist0 === 0) {
               gesture.current.dist0 = d;
-              gesture.current.scale0 = fontRef.current;
+              const current = boxesRef.current.find((x) => x.id === id);
+              gesture.current.scale0 = current?.size ?? DEFAULT_BOX_SIZE;
             }
-            setFontSize(
-              clamp(
+            patchBox(id, {
+              size: clamp(
                 gesture.current.scale0 * (d / gesture.current.dist0),
-                MIN_FONT,
-                MAX_FONT,
+                MIN_BOX_SIZE,
+                MAX_BOX_SIZE,
               ),
-            );
+            });
           } else {
             gesture.current.dist0 = 0;
-            updateTextPos({
-              x: clamp(gesture.current.x0 + gs.dx / stageRef.current.w, 0.05, 0.95),
-              y: clamp(gesture.current.y0 + gs.dy / stageRef.current.h, 0.05, 0.95),
+            patchBox(id, {
+              x: clamp(gesture.current.x0 + gs.dx / stageRef.current.w, 0.04, 0.96),
+              y: clamp(gesture.current.y0 + gs.dy / stageRef.current.h, 0.04, 0.96),
             });
           }
         },
         onPanResponderRelease: (_evt, gs) => {
-          // A still tap reopens the keyboard, Instagram-style.
-          if (Math.abs(gs.dx) < 4 && Math.abs(gs.dy) < 4) {
-            inputRef.current?.focus();
+          // A still tap on a box reopens the keyboard, Instagram-style.
+          if (
+            gesture.current.boxId &&
+            Math.abs(gs.dx) < 4 &&
+            Math.abs(gs.dy) < 4
+          ) {
+            setEditing(true);
           }
         },
       }),
     [],
   );
 
+  // Instagram's left-edge size slider: vertical drag maps top=big, bottom=small.
+  const sliderH = Math.max(200, stage.h * 0.3);
+  const sliderPan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => applySlider(evt.nativeEvent.locationY),
+        onPanResponderMove: (evt) => applySlider(evt.nativeEvent.locationY),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sliderH],
+  );
+
+  function applySlider(localY: number) {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const t = clamp(1 - localY / sliderH, 0, 1);
+    patchBox(id, { size: MIN_BOX_SIZE + t * (MAX_BOX_SIZE - MIN_BOX_SIZE) });
+  }
+
   const textMode = mode === 'text';
-  const contrast = overlayTextContrast(fill);
+  const active = boxes.find((b) => b.id === activeId) ?? null;
   const blocked = busy || saving;
 
   async function commit(patch: OverlaySavePatch) {
@@ -384,79 +391,80 @@ export function OverlayEditor(props: {
     });
   }
 
-  function handleAddText() {
-    const trimmed = text.trim();
-    void commit({
-      overlay_text: trimmed,
-      show_on_screen: trimmed.length > 0,
-      overlay_style: {
-        color: fill,
-        bg,
-        size: Math.round(fontSize),
-        x: textPos.x,
-      },
-      text_y: textPos.y,
-    });
-  }
-
-  async function handleDeleteText() {
-    if (blocked) return;
-    setBusy(true);
-    try {
-      await onDeleteText();
-      onClose();
-    } catch {
-      // Stay open.
-    } finally {
-      setBusy(false);
+  /** Editing Done: keep or drop the draft box, close only the keyboard. */
+  function handleEditingDone() {
+    const id = activeIdRef.current;
+    const current = boxesRef.current.find((b) => b.id === id);
+    if (current && current.text.trim().length === 0) {
+      const next = boxesRef.current.filter((b) => b.id !== id);
+      boxesRef.current = next;
+      setBoxes(next);
+      setActiveId(next[next.length - 1]?.id ?? null);
     }
+    Keyboard.dismiss();
+    setEditing(false);
   }
 
-  function cycleFont() {
-    const next = FONT_SIZES.find((s) => s > fontSize) ?? FONT_SIZES[0];
-    setFontSize(next);
+  /** Top-right Done outside the keyboard: save every box and close. */
+  function handleSaveAll() {
+    void commit(serializeOverlayBoxes(boxesRef.current));
+  }
+
+  function handleDeleteActive() {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const next = boxesRef.current.filter((b) => b.id !== id);
+    boxesRef.current = next;
+    setBoxes(next);
+    setActiveId(next[next.length - 1]?.id ?? null);
+    Keyboard.dismiss();
+    setEditing(false);
   }
 
   const shotW = shot.w * stage.w;
   const shotH = shotW / aspect;
 
-  const pill = (
-    <View
-      style={[
-        styles.pill,
-        bg ? { backgroundColor: overlayBoxFill(fill) } : styles.pillClear,
-      ]}
-    >
-      <TextInput
-        ref={inputRef}
-        multiline
-        scrollEnabled={false}
-        editable={editing}
-        pointerEvents={editing ? 'auto' : 'none'}
-        value={text}
-        onChangeText={setText}
-        onFocus={() => setEditing(true)}
-        onBlur={() => setEditing(false)}
-        placeholder=""
-        placeholderTextColor={color.whiteA45}
-        selectionColor={color.blue300}
-        underlineColorAndroid="transparent"
+  function pillFor(box: OverlayBox, forInput: boolean): JSX.Element {
+    const fontSize = clamp(box.size * stage.w, 10, 96);
+    const contrast = overlayTextContrast(box.color);
+    const textStyle = {
+      color: box.bg ? contrast : box.color,
+      fontSize,
+      lineHeight: fontSize * 1.22,
+      textShadowColor: box.bg ? 'transparent' : 'rgba(0,0,0,0.6)',
+      textShadowOffset: box.bg
+        ? { width: 0, height: 0 }
+        : { width: 0, height: 1 },
+      textShadowRadius: box.bg ? 0 : 10,
+    };
+    return (
+      <View
         style={[
-          styles.input,
-          {
-            color: bg ? contrast : fill,
-            fontSize,
-            lineHeight: fontSize * 1.22,
-            textShadowColor: bg ? 'transparent' : 'rgba(0,0,0,0.6)',
-            textShadowOffset: bg
-              ? { width: 0, height: 0 }
-              : { width: 0, height: 1 },
-            textShadowRadius: bg ? 0 : 10,
-          },
+          styles.pill,
+          box.bg
+            ? { backgroundColor: overlayBoxFill(box.color) }
+            : styles.pillClear,
         ]}
-      />
-    </View>
-  );
+      >
+        {forInput ? (
+          <TextInput
+            ref={inputRef}
+            multiline
+            scrollEnabled={false}
+            value={box.text}
+            onChangeText={(t) => patchBox(box.id, { text: t })}
+            placeholder=""
+            placeholderTextColor={color.whiteA45}
+            selectionColor={color.blue300}
+            underlineColorAndroid="transparent"
+            style={[styles.inputText, textStyle]}
+          />
+        ) : (
+          <Text style={[styles.inputText, textStyle]}>{box.text}</Text>
+        )}
+      </View>
+    );
+  }
 
   return (
     <Modal
@@ -497,28 +505,71 @@ export function OverlayEditor(props: {
         </View>
 
         {!textMode ? (
-          <View
-            {...mediaPan.panHandlers}
-            style={[
-              styles.shot,
-              {
-                left: shot.x * stage.w - shotW / 2,
-                top: shot.y * stage.h - shotH / 2,
-                width: shotW,
-                height: shotH,
-              },
-            ]}
-          >
-            {screenshotUrl ? (
-              <Image
-                source={{ uri: screenshotUrl }}
-                style={styles.mediaImg}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.thumb} />
-            )}
-          </View>
+          <>
+            <View pointerEvents="none">
+              <View
+                style={[
+                  styles.shot,
+                  {
+                    left: shot.x * stage.w - shotW / 2,
+                    top: shot.y * stage.h - shotH / 2,
+                    width: shotW,
+                    height: shotH,
+                  },
+                ]}
+              >
+                {screenshotUrl ? (
+                  <Image
+                    source={{ uri: screenshotUrl }}
+                    style={styles.mediaImg}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.thumb} />
+                )}
+              </View>
+            </View>
+            <View
+              {...mediaPan.panHandlers}
+              style={[StyleSheet.absoluteFill, styles.gestureLayer]}
+            />
+          </>
+        ) : null}
+
+        {textMode && !editing ? (
+          <>
+            {boxes.map((box) => (
+              <View
+                key={box.id}
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, styles.boxLayer]}
+              >
+                <View
+                  onLayout={(e) => {
+                    boxLayouts.current[box.id] = {
+                      w: e.nativeEvent.layout.width,
+                      h: e.nativeEvent.layout.height,
+                    };
+                  }}
+                  style={[
+                    styles.boxWrap,
+                    {
+                      transform: [
+                        { translateX: (box.x - 0.5) * stage.w },
+                        { translateY: (box.y - 0.5) * stage.h },
+                      ],
+                    },
+                  ]}
+                >
+                  {pillFor(box, false)}
+                </View>
+              </View>
+            ))}
+            <View
+              {...textPan.panHandlers}
+              style={[StyleSheet.absoluteFill, styles.gestureLayer]}
+            />
+          </>
         ) : null}
 
         <View
@@ -551,43 +602,46 @@ export function OverlayEditor(props: {
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Done"
-              onPress={() => Keyboard.dismiss()}
+              onPress={handleEditingDone}
               style={styles.done}
             >
               <Text style={styles.doneText}>Done</Text>
             </PressableScale>
-          ) : null}
+          ) : (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              disabled={blocked}
+              onPress={handleSaveAll}
+              style={styles.done}
+            >
+              <Text style={styles.doneText}>
+                {blocked ? 'Saving…' : 'Done'}
+              </Text>
+            </PressableScale>
+          )}
         </View>
 
-        {textMode ? (
+        {textMode && active ? (
           <View style={[styles.rail, { top: Math.max(insets.top, 12) + 64 }]}>
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel="Text size"
-              hitSlop={TOOL_HIT}
-              onPress={cycleFont}
-              style={styles.tool}
-            >
-              <Text style={styles.aa}>Aa</Text>
-            </PressableScale>
-            <PressableScale
-              accessibilityRole="button"
               accessibilityLabel="Background behind text"
-              accessibilityState={{ selected: bg }}
+              accessibilityState={{ selected: active.bg }}
               hitSlop={TOOL_HIT}
-              onPress={() => setBg((v) => !v)}
-              style={[styles.tool, bg && styles.toolOn]}
+              onPress={() => patchBox(active.id, { bg: !active.bg })}
+              style={[styles.tool, active.bg && styles.toolOn]}
             >
-              <View style={[styles.aChip, bg && styles.aChipOn]}>
+              <View style={[styles.aChip, active.bg && styles.aChipOn]}>
                 <Text style={styles.aChipText}>A</Text>
               </View>
             </PressableScale>
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel="Delete text"
+              accessibilityLabel="Delete this text box"
               hitSlop={TOOL_HIT}
               disabled={blocked}
-              onPress={() => void handleDeleteText()}
+              onPress={handleDeleteActive}
               style={styles.tool}
             >
               <Icon name="trash-2" size={17} color={color.white} />
@@ -595,23 +649,39 @@ export function OverlayEditor(props: {
           </View>
         ) : null}
 
-        {textMode ? (
-          editing ? (
-            <View style={styles.textStage}>{pill}</View>
-          ) : (
-            <View style={styles.dragStage} pointerEvents="box-none">
-              <View
-                {...textPan.panHandlers}
-                style={{
-                  transform: [
-                    { translateX: (textPos.x - 0.5) * stage.w },
-                    { translateY: (textPos.y - 0.5) * stage.h },
-                  ],
-                }}
-              >
-                {pill}
-              </View>
+        {textMode && active ? (
+          <View
+            style={[
+              styles.sliderWrap,
+              { top: stage.h * 0.18, height: sliderH },
+            ]}
+            {...sliderPan.panHandlers}
+          >
+            <View style={styles.sliderTrack} pointerEvents="none">
+              <View style={styles.sliderTaperTop} />
+              <View style={styles.sliderTaperBottom} />
             </View>
+            <View
+              pointerEvents="none"
+              style={[
+                styles.sliderThumb,
+                {
+                  top:
+                    (1 -
+                      (active.size - MIN_BOX_SIZE) /
+                        (MAX_BOX_SIZE - MIN_BOX_SIZE)) *
+                    (sliderH - 28),
+                },
+              ]}
+            />
+          </View>
+        ) : null}
+
+        {textMode ? (
+          editing && active ? (
+            <View style={styles.textStage}>{pillFor(active, true)}</View>
+          ) : (
+            <View style={styles.flex} pointerEvents="none" />
           )
         ) : (
           <View style={styles.flex} pointerEvents="none" />
@@ -627,43 +697,44 @@ export function OverlayEditor(props: {
             <View style={styles.addTextRow}>
               <PressableScale
                 accessibilityRole="button"
-                accessibilityLabel="Add text"
+                accessibilityLabel="Add another text box"
                 disabled={blocked}
-                onPress={handleAddText}
+                onPress={startNewBox}
                 style={styles.addTextBtn}
               >
-                <Text style={styles.addTextLabel}>
-                  {blocked ? 'Saving…' : 'Add text'}
-                </Text>
+                <Icon name="plus" size={15} color={color.white} />
+                <Text style={styles.addTextLabel}>Add text</Text>
               </PressableScale>
             </View>
           ) : null}
           <View style={styles.bottomRow}>
             {textMode
               ? SWATCHES.map((c) => {
-                  const active = hexEq(c, fill);
+                  const isOn = active !== null && hexEq(c, active.color);
                   return (
                     <PressableScale
                       key={c}
                       accessibilityRole="button"
                       accessibilityLabel={c}
-                      accessibilityState={{ selected: active }}
+                      accessibilityState={{ selected: isOn }}
                       hitSlop={7}
-                      onPress={() => setFill(c)}
-                      style={[styles.swatchRing, active && styles.swatchRingOn]}
+                      onPress={() =>
+                        active ? patchBox(active.id, { color: c }) : undefined
+                      }
+                      style={[styles.swatchRing, isOn && styles.swatchRingOn]}
                     >
                       <View
                         style={[
                           styles.swatch,
                           { backgroundColor: c },
-                          !active && styles.swatchIdle,
+                          !isOn && styles.swatchIdle,
                         ]}
                       />
                     </PressableScale>
                   );
                 })
               : MEDIA_PRESETS.map((preset) => {
-                  const active =
+                  const isOn =
                     Math.abs(shot.x - preset.x) < 0.02 &&
                     Math.abs(shot.y - preset.y) < 0.02 &&
                     Math.abs(shot.w - preset.width) < 0.02;
@@ -671,16 +742,16 @@ export function OverlayEditor(props: {
                     <PressableScale
                       key={preset.id}
                       accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
+                      accessibilityState={{ selected: isOn }}
                       onPress={() =>
                         updateShot({ x: preset.x, y: preset.y, w: preset.width })
                       }
-                      style={[styles.posChip, active && styles.posChipOn]}
+                      style={[styles.posChip, isOn && styles.posChipOn]}
                     >
                       <Text
                         style={[
                           styles.posChipText,
-                          active && styles.posChipTextOn,
+                          isOn && styles.posChipTextOn,
                         ]}
                       >
                         {preset.label}
@@ -729,6 +800,16 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
+  gestureLayer: {
+    zIndex: 1,
+  },
+  boxLayer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  boxWrap: {
+    maxWidth: '86%',
+  },
   chrome: {
     position: 'relative',
     zIndex: 2,
@@ -753,11 +834,6 @@ const styles = StyleSheet.create({
   },
   toolOn: {
     backgroundColor: color.white,
-  },
-  aa: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: color.white,
   },
   aChip: {
     width: 20,
@@ -791,17 +867,50 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: color.white,
   },
+  sliderWrap: {
+    position: 'absolute',
+    left: 4,
+    width: 44,
+    zIndex: 3,
+    alignItems: 'center',
+  },
+  sliderTrack: {
+    flex: 1,
+    width: 20,
+    alignItems: 'center',
+  },
+  sliderTaperTop: {
+    flex: 1,
+    width: 5,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.75)',
+  },
+  sliderTaperBottom: {
+    flex: 1,
+    width: 2.5,
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
+  sliderThumb: {
+    position: 'absolute',
+    left: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: color.white,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
   textStage: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 56,
-    zIndex: 1,
-  },
-  dragStage: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 1,
   },
   pill: {
@@ -816,7 +925,7 @@ const styles = StyleSheet.create({
   pillClear: {
     backgroundColor: 'transparent',
   },
-  input: {
+  inputText: {
     fontFamily: OVERLAY_FONT,
     fontWeight: '700',
     letterSpacing: -0.3,
@@ -839,10 +948,12 @@ const styles = StyleSheet.create({
   },
   addTextBtn: {
     minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
     paddingHorizontal: 22,
     borderRadius: radiusAdmin.pill,
     backgroundColor: color.accent,
-    alignItems: 'center',
     justifyContent: 'center',
   },
   addTextLabel: {

@@ -6,17 +6,17 @@ import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import type { TalkingPoint } from '../../../lib/briefs-api';
+import {
+  overlayBoxFill,
+  overlayTextContrast,
+  type OverlayBox,
+} from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { SectionLabel } from '../shared';
 import { AiPill } from './AiPill';
-import {
-  overlayBoxFill,
-  overlayTextContrast,
-  type OverlayEditorMode,
-  type OverlayStyleValue,
-} from './OverlayEditor';
+import { type OverlayEditorMode } from './OverlayEditor';
 
 function shotLabel(url: string): string {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url) ? 'Recording' : 'Screenshot';
@@ -40,8 +40,7 @@ export function PointsEditor(props: {
   screenshotBusyIndex: number | null;
   onAttachScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
-  overlayTextForIndex: (index: number) => string | undefined;
-  overlayStyleForIndex: (index: number) => OverlayStyleValue;
+  overlayBoxesForIndex: (index: number) => OverlayBox[];
   onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
 }): JSX.Element {
   const {
@@ -59,8 +58,7 @@ export function PointsEditor(props: {
     screenshotBusyIndex,
     onAttachScreenshot,
     onRemoveScreenshot,
-    overlayTextForIndex,
-    overlayStyleForIndex,
+    overlayBoxesForIndex,
     onOpenOverlay,
   } = props;
 
@@ -125,10 +123,7 @@ export function PointsEditor(props: {
         const busy = busyIndex === i;
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
-        const overlayText = overlayTextForIndex(i);
-        const overlayStyle = overlayStyleForIndex(i);
-        const overlayFill = overlayStyle.color ?? color.white;
-        const overlayBg = overlayStyle.bg ?? true;
+        const overlayBoxes = overlayBoxesForIndex(i);
         const plug = point.is_product;
         return (
           <View
@@ -263,35 +258,38 @@ export function PointsEditor(props: {
                 </PressableScale>
               )}
             </View>
-            {overlayText ? (
+            {overlayBoxes.length > 0 ? (
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel={`Edit overlay text on point ${i + 1}`}
                 onPress={() => onOpenOverlay(i, 'text')}
                 style={styles.textPreview}
               >
-                <View
-                  style={[
-                    styles.textPill,
-                    overlayBg
-                      ? { backgroundColor: overlayBoxFill(overlayFill) }
-                      : styles.textPillClear,
-                  ]}
-                >
-                  <Text
-                    numberOfLines={1}
+                {overlayBoxes.map((box) => (
+                  <View
+                    key={box.id}
                     style={[
-                      styles.textPillLabel,
-                      {
-                        color: overlayBg
-                          ? overlayTextContrast(overlayFill)
-                          : overlayFill,
-                      },
+                      styles.textPill,
+                      box.bg
+                        ? { backgroundColor: overlayBoxFill(box.color) }
+                        : styles.textPillClear,
                     ]}
                   >
-                    {overlayText}
-                  </Text>
-                </View>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.textPillLabel,
+                        {
+                          color: box.bg
+                            ? overlayTextContrast(box.color)
+                            : box.color,
+                        },
+                      ]}
+                    >
+                      {box.text}
+                    </Text>
+                  </View>
+                ))}
               </PressableScale>
             ) : (
               <PressableScale
@@ -497,7 +495,8 @@ const styles = StyleSheet.create({
   textPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    flexWrap: 'wrap',
+    gap: 6,
     minHeight: 44,
     paddingVertical: 7,
     paddingHorizontal: 10,

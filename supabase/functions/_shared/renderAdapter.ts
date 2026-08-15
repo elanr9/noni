@@ -32,6 +32,98 @@ const TEXT_BASE = {
  * (accent is the box fill); 'outline': letters stroked with the accent;
  * 'plain': bare text with a soft shadow.
  */
+// ---- Per-box styling (mirrors lib/overlay-boxes.ts on the client) ----
+
+function parseHex(hex: string): { r: number; g: number; b: number } | null {
+  const raw = hex.replace('#', '').trim();
+  const n =
+    raw.length === 3
+      ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+      : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(n)) return null;
+  return {
+    r: parseInt(n.slice(0, 2), 16),
+    g: parseInt(n.slice(2, 4), 16),
+    b: parseInt(n.slice(4, 6), 16),
+  };
+}
+
+function toHex(r: number, g: number, b: number): string {
+  const byte = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${byte(r)}${byte(g)}${byte(b)}`;
+}
+
+function mixHex(a: string, b: string, t: number): string | null {
+  const from = parseHex(a);
+  const to = parseHex(b);
+  if (!from || !to) return null;
+  return toHex(
+    from.r + (to.r - from.r) * t,
+    from.g + (to.g - from.g) * t,
+    from.b + (to.b - from.b) * t,
+  );
+}
+
+function luminance(hex: string): number | null {
+  const p = parseHex(hex);
+  if (p === null) return null;
+  return (0.299 * p.r + 0.587 * p.g + 0.114 * p.b) / 255;
+}
+
+/** Pastel wash of the picked color — TikTok/Reels Classic box fill. */
+function overlayBoxFill(fill: string): string {
+  const lum = luminance(fill);
+  if (lum == null || lum > 0.82 || lum < 0.18) return fill;
+  return mixHex(fill, '#FFFFFF', 0.7) ?? fill;
+}
+
+/** Darker same-hue letters on the pastel box (white/black stay high-contrast). */
+function overlayTextContrast(fill: string): string {
+  const lum = luminance(fill);
+  if (lum == null || lum > 0.82) return '#0F1720';
+  if (lum < 0.18) return '#FFFFFF';
+  return mixHex(fill, '#000000', 0.22) ?? fill;
+}
+
+/**
+ * Creatomate props for one admin-placed box: exact position, exact size
+ * (box.size is a fraction of the frame width, which equals vmin on a 9:16
+ * frame) and the same pastel wash the composer previews.
+ */
+function boxTextProps(box: {
+  x: number;
+  size: number;
+  color: string;
+  bg: boolean;
+}): Record<string, string> {
+  const sizeVmin = `${(box.size * 100).toFixed(2)} vmin`;
+  if (!box.bg) {
+    return {
+      ...TEXT_BASE,
+      x: `${box.x * 100}%`,
+      width: '86%',
+      font_size: sizeVmin,
+      fill_color: box.color,
+      shadow_color: 'rgba(0,0,0,0.6)',
+      shadow_blur: '1.2 vmin',
+    };
+  }
+  return {
+    ...TEXT_BASE,
+    x: `${box.x * 100}%`,
+    width: '86%',
+    font_size: sizeVmin,
+    fill_color: overlayTextContrast(box.color),
+    background_color: overlayBoxFill(box.color),
+    background_x_padding: '58%',
+    background_y_padding: '42%',
+    background_border_radius: '52%',
+  };
+}
+
 function textProps(overlay: TimelineTextOverlay): Record<string, string> {
   if (overlay.mode === 'outline') {
     return {
@@ -86,10 +178,12 @@ function toElements(params: {
   ];
 
   const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
-  const style = textProps(overlay);
+  const legacyStyle = textProps(overlay);
   for (const t of timeline.texts) {
-    // One auto-wrapping element centered on TEXT_Y; newlines in the overlay
-    // text become line breaks inside the same bubble, like TikTok.
+    // One auto-wrapping element per box; newlines in the overlay text become
+    // line breaks inside the same bubble, like TikTok. Boxes from the new
+    // composer carry their own position, size and colors; legacy texts keep
+    // the brief-level style.
     elements.push({
       type: 'text',
       text: t.text
@@ -100,7 +194,7 @@ function toElements(params: {
       time: t.start_ms / 1000,
       duration: t.duration_ms / 1000,
       y: `${(t.y ?? TEXT_Y) * 100}%`,
-      ...style,
+      ...(t.box ? boxTextProps(t.box) : legacyStyle),
     });
   }
 

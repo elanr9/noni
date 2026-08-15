@@ -1,7 +1,7 @@
 // Live preview of a segment's final edit while the creator records. Mirrors
-// the render pass in supabase/functions/_shared/renderAdapter.ts: one
-// TikTok-style text bubble mid-frame (TikTok Sans, admin-picked colors) and
-// the screenshot card at its admin-placed spot. Green screen segments skip
+// the render pass in supabase/functions/_shared/renderAdapter.ts: every
+// admin-placed text box (TikTok Sans, per-box color and position) and the
+// screenshot card at its admin-placed spot. Green screen segments skip
 // the card here because the screenshot fills the stage as the background.
 import type { JSX } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
@@ -11,8 +11,12 @@ import {
 } from '@expo-google-fonts/tiktok-sans';
 
 import type { BriefSegment, TextOverlay } from '../../lib/briefs-api';
+import {
+  overlayBoxFill,
+  overlayTextContrast,
+  parseOverlayBoxes,
+} from '../../lib/overlay-boxes';
 
-const TEXT_Y = 0.45;
 const IMAGE_Y = 0.62;
 const IMAGE_WIDTH = 0.85;
 
@@ -29,45 +33,19 @@ export function SegmentOverlayPreview(props: {
   const [fontLoaded] = useFonts({ TikTokSans_700Bold });
 
   const showText = overlay.enabled && segment.show_on_screen;
-  const text = (showText ? segment.overlay_text ?? '' : '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
+  const boxes = showText
+    ? parseOverlayBoxes(segment.overlay_style, {
+        text: segment.overlay_text,
+        textY: segment.text_y,
+      })
+    : [];
   const showCard = shot !== null && segment.layout !== 'green_screen';
-  if (text.length === 0 && !showCard) return null;
+  if (boxes.length === 0 && !showCard) return null;
 
   const cardWidth = stageWidth * (segment.screenshot_width ?? IMAGE_WIDTH);
   const cardHeight = showCard ? cardWidth / (shot?.aspect ?? 9 / 16) : 0;
   const cardLeft = stageWidth * (segment.screenshot_x ?? 0.5) - cardWidth / 2;
   const cardTop = stageHeight * (segment.screenshot_y ?? IMAGE_Y) - cardHeight / 2;
-
-  const font = stageWidth * 0.044;
-  const decoration =
-    overlay.mode === 'box'
-      ? {
-          color: overlay.text_color,
-          backgroundColor: overlay.accent_color,
-          paddingHorizontal: font * 0.72,
-          paddingVertical: font * 0.48,
-          borderRadius: font * 0.72,
-          overflow: 'hidden' as const,
-        }
-      : overlay.mode === 'outline'
-        ? {
-            color: overlay.text_color,
-            // RN Text cannot stroke letters; a tight same-color glow is the
-            // closest stand-in for the render's outline.
-            textShadowColor: overlay.accent_color,
-            textShadowOffset: { width: 0, height: 0 },
-            textShadowRadius: 3,
-          }
-        : {
-            color: overlay.text_color,
-            textShadowColor: 'rgba(0, 0, 0, 0.6)',
-            textShadowOffset: { width: 0, height: 1 },
-            textShadowRadius: 4,
-          };
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -80,32 +58,58 @@ export function SegmentOverlayPreview(props: {
           ]}
         />
       ) : null}
-      {text.length > 0 ? (
-        <View
-          style={[
-            styles.textWrap,
-            {
-              transform: [
-                { translateY: ((segment.text_y ?? TEXT_Y) - 0.5) * stageHeight },
-              ],
-            },
-          ]}
-        >
-          <Text
+      {boxes.map((box) => {
+        const font = stageWidth * box.size;
+        const text = box.text
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .join('\n');
+        if (text.length === 0) return null;
+        const decoration = box.bg
+          ? {
+              color: overlayTextContrast(box.color),
+              backgroundColor: overlayBoxFill(box.color),
+              paddingHorizontal: font * 0.72,
+              paddingVertical: font * 0.48,
+              borderRadius: font * 0.72,
+              overflow: 'hidden' as const,
+            }
+          : {
+              color: box.color,
+              textShadowColor: 'rgba(0, 0, 0, 0.6)',
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 4,
+            };
+        return (
+          <View
+            key={box.id}
             style={[
-              styles.text,
+              styles.textWrap,
               {
-                fontSize: font,
-                lineHeight: font * 1.3,
-                fontFamily: fontLoaded ? 'TikTokSans_700Bold' : undefined,
+                transform: [
+                  { translateX: (box.x - 0.5) * stageWidth },
+                  { translateY: (box.y - 0.5) * stageHeight },
+                ],
               },
-              decoration,
             ]}
           >
-            {text}
-          </Text>
-        </View>
-      ) : null}
+            <Text
+              style={[
+                styles.text,
+                {
+                  fontSize: font,
+                  lineHeight: font * 1.3,
+                  fontFamily: fontLoaded ? 'TikTokSans_700Bold' : undefined,
+                },
+                decoration,
+              ]}
+            >
+              {text}
+            </Text>
+          </View>
+        );
+      })}
     </View>
   );
 }

@@ -14,6 +14,16 @@ export type TimelineText = {
   duration_ms: number;
   /** Normalized 0-1 vertical center, admin-placed; defaults to TEXT_Y. */
   y: number;
+  /** Per-box style from the admin composer; absent on legacy segments. */
+  box?: {
+    /** Normalized 0-1 horizontal center. */
+    x: number;
+    /** Font size as a fraction of the frame width. */
+    size: number;
+    /** Admin-picked color; pastel-washed into the box fill when bg is true. */
+    color: string;
+    bg: boolean;
+  };
 };
 
 export type TimelineImage = {
@@ -61,12 +71,63 @@ export type BriefSegmentRow = {
   show_on_screen: boolean;
   /** Admin-placed text position; null falls back to TEXT_Y. */
   text_y: number | null;
+  /** JSONB; may hold { boxes: [...] } for multiple admin-placed text boxes. */
+  overlay_style?: unknown;
   screenshot_url: string | null;
   /** Admin-placed overlay position; null falls back to the defaults below. */
   screenshot_x: number | null;
   screenshot_y: number | null;
   screenshot_width: number | null;
 };
+
+/** Editor stage the legacy px sizes were designed on (see lib/overlay-boxes). */
+const LEGACY_STAGE_WIDTH = 390;
+const DEFAULT_BOX_SIZE = 26 / LEGACY_STAGE_WIDTH;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function num(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+/** Text boxes for one segment: overlay_style.boxes, else the legacy columns. */
+function segmentBoxes(
+  segment: BriefSegmentRow,
+): { text: string; x: number; y: number; size: number; color: string; bg: boolean }[] {
+  const style = segment.overlay_style;
+  if (isRecord(style) && Array.isArray(style.boxes)) {
+    return style.boxes.flatMap((raw) => {
+      if (!isRecord(raw)) return [];
+      const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+      if (text.length === 0) return [];
+      return [
+        {
+          text,
+          x: num(raw.x, 0.5),
+          y: num(raw.y, TEXT_Y),
+          size: num(raw.size, DEFAULT_BOX_SIZE),
+          color: typeof raw.color === 'string' ? raw.color : '#EB4C89',
+          bg: typeof raw.bg === 'boolean' ? raw.bg : true,
+        },
+      ];
+    });
+  }
+  const text = segment.overlay_text?.trim() ?? '';
+  if (text.length === 0) return [];
+  const legacy = isRecord(style) ? style : {};
+  return [
+    {
+      text,
+      x: num(legacy.x, 0.5),
+      y: segment.text_y ?? TEXT_Y,
+      size: num(legacy.size, 26) / LEGACY_STAGE_WIDTH,
+      color: typeof legacy.color === 'string' ? legacy.color : '#EB4C89',
+      bg: typeof legacy.bg === 'boolean' ? legacy.bg : true,
+    },
+  ];
+}
 
 /** Matches the -ss 0.15 input seek on clip 0 in post-approved's FFmpeg pass. */
 export const HEAD_TRIM_MS = 150;
@@ -107,14 +168,21 @@ export function buildRenderTimeline(params: {
 
     const segment = ordered[i];
     if (segment) {
-      const text = segment.overlay_text?.trim() ?? '';
-      if (textOverlay.enabled && segment.show_on_screen && text.length > 0) {
-        texts.push({
-          text,
-          start_ms: cursorMs,
-          duration_ms: Math.min(TEXT_HOLD_MS, effectiveMs),
-          y: segment.text_y ?? TEXT_Y,
-        });
+      if (textOverlay.enabled && segment.show_on_screen) {
+        for (const box of segmentBoxes(segment)) {
+          texts.push({
+            text: box.text,
+            start_ms: cursorMs,
+            duration_ms: Math.min(TEXT_HOLD_MS, effectiveMs),
+            y: box.y,
+            box: {
+              x: box.x,
+              size: box.size,
+              color: box.color,
+              bg: box.bg,
+            },
+          });
+        }
       }
       // Green screen screenshots are composited into the clip itself before
       // stitching, so they never join the overlay pass.
