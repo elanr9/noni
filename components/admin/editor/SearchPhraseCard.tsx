@@ -31,7 +31,6 @@ export function SearchPhraseCard({
     <View style={styles.block}>
       <View style={[styles.card, shadow.shadowCard]}>
         <View style={styles.headRow}>
-          <SectionLabel>Search phrase</SectionLabel>
           <AiPill
             icon="rotate-ccw"
             label="Regenerate"
@@ -90,8 +89,7 @@ const styles = StyleSheet.create({
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    justifyContent: 'flex-end',
   },
   fieldRow: {
     flexDirection: 'row',

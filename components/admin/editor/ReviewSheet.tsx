@@ -93,8 +93,8 @@ export function ReviewSheet(props: {
             <ScoreDial score={result.scores.overall} label="Overall" size={76} />
             <Text style={styles.dialNote}>
               {result.checks.length === 0
-                ? 'Every check passed. Ship it.'
-                : `${result.checks.length} ${result.checks.length === 1 ? 'check' : 'checks'} fired. The review never blocks saving.`}
+                ? 'Every check passed.'
+                : `${result.checks.length} ${result.checks.length === 1 ? 'check' : 'checks'} fired.`}
             </Text>
           </View>
 

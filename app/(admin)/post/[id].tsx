@@ -2,14 +2,21 @@
 // editable on the title step. Nothing generates on open — AI assist is on
 // demand. Screenshots live on brief_segments keyed by talking_point_index.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CameraRollSheet } from '../../../components/admin/editor/CameraRollSheet';
 import { CaptionStep } from '../../../components/admin/editor/CaptionStep';
 import { CtaCard } from '../../../components/admin/editor/CtaCard';
-import { FillSheet } from '../../../components/admin/editor/FillSheet';
 import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
 import {
   OverlayEditor,
@@ -22,12 +29,7 @@ import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { StepDots } from '../../../components/admin/editor/StepDots';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
-import { TypePicker } from '../../../components/admin/editor/TypePicker';
-import {
-  LibraryPickerSheet,
-  type LibraryPick,
-} from '../../../components/admin/LibraryPickerSheet';
-import { PushHeader } from '../../../components/admin/shared';
+import { PushHeader, SectionLabel } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
@@ -36,7 +38,6 @@ import {
   assistDeriveSegments,
   assistRegenerateField,
   confirmBriefReview,
-  generatePost,
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
@@ -44,7 +45,6 @@ import {
   listNoniLibrary,
   listPostTypes,
   logBriefReviewEvents,
-  markSearchQueryUsedByText,
   parseHookOptions,
   parseTalkingPoints,
   reviewBrief,
@@ -87,19 +87,6 @@ const STEP_TITLES: Record<EditorStep, string> = {
   review: 'AI review',
 };
 
-/** One line of intent under each step's h1 (README §8 shell). */
-const STEP_INTENTS: Record<EditorStep, string> = {
-  title: 'Optional. It is how the post reads in the grid, not on the platform.',
-  search:
-    'The TikTok search this post answers. Everything downstream is written against it.',
-  hook: 'Nine words maximum, written against the finished body. Pick one or write your own.',
-  cta: 'One plug sentence. On the talking points step it lands inside one point, never its own clip.',
-  points: 'Clip count is derived from the type, never entered.',
-  caption: 'Caption and 3 to 5 hashtags. Instagram reads tags inside the caption.',
-  review:
-    'Suggestions only. Apply what helps, ignore the rest, confirm when it reads right.',
-};
-
 /** The fields as they stood when review opened, for edit diffs and the ban list. */
 type ReviewSnapshot = {
   hook: string;
@@ -129,6 +116,8 @@ export default function PostEditorScreen() {
   const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState<EditorStep>('title');
+  /** Completed posts open as one read-only page; Edit flips it to inputs. */
+  const [summaryMode, setSummaryMode] = useState<'view' | 'edit' | null>(null);
   // Direction-aware step transition: Next slides in from the right,
   // Back from the left, with a fade. Driven by index delta so every
   // setStep caller gets it for free.
@@ -197,12 +186,10 @@ export default function PostEditorScreen() {
   const [pendingOverlayLabels, setPendingOverlayLabels] = useState<
     (string | null)[] | null
   >(null);
-  const [hookStale, setHookStale] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [baseline, setBaseline] = useState('');
 
   const [approvedClaimIds, setApprovedClaimIds] = useState<string[]>([]);
-  const [reviewedAt, setReviewedAt] = useState<string | null>(null);
   const [reviewVisible, setReviewVisible] = useState(false);
   const [reviewRunning, setReviewRunning] = useState(false);
   const [reviewConfirming, setReviewConfirming] = useState(false);
@@ -211,15 +198,11 @@ export default function PostEditorScreen() {
   const [appliedPointIds, setAppliedPointIds] = useState<ReadonlySet<string>>(new Set());
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
 
-  const [fillVisible, setFillVisible] = useState(false);
-  const [libraryVisible, setLibraryVisible] = useState(false);
-  /** Approved claim names by id, for the CTA trace chip. */
-  const [claimNames, setClaimNames] = useState<Record<string, string>>({});
-  const [filling, setFilling] = useState(false);
   const [regenBusy, setRegenBusy] = useState<RegenField | null>(null);
-  const [regenPointIndex, setRegenPointIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  /** True while a talking point card drags, so the page scroll pauses. */
+  const [pointsDragging, setPointsDragging] = useState(false);
   const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
   /** Which point the camera roll sheet is picking for; null means closed. */
   const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
@@ -256,7 +239,6 @@ export default function PostEditorScreen() {
           { data: brand },
           claimIds,
           { data: link },
-          { data: claims },
           { data: company },
         ] = await Promise.all([
           getBrief(id),
@@ -269,7 +251,6 @@ export default function PostEditorScreen() {
             .select('position, campaign_id')
             .eq('brief_id', id)
             .maybeSingle(),
-          supabase.from('product_features').select('id, name').eq('approved', true),
           supabase.from('companies').select('slug, name').maybeSingle(),
         ]);
         if (!brief) {
@@ -281,13 +262,9 @@ export default function PostEditorScreen() {
         refreshScreenshotUrls(segs);
         setHashtagBank(brand?.hashtag_bank ?? []);
         setApprovedClaimIds(claimIds);
-        setClaimNames(
-          Object.fromEntries((claims ?? []).map((c) => [c.id, c.name])),
-        );
         // No posting-account handle lives in the data; the slug is the
         // closest stable stand-in for the merged preview.
         setAccountName(company?.slug ?? company?.name ?? '');
-        setReviewedAt(brief.reviewed_at);
 
         const options = parseHookOptions(brief.hook_options);
         const chosen = brief.hook ? options.indexOf(brief.hook) : 0;
@@ -335,10 +312,17 @@ export default function PostEditorScreen() {
             .catch(() => undefined);
         }
 
+        // A finished post opens as one read-only page instead of a step.
+        const rowType = types.find((t) => t.id === brief.post_type_id) ?? null;
+        const complete =
+          Boolean(brief.hook?.trim()) &&
+          briefPoints.length >= (rowType?.min_points ?? 1) &&
+          Boolean(brief.caption?.trim());
+        if (complete) setSummaryMode('view');
+
         // Entering the editor opens the first incomplete step, or step 1
         // on an untouched row. Never lands on review — that would either
         // generate on open (rule 1) or show an empty screen.
-        const rowType = types.find((t) => t.id === brief.post_type_id) ?? null;
         const untouched =
           !brief.hook?.trim() &&
           briefPoints.length === 0 &&
@@ -386,55 +370,8 @@ export default function PostEditorScreen() {
     };
   }
 
-  async function fillFrom(source: { query?: string; url?: string; context?: string }) {
-    if (!id || !currentType) return;
-    setFilling(true);
-    try {
-      const result = await generatePost({
-        ...source,
-        postTypeKey: currentType.key,
-      });
-      if (result.kind === 'kill') {
-        // Kill rather than pad: persist immediately so the grid row shows
-        // the reason even if she backs out without saving.
-        setKillReason(result.kill_reason);
-        await updateBrief(id, { kill_reason: result.kill_reason });
-        setFillVisible(false);
-        return;
-      }
-      const d = result.draft;
-      setTitle(d.title);
-      setPoints(d.talking_points);
-      setCta(d.cta ?? '');
-      setHookOptions(d.hook_options);
-      setChosenHookIndex(0);
-      setSearchPhrase(d.search_phrase ?? searchPhrase);
-      setCaption(d.caption);
-      setHashtags(d.hashtags);
-      setWhyItWorks(d.why_it_works);
-      setScript(d.script);
-      setTargetWords(d.target_words);
-      setGenerationId(d.generation_id);
-      if (d.example_url) setExampleUrl(d.example_url);
-      setPendingOverlayLabels(d.overlay_labels);
-      setWarnings(d.warnings);
-      setKillReason(null);
-      setHookStale(false);
-      if (source.query) void markSearchQueryUsedByText(source.query);
-      setFillVisible(false);
-    } catch (e) {
-      Alert.alert(
-        'Could not fill',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setFilling(false);
-    }
-  }
-
   async function regenerate(field: RegenField, index?: number) {
     setRegenBusy(field);
-    if (field === 'talking_point') setRegenPointIndex(index ?? null);
     try {
       const result = await assistRegenerateField({
         field,
@@ -457,7 +394,6 @@ export default function PostEditorScreen() {
           if (result.script !== null) setScript(result.script);
           if (result.target_words !== null) setTargetWords(result.target_words);
           setPendingOverlayLabels(result.overlay_labels);
-          if (result.hook_may_be_stale) setHookStale(true);
           break;
         case 'talking_point': {
           setPoints((prev) =>
@@ -468,13 +404,11 @@ export default function PostEditorScreen() {
             next[result.index] = result.overlay_label;
             return next;
           });
-          if (result.hook_may_be_stale) setHookStale(true);
           break;
         }
         case 'hook':
           setHookOptions(result.hook_options);
           setChosenHookIndex(0);
-          setHookStale(false);
           break;
         case 'caption':
           setCaption(result.caption);
@@ -488,7 +422,6 @@ export default function PostEditorScreen() {
       );
     } finally {
       setRegenBusy(null);
-      setRegenPointIndex(null);
     }
   }
 
@@ -747,7 +680,6 @@ export default function PostEditorScreen() {
       await confirmBriefReview(id, reviewResult);
       await logBriefReviewEvents(events);
       await appendBannedPhrases(profile.company_id, bannedPhrases);
-      setReviewedAt(new Date().toISOString());
       setReviewVisible(false);
       router.back();
     } catch (e) {
@@ -920,6 +852,14 @@ export default function PostEditorScreen() {
   }
 
   function goBack() {
+    if (summaryMode === 'edit') {
+      setSummaryMode('view');
+      return;
+    }
+    if (summaryMode === 'view') {
+      router.back();
+      return;
+    }
     const idx = stepIndex(step);
     if (idx <= 0) {
       router.back();
@@ -927,6 +867,12 @@ export default function PostEditorScreen() {
     }
     if (step === 'review') setReviewVisible(false);
     setStep(STEPS[idx - 1]);
+  }
+
+  /** Summary Edit → Save: persist and drop back to the read-only page. */
+  async function saveSummaryEdits() {
+    const ok = await save();
+    if (ok) setSummaryMode('view');
   }
 
   /** Header action: save through the normal path and exit, row stays partial. */
@@ -955,11 +901,7 @@ export default function PostEditorScreen() {
   // The generation API returns one phrase, no alternates; the "Also
   // searched" section renders only when some exist.
   const alsoSearched: string[] = [];
-  const plugClaimId = points.find((p) => p.is_product)?.claim_id ?? null;
-  const traceClaimName =
-    plugClaimId !== null ? (claimNames[plugClaimId] ?? null) : null;
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
-  const captionBody = caption.replace(/#\w+/g, ' ').replace(/\s+/g, ' ').trim();
   const currentStepIndex = stepIndex(step);
   const typeLabel = currentType?.label ?? 'Post';
   const family: 'video' | 'photo_carousel' =
@@ -967,18 +909,6 @@ export default function PostEditorScreen() {
 
   const overlaySegment =
     overlayIndex !== null ? (segmentForPointIndex(overlayIndex) ?? null) : null;
-
-  // Clip and slide counts are derived from the type, never entered.
-  const pointCount =
-    currentType !== null ? Math.max(points.length, currentType.min_points) : points.length;
-  const stepIntent =
-    step === 'points' && currentType !== null
-      ? currentType.clip_structure === 'single_clip'
-        ? 'One clip, derived from the type.'
-        : currentType.clip_structure === 'slide_per_point'
-          ? `One slide per point = ${pointCount} slides. Derived from the type, never entered.`
-          : `Hook + ${pointCount} points + outro = ${pointCount + 2} clips. Derived from the type, never entered.`
-      : STEP_INTENTS[step];
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -996,23 +926,42 @@ export default function PostEditorScreen() {
           }
           onBack={goBack}
           trailing={
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Save progress"
-              disabled={saving}
-              onPress={() => void saveProgress()}
-            >
-              <Text style={styles.saveProgress}>
-                {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
-              </Text>
-            </PressableScale>
+            summaryMode === 'view' ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Edit this post"
+                onPress={() => setSummaryMode('edit')}
+              >
+                <Text style={styles.saveProgress}>Edit</Text>
+              </PressableScale>
+            ) : summaryMode === 'edit' ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Save changes"
+                disabled={saving}
+                onPress={() => void saveSummaryEdits()}
+              >
+                <Text style={styles.saveProgress}>
+                  {saving ? 'Saving…' : 'Save'}
+                </Text>
+              </PressableScale>
+            ) : (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Save progress"
+                disabled={saving}
+                onPress={() => void saveProgress()}
+              >
+                <Text style={styles.saveProgress}>
+                  {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
+                </Text>
+              </PressableScale>
+            )
           }
         />
-        <StepDots
-          current={currentStepIndex}
-          total={STEPS.length}
-          name={STEP_TITLES[step]}
-        />
+        {summaryMode === null ? (
+          <StepDots current={currentStepIndex} total={STEPS.length} />
+        ) : null}
       </View>
 
       <ScrollView
@@ -1020,7 +969,123 @@ export default function PostEditorScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!pointsDragging}
       >
+        {summaryMode === 'view' ? (
+          <View style={styles.summaryStack}>
+            {title.trim() ? (
+              <View style={styles.summaryCard}>
+                <SectionLabel>Title</SectionLabel>
+                <Text style={styles.summaryTitle}>{title.trim()}</Text>
+              </View>
+            ) : null}
+            {searchPhrase.trim() ? (
+              <View style={styles.summaryCard}>
+                <SectionLabel>Search phrase</SectionLabel>
+                <Text style={styles.summaryText}>{searchPhrase.trim()}</Text>
+              </View>
+            ) : null}
+            {resolvedHook() ? (
+              <View style={styles.summaryCard}>
+                <SectionLabel>Hook</SectionLabel>
+                <Text style={styles.summaryText}>{resolvedHook()}</Text>
+              </View>
+            ) : null}
+            <View style={styles.summaryCard}>
+              <SectionLabel>Talking points</SectionLabel>
+              {points.map((point, i) => {
+                const seg = segmentForPointIndex(i);
+                const thumb = seg?.screenshot_url
+                  ? screenshotUrls[seg.id]
+                  : undefined;
+                return (
+                  <View key={point.id} style={styles.summaryPoint}>
+                    <Text style={styles.summaryPointNum}>{i + 1}</Text>
+                    <View style={styles.summaryPointBody}>
+                      <Text style={styles.summaryText}>{point.text ?? ''}</Text>
+                      {point.is_product && cta.trim() ? (
+                        <Text style={styles.summaryPlug}>{cta.trim()}</Text>
+                      ) : null}
+                      {thumb !== undefined ? (
+                        <Image
+                          source={{ uri: thumb }}
+                          style={styles.summaryThumb}
+                        />
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+            {mergedCaption() ? (
+              <View style={styles.summaryCard}>
+                <SectionLabel>Caption</SectionLabel>
+                <Text style={styles.summaryText}>{mergedCaption()}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : summaryMode === 'edit' ? (
+          <View style={styles.summaryStack}>
+            <SectionLabel>Title</SectionLabel>
+            <TitleCard value={title} onChange={setTitle} />
+            <SectionLabel>Search phrase</SectionLabel>
+            <SearchPhraseCard
+              value={searchPhrase}
+              onChange={setSearchPhrase}
+              busy={regenBusy === 'search_phrase'}
+              onRegenerate={() => void regenerate('search_phrase')}
+              alternates={alsoSearched}
+              onPickAlternate={setSearchPhrase}
+            />
+            <SectionLabel>Script</SectionLabel>
+            <PointsEditor
+              points={points}
+              family={family}
+              hook={useCustomHook ? customHook : (hookOptions[chosenHookIndex] ?? '')}
+              onChangeHook={(text) => {
+                setUseCustomHook(true);
+                setCustomHook(text);
+              }}
+              cta={cta}
+              busyAll={regenBusy === 'talking_points'}
+              onChange={setPoints}
+              onRegenerateAll={() => void regenerate('talking_points')}
+              onDragStateChange={setPointsDragging}
+              screenshotUrlForIndex={(i) => {
+                const seg = segmentForPointIndex(i);
+                return seg?.screenshot_url
+                  ? screenshotUrls[seg.id]
+                  : undefined;
+              }}
+              screenshotBusyIndex={shotBusyIndex}
+              onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
+              onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
+              overlayBoxesForIndex={(i) => {
+                const seg = segmentForPointIndex(i);
+                return parseOverlayBoxes(seg?.overlay_style, {
+                  text: seg?.overlay_text,
+                  textY: seg?.text_y,
+                });
+              }}
+              onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
+            />
+            <SectionLabel>CTA</SectionLabel>
+            <CtaCard value={cta} onChange={setCta} />
+            <SectionLabel>Caption</SectionLabel>
+            <CaptionStep
+              caption={caption}
+              onChangeCaption={setCaption}
+              busy={regenBusy === 'caption'}
+              onRegenerate={() => void regenerate('caption')}
+              hashtags={hashtags}
+              bankTags={bankTags}
+              onToggleTag={toggleHashtag}
+              onAddTag={addHashtag}
+              merged={mergedCaption()}
+              accountName={accountName}
+            />
+          </View>
+        ) : (
         <Animated.View
           style={{
             opacity: stepOpacity,
@@ -1028,7 +1093,6 @@ export default function PostEditorScreen() {
           }}
         >
         <Text style={styles.h1}>{STEP_TITLES[step]}</Text>
-        <Text style={styles.intent}>{stepIntent}</Text>
 
         {killReason && step === 'title' ? (
           <View style={styles.killCard}>
@@ -1049,19 +1113,7 @@ export default function PostEditorScreen() {
 
         {step === 'title' ? (
           <View style={styles.section}>
-            <TitleCard
-              value={title}
-              onChange={setTitle}
-              filling={filling}
-              onFillWithAi={() => setFillVisible(true)}
-            />
-            {postTypeId !== null ? (
-              <TypePicker
-                postTypes={postTypes}
-                selectedId={postTypeId}
-                onSelect={(t) => setPostTypeId(t.id)}
-              />
-            ) : null}
+            <TitleCard value={title} onChange={setTitle} />
           </View>
         ) : null}
 
@@ -1081,20 +1133,8 @@ export default function PostEditorScreen() {
         {step === 'hook' ? (
           <View style={styles.section}>
             <HookOptionsField
-              options={hookOptions}
-              chosenIndex={chosenHookIndex}
-              stale={hookStale}
-              busy={regenBusy === 'hook'}
-              onChoose={(i) => {
-                setUseCustomHook(false);
-                setChosenHookIndex(i);
-              }}
-              onRegenerate={() => void regenerate('hook')}
-              onOpenLibrary={() => setLibraryVisible(true)}
-              useCustom={useCustomHook}
-              customText={customHook}
-              onChooseCustom={() => setUseCustomHook(true)}
-              onChangeCustom={(text) => {
+              value={useCustomHook ? customHook : (hookOptions[chosenHookIndex] ?? '')}
+              onChange={(text) => {
                 setUseCustomHook(true);
                 setCustomHook(text);
               }}
@@ -1104,7 +1144,7 @@ export default function PostEditorScreen() {
 
         {step === 'cta' ? (
           <View style={styles.section}>
-            <CtaCard value={cta} onChange={setCta} claimName={traceClaimName} />
+            <CtaCard value={cta} onChange={setCta} />
           </View>
         ) : null}
 
@@ -1112,15 +1152,17 @@ export default function PostEditorScreen() {
           <View style={styles.section}>
             <PointsEditor
               points={points}
-              minPoints={currentType?.min_points ?? null}
-              maxPoints={currentType?.max_points ?? null}
               family={family}
+              hook={useCustomHook ? customHook : (hookOptions[chosenHookIndex] ?? '')}
+              onChangeHook={(text) => {
+                setUseCustomHook(true);
+                setCustomHook(text);
+              }}
               cta={cta}
               busyAll={regenBusy === 'talking_points'}
-              busyIndex={regenBusy === 'talking_point' ? regenPointIndex : null}
               onChange={setPoints}
               onRegenerateAll={() => void regenerate('talking_points')}
-              onRegeneratePoint={(i) => void regenerate('talking_point', i)}
+              onDragStateChange={setPointsDragging}
               screenshotUrlForIndex={(i) => {
                 const seg = segmentForPointIndex(i);
                 return seg?.screenshot_url
@@ -1145,7 +1187,7 @@ export default function PostEditorScreen() {
         {step === 'caption' ? (
           <View style={styles.section}>
             <CaptionStep
-              caption={captionBody}
+              caption={caption}
               onChangeCaption={setCaption}
               busy={regenBusy === 'caption'}
               onRegenerate={() => void regenerate('caption')}
@@ -1176,15 +1218,11 @@ export default function PostEditorScreen() {
           />
         ) : null}
 
-        {reviewedAt && step !== 'review' ? (
-          <Text style={styles.reviewedNote}>
-            Reviewed {new Date(reviewedAt).toLocaleDateString()}. You can still
-            edit and review again.
-          </Text>
-        ) : null}
         </Animated.View>
+        )}
       </ScrollView>
 
+      {summaryMode === null ? (
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
         <View style={styles.backButton}>
           <Button size="lg" variant="ghost" block onPress={goBack}>
@@ -1197,7 +1235,7 @@ export default function PostEditorScreen() {
               size="lg"
               variant="primary"
               block
-              disabled={saving || filling}
+              disabled={saving}
               onPress={() => void goNext()}
             >
               Next
@@ -1215,15 +1253,7 @@ export default function PostEditorScreen() {
           )}
         </View>
       </View>
-
-      <FillSheet
-        visible={fillVisible}
-        searchPhrase={searchPhrase}
-        busy={filling}
-        onClose={() => setFillVisible(false)}
-        onFillFromPhrase={() => void fillFrom({ query: searchPhrase })}
-        onFillFromLink={(url, context) => void fillFrom({ url, context })}
-      />
+      ) : null}
 
       {overlayIndex !== null ? (
         <OverlayEditor
@@ -1259,22 +1289,6 @@ export default function PostEditorScreen() {
         }}
       />
 
-      <LibraryPickerSheet
-        visible={libraryVisible}
-        postTypeId={postTypeId}
-        onClose={() => setLibraryVisible(false)}
-        onPick={(pick: LibraryPick) => {
-          // From the hook step: a reference attaches as the example, a
-          // text idea becomes the written hook.
-          if (pick.kind === 'example') {
-            setExampleUrl(pick.url);
-          } else {
-            setUseCustomHook(true);
-            setCustomHook(pick.text);
-          }
-          setLibraryVisible(false);
-        }}
-      />
     </View>
   );
 }
@@ -1308,14 +1322,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: color.ink,
     letterSpacing: type.tracking.title,
-  },
-  intent: {
-    marginTop: 6,
     marginBottom: 16,
-    fontSize: 14,
-    fontWeight: '400',
-    lineHeight: 14 * 1.45,
-    color: color.slate500,
   },
   killCard: {
     gap: 6,
@@ -1359,9 +1366,55 @@ const styles = StyleSheet.create({
   },
   backButton: { flexBasis: '30%' },
   nextButton: { flex: 1 },
-  reviewedNote: {
-    marginTop: 10,
-    fontSize: type.size.meta,
+  summaryStack: {
+    gap: 12,
+  },
+  summaryCard: {
+    gap: 10,
+    padding: 16,
+    borderRadius: radius.md,
+    backgroundColor: color.white,
+  },
+  summaryTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 20 * 1.3,
+    letterSpacing: type.tracking.title,
+    color: color.ink,
+  },
+  summaryText: {
+    fontSize: 15,
+    fontWeight: '400',
+    lineHeight: 15 * 1.4,
+    color: color.ink,
+  },
+  summaryPlug: {
+    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '400',
+    lineHeight: 15 * 1.4,
+    color: color.slate500,
+  },
+  summaryPoint: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  summaryPointNum: {
+    width: 22,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 15 * 1.4,
     color: color.slate400,
+  },
+  summaryPointBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryThumb: {
+    marginTop: 8,
+    width: 42,
+    height: 56,
+    borderRadius: radius.sm,
+    backgroundColor: color.offWhite,
   },
 });

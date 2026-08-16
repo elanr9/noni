@@ -41,7 +41,6 @@ export function CaptionStep({
   const [adding, setAdding] = useState(false);
   const [newTag, setNewTag] = useState('');
   const over = caption.length > CAPTION_MAX;
-  const tagCountOff = hashtags.length < 3 || hashtags.length > 5;
 
   function commitNewTag() {
     const tag = newTag.replace(/^#/, '').replace(/\s+/g, '').trim();
@@ -54,7 +53,6 @@ export function CaptionStep({
     <View style={styles.stack}>
       <View style={[styles.card, shadow.shadowCard]}>
         <View style={styles.headRow}>
-          <SectionLabel>Caption</SectionLabel>
           <AiPill icon="rotate-ccw" label="Regenerate" busy={busy} onPress={onRegenerate} />
         </View>
         <TextInput
@@ -65,15 +63,15 @@ export function CaptionStep({
           placeholderTextColor={color.slate400}
           style={styles.captionField}
         />
-        <Text style={[styles.count, over && styles.countOver]}>
-          {`${caption.length} of ${CAPTION_MAX}`}
-        </Text>
+        {over ? (
+          <Text style={styles.countOver}>
+            {`${caption.length} of ${CAPTION_MAX}`}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.tagBlock}>
-        <SectionLabel style={tagCountOff ? styles.labelWarn : undefined}>
-          {`Hashtags · ${hashtags.length} of 3 to 5`}
-        </SectionLabel>
+        <SectionLabel>Hashtags</SectionLabel>
         <View style={styles.tagRow}>
           {bankTags.map((tag) => {
             const selected = hashtags.includes(tag);
@@ -117,20 +115,15 @@ export function CaptionStep({
         </View>
       </View>
 
-      <View style={styles.previewBlock}>
-        <SectionLabel>Merged preview</SectionLabel>
+      {merged ? (
         <View style={[styles.preview, shadow.shadowCard]}>
           <View style={styles.previewHead}>
             <CreatorAvatar uri={null} name={accountName} size={28} />
             <Text style={styles.previewName}>{accountName}</Text>
           </View>
-          <Text style={styles.previewText}>{merged || 'Nothing written yet.'}</Text>
-          <Text style={styles.previewNote}>
-            Instagram reads hashtags inside the caption, so this saves as one
-            string.
-          </Text>
+          <Text style={styles.previewText}>{merged}</Text>
         </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -148,8 +141,7 @@ const styles = StyleSheet.create({
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    justifyContent: 'flex-end',
   },
   captionField: {
     fontSize: 15,
@@ -160,20 +152,14 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     padding: 0,
   },
-  count: {
+  countOver: {
     fontSize: 12,
     fontWeight: '600',
-    color: color.slate400,
-    textAlign: 'right',
-  },
-  countOver: {
     color: color.danger,
+    textAlign: 'right',
   },
   tagBlock: {
     gap: 8,
-  },
-  labelWarn: {
-    color: color.amber,
   },
   tagRow: {
     flexDirection: 'row',
@@ -221,9 +207,6 @@ const styles = StyleSheet.create({
     color: color.ink,
     backgroundColor: color.white,
   },
-  previewBlock: {
-    gap: 8,
-  },
   preview: {
     gap: 10,
     padding: 16,
@@ -245,10 +228,5 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 14 * 1.45,
     color: color.ink,
-  },
-  previewNote: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: color.slate400,
   },
 });

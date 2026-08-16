@@ -1,22 +1,22 @@
-// Admin handoff §8 step 5. One card per talking point: numbered badge,
-// text, screenshot slot, Move control. The plug card is starred. Overlay
-// chrome lives on brief_segments and opens OverlayEditor.
-import type { JSX } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+// Admin handoff §8 step 5. The hook rides as the pinned first card so the
+// whole script reads in order; each talking point is a draggable card with
+// one delete control (confirm before removing). The plug sentence renders
+// as script inside its point. Overlay chrome lives on brief_segments and
+// opens OverlayEditor.
+import { useRef, useState, type JSX } from 'react';
+import { Alert, Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import type { TalkingPoint } from '../../../lib/briefs-api';
-import {
-  overlayBoxFill,
-  overlayTextContrast,
-  type OverlayBox,
-} from '../../../lib/overlay-boxes';
+import { type OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
-import { SectionLabel } from '../shared';
 import { AiPill } from './AiPill';
 import { type OverlayEditorMode } from './OverlayEditor';
+
+/** Matches styles.section gap so drag swap distances line up. */
+const CARD_GAP = 10;
 
 function shotLabel(url: string): string {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url) ? 'Recording' : 'Screenshot';
@@ -24,17 +24,16 @@ function shotLabel(url: string): string {
 
 export function PointsEditor(props: {
   points: TalkingPoint[];
-  minPoints: number | null;
-  maxPoints: number | null;
   /** Clip on videos, Slide on slideshows — naming only, never a count field. */
   family: 'video' | 'photo_carousel';
-  /** The plug sentence from the CTA step, shown inside the plug point. */
+  /** The hook script, pinned as the first card. */
+  hook: string;
+  onChangeHook: (text: string) => void;
+  /** The plug sentence from the CTA step, shown as script inside the plug point. */
   cta: string;
   busyAll: boolean;
-  busyIndex: number | null;
   onChange: (points: TalkingPoint[]) => void;
   onRegenerateAll: () => void;
-  onRegeneratePoint: (index: number) => void;
   /** Signed URL for a screenshot attached to this point's segment, if any. */
   screenshotUrlForIndex: (index: number) => string | undefined;
   screenshotBusyIndex: number | null;
@@ -42,25 +41,34 @@ export function PointsEditor(props: {
   onRemoveScreenshot: (index: number) => void;
   overlayBoxesForIndex: (index: number) => OverlayBox[];
   onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
+  /** Fires while a card drags so the parent scroll can pause. */
+  onDragStateChange: (dragging: boolean) => void;
 }): JSX.Element {
   const {
     points,
-    minPoints,
-    maxPoints,
     family,
+    hook,
+    onChangeHook,
     cta,
     busyAll,
-    busyIndex,
     onChange,
     onRegenerateAll,
-    onRegeneratePoint,
     screenshotUrlForIndex,
     screenshotBusyIndex,
     onAttachScreenshot,
     onRemoveScreenshot,
     overlayBoxesForIndex,
     onOpenOverlay,
+    onDragStateChange,
   } = props;
+
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const drag = useRef({ id: '', index: 0, prevY: 0, offset: 0 });
+  const cardHeights = useRef<Record<string, number>>({});
 
   function updatePoint(id: string, text: string) {
     onChange(
@@ -68,16 +76,15 @@ export function PointsEditor(props: {
     );
   }
 
-  function movePoint(index: number, delta: -1 | 1) {
-    const target = index + delta;
-    if (target < 0 || target >= points.length) return;
-    const next = [...points];
-    [next[index], next[target]] = [next[target], next[index]];
-    onChange(next);
-  }
-
-  function deletePoint(id: string) {
-    onChange(points.filter((p) => p.id !== id));
+  function confirmDelete(id: string) {
+    Alert.alert('Delete this point?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => onChange(pointsRef.current.filter((p) => p.id !== id)),
+      },
+    ]);
   }
 
   function addPoint() {
@@ -97,15 +104,68 @@ export function PointsEditor(props: {
     onChange(points.map((p) => ({ ...p, is_product: p.id === id })));
   }
 
-  const countOff =
-    minPoints !== null &&
-    maxPoints !== null &&
-    (points.length < minPoints || points.length > maxPoints);
+  // Drag reorder: the grip handle owns the gesture. Deltas track our own
+  // pageY so re-renders mid-drag never jump, and crossing half of the
+  // neighbouring card swaps the order live.
+  function startDrag(pointId: string, pageY: number) {
+    const index = pointsRef.current.findIndex((p) => p.id === pointId);
+    if (index < 0) return;
+    drag.current = { id: pointId, index, prevY: pageY, offset: 0 };
+    setDragId(pointId);
+    setDragOffset(0);
+    onDragStateChange(true);
+  }
+
+  function moveDrag(pageY: number) {
+    const d = drag.current;
+    if (!d.id) return;
+    d.offset += pageY - d.prevY;
+    d.prevY = pageY;
+    const list = pointsRef.current;
+    if (d.offset > 0 && d.index < list.length - 1) {
+      const next = list[d.index + 1];
+      const nextH = (next ? cardHeights.current[next.id] : undefined) ?? 120;
+      if (d.offset > (nextH + CARD_GAP) / 2) {
+        const swapped = [...list];
+        const dragged = swapped[d.index];
+        const other = swapped[d.index + 1];
+        if (dragged && other) {
+          swapped[d.index] = other;
+          swapped[d.index + 1] = dragged;
+          onChange(swapped);
+          d.offset -= nextH + CARD_GAP;
+          d.index += 1;
+        }
+      }
+    } else if (d.offset < 0 && d.index > 0) {
+      const prev = list[d.index - 1];
+      const prevH = (prev ? cardHeights.current[prev.id] : undefined) ?? 120;
+      if (-d.offset > (prevH + CARD_GAP) / 2) {
+        const swapped = [...list];
+        const dragged = swapped[d.index];
+        const other = swapped[d.index - 1];
+        if (dragged && other) {
+          swapped[d.index] = other;
+          swapped[d.index - 1] = dragged;
+          onChange(swapped);
+          d.offset += prevH + CARD_GAP;
+          d.index -= 1;
+        }
+      }
+    }
+    setDragOffset(d.offset);
+  }
+
+  function endDrag() {
+    drag.current = { id: '', index: 0, prevY: 0, offset: 0 };
+    setDragId(null);
+    setDragOffset(0);
+    onDragStateChange(false);
+  }
 
   return (
     <View style={styles.section}>
       <View style={styles.headRow}>
-        <SectionLabel>{`${points.length} points`}</SectionLabel>
         <AiPill
           icon="rotate-ccw"
           label="Regenerate all"
@@ -113,28 +173,65 @@ export function PointsEditor(props: {
           onPress={onRegenerateAll}
         />
       </View>
-      {countOff ? (
-        <Text style={styles.countWarn}>
-          This type wants {minPoints} to {maxPoints} points.
-        </Text>
-      ) : null}
+
+      <View style={[styles.card, shadow.shadowCard]}>
+        <View style={styles.cardHead}>
+          <View style={styles.hookTag}>
+            <Icon name="megaphone" size={13} color={color.blue600} />
+            <Text style={styles.hookTagText}>Hook</Text>
+          </View>
+        </View>
+        <TextInput
+          multiline
+          value={hook}
+          onChangeText={onChangeHook}
+          placeholder="The opening line, spoken first"
+          placeholderTextColor={color.slate400}
+          style={styles.text}
+        />
+      </View>
 
       {points.map((point, i) => {
-        const busy = busyIndex === i;
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
         const overlayBoxes = overlayBoxesForIndex(i);
         const plug = point.is_product;
+        const dragging = dragId === point.id;
         return (
           <View
             key={point.id}
-            style={[styles.card, shadow.shadowCard, plug && styles.cardPlug]}
+            onLayout={(e) => {
+              cardHeights.current[point.id] = e.nativeEvent.layout.height;
+            }}
+            style={[
+              styles.card,
+              shadow.shadowCard,
+              plug && styles.cardPlug,
+              dragging && [
+                styles.cardDragging,
+                { transform: [{ translateY: dragOffset }] },
+              ],
+            ]}
           >
             <View style={styles.cardHead}>
-              <View style={[styles.badge, plug && styles.badgePlug]}>
-                <Text style={[styles.badgeText, plug && styles.badgeTextPlug]}>
-                  {i + 1}
-                </Text>
+              <View
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={(e) =>
+                  startDrag(point.id, e.nativeEvent.pageY)
+                }
+                onResponderMove={(e) => moveDrag(e.nativeEvent.pageY)}
+                onResponderRelease={endDrag}
+                onResponderTerminate={endDrag}
+                onResponderTerminationRequest={() => false}
+                style={styles.dragHandle}
+              >
+                <Icon name="grip-vertical" size={15} color={color.slate300} />
+                <View style={[styles.badge, plug && styles.badgePlug]}>
+                  <Text style={[styles.badgeText, plug && styles.badgeTextPlug]}>
+                    {i + 2}
+                  </Text>
+                </View>
               </View>
               {plug ? (
                 <View style={styles.plugTag}>
@@ -151,72 +248,32 @@ export function PointsEditor(props: {
                   <Text style={styles.plugGhostText}>Add plug</Text>
                 </PressableScale>
               )}
-              <View style={styles.tools}>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Regenerate point ${i + 1}`}
-                  disabled={busy || busyAll}
-                  onPress={() => onRegeneratePoint(i)}
-                  style={styles.toolBtn}
-                >
-                  {busy ? (
-                    <Text style={styles.toolText}>…</Text>
-                  ) : (
-                    <Icon name="rotate-ccw" size={13} color={color.slate500} />
-                  )}
-                </PressableScale>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Move point ${i + 1} up`}
-                  onPress={() => movePoint(i, -1)}
-                  style={styles.toolBtn}
-                >
-                  <Icon name="chevron-up" size={14} color={color.slate500} />
-                </PressableScale>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Move point ${i + 1} down`}
-                  onPress={() => movePoint(i, 1)}
-                  style={styles.toolBtn}
-                >
-                  <Icon name="chevron-down" size={14} color={color.slate500} />
-                </PressableScale>
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete point ${i + 1}`}
-                  onPress={() => deletePoint(point.id)}
-                  style={styles.toolBtn}
-                >
-                  <Icon name="x" size={13} color={color.danger} />
-                </PressableScale>
-              </View>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Delete point ${i + 1}`}
+                onPress={() => confirmDelete(point.id)}
+                style={styles.deleteBtn}
+              >
+                <Icon name="x" size={14} color={color.slate400} />
+              </PressableScale>
             </View>
-
-            {plug ? (
-              <View style={styles.ctaBox}>
-                <Icon name="zap" size={13} color={color.blue600} />
-                <Text style={styles.ctaBoxText}>
-                  {cta.trim()
-                    ? cta.trim()
-                    : 'No CTA written yet. Add it on the CTA step.'}
-                </Text>
-              </View>
-            ) : null}
 
             <TextInput
               multiline
               value={point.text ?? ''}
               onChangeText={(text) => updatePoint(point.id, text)}
               placeholder={
-                plug
-                  ? 'The plug sentence rides inside this point.'
-                  : family === 'photo_carousel'
-                    ? 'One slide per point. Written to be read.'
-                    : 'Beat, not a line. Under 25 words.'
+                family === 'photo_carousel'
+                  ? 'One slide per point. Written to be read.'
+                  : 'Beat, not a line. Under 25 words.'
               }
               placeholderTextColor={color.slate400}
               style={styles.text}
             />
+
+            {plug && cta.trim() ? (
+              <Text style={styles.plugScript}>{cta.trim()}</Text>
+            ) : null}
 
             <View style={styles.shotRow}>
               {shotUrl !== undefined ? (
@@ -238,7 +295,7 @@ export function PointsEditor(props: {
                     accessibilityLabel={`Remove the ${shotLabel(shotUrl).toLowerCase()} on point ${i + 1}`}
                     disabled={shotBusy}
                     onPress={() => onRemoveScreenshot(i)}
-                    style={styles.toolBtn}
+                    style={styles.deleteBtn}
                   >
                     <Icon name="x" size={13} color={color.slate500} />
                   </PressableScale>
@@ -265,27 +322,10 @@ export function PointsEditor(props: {
                 onPress={() => onOpenOverlay(i, 'text')}
                 style={styles.textPreview}
               >
+                <Icon name="pencil" size={13} color={color.slate400} />
                 {overlayBoxes.map((box) => (
-                  <View
-                    key={box.id}
-                    style={[
-                      styles.textPill,
-                      box.bg
-                        ? { backgroundColor: overlayBoxFill(box.color) }
-                        : styles.textPillClear,
-                    ]}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.textPillLabel,
-                        {
-                          color: box.bg
-                            ? overlayTextContrast(box.color)
-                            : box.color,
-                        },
-                      ]}
-                    >
+                  <View key={box.id} style={styles.textChip}>
+                    <Text numberOfLines={1} style={styles.textChipLabel}>
                       {box.text}
                     </Text>
                   </View>
@@ -306,12 +346,6 @@ export function PointsEditor(props: {
         );
       })}
 
-      <Text style={styles.helper}>
-        {family === 'photo_carousel'
-          ? 'Tap a screenshot to move and resize it on its slide.'
-          : 'Tap a screenshot to move and resize it on its clip.'}
-      </Text>
-
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel="Add a point"
@@ -326,17 +360,11 @@ export function PointsEditor(props: {
 }
 
 const styles = StyleSheet.create({
-  section: { gap: 10 },
+  section: { gap: CARD_GAP },
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  countWarn: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: color.amber,
+    justifyContent: 'flex-end',
   },
   card: {
     gap: 10,
@@ -349,10 +377,26 @@ const styles = StyleSheet.create({
   cardPlug: {
     borderColor: color.blue300,
   },
+  cardDragging: {
+    zIndex: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    borderColor: color.blue300,
+  },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  dragHandle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingRight: 6,
   },
   badge: {
     width: 26,
@@ -372,6 +416,16 @@ const styles = StyleSheet.create({
   },
   badgeTextPlug: {
     color: color.white,
+  },
+  hookTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  hookTagText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.blue600,
   },
   plugTag: {
     flexDirection: 'row',
@@ -395,23 +449,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: color.slate400,
   },
-  tools: {
-    flexDirection: 'row',
-    gap: 4,
-    marginLeft: 'auto',
-  },
-  toolBtn: {
+  deleteBtn: {
     width: 30,
     height: 30,
     borderRadius: radiusAdmin.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.fillQuiet,
-  },
-  toolText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: color.slate500,
+    marginLeft: 'auto',
   },
   text: {
     fontSize: 15,
@@ -421,6 +466,12 @@ const styles = StyleSheet.create({
     minHeight: 40,
     textAlignVertical: 'top',
     padding: 0,
+  },
+  plugScript: {
+    fontSize: 15,
+    fontWeight: '400',
+    lineHeight: 15 * 1.4,
+    color: color.slate500,
   },
   shotRow: {
     flexDirection: 'row',
@@ -446,22 +497,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: color.slate500,
-  },
-  ctaBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: 9,
-    paddingHorizontal: 11,
-    borderRadius: radiusAdmin.sm,
-    backgroundColor: color.blue100,
-  },
-  ctaBoxText: {
-    flex: 1,
-    fontSize: 12.5,
-    fontWeight: '600',
-    lineHeight: 12.5 * 1.4,
-    color: color.blue700,
   },
   addShot: {
     flex: 1,
@@ -499,31 +534,24 @@ const styles = StyleSheet.create({
     gap: 6,
     minHeight: 44,
     paddingVertical: 7,
-    paddingHorizontal: 10,
+    paddingHorizontal: 11,
     borderRadius: radiusAdmin.sm,
-    backgroundColor: color.ink900,
+    backgroundColor: color.fillQuiet,
   },
-  textPill: {
+  textChip: {
     minWidth: 0,
     flexShrink: 1,
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 10,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
   },
-  textPillClear: {
-    backgroundColor: 'transparent',
-  },
-  textPillLabel: {
-    fontFamily: 'TikTokSans_700Bold',
+  textChipLabel: {
     fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  helper: {
-    fontSize: 12.5,
-    fontWeight: '400',
-    lineHeight: 12.5 * 1.45,
-    color: color.slate400,
+    fontWeight: '600',
+    color: color.ink,
   },
   addPoint: {
     flexDirection: 'row',

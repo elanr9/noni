@@ -6,6 +6,7 @@ import {
   Easing,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -313,6 +314,10 @@ export default function RecordScreen() {
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewPlaying, setReviewPlaying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [reviewCardSize, setReviewCardSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
   const reviewSheet = useRef(new Animated.Value(0)).current;
 
   const recordingRef = useRef(false);
@@ -349,6 +354,20 @@ export default function RecordScreen() {
   const reviewPlayer = useVideoPlayer(reviewSource, (p) => {
     p.loop = false;
   });
+
+  // The review clips follow plan order, so the playing clip maps back to
+  // its segment and the manager's overlays render on the playback too.
+  const reviewClips = useMemo(
+    () => plan.filter((c) => kept[c.slotIndex] !== undefined),
+    [plan, kept],
+  );
+  const reviewSegment =
+    phase === 'review'
+      ? briefSegments.find(
+          (s) => s.slot_index === reviewClips[reviewIndex]?.slotIndex,
+        ) ?? null
+      : null;
+  const reviewShot = reviewSegment ? shots[reviewSegment.id] ?? null : null;
 
   // Chain the kept clips: when one ends, roll to the next.
   useEffect(() => {
@@ -449,14 +468,24 @@ export default function RecordScreen() {
   }, [loading, initialized, plan, kept]);
 
   // Sign the brief's screenshots so the live preview shows the pre-placed
-  // assets exactly where the final edit will put them.
+  // assets exactly where the final edit will put them. Video attachments
+  // preview through a poster frame since Image cannot render an mp4.
   useEffect(() => {
     const withShots = briefSegments.filter((s) => s.screenshot_url);
     if (withShots.length === 0) return;
     let cancelled = false;
     void Promise.all(
       withShots.map(async (s) => {
-        const url = await signedScreenshotUrl(s.screenshot_url as string);
+        const path = s.screenshot_url as string;
+        let url = await signedScreenshotUrl(path);
+        if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(path)) {
+          try {
+            const t = await VideoThumbnails.getThumbnailAsync(url, { time: 0 });
+            url = t.uri;
+          } catch {
+            // keep the signed URL; the card just stays blank
+          }
+        }
         const aspect = await new Promise<number>((resolve) => {
           Image.getSize(
             url,
@@ -948,6 +977,12 @@ export default function RecordScreen() {
               accessibilityRole="button"
               accessibilityLabel={reviewPlaying ? 'Pause preview' : 'Play preview'}
               onPress={toggleReviewPlay}
+              onLayout={(e) =>
+                setReviewCardSize({
+                  w: e.nativeEvent.layout.width,
+                  h: e.nativeEvent.layout.height,
+                })
+              }
               style={styles.reviewCard}
             >
               {reviewSource !== null ? (
@@ -956,6 +991,17 @@ export default function RecordScreen() {
                   player={reviewPlayer}
                   contentFit="cover"
                   nativeControls={false}
+                />
+              ) : null}
+              {reviewSegment !== null &&
+              reviewCardSize !== null &&
+              reviewSegment.layout !== 'green_screen' ? (
+                <SegmentOverlayPreview
+                  segment={reviewSegment}
+                  shot={reviewShot}
+                  stageWidth={reviewCardSize.w}
+                  stageHeight={reviewCardSize.h}
+                  overlay={parseTextOverlay(brief?.text_overlay)}
                 />
               ) : null}
               <View style={styles.reviewSegments}>
@@ -1014,9 +1060,12 @@ export default function RecordScreen() {
             {reviewData?.caption ? (
               <View style={styles.captionBlock}>
                 <Text style={styles.captionLabel}>Caption</Text>
-                <Text style={styles.captionText} numberOfLines={4}>
-                  {reviewData.caption}
-                </Text>
+                <ScrollView
+                  style={styles.captionScroll}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.captionText}>{reviewData.caption}</Text>
+                </ScrollView>
               </View>
             ) : null}
             <PressableScale
@@ -1856,6 +1905,9 @@ const styles = StyleSheet.create({
   },
   captionBlock: {
     gap: 4,
+  },
+  captionScroll: {
+    maxHeight: 132,
   },
   captionLabel: {
     fontSize: type.size.micro,

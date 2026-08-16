@@ -1,9 +1,9 @@
-// Story-style overlay composer with multiple text boxes. Text mode: each box
-// drags and pinches anywhere on the stage, an Instagram-style slider on the
-// left resizes the active box (which re-wraps the line breaks), a still tap
-// opens the keyboard, "Add text" starts another box, and Done saves it all.
-// Media mode: the screenshot drags and pinches from anywhere on the screen,
-// with three snap chips.
+// Story-style overlay composer. The screenshot and every text box live on
+// one stage and edit together: a gesture that starts on a text box drags or
+// pinches that box, anywhere else drags or pinches the screenshot. The
+// Instagram-style slider on the left resizes the active text box, a still
+// tap on a box opens the keyboard, "Add text" starts another box, and Done
+// saves the whole arrangement at once.
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Dimensions,
@@ -101,8 +101,29 @@ function newBox(fill: string): OverlayBox {
 
 type ShotPos = { x: number; y: number; w: number };
 
+/** Incremental gesture tracking: deltas apply between frames, so a finger
+ * landing or lifting mid-gesture re-baselines instead of jumping. */
+type GestureTrack = {
+  target: 'box' | 'shot' | null;
+  boxId: string;
+  prevX: number;
+  prevY: number;
+  prevDist: number;
+  prevCount: number;
+};
+
+const IDLE_GESTURE: GestureTrack = {
+  target: null,
+  boxId: '',
+  prevX: 0,
+  prevY: 0,
+  prevDist: 0,
+  prevCount: 0,
+};
+
 export function OverlayEditor(props: {
   visible: boolean;
+  /** Entry intent only: 'text' starts a fresh box when none exist yet. */
   mode: OverlayEditorMode;
   /** Changes when a different point opens so local draft state resets. */
   resetKey: string;
@@ -152,6 +173,9 @@ export function OverlayEditor(props: {
   const [shot, setShot] = useState<ShotPos>(DEFAULT_SHOT);
   const shotRef = useRef(shot);
   const [aspect, setAspect] = useState(9 / 16);
+  const hasShot = Boolean(screenshotUrl);
+  const hasShotRef = useRef(hasShot);
+  hasShotRef.current = hasShot;
 
   function updateShot(next: ShotPos) {
     shotRef.current = next;
@@ -219,52 +243,7 @@ export function OverlayEditor(props: {
     );
   }, [screenshotUrl]);
 
-  const gesture = useRef({ x0: 0, y0: 0, scale0: 0, dist0: 0, boxId: '' });
-
-  // Media mode: the WHOLE stage drags and pinches the screenshot, so two
-  // fingers land anywhere and still resize it.
-  const mediaPan = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
-          gesture.current = {
-            x0: shotRef.current.x,
-            y0: shotRef.current.y,
-            scale0: shotRef.current.w,
-            dist0: 0,
-            boxId: '',
-          };
-        },
-        onPanResponderMove: (evt, gs) => {
-          const touches = evt.nativeEvent.touches;
-          const a = touches[0];
-          const b = touches[1];
-          if (touches.length >= 2 && a && b) {
-            const d = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
-            if (gesture.current.dist0 === 0) {
-              gesture.current.dist0 = d;
-              gesture.current.scale0 = shotRef.current.w;
-            }
-            const w = clamp(
-              gesture.current.scale0 * (d / gesture.current.dist0),
-              0.15,
-              1,
-            );
-            updateShot({ ...shotRef.current, w });
-          } else {
-            gesture.current.dist0 = 0;
-            updateShot({
-              x: clamp(gesture.current.x0 + gs.dx / stageRef.current.w, 0, 1),
-              y: clamp(gesture.current.y0 + gs.dy / stageRef.current.h, 0, 1),
-              w: shotRef.current.w,
-            });
-          }
-        },
-      }),
-    [],
-  );
+  const gesture = useRef<GestureTrack>({ ...IDLE_GESTURE });
 
   function boxAtPoint(px: number, py: number): OverlayBox | null {
     const { w, h } = stageRef.current;
@@ -282,64 +261,91 @@ export function OverlayEditor(props: {
     return null;
   }
 
-  // Text mode drag stage: the gesture must START on a box, then one finger
-  // drags it and a second finger pinches it from anywhere on the screen.
-  const textPan = useMemo(
+  // One gesture layer for the whole stage. A gesture starting on a text box
+  // moves and pinches that box; anywhere else it moves and pinches the
+  // screenshot. Deltas apply frame to frame so pinch and drag blend smoothly.
+  const stagePan = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: (evt) =>
-          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null,
+          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null ||
+          hasShotRef.current,
         onMoveShouldSetPanResponder: (evt) =>
-          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null,
+          boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null ||
+          hasShotRef.current,
         onPanResponderGrant: (evt) => {
-          const hit = boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
-          if (!hit) return;
-          setActiveId(hit.id);
+          const { pageX, pageY } = evt.nativeEvent;
+          const hit = boxAtPoint(pageX, pageY);
+          if (hit) setActiveId(hit.id);
           gesture.current = {
-            x0: hit.x,
-            y0: hit.y,
-            scale0: hit.size,
-            dist0: 0,
-            boxId: hit.id,
+            target: hit ? 'box' : hasShotRef.current ? 'shot' : null,
+            boxId: hit?.id ?? '',
+            prevX: pageX,
+            prevY: pageY,
+            prevDist: 0,
+            prevCount: 1,
           };
         },
-        onPanResponderMove: (evt, gs) => {
-          const id = gesture.current.boxId;
-          if (!id) return;
+        onPanResponderMove: (evt) => {
+          const g = gesture.current;
+          if (!g.target) return;
           const touches = evt.nativeEvent.touches;
+          if (touches.length === 0) return;
+          let cx = 0;
+          let cy = 0;
+          for (const t of touches) {
+            cx += t.pageX;
+            cy += t.pageY;
+          }
+          cx /= touches.length;
+          cy /= touches.length;
           const a = touches[0];
           const b = touches[1];
-          if (touches.length >= 2 && a && b) {
-            const d = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
-            if (gesture.current.dist0 === 0) {
-              gesture.current.dist0 = d;
-              const current = boxesRef.current.find((x) => x.id === id);
-              gesture.current.scale0 = current?.size ?? DEFAULT_BOX_SIZE;
+          const dist =
+            touches.length >= 2 && a && b
+              ? Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY)
+              : 0;
+          // A finger landed or lifted: re-baseline, never jump.
+          if (touches.length !== g.prevCount) {
+            g.prevX = cx;
+            g.prevY = cy;
+            g.prevDist = dist;
+            g.prevCount = touches.length;
+            return;
+          }
+          const dx = (cx - g.prevX) / stageRef.current.w;
+          const dy = (cy - g.prevY) / stageRef.current.h;
+          const scale = g.prevDist > 0 && dist > 0 ? dist / g.prevDist : 1;
+          if (g.target === 'box') {
+            const current = boxesRef.current.find((x) => x.id === g.boxId);
+            if (current) {
+              patchBox(g.boxId, {
+                x: clamp(current.x + dx, 0.04, 0.96),
+                y: clamp(current.y + dy, 0.04, 0.96),
+                size: clamp(current.size * scale, MIN_BOX_SIZE, MAX_BOX_SIZE),
+              });
             }
-            patchBox(id, {
-              size: clamp(
-                gesture.current.scale0 * (d / gesture.current.dist0),
-                MIN_BOX_SIZE,
-                MAX_BOX_SIZE,
-              ),
-            });
           } else {
-            gesture.current.dist0 = 0;
-            patchBox(id, {
-              x: clamp(gesture.current.x0 + gs.dx / stageRef.current.w, 0.04, 0.96),
-              y: clamp(gesture.current.y0 + gs.dy / stageRef.current.h, 0.04, 0.96),
+            updateShot({
+              x: clamp(shotRef.current.x + dx, 0, 1),
+              y: clamp(shotRef.current.y + dy, 0, 1),
+              w: clamp(shotRef.current.w * scale, 0.15, 1),
             });
           }
+          g.prevX = cx;
+          g.prevY = cy;
+          g.prevDist = dist;
         },
         onPanResponderRelease: (_evt, gs) => {
           // A still tap on a box reopens the keyboard, Instagram-style.
           if (
-            gesture.current.boxId &&
+            gesture.current.target === 'box' &&
             Math.abs(gs.dx) < 4 &&
             Math.abs(gs.dy) < 4
           ) {
             setEditing(true);
           }
+          gesture.current = { ...IDLE_GESTURE };
         },
       }),
     [],
@@ -366,7 +372,6 @@ export function OverlayEditor(props: {
     patchBox(id, { size: MIN_BOX_SIZE + t * (MAX_BOX_SIZE - MIN_BOX_SIZE) });
   }
 
-  const textMode = mode === 'text';
   const active = boxes.find((b) => b.id === activeId) ?? null;
   const blocked = busy || saving;
 
@@ -383,14 +388,6 @@ export function OverlayEditor(props: {
     }
   }
 
-  function handleMediaDone() {
-    void commit({
-      screenshot_x: shot.x,
-      screenshot_y: shot.y,
-      screenshot_width: shot.w,
-    });
-  }
-
   /** Editing Done: keep or drop the draft box, close only the keyboard. */
   function handleEditingDone() {
     const id = activeIdRef.current;
@@ -405,9 +402,15 @@ export function OverlayEditor(props: {
     setEditing(false);
   }
 
-  /** Top-right Done outside the keyboard: save every box and close. */
+  /** Top-right Done: save every box and the screenshot placement together. */
   function handleSaveAll() {
-    void commit(serializeOverlayBoxes(boxesRef.current));
+    const patch: OverlaySavePatch = serializeOverlayBoxes(boxesRef.current);
+    if (hasShotRef.current) {
+      patch.screenshot_x = shotRef.current.x;
+      patch.screenshot_y = shotRef.current.y;
+      patch.screenshot_width = shotRef.current.w;
+    }
+    void commit(patch);
   }
 
   function handleDeleteActive() {
@@ -488,55 +491,36 @@ export function OverlayEditor(props: {
           }}
           pointerEvents="none"
         />
-        {textMode && screenshotUrl ? (
-          <View pointerEvents="none" style={[styles.mediaFull, styles.mediaDim]}>
-            <Image
-              source={{ uri: screenshotUrl }}
-              style={styles.mediaImg}
-              resizeMode="cover"
-            />
-          </View>
-        ) : null}
         <View
           pointerEvents="none"
-          style={[styles.silhouette, { opacity: textMode ? 0.25 : 0.55 }]}
+          style={[styles.silhouette, { opacity: editing ? 0.2 : 0.45 }]}
         >
           <Icon name="circle-user-round" size={130} color={color.white} />
         </View>
 
-        {!textMode ? (
-          <>
-            <View pointerEvents="none">
-              <View
-                style={[
-                  styles.shot,
-                  {
-                    left: shot.x * stage.w - shotW / 2,
-                    top: shot.y * stage.h - shotH / 2,
-                    width: shotW,
-                    height: shotH,
-                  },
-                ]}
-              >
-                {screenshotUrl ? (
-                  <Image
-                    source={{ uri: screenshotUrl }}
-                    style={styles.mediaImg}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.thumb} />
-                )}
-              </View>
-            </View>
+        {hasShot ? (
+          <View pointerEvents="none" style={editing && styles.dimmed}>
             <View
-              {...mediaPan.panHandlers}
-              style={[StyleSheet.absoluteFill, styles.gestureLayer]}
-            />
-          </>
+              style={[
+                styles.shot,
+                {
+                  left: shot.x * stage.w - shotW / 2,
+                  top: shot.y * stage.h - shotH / 2,
+                  width: shotW,
+                  height: shotH,
+                },
+              ]}
+            >
+              <Image
+                source={{ uri: screenshotUrl }}
+                style={styles.mediaImg}
+                resizeMode="cover"
+              />
+            </View>
+          </View>
         ) : null}
 
-        {textMode && !editing ? (
+        {!editing ? (
           <>
             {boxes.map((box) => (
               <View
@@ -566,7 +550,7 @@ export function OverlayEditor(props: {
               </View>
             ))}
             <View
-              {...textPan.panHandlers}
+              {...stagePan.panHandlers}
               style={[StyleSheet.absoluteFill, styles.gestureLayer]}
             />
           </>
@@ -586,19 +570,7 @@ export function OverlayEditor(props: {
             <Icon name="x" size={18} color={color.white} />
           </PressableScale>
           <View style={styles.flex} />
-          {!textMode ? (
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-              disabled={blocked}
-              onPress={handleMediaDone}
-              style={styles.done}
-            >
-              <Text style={styles.doneText}>
-                {blocked ? 'Saving…' : 'Done'}
-              </Text>
-            </PressableScale>
-          ) : editing ? (
+          {editing ? (
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Done"
@@ -622,7 +594,7 @@ export function OverlayEditor(props: {
           )}
         </View>
 
-        {textMode && active ? (
+        {active ? (
           <View style={[styles.rail, { top: Math.max(insets.top, 12) + 64 }]}>
             <PressableScale
               accessibilityRole="button"
@@ -649,7 +621,7 @@ export function OverlayEditor(props: {
           </View>
         ) : null}
 
-        {textMode && active ? (
+        {active && !editing ? (
           <View
             style={[
               styles.sliderWrap,
@@ -657,10 +629,7 @@ export function OverlayEditor(props: {
             ]}
             {...sliderPan.panHandlers}
           >
-            <View style={styles.sliderTrack} pointerEvents="none">
-              <View style={styles.sliderTaperTop} />
-              <View style={styles.sliderTaperBottom} />
-            </View>
+            <View style={styles.sliderTrack} pointerEvents="none" />
             <View
               pointerEvents="none"
               style={[
@@ -677,12 +646,8 @@ export function OverlayEditor(props: {
           </View>
         ) : null}
 
-        {textMode ? (
-          editing && active ? (
-            <View style={styles.textStage}>{pillFor(active, true)}</View>
-          ) : (
-            <View style={styles.flex} pointerEvents="none" />
-          )
+        {editing && active ? (
+          <View style={styles.textStage}>{pillFor(active, true)}</View>
         ) : (
           <View style={styles.flex} pointerEvents="none" />
         )}
@@ -693,8 +658,44 @@ export function OverlayEditor(props: {
             { paddingBottom: Math.max(insets.bottom, 12) + 22 },
           ]}
         >
-          {textMode && !editing ? (
+          {!editing ? (
             <View style={styles.addTextRow}>
+              {hasShot ? (
+                <View style={styles.presetRow}>
+                  {MEDIA_PRESETS.map((preset) => {
+                    const isOn =
+                      Math.abs(shot.x - preset.x) < 0.02 &&
+                      Math.abs(shot.y - preset.y) < 0.02 &&
+                      Math.abs(shot.w - preset.width) < 0.02;
+                    return (
+                      <PressableScale
+                        key={preset.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isOn }}
+                        onPress={() =>
+                          updateShot({
+                            x: preset.x,
+                            y: preset.y,
+                            w: preset.width,
+                          })
+                        }
+                        style={[styles.posChip, isOn && styles.posChipOn]}
+                      >
+                        <Text
+                          style={[
+                            styles.posChipText,
+                            isOn && styles.posChipTextOn,
+                          ]}
+                        >
+                          {preset.label}
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              ) : (
+                <View style={styles.flex} />
+              )}
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel="Add another text box"
@@ -708,57 +709,30 @@ export function OverlayEditor(props: {
             </View>
           ) : null}
           <View style={styles.bottomRow}>
-            {textMode
-              ? SWATCHES.map((c) => {
-                  const isOn = active !== null && hexEq(c, active.color);
-                  return (
-                    <PressableScale
-                      key={c}
-                      accessibilityRole="button"
-                      accessibilityLabel={c}
-                      accessibilityState={{ selected: isOn }}
-                      hitSlop={7}
-                      onPress={() =>
-                        active ? patchBox(active.id, { color: c }) : undefined
-                      }
-                      style={[styles.swatchRing, isOn && styles.swatchRingOn]}
-                    >
-                      <View
-                        style={[
-                          styles.swatch,
-                          { backgroundColor: c },
-                          !isOn && styles.swatchIdle,
-                        ]}
-                      />
-                    </PressableScale>
-                  );
-                })
-              : MEDIA_PRESETS.map((preset) => {
-                  const isOn =
-                    Math.abs(shot.x - preset.x) < 0.02 &&
-                    Math.abs(shot.y - preset.y) < 0.02 &&
-                    Math.abs(shot.w - preset.width) < 0.02;
-                  return (
-                    <PressableScale
-                      key={preset.id}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isOn }}
-                      onPress={() =>
-                        updateShot({ x: preset.x, y: preset.y, w: preset.width })
-                      }
-                      style={[styles.posChip, isOn && styles.posChipOn]}
-                    >
-                      <Text
-                        style={[
-                          styles.posChipText,
-                          isOn && styles.posChipTextOn,
-                        ]}
-                      >
-                        {preset.label}
-                      </Text>
-                    </PressableScale>
-                  );
-                })}
+            {SWATCHES.map((c) => {
+              const isOn = active !== null && hexEq(c, active.color);
+              return (
+                <PressableScale
+                  key={c}
+                  accessibilityRole="button"
+                  accessibilityLabel={c}
+                  accessibilityState={{ selected: isOn }}
+                  hitSlop={7}
+                  onPress={() =>
+                    active ? patchBox(active.id, { color: c }) : undefined
+                  }
+                  style={[styles.swatchRing, isOn && styles.swatchRingOn]}
+                >
+                  <View
+                    style={[
+                      styles.swatch,
+                      { backgroundColor: c },
+                      !isOn && styles.swatchIdle,
+                    ]}
+                  />
+                </PressableScale>
+              );
+            })}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -773,11 +747,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   flex: { flex: 1 },
-  mediaFull: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  mediaDim: {
-    opacity: 0.4,
+  dimmed: {
+    opacity: 0.35,
   },
   mediaImg: {
     width: '100%',
@@ -787,10 +758,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: radiusAdmin.md,
     overflow: 'hidden',
-    backgroundColor: color.ink800,
-  },
-  thumb: {
-    flex: 1,
     backgroundColor: color.ink800,
   },
   silhouette: {
@@ -875,23 +842,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sliderTrack: {
-    flex: 1,
-    width: 20,
-    alignItems: 'center',
-  },
-  sliderTaperTop: {
-    flex: 1,
-    width: 5,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-  },
-  sliderTaperBottom: {
-    flex: 1,
-    width: 2.5,
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
   sliderThumb: {
     position: 'absolute',
@@ -944,7 +900,14 @@ const styles = StyleSheet.create({
   },
   addTextRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presetRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   addTextBtn: {
     minHeight: 48,
