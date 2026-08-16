@@ -29,6 +29,9 @@ export function PointsEditor(props: {
   /** The hook script, pinned as the first card. */
   hook: string;
   onChangeHook: (text: string) => void;
+  /** Overlay text boxes on the hook clip's segment. */
+  hookOverlayBoxes: OverlayBox[];
+  onOpenHookOverlay: () => void;
   /** The plug sentence from the CTA step, shown as script inside the plug point. */
   cta: string;
   busyAll: boolean;
@@ -49,6 +52,8 @@ export function PointsEditor(props: {
     family,
     hook,
     onChangeHook,
+    hookOverlayBoxes,
+    onOpenHookOverlay,
     cta,
     busyAll,
     onChange,
@@ -189,6 +194,33 @@ export function PointsEditor(props: {
           placeholderTextColor={color.slate400}
           style={styles.text}
         />
+        {hookOverlayBoxes.length > 0 ? (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Edit overlay text on the hook"
+            onPress={onOpenHookOverlay}
+            style={styles.textPreview}
+          >
+            <Icon name="pencil" size={13} color={color.slate400} />
+            {hookOverlayBoxes.map((box) => (
+              <View key={box.id} style={styles.textChip}>
+                <Text numberOfLines={1} style={styles.textChipLabel}>
+                  {box.text}
+                </Text>
+              </View>
+            ))}
+          </PressableScale>
+        ) : (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Add overlay text on the hook"
+            onPress={onOpenHookOverlay}
+            style={styles.addText}
+          >
+            <Icon name="pencil" size={13} color={color.slate400} />
+            <Text style={styles.addShotText}>Add text</Text>
+          </PressableScale>
+        )}
       </View>
 
       {points.map((point, i) => {

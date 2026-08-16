@@ -57,14 +57,10 @@ export type OverlaySavePatch = {
   screenshot_width?: number;
 };
 
-/** Snap targets for the screenshot; free drag and pinch stay authoritative. */
-const MEDIA_PRESETS = [
-  { id: 'top_left', x: 0.23, y: 0.19, width: 0.46, label: 'Top left' },
-  { id: 'top_right', x: 0.77, y: 0.19, width: 0.46, label: 'Top right' },
-  { id: 'center', x: 0.5, y: 0.46, width: 0.66, label: 'Center' },
-] as const;
-
 const DEFAULT_SHOT = { x: 0.23, y: 0.19, w: 0.46 };
+
+/** Drag-to-delete: how close the fingers must get to the trash to drop. */
+const TRASH_RADIUS = 64;
 
 const SWATCHES = [
   '#FFFFFF',
@@ -136,6 +132,8 @@ export function OverlayEditor(props: {
   saving?: boolean;
   onClose: () => void;
   onSave: (patch: OverlaySavePatch) => void | Promise<void>;
+  /** Fires when the screenshot is dragged onto the trash. */
+  onRemoveShot?: () => void;
 }): JSX.Element {
   const {
     visible,
@@ -149,6 +147,7 @@ export function OverlayEditor(props: {
     saving = false,
     onClose,
     onSave,
+    onRemoveShot,
   } = props;
 
   const insets = useSafeAreaInsets();
@@ -173,9 +172,22 @@ export function OverlayEditor(props: {
   const [shot, setShot] = useState<ShotPos>(DEFAULT_SHOT);
   const shotRef = useRef(shot);
   const [aspect, setAspect] = useState(9 / 16);
-  const hasShot = Boolean(screenshotUrl);
+  const [shotRemoved, setShotRemoved] = useState(false);
+  const hasShot = Boolean(screenshotUrl) && !shotRemoved;
   const hasShotRef = useRef(hasShot);
   hasShotRef.current = hasShot;
+
+  /** Instagram-style drag-to-delete: trash shows while something drags. */
+  const [draggingTarget, setDraggingTarget] = useState<'box' | 'shot' | null>(
+    null,
+  );
+  const [overTrash, setOverTrash] = useState(false);
+  const overTrashRef = useRef(false);
+  const onRemoveShotRef = useRef(onRemoveShot);
+  onRemoveShotRef.current = onRemoveShot;
+  const dragShownRef = useRef(false);
+  const trashOffsetRef = useRef(0);
+  trashOffsetRef.current = Math.max(insets.bottom, 12) + 58;
 
   function updateShot(next: ShotPos) {
     shotRef.current = next;
@@ -208,6 +220,9 @@ export function OverlayEditor(props: {
     boxLayouts.current = {};
     setActiveId(initialBoxes[0]?.id ?? null);
     setEditing(false);
+    setShotRemoved(false);
+    setDraggingTarget(null);
+    setOverTrash(false);
     const nextShot = {
       x: screenshotX ?? DEFAULT_SHOT.x,
       y: screenshotY ?? DEFAULT_SHOT.y,
@@ -261,6 +276,27 @@ export function OverlayEditor(props: {
     return null;
   }
 
+  function isOverTrash(px: number, py: number): boolean {
+    const { w, h } = stageRef.current;
+    const cx = w / 2;
+    const cy = h - trashOffsetRef.current;
+    return Math.hypot(px - cx, py - cy) < TRASH_RADIUS;
+  }
+
+  function deleteBox(id: string) {
+    const next = boxesRef.current.filter((b) => b.id !== id);
+    boxesRef.current = next;
+    setBoxes(next);
+    setActiveId(next[next.length - 1]?.id ?? null);
+  }
+
+  function resetDrag() {
+    dragShownRef.current = false;
+    overTrashRef.current = false;
+    setDraggingTarget(null);
+    setOverTrash(false);
+  }
+
   // One gesture layer for the whole stage. A gesture starting on a text box
   // moves and pinches that box; anywhere else it moves and pinches the
   // screenshot. Deltas apply frame to frame so pinch and drag blend smoothly.
@@ -286,7 +322,7 @@ export function OverlayEditor(props: {
             prevCount: 1,
           };
         },
-        onPanResponderMove: (evt) => {
+        onPanResponderMove: (evt, gs) => {
           const g = gesture.current;
           if (!g.target) return;
           const touches = evt.nativeEvent.touches;
@@ -299,6 +335,17 @@ export function OverlayEditor(props: {
           }
           cx /= touches.length;
           cy /= touches.length;
+          if (!dragShownRef.current && Math.hypot(gs.dx, gs.dy) > 8) {
+            dragShownRef.current = true;
+            setDraggingTarget(g.target);
+          }
+          if (dragShownRef.current) {
+            const over = isOverTrash(cx, cy);
+            if (over !== overTrashRef.current) {
+              overTrashRef.current = over;
+              setOverTrash(over);
+            }
+          }
           const a = touches[0];
           const b = touches[1];
           const dist =
@@ -337,15 +384,29 @@ export function OverlayEditor(props: {
           g.prevDist = dist;
         },
         onPanResponderRelease: (_evt, gs) => {
-          // A still tap on a box reopens the keyboard, Instagram-style.
-          if (
-            gesture.current.target === 'box' &&
+          const g = gesture.current;
+          if (dragShownRef.current && overTrashRef.current) {
+            // Dropped on the trash: the box or the screenshot goes.
+            if (g.target === 'box' && g.boxId) {
+              deleteBox(g.boxId);
+            } else if (g.target === 'shot') {
+              setShotRemoved(true);
+              onRemoveShotRef.current?.();
+            }
+          } else if (
+            g.target === 'box' &&
             Math.abs(gs.dx) < 4 &&
             Math.abs(gs.dy) < 4
           ) {
+            // A still tap on a box reopens the keyboard, Instagram-style.
             setEditing(true);
           }
           gesture.current = { ...IDLE_GESTURE };
+          resetDrag();
+        },
+        onPanResponderTerminate: () => {
+          gesture.current = { ...IDLE_GESTURE };
+          resetDrag();
         },
       }),
     [],
@@ -411,17 +472,6 @@ export function OverlayEditor(props: {
       patch.screenshot_width = shotRef.current.w;
     }
     void commit(patch);
-  }
-
-  function handleDeleteActive() {
-    const id = activeIdRef.current;
-    if (!id) return;
-    const next = boxesRef.current.filter((b) => b.id !== id);
-    boxesRef.current = next;
-    setBoxes(next);
-    setActiveId(next[next.length - 1]?.id ?? null);
-    Keyboard.dismiss();
-    setEditing(false);
   }
 
   const shotW = shot.w * stage.w;
@@ -491,13 +541,6 @@ export function OverlayEditor(props: {
           }}
           pointerEvents="none"
         />
-        <View
-          pointerEvents="none"
-          style={[styles.silhouette, { opacity: editing ? 0.2 : 0.45 }]}
-        >
-          <Icon name="circle-user-round" size={130} color={color.white} />
-        </View>
-
         {hasShot ? (
           <View pointerEvents="none" style={editing && styles.dimmed}>
             <View
@@ -608,16 +651,6 @@ export function OverlayEditor(props: {
                 <Text style={styles.aChipText}>A</Text>
               </View>
             </PressableScale>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Delete this text box"
-              hitSlop={TOOL_HIT}
-              disabled={blocked}
-              onPress={handleDeleteActive}
-              style={styles.tool}
-            >
-              <Icon name="trash-2" size={17} color={color.white} />
-            </PressableScale>
           </View>
         ) : null}
 
@@ -652,89 +685,72 @@ export function OverlayEditor(props: {
           <View style={styles.flex} pointerEvents="none" />
         )}
 
-        <View
-          style={[
-            styles.bottomWrap,
-            { paddingBottom: Math.max(insets.bottom, 12) + 22 },
-          ]}
-        >
-          {!editing ? (
-            <View style={styles.addTextRow}>
-              {hasShot ? (
-                <View style={styles.presetRow}>
-                  {MEDIA_PRESETS.map((preset) => {
-                    const isOn =
-                      Math.abs(shot.x - preset.x) < 0.02 &&
-                      Math.abs(shot.y - preset.y) < 0.02 &&
-                      Math.abs(shot.w - preset.width) < 0.02;
-                    return (
-                      <PressableScale
-                        key={preset.id}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isOn }}
-                        onPress={() =>
-                          updateShot({
-                            x: preset.x,
-                            y: preset.y,
-                            w: preset.width,
-                          })
-                        }
-                        style={[styles.posChip, isOn && styles.posChipOn]}
-                      >
-                        <Text
-                          style={[
-                            styles.posChipText,
-                            isOn && styles.posChipTextOn,
-                          ]}
-                        >
-                          {preset.label}
-                        </Text>
-                      </PressableScale>
-                    );
-                  })}
-                </View>
-              ) : (
-                <View style={styles.flex} />
-              )}
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Add another text box"
-                disabled={blocked}
-                onPress={startNewBox}
-                style={styles.addTextBtn}
-              >
-                <Icon name="plus" size={15} color={color.white} />
-                <Text style={styles.addTextLabel}>Add text</Text>
-              </PressableScale>
+        {draggingTarget !== null ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.trashWrap,
+              { bottom: Math.max(insets.bottom, 12) + 28 },
+            ]}
+          >
+            <View style={[styles.trash, overTrash && styles.trashOn]}>
+              <Icon
+                name="trash-2"
+                size={overTrash ? 23 : 18}
+                color={overTrash ? color.ink : color.white}
+              />
             </View>
-          ) : null}
-          <View style={styles.bottomRow}>
-            {SWATCHES.map((c) => {
-              const isOn = active !== null && hexEq(c, active.color);
-              return (
-                <PressableScale
-                  key={c}
-                  accessibilityRole="button"
-                  accessibilityLabel={c}
-                  accessibilityState={{ selected: isOn }}
-                  hitSlop={7}
-                  onPress={() =>
-                    active ? patchBox(active.id, { color: c }) : undefined
-                  }
-                  style={[styles.swatchRing, isOn && styles.swatchRingOn]}
-                >
-                  <View
-                    style={[
-                      styles.swatch,
-                      { backgroundColor: c },
-                      !isOn && styles.swatchIdle,
-                    ]}
-                  />
-                </PressableScale>
-              );
-            })}
           </View>
-        </View>
+        ) : null}
+
+        {draggingTarget === null ? (
+          <View
+            style={[
+              styles.bottomWrap,
+              { paddingBottom: Math.max(insets.bottom, 12) + 22 },
+            ]}
+          >
+            {editing && active !== null ? (
+              <View style={styles.bottomRow}>
+                {SWATCHES.map((c) => {
+                  const isOn = hexEq(c, active.color);
+                  return (
+                    <PressableScale
+                      key={c}
+                      accessibilityRole="button"
+                      accessibilityLabel={c}
+                      accessibilityState={{ selected: isOn }}
+                      hitSlop={7}
+                      onPress={() => patchBox(active.id, { color: c })}
+                      style={[styles.swatchRing, isOn && styles.swatchRingOn]}
+                    >
+                      <View
+                        style={[
+                          styles.swatch,
+                          { backgroundColor: c },
+                          !isOn && styles.swatchIdle,
+                        ]}
+                      />
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={styles.addTextRow}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Add another text box"
+                  disabled={blocked}
+                  onPress={startNewBox}
+                  style={styles.addTextBtn}
+                >
+                  <Icon name="plus" size={15} color={color.white} />
+                  <Text style={styles.addTextLabel}>Add text</Text>
+                </PressableScale>
+              </View>
+            )}
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -759,13 +775,6 @@ const styles = StyleSheet.create({
     borderRadius: radiusAdmin.md,
     overflow: 'hidden',
     backgroundColor: color.ink800,
-  },
-  silhouette: {
-    position: 'absolute',
-    bottom: -34,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
   },
   gestureLayer: {
     zIndex: 1,
@@ -901,13 +910,7 @@ const styles = StyleSheet.create({
   addTextRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  presetRow: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    justifyContent: 'flex-end',
   },
   addTextBtn: {
     minHeight: 48,
@@ -952,23 +955,25 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: color.whiteA45,
   },
-  posChip: {
-    minHeight: 44,
-    paddingHorizontal: 13,
-    borderRadius: radiusAdmin.pill,
+  trashWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 4,
+  },
+  trash: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderColor: color.white,
     backgroundColor: RAIL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  posChipOn: {
+  trashOn: {
     backgroundColor: color.white,
-  },
-  posChipText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: color.white,
-  },
-  posChipTextOn: {
-    color: color.ink,
+    borderColor: color.white,
   },
 });

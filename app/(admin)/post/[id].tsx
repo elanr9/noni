@@ -446,6 +446,12 @@ export default function PostEditorScreen() {
     );
   }
 
+  /** Overlay slots: -1 is the hook clip, 0+ are talking points. */
+  function segmentForOverlayIndex(index: number): BriefSegment | undefined {
+    if (index === -1) return segments.find((s) => s.kind === 'hook');
+    return segmentForPointIndex(index);
+  }
+
   async function save(): Promise<boolean> {
     if (!id) return false;
     setSaving(true);
@@ -789,7 +795,7 @@ export default function PostEditorScreen() {
   async function saveOverlay(patch: OverlaySavePatch) {
     const pointIndex = overlayIndex;
     if (pointIndex === null) return;
-    const segment = segmentForPointIndex(pointIndex);
+    const segment = segmentForOverlayIndex(pointIndex);
     if (!segment) {
       Alert.alert('No clip yet', 'Save the post so clips exist, then add text.');
       throw new Error('No clip yet');
@@ -908,7 +914,15 @@ export default function PostEditorScreen() {
     currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
 
   const overlaySegment =
-    overlayIndex !== null ? (segmentForPointIndex(overlayIndex) ?? null) : null;
+    overlayIndex !== null
+      ? (segmentForOverlayIndex(overlayIndex) ?? null)
+      : null;
+
+  const hookSegment = segments.find((s) => s.kind === 'hook') ?? null;
+  const hookOverlayBoxes = parseOverlayBoxes(hookSegment?.overlay_style, {
+    text: hookSegment?.overlay_text,
+    textY: hookSegment?.text_y,
+  });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -1046,6 +1060,8 @@ export default function PostEditorScreen() {
                 setUseCustomHook(true);
                 setCustomHook(text);
               }}
+              hookOverlayBoxes={hookOverlayBoxes}
+              onOpenHookOverlay={() => void openOverlay(-1, 'text')}
               cta={cta}
               busyAll={regenBusy === 'talking_points'}
               onChange={setPoints}
@@ -1158,6 +1174,8 @@ export default function PostEditorScreen() {
                 setUseCustomHook(true);
                 setCustomHook(text);
               }}
+              hookOverlayBoxes={hookOverlayBoxes}
+              onOpenHookOverlay={() => void openOverlay(-1, 'text')}
               cta={cta}
               busyAll={regenBusy === 'talking_points'}
               onChange={setPoints}
@@ -1275,6 +1293,19 @@ export default function PostEditorScreen() {
           saving={overlaySaving}
           onClose={() => setOverlayIndex(null)}
           onSave={saveOverlay}
+          onRemoveShot={() => {
+            const segment = overlaySegment;
+            if (!segment?.screenshot_url) return;
+            void updateBriefSegment(segment.id, { screenshot_url: null })
+              .then(() =>
+                setSegments((prev) =>
+                  prev.map((s) =>
+                    s.id === segment.id ? { ...s, screenshot_url: null } : s,
+                  ),
+                ),
+              )
+              .catch(() => undefined);
+          }}
         />
       ) : null}
 
