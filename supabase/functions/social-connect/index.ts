@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 type Body = {
-  action: 'status' | 'connect_url' | 'team_status';
+  action: 'status' | 'connect_url' | 'team_status' | 'cleanup_profiles';
   creator_id?: string;
 };
 
@@ -106,7 +106,9 @@ Deno.serve(async (req) => {
     const body = (await req.json().catch(() => null)) as Body | null;
     if (
       !body?.action ||
-      !['status', 'connect_url', 'team_status'].includes(body.action)
+      !['status', 'connect_url', 'team_status', 'cleanup_profiles'].includes(
+        body.action,
+      )
     ) {
       return jsonResponse(
         { error: 'expected { action: status|connect_url|team_status }' },
@@ -120,6 +122,93 @@ Deno.serve(async (req) => {
     );
 
     const authHeader = req.headers.get('Authorization') ?? '';
+
+    // Maintenance: delete Upload-Post profiles that belong to no current
+    // profile row, freeing plan slots. Manager or platform admin only,
+    // then a create+delete probe proves new profiles can be made again.
+    if (body.action === 'cleanup_profiles') {
+      const { data: opsUser } = await admin.auth.getUser(
+        authHeader.replace('Bearer ', ''),
+      );
+      const { data: opsProfile } = opsUser?.user
+        ? await admin
+            .from('profiles')
+            .select('role')
+            .eq('id', opsUser.user.id)
+            .maybeSingle()
+        : { data: null };
+      if (
+        !opsProfile ||
+        !['admin', 'campaign_manager'].includes(opsProfile.role as string)
+      ) {
+        return jsonResponse({ error: 'forbidden' }, 403);
+      }
+      const apiKey = uploadPostKey();
+      const listRes = await fetch(
+        'https://api.upload-post.com/api/uploadposts/users',
+        { headers: { Authorization: `Apikey ${apiKey}` } },
+      );
+      const listJson = (await listRes.json()) as {
+        profiles?: Array<{ username: string }>;
+      };
+      const existing = (listJson.profiles ?? []).map((p) => p.username);
+      const { data: rows } = await admin
+        .from('profiles')
+        .select('id, upload_post_profile');
+      const valid = new Set<string>();
+      for (const row of rows ?? []) {
+        if (row.upload_post_profile) valid.add(row.upload_post_profile as string);
+        valid.add(profileUsernameFor(row.id as string));
+      }
+      const deleted: string[] = [];
+      const failed: Array<{ username: string; detail: string }> = [];
+      for (const username of existing) {
+        if (valid.has(username)) continue;
+        const delRes = await fetch(
+          'https://api.upload-post.com/api/uploadposts/users',
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Apikey ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ username }),
+          },
+        );
+        if (delRes.ok) deleted.push(username);
+        else failed.push({ username, detail: await delRes.text() });
+      }
+      const probeName = `c_probe${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const probeRes = await fetch(
+        'https://api.upload-post.com/api/uploadposts/users',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Apikey ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ username: probeName }),
+        },
+      );
+      const probeDetail = await probeRes.text();
+      if (probeRes.ok) {
+        await fetch('https://api.upload-post.com/api/uploadposts/users', {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Apikey ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ username: probeName }),
+        });
+      }
+      return jsonResponse({
+        existing,
+        deleted,
+        failed,
+        probe_create_ok: probeRes.ok,
+        probe_detail: probeRes.ok ? null : probeDetail,
+      });
+    }
     const { data: userData } = await admin.auth.getUser(
       authHeader.replace('Bearer ', ''),
     );
