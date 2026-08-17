@@ -66,7 +66,7 @@ import {
 import { supabase } from '../../../lib/supabase';
 import { color, motion, radius, type } from '../../../theme/tokens';
 
-const STEPS = [
+const VIDEO_STEPS = [
   'title',
   'search',
   'hook',
@@ -75,7 +75,17 @@ const STEPS = [
   'caption',
   'review',
 ] as const;
-type EditorStep = (typeof STEPS)[number];
+type EditorStep = (typeof VIDEO_STEPS)[number];
+
+/** Slideshows skip the spoken-video steps: no hook, no CTA. Slides carry
+ * their own text and screenshots and are read, not performed. */
+const SLIDESHOW_STEPS: readonly EditorStep[] = [
+  'title',
+  'search',
+  'points',
+  'caption',
+  'review',
+];
 
 const STEP_TITLES: Record<EditorStep, string> = {
   title: 'Title',
@@ -124,29 +134,6 @@ export default function PostEditorScreen() {
   const stepOpacity = useRef(new Animated.Value(1)).current;
   const stepShift = useRef(new Animated.Value(0)).current;
   const prevStepIndexRef = useRef(0);
-
-  useEffect(() => {
-    const idx = STEPS.indexOf(step);
-    const delta = idx - prevStepIndexRef.current;
-    prevStepIndexRef.current = idx;
-    if (delta === 0) return;
-    stepOpacity.setValue(0);
-    stepShift.setValue(delta > 0 ? 28 : -28);
-    Animated.parallel([
-      Animated.timing(stepOpacity, {
-        toValue: 1,
-        duration: motion.base,
-        easing: motion.easeOut,
-        useNativeDriver: true,
-      }),
-      Animated.timing(stepShift, {
-        toValue: 0,
-        duration: motion.base,
-        easing: motion.easeOut,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [step, stepOpacity, stepShift]);
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
   const [postNumber, setPostNumber] = useState<number | null>(null);
@@ -216,6 +203,33 @@ export default function PostEditorScreen() {
     () => postTypes.find((t) => t.id === postTypeId) ?? null,
     [postTypes, postTypeId],
   );
+  const family: 'video' | 'photo_carousel' =
+    currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+  const steps: readonly EditorStep[] =
+    family === 'photo_carousel' ? SLIDESHOW_STEPS : VIDEO_STEPS;
+
+  useEffect(() => {
+    const idx = steps.indexOf(step);
+    const delta = idx - prevStepIndexRef.current;
+    prevStepIndexRef.current = idx;
+    if (delta === 0) return;
+    stepOpacity.setValue(0);
+    stepShift.setValue(delta > 0 ? 28 : -28);
+    Animated.parallel([
+      Animated.timing(stepOpacity, {
+        toValue: 1,
+        duration: motion.base,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+      Animated.timing(stepShift, {
+        toValue: 0,
+        duration: motion.base,
+        easing: motion.easeOut,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [step, steps, stepOpacity, stepShift]);
 
   const refreshScreenshotUrls = useCallback((rows: BriefSegment[]) => {
     for (const row of rows) {
@@ -313,9 +327,11 @@ export default function PostEditorScreen() {
         }
 
         // A finished post opens as one read-only page instead of a step.
+        // Slideshows never require a hook or CTA.
         const rowType = types.find((t) => t.id === brief.post_type_id) ?? null;
+        const isSlideshow = rowType?.family === 'photo_carousel';
         const complete =
-          Boolean(brief.hook?.trim()) &&
+          (isSlideshow || Boolean(brief.hook?.trim())) &&
           briefPoints.length >= (rowType?.min_points ?? 1) &&
           Boolean(brief.caption?.trim());
         if (complete) setSummaryMode('view');
@@ -334,9 +350,11 @@ export default function PostEditorScreen() {
             ? 'title'
             : !brief.search_phrase?.trim()
               ? 'search'
-              : !brief.hook?.trim()
+              : !isSlideshow && !brief.hook?.trim()
                 ? 'hook'
-                : (rowType?.requires_plug ?? true) && !brief.cta?.trim()
+                : !isSlideshow &&
+                    (rowType?.requires_plug ?? true) &&
+                    !brief.cta?.trim()
                   ? 'cta'
                   : briefPoints.length < (rowType?.min_points ?? 1)
                     ? 'points'
@@ -352,6 +370,18 @@ export default function PostEditorScreen() {
       }
     })();
   }, [id, refreshScreenshotUrls]);
+
+  // Auto-draft the caption: landing on the caption step with nothing
+  // written generates caption and hashtags from the post, once per open.
+  const autoCaptionRan = useRef(false);
+  useEffect(() => {
+    if (step !== 'caption' || summaryMode !== null) return;
+    if (autoCaptionRan.current || caption.trim() || regenBusy !== null) return;
+    autoCaptionRan.current = true;
+    void regenerate('caption');
+    // Fires on step entry only; regenerate reads the draft fields fresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, summaryMode]);
 
   function buildRegenPayload(): RegenDraftPayload {
     return {
@@ -833,7 +863,7 @@ export default function PostEditorScreen() {
   }
 
   function stepIndex(s: EditorStep): number {
-    return STEPS.indexOf(s);
+    return steps.indexOf(s);
   }
 
   async function goNext() {
@@ -852,8 +882,9 @@ export default function PostEditorScreen() {
       void runReview();
       return;
     }
-    if (idx < STEPS.length - 1) {
-      setStep(STEPS[idx + 1]);
+    if (idx < steps.length - 1) {
+      const next = steps[idx + 1];
+      if (next) setStep(next);
     }
   }
 
@@ -872,7 +903,8 @@ export default function PostEditorScreen() {
       return;
     }
     if (step === 'review') setReviewVisible(false);
-    setStep(STEPS[idx - 1]);
+    const prev = steps[idx - 1];
+    if (prev) setStep(prev);
   }
 
   /** Summary Edit → Save: persist and drop back to the read-only page. */
@@ -910,8 +942,6 @@ export default function PostEditorScreen() {
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
   const currentStepIndex = stepIndex(step);
   const typeLabel = currentType?.label ?? 'Post';
-  const family: 'video' | 'photo_carousel' =
-    currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
 
   const overlaySegment =
     overlayIndex !== null
@@ -974,7 +1004,7 @@ export default function PostEditorScreen() {
           }
         />
         {summaryMode === null ? (
-          <StepDots current={currentStepIndex} total={STEPS.length} />
+          <StepDots current={currentStepIndex} total={steps.length} />
         ) : null}
       </View>
 
@@ -999,14 +1029,16 @@ export default function PostEditorScreen() {
                 <Text style={styles.summaryText}>{searchPhrase.trim()}</Text>
               </View>
             ) : null}
-            {resolvedHook() ? (
+            {family !== 'photo_carousel' && resolvedHook() ? (
               <View style={styles.summaryCard}>
                 <SectionLabel>Hook</SectionLabel>
                 <Text style={styles.summaryText}>{resolvedHook()}</Text>
               </View>
             ) : null}
             <View style={styles.summaryCard}>
-              <SectionLabel>Talking points</SectionLabel>
+              <SectionLabel>
+                {family === 'photo_carousel' ? 'Slides' : 'Talking points'}
+              </SectionLabel>
               {points.map((point, i) => {
                 const seg = segmentForPointIndex(i);
                 const thumb = seg?.screenshot_url
@@ -1017,7 +1049,9 @@ export default function PostEditorScreen() {
                     <Text style={styles.summaryPointNum}>{i + 1}</Text>
                     <View style={styles.summaryPointBody}>
                       <Text style={styles.summaryText}>{point.text ?? ''}</Text>
-                      {point.is_product && cta.trim() ? (
+                      {family !== 'photo_carousel' &&
+                      point.is_product &&
+                      cta.trim() ? (
                         <Text style={styles.summaryPlug}>{cta.trim()}</Text>
                       ) : null}
                       {thumb !== undefined ? (
@@ -1051,7 +1085,9 @@ export default function PostEditorScreen() {
               alternates={alsoSearched}
               onPickAlternate={setSearchPhrase}
             />
-            <SectionLabel>Script</SectionLabel>
+            <SectionLabel>
+              {family === 'photo_carousel' ? 'Slides' : 'Script'}
+            </SectionLabel>
             <PointsEditor
               points={points}
               family={family}
@@ -1085,8 +1121,12 @@ export default function PostEditorScreen() {
               }}
               onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
-            <SectionLabel>CTA</SectionLabel>
-            <CtaCard value={cta} onChange={setCta} />
+            {family !== 'photo_carousel' ? (
+              <>
+                <SectionLabel>CTA</SectionLabel>
+                <CtaCard value={cta} onChange={setCta} />
+              </>
+            ) : null}
             <SectionLabel>Caption</SectionLabel>
             <CaptionStep
               caption={caption}
@@ -1108,7 +1148,11 @@ export default function PostEditorScreen() {
             transform: [{ translateX: stepShift }],
           }}
         >
-        <Text style={styles.h1}>{STEP_TITLES[step]}</Text>
+        <Text style={styles.h1}>
+          {step === 'points' && family === 'photo_carousel'
+            ? 'Slides'
+            : STEP_TITLES[step]}
+        </Text>
 
         {killReason && step === 'title' ? (
           <View style={styles.killCard}>

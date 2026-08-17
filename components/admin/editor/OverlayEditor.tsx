@@ -62,6 +62,29 @@ const DEFAULT_SHOT = { x: 0.23, y: 0.19, w: 0.46 };
 /** Drag-to-delete: how close the fingers must get to the trash to drop. */
 const TRASH_RADIUS = 64;
 
+/** Snap-to-align: how close (in px) a center must get to a guide to stick. */
+const SNAP_PX = 8;
+
+type Guides = { v: number | null; h: number | null };
+
+/** Picks the nearest candidate within the threshold, or passes through. */
+function snapAxis(
+  value: number,
+  candidates: number[],
+  threshold: number,
+): { value: number; guide: number | null } {
+  let best: number | null = null;
+  let bestDist = threshold;
+  for (const c of candidates) {
+    const d = Math.abs(value - c);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best === null ? { value, guide: null } : { value: best, guide: best };
+}
+
 const SWATCHES = [
   '#FFFFFF',
   '#000000',
@@ -106,6 +129,9 @@ type GestureTrack = {
   prevY: number;
   prevDist: number;
   prevCount: number;
+  /** Unsnapped position so the target can pull away from a guide. */
+  rawX: number;
+  rawY: number;
 };
 
 const IDLE_GESTURE: GestureTrack = {
@@ -115,6 +141,8 @@ const IDLE_GESTURE: GestureTrack = {
   prevY: 0,
   prevDist: 0,
   prevCount: 0,
+  rawX: 0,
+  rawY: 0,
 };
 
 export function OverlayEditor(props: {
@@ -290,11 +318,41 @@ export function OverlayEditor(props: {
     setActiveId(next[next.length - 1]?.id ?? null);
   }
 
+  /** Active alignment guides, in normalized stage coordinates. */
+  const [guides, setGuides] = useState<Guides>({ v: null, h: null });
+  const guidesRef = useRef<Guides>({ v: null, h: null });
+
+  function updateGuides(next: Guides) {
+    if (guidesRef.current.v === next.v && guidesRef.current.h === next.h) {
+      return;
+    }
+    guidesRef.current = next;
+    setGuides(next);
+  }
+
+  /** Center lines of everything except the dragged target, plus the screen
+   * center, like Instagram's snap guides. */
+  function snapCandidates(target: 'box' | 'shot', boxId: string) {
+    const xs = [0.5];
+    const ys = [0.5];
+    for (const b of boxesRef.current) {
+      if (target === 'box' && b.id === boxId) continue;
+      xs.push(b.x);
+      ys.push(b.y);
+    }
+    if (target === 'box' && hasShotRef.current) {
+      xs.push(shotRef.current.x);
+      ys.push(shotRef.current.y);
+    }
+    return { xs, ys };
+  }
+
   function resetDrag() {
     dragShownRef.current = false;
     overTrashRef.current = false;
     setDraggingTarget(null);
     setOverTrash(false);
+    updateGuides({ v: null, h: null });
   }
 
   // One gesture layer for the whole stage. A gesture starting on a text box
@@ -320,6 +378,8 @@ export function OverlayEditor(props: {
             prevY: pageY,
             prevDist: 0,
             prevCount: 1,
+            rawX: hit ? hit.x : shotRef.current.x,
+            rawY: hit ? hit.y : shotRef.current.y,
           };
         },
         onPanResponderMove: (evt, gs) => {
@@ -363,19 +423,36 @@ export function OverlayEditor(props: {
           const dx = (cx - g.prevX) / stageRef.current.w;
           const dy = (cy - g.prevY) / stageRef.current.h;
           const scale = g.prevDist > 0 && dist > 0 ? dist / g.prevDist : 1;
+          const loX = g.target === 'box' ? 0.04 : 0;
+          const hiX = g.target === 'box' ? 0.96 : 1;
+          g.rawX = clamp(g.rawX + dx, loX, hiX);
+          g.rawY = clamp(g.rawY + dy, loX, hiX);
+          let nextX = g.rawX;
+          let nextY = g.rawY;
+          // Snap only single-finger drags; pinches move too much to stick.
+          if (touches.length === 1 && !overTrashRef.current) {
+            const cands = snapCandidates(g.target, g.boxId);
+            const sx = snapAxis(g.rawX, cands.xs, SNAP_PX / stageRef.current.w);
+            const sy = snapAxis(g.rawY, cands.ys, SNAP_PX / stageRef.current.h);
+            nextX = sx.value;
+            nextY = sy.value;
+            updateGuides({ v: sx.guide, h: sy.guide });
+          } else {
+            updateGuides({ v: null, h: null });
+          }
           if (g.target === 'box') {
             const current = boxesRef.current.find((x) => x.id === g.boxId);
             if (current) {
               patchBox(g.boxId, {
-                x: clamp(current.x + dx, 0.04, 0.96),
-                y: clamp(current.y + dy, 0.04, 0.96),
+                x: nextX,
+                y: nextY,
                 size: clamp(current.size * scale, MIN_BOX_SIZE, MAX_BOX_SIZE),
               });
             }
           } else {
             updateShot({
-              x: clamp(shotRef.current.x + dx, 0, 1),
-              y: clamp(shotRef.current.y + dy, 0, 1),
+              x: nextX,
+              y: nextY,
               w: clamp(shotRef.current.w * scale, 0.15, 1),
             });
           }
@@ -596,6 +673,18 @@ export function OverlayEditor(props: {
               {...stagePan.panHandlers}
               style={[StyleSheet.absoluteFill, styles.gestureLayer]}
             />
+            {guides.v !== null ? (
+              <View
+                pointerEvents="none"
+                style={[styles.guideV, { left: guides.v * stage.w - 1 }]}
+              />
+            ) : null}
+            {guides.h !== null ? (
+              <View
+                pointerEvents="none"
+                style={[styles.guideH, { top: guides.h * stage.h - 1 }]}
+              />
+            ) : null}
           </>
         ) : null}
 
@@ -777,6 +866,22 @@ const styles = StyleSheet.create({
     backgroundColor: color.ink800,
   },
   gestureLayer: {
+    zIndex: 1,
+  },
+  guideV: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: color.blue300,
+    zIndex: 1,
+  },
+  guideH: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: color.blue300,
     zIndex: 1,
   },
   boxLayer: {

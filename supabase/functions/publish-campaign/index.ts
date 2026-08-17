@@ -4,6 +4,10 @@ import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 type PublishBody = {
   campaign_id: string;
+  /** Publish only reviewed briefs instead of the full week. */
+  only_ready?: boolean;
+  /** YYYY-MM-DD the plan starts on; defaults to the campaign drop date. */
+  start_date?: string;
 };
 
 function addDays(isoDate: string, days: number): string {
@@ -18,6 +22,9 @@ Deno.serve(async (req) => {
   const body = (await req.json().catch(() => null)) as PublishBody | null;
   if (!body?.campaign_id) {
     return jsonResponse({ error: 'expected { campaign_id }' }, 400);
+  }
+  if (body.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(body.start_date)) {
+    return jsonResponse({ error: 'start_date must be YYYY-MM-DD' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -43,17 +50,35 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'campaign has no drop_date' }, 400);
   }
 
-  const { data: campaignBriefs, error: briefsError } = await db
+  const { data: allCampaignBriefs, error: briefsError } = await db
     .from('campaign_briefs')
-    .select('brief_id, created_at, briefs(format)')
+    .select('brief_id, created_at, briefs(format, reviewed_at, kill_reason)')
     .eq('campaign_id', campaign.id)
     .order('created_at', { ascending: true })
     .order('brief_id', { ascending: true });
   if (briefsError) {
     return jsonResponse({ error: briefsError.message }, 500);
   }
-  if (!campaignBriefs || campaignBriefs.length === 0) {
-    return jsonResponse({ error: 'campaign has no briefs' }, 400);
+  // Partial publish (testing mode): only reviewed briefs go out; the rest
+  // of the week's rows stay behind and never reach creators.
+  const campaignBriefs = body.only_ready
+    ? (allCampaignBriefs ?? []).filter((b) => {
+        const brief = b.briefs as unknown as {
+          reviewed_at?: string | null;
+          kill_reason?: string | null;
+        } | null;
+        return brief?.reviewed_at != null && brief?.kill_reason == null;
+      })
+    : (allCampaignBriefs ?? []);
+  if (campaignBriefs.length === 0) {
+    return jsonResponse(
+      {
+        error: body.only_ready
+          ? 'no reviewed briefs to publish'
+          : 'campaign has no briefs',
+      },
+      400,
+    );
   }
 
   const { data: allCreators, error: creatorsError } = await db
@@ -96,6 +121,7 @@ Deno.serve(async (req) => {
       (b.briefs as unknown as { format?: string } | null)?.format ?? 'video',
   }));
 
+  const baseDate = body.start_date ?? campaign.drop_date;
   const rows: Array<{
     creator_id: string;
     brief_id: string;
@@ -108,7 +134,7 @@ Deno.serve(async (req) => {
       rows.push({
         creator_id: creator.id,
         brief_id: slot.brief_id,
-        scheduled_date: addDays(campaign.drop_date, slot.day),
+        scheduled_date: addDays(baseDate, slot.day),
         slot_index: slot.slot_index,
       });
     }
@@ -125,7 +151,8 @@ Deno.serve(async (req) => {
   }
 
   // Published before Sunday 8PM EST notifies at Sunday 8PM EST (the cron
-  // sweeps notify-scheduled); published after notifies immediately.
+  // sweeps notify-scheduled); published after notifies immediately. A
+  // partial publish is for starting now, so it always notifies immediately.
   const { data: notifyAtRaw, error: notifyAtError } = await db.rpc(
     'campaign_notify_at',
     { p_drop_date: campaign.drop_date },
@@ -133,7 +160,9 @@ Deno.serve(async (req) => {
   if (notifyAtError) {
     return jsonResponse({ error: notifyAtError.message }, 500);
   }
-  const notifyAt = String(notifyAtRaw);
+  const notifyAt = body.only_ready
+    ? new Date().toISOString()
+    : String(notifyAtRaw);
 
   if (new Date() < new Date(notifyAt)) {
     const { error: scheduleError } = await db

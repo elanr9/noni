@@ -407,6 +407,7 @@ export default function WeekDetailScreen() {
   const leftCount = rows.filter(
     (r) => r.state !== 'complete' && r.state !== 'killed',
   ).length;
+  const readyCount = rows.filter((r) => r.state === 'complete').length;
   const phase: WeekPhase =
     rows.length > 0 && leftCount === 0 ? 'complete' : 'in_progress';
   const videoTarget = campaign?.video_target ?? 20;
@@ -546,11 +547,30 @@ export default function WeekDetailScreen() {
     );
   }
 
-  async function publish() {
+  /** Testing mode: publish only the reviewed posts, starting today. */
+  function confirmPublishReady() {
+    if (!campaign) return;
+    const days = Math.ceil(readyCount / 3);
+    Alert.alert(
+      `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'}?`,
+      `Creators get a ${days} day plan starting today and are notified right away. The unfinished rows stay behind and never reach creators.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Publish', onPress: () => void publish(true) },
+      ],
+    );
+  }
+
+  async function publish(onlyReady = false) {
     if (!campaign) return;
     setPublishing(true);
     try {
-      const result = await publishCampaign(campaign.id);
+      const result = await publishCampaign(
+        campaign.id,
+        onlyReady
+          ? { onlyReady: true, startDate: isoDate(new Date()) }
+          : undefined,
+      );
       Alert.alert(
         result.scheduled ? 'Campaign scheduled' : 'Campaign is live',
         result.scheduled
@@ -598,6 +618,8 @@ export default function WeekDetailScreen() {
               }
               publishing={publishing}
               onPublish={confirmPublish}
+              readyCount={readyCount}
+              onPublishReady={confirmPublishReady}
               onStartNext={() => router.push('/(admin)/week-setup')}
               onDismiss={dismissStrip}
             />

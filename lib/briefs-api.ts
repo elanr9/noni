@@ -508,10 +508,15 @@ export type BriefRowState = 'empty' | 'partial' | 'filled' | 'complete';
  */
 export function briefRowState(
   brief: Brief,
-  postType: Pick<PostType, 'min_points' | 'max_points' | 'requires_plug'> | null,
+  postType: Pick<
+    PostType,
+    'min_points' | 'max_points' | 'requires_plug' | 'family'
+  > | null,
 ): BriefRowState {
   if (brief.reviewed_at) return 'complete';
   const points = parseTalkingPoints(brief.talking_points);
+  // Slideshows carry no spoken script, so hook and CTA never gate them.
+  const isSlideshow = postType?.family === 'photo_carousel';
   const hasHook = Boolean(brief.hook?.trim());
   const hasCta = Boolean(brief.cta?.trim());
   const hasCaption = Boolean(brief.caption?.trim());
@@ -519,8 +524,10 @@ export function briefRowState(
   const pointsOk = postType
     ? points.length >= postType.min_points && points.length <= postType.max_points
     : points.length > 0;
-  const ctaOk = postType && !postType.requires_plug ? true : hasCta;
-  if (hasHook && ctaOk && hasCaption && hashtagsOk && pointsOk) return 'filled';
+  const hookOk = isSlideshow || hasHook;
+  const ctaOk =
+    isSlideshow || (postType && !postType.requires_plug ? true : hasCta);
+  if (hookOk && ctaOk && hasCaption && hashtagsOk && pointsOk) return 'filled';
   if (
     hasHook ||
     hasCta ||
@@ -976,10 +983,19 @@ export type PublishResult = {
   notify_at: string | null;
 };
 
-/** Publishes through the deployed publish-campaign function (shuffle + RPC). */
-export async function publishCampaign(campaignId: string): Promise<PublishResult> {
+/** Publishes through the deployed publish-campaign function (shuffle + RPC).
+ * With onlyReady, only reviewed briefs go out, scheduled from startDate. */
+export async function publishCampaign(
+  campaignId: string,
+  options?: { onlyReady: boolean; startDate: string },
+): Promise<PublishResult> {
   const { data, error } = await supabase.functions.invoke('publish-campaign', {
-    body: { campaign_id: campaignId },
+    body: {
+      campaign_id: campaignId,
+      ...(options?.onlyReady
+        ? { only_ready: true, start_date: options.startDate }
+        : {}),
+    },
   });
   if (error) throw error;
   const result = data as Partial<PublishResult> & { error?: string };

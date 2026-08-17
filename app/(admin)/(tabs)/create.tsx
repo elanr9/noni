@@ -218,6 +218,7 @@ export default function BriefsScreen() {
   const leftCount = rows.filter(
     (r) => r.state !== 'complete' && r.state !== 'killed',
   ).length;
+  const readyCount = rows.filter((r) => r.state === 'complete').length;
   const phase: WeekPhase =
     campaign?.status === 'published'
       ? 'published'
@@ -247,6 +248,20 @@ export default function BriefsScreen() {
     );
   }
 
+  /** Testing mode: publish only the reviewed posts, starting today. */
+  function confirmPublishReady() {
+    if (!campaign) return;
+    const days = Math.ceil(readyCount / 3);
+    Alert.alert(
+      `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'}?`,
+      `Creators get a ${days} day plan starting today and are notified right away. The unfinished rows stay behind and never reach creators.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Publish', onPress: () => void publish(true) },
+      ],
+    );
+  }
+
   async function saveTargets(videoTarget: number, slideshowTarget: number) {
     if (!campaign) return;
     setTargetsSaving(true);
@@ -264,11 +279,16 @@ export default function BriefsScreen() {
     }
   }
 
-  async function publish() {
+  async function publish(onlyReady = false) {
     if (!campaign) return;
     setPublishing(true);
     try {
-      const result = await publishCampaign(campaign.id);
+      const result = await publishCampaign(
+        campaign.id,
+        onlyReady
+          ? { onlyReady: true, startDate: isoDate(new Date()) }
+          : undefined,
+      );
       Alert.alert(
         result.scheduled ? 'Campaign scheduled' : 'Campaign is live',
         result.scheduled
@@ -312,6 +332,8 @@ export default function BriefsScreen() {
             }
             publishing={publishing}
             onPublish={confirmPublish}
+            readyCount={readyCount}
+            onPublishReady={confirmPublishReady}
             onStartNext={() => router.push('/(admin)/week-setup')}
           />
         ) : undefined

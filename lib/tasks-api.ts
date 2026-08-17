@@ -100,7 +100,10 @@ export async function listSwapPool(
   const taken = new Set((mineRes.data ?? []).map((a) => a.brief_id));
   return (poolRes.data ?? [])
     .filter((row) => !taken.has(row.brief_id))
-    .map((row) => row.briefs as unknown as Brief);
+    .map((row) => row.briefs as unknown as Brief)
+    // Partial publishes leave unreviewed rows in the campaign; creators
+    // only ever swap onto finished briefs.
+    .filter((b) => b.reviewed_at !== null && b.kill_reason === null);
 }
 
 /**

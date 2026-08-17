@@ -70,6 +70,10 @@ export function PointsEditor(props: {
   const pointsRef = useRef(points);
   pointsRef.current = points;
 
+  // Slideshows have no spoken script: no hook card, no plug, and each card
+  // is a slide numbered from 1 carrying only its text and screenshot.
+  const slideshow = family === 'photo_carousel';
+
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
   const drag = useRef({ id: '', index: 0, prevY: 0, offset: 0 });
@@ -82,7 +86,7 @@ export function PointsEditor(props: {
   }
 
   function confirmDelete(id: string) {
-    Alert.alert('Delete this point?', undefined, [
+    Alert.alert(slideshow ? 'Delete this slide?' : 'Delete this point?', undefined, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -179,6 +183,7 @@ export function PointsEditor(props: {
         />
       </View>
 
+      {slideshow ? null : (
       <View style={[styles.card, shadow.shadowCard]}>
         <View style={styles.cardHead}>
           <View style={styles.hookTag}>
@@ -222,12 +227,13 @@ export function PointsEditor(props: {
           </PressableScale>
         )}
       </View>
+      )}
 
       {points.map((point, i) => {
         const shotBusy = screenshotBusyIndex === i;
         const shotUrl = screenshotUrlForIndex(i);
         const overlayBoxes = overlayBoxesForIndex(i);
-        const plug = point.is_product;
+        const plug = !slideshow && point.is_product;
         const dragging = dragId === point.id;
         return (
           <View
@@ -261,11 +267,11 @@ export function PointsEditor(props: {
                 <Icon name="grip-vertical" size={15} color={color.slate300} />
                 <View style={[styles.badge, plug && styles.badgePlug]}>
                   <Text style={[styles.badgeText, plug && styles.badgeTextPlug]}>
-                    {i + 2}
+                    {slideshow ? i + 1 : i + 2}
                   </Text>
                 </View>
               </View>
-              {plug ? (
+              {slideshow ? null : plug ? (
                 <View style={styles.plugTag}>
                   <Icon name="zap" size={13} color={color.blue600} />
                   <Text style={styles.plugTagText}>Plug</Text>
@@ -282,7 +288,9 @@ export function PointsEditor(props: {
               )}
               <PressableScale
                 accessibilityRole="button"
-                accessibilityLabel={`Delete point ${i + 1}`}
+                accessibilityLabel={
+                  slideshow ? `Delete slide ${i + 1}` : `Delete point ${i + 1}`
+                }
                 onPress={() => confirmDelete(point.id)}
                 style={styles.deleteBtn}
               >
@@ -380,12 +388,14 @@ export function PointsEditor(props: {
 
       <PressableScale
         accessibilityRole="button"
-        accessibilityLabel="Add a point"
+        accessibilityLabel={slideshow ? 'Add a slide' : 'Add a point'}
         onPress={addPoint}
         style={styles.addPoint}
       >
         <Icon name="plus" size={14} color={color.blue700} />
-        <Text style={styles.addPointText}>Add point</Text>
+        <Text style={styles.addPointText}>
+          {slideshow ? 'Add slide' : 'Add point'}
+        </Text>
       </PressableScale>
     </View>
   );

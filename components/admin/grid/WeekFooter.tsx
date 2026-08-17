@@ -19,6 +19,9 @@ export interface WeekFooterProps {
   beforeCutoff: boolean;
   publishing: boolean;
   onPublish: () => void;
+  /** Reviewed rows so far; enables the partial publish while in progress. */
+  readyCount: number;
+  onPublishReady: () => void;
   onStartNext: () => void;
   /** When set, the in-progress strip shows an X that calls this. */
   onDismiss?: () => void;
@@ -31,29 +34,46 @@ export function WeekFooter({
   beforeCutoff,
   publishing,
   onPublish,
+  readyCount,
+  onPublishReady,
   onStartNext,
   onDismiss,
 }: WeekFooterProps) {
   if (phase === 'in_progress') {
     return (
-      <View style={[styles.strip, shadow.shadowCard]}>
-        <View style={styles.bubble}>
-          <Text style={styles.bubbleText}>{left}</Text>
+      <View style={styles.stack}>
+        <View style={[styles.strip, shadow.shadowCard]}>
+          <View style={styles.bubble}>
+            <Text style={styles.bubbleText}>{left}</Text>
+          </View>
+          <Text style={styles.stripText}>
+            {left} posts left this week. Publish opens when all thirty are
+            complete.
+          </Text>
+          {onDismiss !== undefined ? (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+              hitSlop={8}
+              onPress={onDismiss}
+              style={styles.dismiss}
+            >
+              <Icon name="x" size={16} color={color.slate400} />
+            </PressableScale>
+          ) : null}
         </View>
-        <Text style={styles.stripText}>
-          {left} posts left this week. Publish opens when all thirty are
-          complete.
-        </Text>
-        {onDismiss !== undefined ? (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss"
-            hitSlop={8}
-            onPress={onDismiss}
-            style={styles.dismiss}
+        {readyCount > 0 ? (
+          <Button
+            variant="outline"
+            size="md"
+            block
+            disabled={publishing}
+            onPress={onPublishReady}
           >
-            <Icon name="x" size={16} color={color.slate400} />
-          </PressableScale>
+            {publishing
+              ? 'Publishing…'
+              : `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'} now`}
+          </Button>
         ) : null}
       </View>
     );
