@@ -544,8 +544,11 @@ export default function WeekDetailScreen() {
   }
 
   const gridActive = editable && hasStampedPosts && rows.length > 0;
+  // Dismissing the strip must never hide the publish entry: the footer stays
+  // whenever there is something to publish.
   const showFooter =
-    gridActive && !(phase === 'in_progress' && stripDismissed);
+    gridActive &&
+    (phase === 'complete' || readyCount > 0 || !stripDismissed);
   const showHeaderCount =
     gridActive && phase === 'in_progress' && stripDismissed;
   const madeCount = rows.length - leftCount;
@@ -580,6 +583,7 @@ export default function WeekDetailScreen() {
               onPublishReady={openPlanner}
               onStartNext={() => router.push('/(admin)/week-setup')}
               onDismiss={dismissStrip}
+              hideStrip={stripDismissed}
             />
           ) : campaign?.status === 'published' && !isDone ? (
             <Button variant="outline" size="md" block onPress={openPlanner}>

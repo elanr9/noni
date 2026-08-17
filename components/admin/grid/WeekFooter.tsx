@@ -25,6 +25,8 @@ export interface WeekFooterProps {
   onStartNext: () => void;
   /** When set, the in-progress strip shows an X that calls this. */
   onDismiss?: () => void;
+  /** Strip already dismissed: show only the publish button. */
+  hideStrip?: boolean;
 }
 
 export function WeekFooter({
@@ -38,10 +40,12 @@ export function WeekFooter({
   onPublishReady,
   onStartNext,
   onDismiss,
+  hideStrip,
 }: WeekFooterProps) {
   if (phase === 'in_progress') {
     return (
       <View style={styles.stack}>
+        {hideStrip ? null : (
         <View style={[styles.strip, shadow.shadowCard]}>
           <View style={styles.bubble}>
             <Text style={styles.bubbleText}>{left}</Text>
@@ -62,6 +66,7 @@ export function WeekFooter({
             </PressableScale>
           ) : null}
         </View>
+        )}
         {readyCount > 0 ? (
           <Button
             variant="outline"
