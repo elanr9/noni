@@ -340,19 +340,34 @@ export type CreatorSocialStatus = {
   social_accounts: Record<string, unknown>;
 };
 
-export async function getSocialConnectStatus(): Promise<SocialConnectStatus> {
+// On non-2xx the supabase client throws a generic "Edge Function returned a
+// non-2xx status code" and hides the JSON body; pull the real message out.
+async function invokeSocialConnect(body: {
+  action: 'status' | 'connect_url' | 'team_status';
+}): Promise<unknown> {
   const { data, error } = await supabase.functions.invoke('social-connect', {
-    body: { action: 'status' },
+    body,
   });
-  if (error) throw error;
+  if (error) {
+    const context = (error as { context?: unknown }).context;
+    if (context instanceof Response) {
+      const payload = (await context.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (payload?.error) throw new Error(payload.error);
+    }
+    throw error;
+  }
+  return data;
+}
+
+export async function getSocialConnectStatus(): Promise<SocialConnectStatus> {
+  const data = await invokeSocialConnect({ action: 'status' });
   return data as SocialConnectStatus;
 }
 
 export async function getSocialConnectUrl(): Promise<string> {
-  const { data, error } = await supabase.functions.invoke('social-connect', {
-    body: { action: 'connect_url' },
-  });
-  if (error) throw error;
+  const data = await invokeSocialConnect({ action: 'connect_url' });
   const payload = data as { access_url?: string; error?: string };
   if (payload.error) throw new Error(payload.error);
   if (!payload.access_url) throw new Error('No connect URL returned');
@@ -360,10 +375,7 @@ export async function getSocialConnectUrl(): Promise<string> {
 }
 
 export async function listCreatorSocialStatus(): Promise<CreatorSocialStatus[]> {
-  const { data, error } = await supabase.functions.invoke('social-connect', {
-    body: { action: 'team_status' },
-  });
-  if (error) throw error;
+  const data = await invokeSocialConnect({ action: 'team_status' });
   return ((data as { members?: CreatorSocialStatus[] }).members ?? []);
 }
 

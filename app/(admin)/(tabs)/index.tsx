@@ -100,12 +100,12 @@ export default function ReviewScreen() {
   const { posts, music, accounts, loading } = useAdminQueue(profile?.company_id);
   const [lane, setLane] = useState(0);
 
-  const total = posts.length + music.length + accounts.length;
-  const subtitle =
-    total === 0 ? SUBTITLE_CLEARED : total === 1 ? SUBTITLE_ONE_LEFT : SUBTITLE_DEFAULT;
-
   const pendingAccounts = accounts.filter((a) => a.status !== 'needs_changes');
   const sentBackAccounts = accounts.filter((a) => a.status === 'needs_changes');
+
+  const total = posts.length + music.length + pendingAccounts.length;
+  const subtitle =
+    total === 0 ? SUBTITLE_CLEARED : total === 1 ? SUBTITLE_ONE_LEFT : SUBTITLE_DEFAULT;
 
   const openAccount = (accountId: string) =>
     router.push({
@@ -132,7 +132,7 @@ export default function ReviewScreen() {
         options={[
           { label: 'Posts', count: loading ? undefined : posts.length },
           { label: 'Music', count: loading ? undefined : music.length },
-          { label: 'Accounts', count: loading ? undefined : accounts.length },
+          { label: 'Accounts', count: loading ? undefined : pendingAccounts.length },
         ]}
         value={lane}
         onChange={setLane}

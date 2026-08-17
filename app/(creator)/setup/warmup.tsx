@@ -93,7 +93,9 @@ export default function WarmupScreen() {
   const [account, setAccount] = useState<CreatorAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [picked, setPicked] = useState<Partial<Record<RecordingKind, string>>>({});
+  const [picked, setPicked] = useState<
+    Partial<Record<RecordingKind, { uri: string; mimeType: string }>>
+  >({});
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -134,10 +136,21 @@ export default function WarmupScreen() {
       : account?.instagram_recording_path ?? null;
 
   const pickRecording = async (slot: RecordingSlot) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['videos'],
-      quality: 0.85,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        // Skip the slow iOS re-encode; screen recordings upload as they are.
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+      });
+    } catch (e) {
+      Alert.alert(
+        'Could not open your videos',
+        e instanceof Error ? e.message : 'Try again',
+      );
+      return;
+    }
     if (result.canceled) return;
     const asset = result.assets[0];
     if (asset === undefined) return;
@@ -149,7 +162,10 @@ export default function WarmupScreen() {
       );
       return;
     }
-    setPicked((prev) => ({ ...prev, [slot.kind]: asset.uri }));
+    setPicked((prev) => ({
+      ...prev,
+      [slot.kind]: { uri: asset.uri, mimeType: asset.mimeType ?? 'video/mp4' },
+    }));
   };
 
   const submitProof = async () => {
@@ -187,8 +203,8 @@ export default function WarmupScreen() {
                 companyId: profile.company_id,
                 creatorId: profile.id,
                 kind: slot.kind,
-                localUri: local,
-                contentType: 'video/mp4',
+                localUri: local.uri,
+                contentType: local.mimeType,
               })
             : existingRecordingPath(slot.kind) ?? '';
       }
@@ -219,6 +235,10 @@ export default function WarmupScreen() {
   const status = account?.status ?? null;
   const proofOpen =
     !loading && account !== null && status !== 'pending' && status !== 'approved';
+  const recordingsReady = RECORDING_SLOTS.every(
+    (slot) =>
+      picked[slot.kind] !== undefined || existingRecordingPath(slot.kind) !== null,
+  );
 
   return (
     <View style={styles.screen}>
@@ -339,7 +359,7 @@ export default function WarmupScreen() {
                 size="lg"
                 variant="primary"
                 block
-                disabled={busy}
+                disabled={busy || !recordingsReady}
                 onPress={() => void submitProof()}
               >
                 {busy ? 'Uploading…' : 'Submit for review'}

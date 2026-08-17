@@ -21,10 +21,10 @@ export default function NotificationsScreen() {
 
   return (
     <OnboardingShell
-      step={9}
-      onBack={() => router.back()}
+      step={1}
+      total={3}
       title="Turn on notifications"
-      subtitle="We ping you when a post is ready to record and when you get paid."
+      subtitle="We ping you when a post is ready to record."
       primaryLabel={busy ? 'One moment' : 'Allow notifications'}
       primaryDisabled={busy}
       onPrimary={() => void allow()}
@@ -41,10 +41,10 @@ export default function NotificationsScreen() {
       }
     >
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Never miss a payout</Text>
+        <Text style={styles.cardTitle}>Never miss a post</Text>
         <Text style={styles.cardBody}>
-          Posts have deadlines and payouts land on a schedule. Notifications
-          keep both on your radar without you checking the app.
+          Posts have deadlines. Notifications keep them on your radar without
+          you checking the app.
         </Text>
       </View>
     </OnboardingShell>

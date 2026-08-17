@@ -33,7 +33,6 @@ import {
 import { modesForProfile } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
-import { useSetupState } from '../../../lib/setup';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
 import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
@@ -170,7 +169,6 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { profile, refreshProfile, setActiveMode, signOut } = useAuth();
-  const setup = useSetupState(profile);
 
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -350,7 +348,6 @@ export default function ProfileScreen() {
   const company = companyName ?? 'Your company';
   const companyInitial = company.charAt(0).toUpperCase();
   const canManage = modesForProfile(profile).includes('admin');
-  const bankConnected = setup.state?.bank === 'done';
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
   const popStyle = {
@@ -437,11 +434,7 @@ export default function ProfileScreen() {
             <Text style={styles.earningsAmount}>
               {availableCents !== null ? formatCents(availableCents) : '$0.00'}
             </Text>
-            <Text style={styles.earningsSub}>
-              {bankConnected
-                ? 'Pays out Sunday at 8PM Eastern'
-                : 'Connect your bank to get paid'}
-            </Text>
+            <Text style={styles.earningsSub}>Payments coming soon</Text>
           </View>
           <View style={styles.earningsChevron}>
             <Icon name="chevron-right" size={18} color={color.ink} />

@@ -16,6 +16,21 @@ function profileUsernameFor(userId: string): string {
   return `c_${userId.replaceAll('-', '').slice(0, 20)}`;
 }
 
+async function uploadPostProfileExists(
+  apiKey: string,
+  username: string,
+): Promise<boolean> {
+  const listRes = await fetch(
+    'https://api.upload-post.com/api/uploadposts/users',
+    { headers: { Authorization: `Apikey ${apiKey}` } },
+  );
+  if (!listRes.ok) return false;
+  const listJson = (await listRes.json()) as {
+    profiles?: Array<{ username: string }>;
+  };
+  return (listJson.profiles ?? []).some((p) => p.username === username);
+}
+
 async function ensureUploadPostProfile(
   apiKey: string,
   admin: ReturnType<typeof createClient>,
@@ -24,22 +39,37 @@ async function ensureUploadPostProfile(
 ): Promise<string> {
   if (existing) return existing;
   const username = profileUsernameFor(userId);
-  const createRes = await fetch(
-    'https://api.upload-post.com/api/uploadposts/users',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Apikey ${apiKey}`,
-        'Content-Type': 'application/json',
+  // Reuse a profile that already exists on Upload-Post (e.g. a previous
+  // attempt created it but the database write failed) before creating one,
+  // since creation counts against the plan's profile limit.
+  const alreadyExists = await uploadPostProfileExists(apiKey, username);
+  if (!alreadyExists) {
+    const createRes = await fetch(
+      'https://api.upload-post.com/api/uploadposts/users',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Apikey ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username }),
       },
-      body: JSON.stringify({ username }),
-    },
-  );
-  if (!createRes.ok && createRes.status !== 409) {
-    const detail = await createRes.json().catch(() => null);
-    throw new Error(
-      `could not create upload-post profile: ${JSON.stringify(detail)}`,
     );
+    if (!createRes.ok && createRes.status !== 409) {
+      const detail = (await createRes.json().catch(() => null)) as {
+        error_code?: string;
+        message?: string;
+      } | null;
+      if (detail?.error_code === 'PROFILE_LIMIT_REACHED') {
+        throw new Error(
+          'The Upload Post account has reached its profile limit. Ask your admin to upgrade the Upload Post plan or remove unused profiles, then try again.',
+        );
+      }
+      throw new Error(
+        detail?.message ??
+          `could not create upload-post profile: ${JSON.stringify(detail)}`,
+      );
+    }
   }
   const { error } = await admin
     .from('profiles')

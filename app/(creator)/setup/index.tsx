@@ -22,7 +22,6 @@ import { getSocialConnectUrl } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
 import { getCompany } from '../../../lib/onboarding';
 import { useSetupState, type SetupState, type SetupStepStatus } from '../../../lib/setup';
-import { getStripeConnectUrl } from '../../../lib/wallet-api';
 import {
   borderWidth,
   color,
@@ -38,13 +37,12 @@ function inviteSeenKey(creatorId: string): string {
 }
 
 /**
- * SCREENS §0 shows exactly three steps. The real machine has four
- * (accounts draft, socials connect, warm-up review, Stripe bank), so
- * "Connect accounts" covers both the accounts draft and the socials link:
- * it reads done only when both are done, and tapping it routes to
- * whichever half is still open.
+ * Two visible steps. The real machine has three (accounts draft, socials
+ * connect, warm-up review), so "Connect accounts" covers both the accounts
+ * draft and the socials link: it reads done only when both are done, and
+ * tapping it routes to whichever half is still open.
  */
-type StepKey = 'bank' | 'accounts' | 'warmup';
+type StepKey = 'accounts' | 'warmup';
 
 type StepView = {
   key: StepKey;
@@ -57,13 +55,6 @@ type StepView = {
 function stepViews(state: SetupState): StepView[] {
   return [
     {
-      key: 'bank',
-      icon: 'dollar-sign',
-      title: 'Connect your bank',
-      sub: 'Where your payouts land, every Sunday at 8PM Eastern.',
-      status: state.bank,
-    },
-    {
       key: 'accounts',
       icon: 'link',
       title: 'Connect accounts',
@@ -74,7 +65,7 @@ function stepViews(state: SetupState): StepView[] {
     {
       key: 'warmup',
       icon: 'zap',
-      title: 'Warm them up',
+      title: 'Warm up accounts',
       sub: 'Scroll and like for a few days so your accounts look human.',
       status: state.warmup,
     },
@@ -192,7 +183,7 @@ function InviteModal({
             {`You've been invited to join ${companyName}'s team`}
           </Text>
           <Text style={styles.inviteBody}>
-            {`You record, ${companyName} handles editing, posting and payouts.`}
+            {`You record, ${companyName} handles editing and posting.`}
           </Text>
           <View style={styles.inviteCta}>
             <Button size="lg" block onPress={onAccept}>
@@ -213,7 +204,6 @@ export function CreatorSetupChecklist() {
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
-  const [bankBusy, setBankBusy] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -260,19 +250,6 @@ export function CreatorSetupChecklist() {
     }
   };
 
-  const connectBank = async () => {
-    setBankBusy(true);
-    try {
-      const url = await getStripeConnectUrl();
-      await WebBrowser.openBrowserAsync(url);
-      await refresh();
-    } catch (e) {
-      Alert.alert('Setup failed', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setBankBusy(false);
-    }
-  };
-
   const connectSocials = async () => {
     setConnectBusy(true);
     try {
@@ -288,10 +265,6 @@ export function CreatorSetupChecklist() {
 
   const stepAction = (key: StepKey): void => {
     if (state === null) return;
-    if (key === 'bank') {
-      void connectBank();
-      return;
-    }
     if (key === 'accounts') {
       if (state.accounts !== 'done') {
         router.push('/(creator)/account-setup' as Href);
@@ -304,7 +277,7 @@ export function CreatorSetupChecklist() {
   };
 
   const stepBusy = (key: StepKey): boolean =>
-    key === 'bank' ? bankBusy : key === 'accounts' ? connectBusy : false;
+    key === 'accounts' ? connectBusy : false;
 
   const steps = state !== null ? stepViews(state) : [];
   const doneCount = steps.filter((s) => s.status === 'done').length;
@@ -342,18 +315,18 @@ export function CreatorSetupChecklist() {
 
         <View style={styles.header}>
           <Text style={styles.title}>Get set up</Text>
-          <Text style={styles.subtitle}>Three steps and your queue unlocks.</Text>
+          <Text style={styles.subtitle}>Two steps and your queue unlocks.</Text>
           <View style={styles.progressRow}>
             <View style={styles.progressBar}>
-              <ProgressBar progress={doneCount / 3} />
+              <ProgressBar progress={doneCount / 2} />
             </View>
-            <Text style={styles.progressLabel}>{doneCount} of 3</Text>
+            <Text style={styles.progressLabel}>{doneCount} of 2</Text>
           </View>
         </View>
 
         {state === null ? (
           <View style={styles.list}>
-            {[0, 1, 2].map((i) => (
+            {[0, 1].map((i) => (
               <SkeletonLine key={i} width="100%" height={92} radius={radius.lg} />
             ))}
           </View>

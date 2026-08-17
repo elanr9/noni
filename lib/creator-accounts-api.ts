@@ -70,7 +70,12 @@ export async function uploadVerificationAsset(params: {
   const response = await fetch(params.localUri);
   if (!response.ok) throw new Error('Could not read the file');
   const blob = await response.blob();
-  const ext = params.contentType.startsWith('video/') ? 'mp4' : 'jpg';
+  const ext =
+    params.contentType === 'video/quicktime'
+      ? 'mov'
+      : params.contentType.startsWith('video/')
+        ? 'mp4'
+        : 'jpg';
   const path = `${params.companyId}/${params.creatorId}/${params.kind}-${Date.now()}.${ext}`;
   const { error } = await supabase.storage
     .from(VERIFICATION_BUCKET)
@@ -151,7 +156,11 @@ export type AccountApprovalItem = CreatorAccount & {
   profiles: { id: string; full_name: string | null } | null;
 };
 
-/** Pending rows only; needs_changes rows are waiting on the creator. */
+/**
+ * Pending rows plus real send-backs (needs_changes with a reason). Drafts
+ * from step one also sit at needs_changes but never carry a reason, so the
+ * reason filter keeps them out of the queue.
+ */
 export async function listAccountApprovalQueue(
   companyId: string,
 ): Promise<AccountApprovalItem[]> {
@@ -159,7 +168,7 @@ export async function listAccountApprovalQueue(
     .from('creator_accounts')
     .select('*, profiles:creator_id ( id, full_name )')
     .eq('company_id', companyId)
-    .eq('status', 'pending')
+    .or('status.eq.pending,and(status.eq.needs_changes,reason.not.is.null)')
     .order('updated_at', { ascending: true });
   if (error) throw error;
   return (data ?? []) as AccountApprovalItem[];

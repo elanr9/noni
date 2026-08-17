@@ -22,5 +22,7 @@ export default function OnboardingIndex() {
     return <Redirect href="/(onboarding)/manager" />;
   }
 
-  return <Redirect href="/(onboarding)/name" />;
+  // Creators skip the questionnaire: permissions, then straight to the
+  // setup checklist.
+  return <Redirect href="/(onboarding)/notifications" />;
 }

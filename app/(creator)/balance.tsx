@@ -6,26 +6,20 @@ import {
   Text,
   View,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { LoadingScreen, Screen } from '../../components/layout/Screen';
 import { SoftToast } from '../../components/states';
-import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuth } from '../../lib/auth';
-import { getCompany } from '../../lib/onboarding';
 import {
   formatCents,
   getOrCreateWallet,
-  getStripeConnectStatus,
-  getStripeConnectUrl,
   ledgerKindLabel,
   listLedger,
   type CreatorWallet,
-  type StripeConnectStatus,
   type WalletLedgerRow,
 } from '../../lib/wallet-api';
 import {
@@ -36,8 +30,8 @@ import {
   type,
 } from '../../theme/tokens';
 
-const PAYOUT_SCHEDULE =
-  'Payouts are net of a 3% platform fee and send every Sunday at 8PM Eastern to your connected bank. Available balance is what transfers on the next run.';
+const EARNINGS_COPY =
+  'Noni tracks everything you earn here. Payments are coming soon.';
 
 function isPendingKind(kind: string): boolean {
   return kind === 'payout_hold' || kind === 'payout_pending';
@@ -74,7 +68,7 @@ function ledgerSubtitle(row: WalletLedgerRow): string {
 
 function ledgerTitle(row: WalletLedgerRow): string {
   if (isCashOutKind(row.kind)) {
-    return row.note?.trim() || 'Payout to bank';
+    return row.note?.trim() || 'Payout';
   }
   return row.note?.trim() || ledgerKindLabel(row.kind);
 }
@@ -101,11 +95,8 @@ export default function CreatorBalanceScreen() {
   const router = useRouter();
   const [wallet, setWallet] = useState<CreatorWallet | null>(null);
   const [ledger, setLedger] = useState<WalletLedgerRow[]>([]);
-  const [connect, setConnect] = useState<StripeConnectStatus | null>(null);
-  const [payoutsEnabled, setPayoutsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -115,16 +106,12 @@ export default function CreatorBalanceScreen() {
       return;
     }
     try {
-      const [w, rows, status, company] = await Promise.all([
+      const [w, rows] = await Promise.all([
         getOrCreateWallet(profile.company_id, profile.id),
         listLedger(profile.id),
-        getStripeConnectStatus().catch(() => null),
-        getCompany(profile.company_id).catch(() => null),
       ]);
       setWallet(w);
       setLedger(rows);
-      setConnect(status);
-      if (company) setPayoutsEnabled(company.payouts_enabled);
     } catch (e) {
       setToast(
         e instanceof Error ? e.message : 'Could not load balance. Try again.',
@@ -141,22 +128,8 @@ export default function CreatorBalanceScreen() {
     }, [load]),
   );
 
-  async function setupConnect() {
-    setBusy(true);
-    try {
-      const url = await getStripeConnectUrl();
-      await WebBrowser.openBrowserAsync(url);
-      await load();
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Bank setup failed. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading) return <LoadingScreen label="Loading balance" />;
 
-  const onboarded = connect?.onboarded === true;
   const available = wallet?.available_cents ?? 0;
   const pending = wallet?.pending_cents ?? 0;
 
@@ -165,35 +138,11 @@ export default function CreatorBalanceScreen() {
       ? `${formatCents(pending)} more clears when posts finish review`
       : 'Nothing clearing right now';
 
-  const bankLabel = onboarded
-    ? 'Bank account connected'
-    : connect?.account_id
-      ? 'Finish bank setup'
-      : 'Connect a bank account';
-
-  const scheduleLine = !payoutsEnabled
-    ? 'Payouts are paused during early access. Your earnings are safe and will pay out once payouts turn on.'
-    : onboarded
-      ? PAYOUT_SCHEDULE
-      : 'Connect a bank so payouts can send. Earnings pay out automatically every Sunday at 8PM Eastern once your bank is connected.';
-
   return (
     <Screen
       bg={color.white}
       edges={['top', 'left', 'right']}
       contentStyle={styles.content}
-      footer={
-        onboarded ? undefined : (
-          <Button
-            block
-            size="lg"
-            disabled={busy}
-            onPress={() => void setupConnect()}
-          >
-            {connect?.account_id ? 'Finish bank setup' : 'Connect bank'}
-          </Button>
-        )
-      }
     >
       <View style={styles.topBar}>
         <PressableScale
@@ -221,46 +170,18 @@ export default function CreatorBalanceScreen() {
         }
       >
         <View style={styles.hero}>
-          <Text style={styles.heroLabel}>Available balance</Text>
+          <Text style={styles.heroLabel}>Earnings</Text>
           <Text style={styles.heroValue}>{formatCents(available)}</Text>
           <Text style={styles.heroClearing}>{clearingLine}</Text>
-          <Text style={styles.scheduleCopy}>{scheduleLine}</Text>
+          <Text style={styles.scheduleCopy}>{EARNINGS_COPY}</Text>
         </View>
-
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Edit payout account"
-          style={styles.bankRow}
-          onPress={() => void setupConnect()}
-        >
-          <View style={styles.bankIcon}>
-            <Icon
-              name={onboarded ? 'check' : 'dollar-sign'}
-              size={18}
-              color={color.ink}
-            />
-          </View>
-          <View style={styles.bankText}>
-            <Text style={styles.bankLabel} numberOfLines={1}>
-              {bankLabel}
-            </Text>
-            {onboarded ? (
-              <Text style={styles.bankSub} numberOfLines={2}>
-                {payoutsEnabled
-                  ? 'Next payout runs Sunday at 8PM Eastern'
-                  : 'Payouts are paused during early access'}
-              </Text>
-            ) : null}
-          </View>
-          <Icon name="pencil" size={18} color={color.slate400} />
-        </PressableScale>
 
         <Text style={styles.sectionLabel}>Recent</Text>
         {ledger.length === 0 ? (
           <EmptyState
             compact
             icon="dollar-sign"
-            title="No payouts yet"
+            title="No earnings yet"
             body="Post from Home to start earning."
           />
         ) : (
@@ -342,38 +263,6 @@ const styles = StyleSheet.create({
     lineHeight: type.size.bodySm * type.leading.body,
     fontWeight: type.weight.regular,
     color: color.slate500,
-  },
-  bankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: space[5],
-    paddingHorizontal: space.cardPad,
-    borderRadius: radius.lg,
-    backgroundColor: color.offWhite,
-  },
-  bankIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
-    backgroundColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bankText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  bankLabel: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  bankSub: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.regular,
-    color: color.slate400,
   },
   sectionLabel: {
     fontSize: type.size.label,

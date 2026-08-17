@@ -31,7 +31,8 @@ export default function DoneScreen() {
 
   return (
     <OnboardingShell
-      step={11}
+      step={3}
+      total={3}
       onBack={() => router.back()}
       title="You're in."
       subtitle="Next: set up your accounts."

@@ -5,15 +5,11 @@ import { getSocialConnectStatus, type SocialConnectStatus } from './admin-api';
 import { getCreatorAccount, type CreatorAccount } from './creator-accounts-api';
 import { supabase } from './supabase';
 import type { Json } from './types';
-import {
-  getStripeConnectStatus,
-  type StripeConnectStatus,
-} from './wallet-api';
 
 /**
  * Creator setup state, derived entirely from live data (creator_accounts,
- * social connect, Stripe Connect). No new tables. The creator layout gates
- * every non-exempt route on `complete`.
+ * social connect). No new tables. The creator layout gates every
+ * non-exempt route on `complete`.
  */
 
 export type SetupStepStatus = 'todo' | 'in_review' | 'done';
@@ -25,8 +21,6 @@ export type SetupState = {
   connect: SetupStepStatus;
   /** Step 3: warm-up proof; pending = in review, approved = done. */
   warmup: SetupStepStatus;
-  /** Step 4: Stripe Connect onboarded. */
-  bank: SetupStepStatus;
   /** Admin send-back note on the account row, if any. */
   accountReason: string | null;
   instagramConnected: boolean;
@@ -43,13 +37,11 @@ function isSocialLinked(value: unknown): boolean {
 export function deriveSetupState(
   account: CreatorAccount | null,
   social: SocialConnectStatus | null,
-  stripe: StripeConnectStatus | null,
 ): SetupState {
   const socialAccounts = social?.social_accounts ?? {};
   const instagramConnected = isSocialLinked(socialAccounts.instagram);
   const tiktokConnected = isSocialLinked(socialAccounts.tiktok);
   const bothConnected = instagramConnected && tiktokConnected;
-  const bankDone = stripe?.onboarded === true;
 
   const warmup: SetupStepStatus =
     account === null
@@ -64,11 +56,10 @@ export function deriveSetupState(
     accounts: account !== null ? 'done' : 'todo',
     connect: bothConnected ? 'done' : 'todo',
     warmup,
-    bank: bankDone ? 'done' : 'todo',
     accountReason: account?.reason ?? null,
     instagramConnected,
     tiktokConnected,
-    complete: account?.status === 'approved' && bothConnected && bankDone,
+    complete: account?.status === 'approved' && bothConnected,
   };
 }
 
@@ -103,16 +94,15 @@ export async function refreshSetupState(
   creatorId: string,
 ): Promise<SetupState> {
   setSnapshot({ ...snapshot, creatorId, loading: true });
-  const [account, social, stripe] = await Promise.all([
+  const [account, social] = await Promise.all([
     getCreatorAccount(companyId, creatorId).catch(() => null),
     getSocialConnectStatus().catch(() => null),
-    getStripeConnectStatus().catch(() => null),
   ]);
-  const state = deriveSetupState(account, social, stripe);
+  const state = deriveSetupState(account, social);
   setSnapshot({ creatorId, state, loading: false });
   if (state.complete) {
     // Fast path for future launches: the gate trusts this flag and skips the
-    // three network calls. Setup never un-completes once approved.
+    // network calls. Setup never un-completes once approved.
     void mergeOnboardingAnswers(creatorId, { setup_complete: true }).catch(
       () => undefined,
     );

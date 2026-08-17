@@ -67,6 +67,7 @@ export default function AccountSetupScreen() {
   const [account, setAccount] = useState<CreatorAccount | null>(null);
   const [template, setTemplate] = useState<AccountTemplate | null>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
   const [tiktokHandle, setTiktokHandle] = useState('');
   const [instagramHandle, setInstagramHandle] = useState('');
   const [picked, setPicked] = useState<Partial<Record<ScreenshotKind, string>>>({});
@@ -91,6 +92,11 @@ export default function AccountSetupScreen() {
           await signedVerificationUrl(tpl.exampleScreenshotPath).catch(() => null),
         );
       }
+      if (tpl?.profilePicturePath) {
+        setProfilePhotoUrl(
+          await signedVerificationUrl(tpl.profilePicturePath).catch(() => null),
+        );
+      }
     } catch (e) {
       Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -109,6 +115,8 @@ export default function AccountSetupScreen() {
   };
 
   const nameIdeas = suggestAccountNames(profile?.full_name ?? 'Creator');
+  const tiktokExample = nameIdeas.usernames[0] ?? 'yourname.d1soccer';
+  const instagramExample = nameIdeas.usernames[1] ?? 'yourname.d1recruit';
 
   const pickSlot = async (slot: UploadSlot) => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -214,102 +222,95 @@ export default function AccountSetupScreen() {
           ) : null}
 
           <Text style={styles.body}>
-            Create a fresh TikTok and Instagram account that match the
-            template below. Save your handles and a screenshot of each
-            profile. Warming up and proof come in the next step.
+            Make a fresh TikTok and a fresh Instagram. Use the examples
+            below, then save your handles and one screenshot of each
+            profile.
           </Text>
 
-          <Text style={styles.section}>Name ideas</Text>
+          <Text style={styles.section}>Example usernames</Text>
           <View style={[styles.card, shadow.shadowCard]}>
-            <Text style={styles.cardLabel}>Display name</Text>
-            <Text style={styles.hintInline}>
-              Use your name plus College Soccer Recruiting.
-            </Text>
-            {nameIdeas.displayNames.map((name) => (
-              <View key={name} style={styles.suggestRow}>
-                <Text style={styles.bioText}>{name}</Text>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onPress={() => void copyText(name, 'display name')}
-                >
-                  Copy
-                </Button>
+            <View style={styles.suggestRow}>
+              <View style={styles.suggestText}>
+                <Text style={styles.cardLabel}>TikTok</Text>
+                <Text style={styles.bioText}>@{tiktokExample}</Text>
               </View>
-            ))}
-            <Text style={styles.cardLabel}>Username</Text>
-            <Text style={styles.hintInline}>
-              Mix your name with d1soccer, d1recruit, recruiting, and similar.
-            </Text>
-            {nameIdeas.usernames.map((handle) => (
-              <View key={handle} style={styles.suggestRow}>
-                <Text style={styles.bioText}>@{handle}</Text>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onPress={() => {
-                    void copyText(handle, 'username');
-                    if (!instagramHandle) setInstagramHandle(handle);
-                    if (!tiktokHandle) setTiktokHandle(handle);
-                  }}
-                >
-                  Use
-                </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => {
+                  void copyText(tiktokExample, 'TikTok username');
+                  if (!tiktokHandle) setTiktokHandle(tiktokExample);
+                }}
+              >
+                Use
+              </Button>
+            </View>
+            <View style={styles.suggestRow}>
+              <View style={styles.suggestText}>
+                <Text style={styles.cardLabel}>Instagram</Text>
+                <Text style={styles.bioText}>@{instagramExample}</Text>
               </View>
-            ))}
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => {
+                  void copyText(instagramExample, 'Instagram username');
+                  if (!instagramHandle) setInstagramHandle(instagramExample);
+                }}
+              >
+                Use
+              </Button>
+            </View>
           </View>
 
           {template !== null && (
             <>
-              <Text style={styles.section}>The standard</Text>
+              <Text style={styles.section}>Bio and photo</Text>
               <View style={[styles.card, shadow.shadowCard]}>
                 {template.instagramBio.length > 0 && (
-                  <>
-                    <Text style={styles.cardLabel}>Instagram bio</Text>
-                    <Text style={styles.bioText}>{template.instagramBio}</Text>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      icon="link"
-                      onPress={() => void copyText(template.instagramBio, 'Instagram bio')}
-                    >
-                      Copy Instagram bio
-                    </Button>
-                  </>
+                  <BioBlock
+                    label={
+                      template.tiktokBio === template.instagramBio ||
+                      template.tiktokBio.length === 0
+                        ? 'Bio for both apps'
+                        : 'Instagram bio'
+                    }
+                    text={template.instagramBio}
+                    onCopy={() => void copyText(template.instagramBio, 'bio')}
+                  />
                 )}
+                {template.tiktokBio.length > 0 &&
+                  template.tiktokBio !== template.instagramBio && (
+                    <BioBlock
+                      label="TikTok bio"
+                      text={template.tiktokBio}
+                      onCopy={() => void copyText(template.tiktokBio, 'TikTok bio')}
+                    />
+                  )}
                 {template.instagramLink.length > 0 && (
-                  <>
-                    <Text style={styles.cardLabel}>Instagram link</Text>
-                    <Text style={styles.bioText}>{template.instagramLink}</Text>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      icon="link"
-                      onPress={() =>
-                        void copyText(template.instagramLink, 'Instagram link')
-                      }
-                    >
-                      Copy Instagram link
-                    </Button>
-                  </>
+                  <BioBlock
+                    label="Link for your Instagram bio"
+                    text={template.instagramLink}
+                    onCopy={() =>
+                      void copyText(template.instagramLink, 'Instagram link')
+                    }
+                  />
                 )}
-                {template.tiktokBio.length > 0 && (
-                  <>
-                    <Text style={styles.cardLabel}>TikTok bio</Text>
-                    <Text style={styles.bioText}>{template.tiktokBio}</Text>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      icon="link"
-                      onPress={() => void copyText(template.tiktokBio, 'TikTok bio')}
-                    >
-                      Copy TikTok bio
-                    </Button>
-                  </>
+                {profilePhotoUrl !== null && (
+                  <View style={styles.templateAsset}>
+                    <Text style={styles.cardLabel}>Use this profile photo</Text>
+                    <Image
+                      source={{ uri: profilePhotoUrl }}
+                      style={styles.profilePhoto}
+                      resizeMode="cover"
+                    />
+                  </View>
                 )}
                 {screenshotUrl !== null && (
                   <View style={styles.templateAsset}>
-                    <Text style={styles.cardLabel}>Example account</Text>
+                    <Text style={styles.cardLabel}>
+                      Your profile should look like this
+                    </Text>
                     <Image
                       source={{ uri: screenshotUrl }}
                       style={styles.templateScreenshot}
@@ -395,6 +396,20 @@ export default function AccountSetupScreen() {
   );
 }
 
+function BioBlock(props: { label: string; text: string; onCopy: () => void }) {
+  return (
+    <View style={styles.suggestRow}>
+      <View style={styles.suggestText}>
+        <Text style={styles.cardLabel}>{props.label}</Text>
+        <Text style={styles.bioText}>{props.text}</Text>
+      </View>
+      <Button size="sm" variant="outline" onPress={props.onCopy}>
+        Copy
+      </Button>
+    </View>
+  );
+}
+
 function StatusCard(props: {
   icon: IconName;
   tint: string;
@@ -465,26 +480,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: type.tracking.label,
   },
-  hintInline: {
-    fontSize: type.size.chip,
-    fontWeight: '600',
-    color: color.slate500,
-    marginTop: -4,
-  },
   suggestRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
+  suggestText: { flex: 1, gap: 2 },
   bioText: {
-    flex: 1,
     fontSize: type.size.bodySm,
     fontWeight: '500',
     color: color.ink,
     lineHeight: 21,
   },
   templateAsset: { gap: 8, marginTop: 4 },
+  profilePhoto: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: color.fillQuiet,
+  },
   templateScreenshot: {
     width: '100%',
     aspectRatio: 2.6,

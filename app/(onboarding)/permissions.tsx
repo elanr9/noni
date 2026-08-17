@@ -13,7 +13,8 @@ export default function PermissionsScreen() {
 
   return (
     <OnboardingShell
-      step={10}
+      step={2}
+      total={3}
       onBack={() => router.back()}
       title="Camera and microphone"
       subtitle="Both are only used while you record. Tap each to allow."
