@@ -9,7 +9,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import type { OverlayBox } from '../../lib/overlay-boxes';
 import { color, motion, radius, shadow, type } from '../../theme/tokens';
+import { SlideStage, type SlideInset } from '../SlideStage';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 
@@ -21,12 +23,16 @@ import { PressableScale } from '../ui/PressableScale';
  */
 
 export interface SlideNavSlide {
-  /** Overlay text, centered on the slide. */
+  /** Overlay text, centered on the slide (legacy, when no boxes exist). */
   text?: string;
   /** Image uri, rendered cover over the tint. */
   image?: string;
   /** Background tint; defaults cycle through a variant palette. */
   tint?: string;
+  /** Admin-placed text boxes; when present they replace the centered text. */
+  boxes?: OverlayBox[];
+  /** The admin's inset picture on this slide. */
+  inset?: SlideInset;
 }
 
 export interface SlideNavProps {
@@ -53,6 +59,18 @@ function SlideLayer({
   tint: string;
   dark: boolean;
 }) {
+  // Slides with admin-placed boxes render exactly as they will publish.
+  if ((slide.boxes?.length ?? 0) > 0 || slide.inset !== undefined) {
+    return (
+      <SlideStage
+        boxes={slide.boxes ?? []}
+        photoUri={slide.image}
+        inset={slide.inset}
+        tint={tint}
+        style={StyleSheet.absoluteFill}
+      />
+    );
+  }
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: tint }]}>
       {slide.image !== undefined && (

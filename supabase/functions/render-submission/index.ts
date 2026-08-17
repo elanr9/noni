@@ -90,16 +90,8 @@ Deno.serve(async (req) => {
     if (submission.render_status === 'ready') {
       return jsonResponse({ status: 'ready' });
     }
-
-    // Photo submissions have nothing to stitch.
-    const videoPath = (submission.video_path ?? '') as string;
-    if (!videoPath.endsWith('.mp4') && !videoPath.endsWith('.mov')) {
-      await admin
-        .from('submissions')
-        .update({ render_status: 'ready', render_error: null })
-        .eq('id', submission.id);
-      return jsonResponse({ status: 'ready' });
-    }
+    // Photo submissions go through assembleSubmission too: it bakes the
+    // admin's text boxes and inset pictures onto each slide.
 
     // Claim the job. The status filter is the lock: a second invoke while the
     // first is mid-flight ('rendering') becomes a no-op unless the caller is

@@ -6,6 +6,7 @@ import {
   DEFAULT_TEXT_OVERLAY,
   TEXT_Y,
   type RenderTimeline,
+  type SegmentBox,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
 
@@ -277,6 +278,62 @@ export async function renderGreenScreenClip(params: {
         shadow_blur: '4 vmin',
       },
     ],
+  });
+}
+
+/**
+ * Bake one slideshow slide: the creator's photo full frame, the admin's inset
+ * picture, and the admin-placed text boxes — the same geometry the app
+ * previews (SlideStage). Returns JPEG bytes at 1080x1920.
+ */
+export async function renderSlideImage(params: {
+  apiKey: string;
+  photoUrl: string;
+  boxes: SegmentBox[];
+  inset?: { url: string; x: number; y: number; width: number };
+}): Promise<Uint8Array> {
+  const { apiKey, photoUrl, boxes, inset } = params;
+  const elements: CreatomateElement[] = [
+    {
+      type: 'image',
+      source: photoUrl,
+      x: '50%',
+      y: '50%',
+      width: '100%',
+      height: '100%',
+      fit: 'cover',
+    },
+  ];
+  if (inset) {
+    elements.push({
+      type: 'image',
+      source: inset.url,
+      x: `${inset.x * 100}%`,
+      y: `${inset.y * 100}%`,
+      width: `${inset.width * 100}%`,
+      fit: 'contain',
+      border_radius: '2.5 vmin',
+      shadow_color: 'rgba(0,0,0,0.4)',
+      shadow_blur: '4 vmin',
+    });
+  }
+  for (const box of boxes) {
+    elements.push({
+      type: 'text',
+      text: box.text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .join('\n'),
+      y: `${box.y * 100}%`,
+      ...boxTextProps(box),
+    });
+  }
+  return runRender(apiKey, {
+    output_format: 'jpg',
+    width: 1080,
+    height: 1920,
+    elements,
   });
 }
 

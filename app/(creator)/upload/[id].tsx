@@ -28,8 +28,11 @@ import { useAuth } from '../../../lib/auth';
 import {
   listBriefSegments,
   parseTalkingPoints,
+  signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
+import { type SlideInset } from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
 import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissions';
@@ -39,6 +42,10 @@ type Phase = 'idle' | 'processing' | 'review';
 type Slide = {
   slotIndex: number;
   text: string;
+  /** Admin-placed text boxes, rendered exactly as they will publish. */
+  boxes: OverlayBox[];
+  /** The admin's inset picture on this slide. */
+  inset?: SlideInset;
 };
 
 const PROCESSING_MIN_MS = 2_000;
@@ -127,6 +134,8 @@ export default function UploadScreen() {
 
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
+  /** Signed URLs for admin inset pictures, keyed by segment id. */
+  const [insetUrls, setInsetUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
   const [submitting, setSubmitting] = useState(false);
@@ -153,6 +162,16 @@ export default function UploadScreen() {
           if (cancelled) return;
           setBriefSegments(segs);
           setPhotos(draft);
+          for (const seg of segs) {
+            if (!seg.screenshot_url) continue;
+            void signedScreenshotUrl(seg.screenshot_url)
+              .then((url) => {
+                if (!cancelled) {
+                  setInsetUrls((prev) => ({ ...prev, [seg.id]: url }));
+                }
+              })
+              .catch(() => undefined);
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -185,26 +204,45 @@ export default function UploadScreen() {
     const slideSegments = briefSegments.filter((s) => s.kind === 'slide');
     if (slideSegments.length > 0) {
       return slideSegments.map((s) => {
+        const boxes = parseOverlayBoxes(s.overlay_style, {
+          text: s.overlay_text,
+          textY: s.text_y,
+        });
         const fromPoint =
           s.talking_point_index !== null
             ? talkingPoints[s.talking_point_index]?.text?.trim()
             : undefined;
+        const insetUri = s.screenshot_url ? insetUrls[s.id] : undefined;
         return {
           slotIndex: s.slot_index,
-          text: s.overlay_text?.trim() || fromPoint || '',
+          text:
+            boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') ||
+            fromPoint ||
+            '',
+          boxes,
+          inset:
+            insetUri !== undefined
+              ? {
+                  uri: insetUri,
+                  x: s.screenshot_x,
+                  y: s.screenshot_y,
+                  width: s.screenshot_width,
+                }
+              : undefined,
         };
       });
     }
     const fromPoints = talkingPoints
       .map((p) => p.text?.trim() ?? '')
       .filter((t) => t.length > 0)
-      .map((text, i) => ({ slotIndex: i, text }));
+      .map((text, i) => ({ slotIndex: i, text, boxes: [] as OverlayBox[] }));
     if (fromPoints.length > 0) return fromPoints;
     return scriptBlocks(brief.script).map((text, i) => ({
       slotIndex: i,
       text,
+      boxes: [] as OverlayBox[],
     }));
-  }, [brief, briefSegments]);
+  }, [brief, briefSegments, insetUrls]);
 
   const pickedCount = slides.filter((s) => photos[s.slotIndex] !== undefined).length;
   const allPicked = slides.length > 0 && pickedCount === slides.length;
@@ -324,6 +362,8 @@ export default function UploadScreen() {
               slides={slides.map((s) => ({
                 text: s.text.length > 0 ? s.text : undefined,
                 image: photos[s.slotIndex]?.uri,
+                boxes: s.boxes,
+                inset: s.inset,
               }))}
               style={StyleSheet.absoluteFill}
             />

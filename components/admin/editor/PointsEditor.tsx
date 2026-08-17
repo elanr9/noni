@@ -10,6 +10,7 @@ import * as Crypto from 'expo-crypto';
 import type { TalkingPoint } from '../../../lib/briefs-api';
 import { type OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
+import { SlideStage, type SlideInset } from '../../SlideStage';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { AiPill } from './AiPill';
@@ -43,6 +44,8 @@ export function PointsEditor(props: {
   onAttachScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
   overlayBoxesForIndex: (index: number) => OverlayBox[];
+  /** The admin's inset picture on a slide, slideshow cards only. */
+  insetForIndex?: (index: number) => SlideInset | undefined;
   onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
   /** Fires while a card drags so the parent scroll can pause. */
   onDragStateChange: (dragging: boolean) => void;
@@ -63,6 +66,7 @@ export function PointsEditor(props: {
     onAttachScreenshot,
     onRemoveScreenshot,
     overlayBoxesForIndex,
+    insetForIndex,
     onOpenOverlay,
     onDragStateChange,
   } = props;
@@ -298,15 +302,91 @@ export function PointsEditor(props: {
               </PressableScale>
             </View>
 
+            {slideshow ? (
+              <View style={styles.slideRow}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit slide ${i + 1}`}
+                  onPress={() => onOpenOverlay(i, 'text')}
+                  style={styles.slidePreviewPress}
+                >
+                  <SlideStage
+                    boxes={overlayBoxes}
+                    inset={insetForIndex?.(i)}
+                    placeholder={
+                      overlayBoxes.length === 0
+                        ? 'Tap to add text'
+                        : "Creator's photo"
+                    }
+                    style={styles.slidePreview}
+                  />
+                </PressableScale>
+                <View style={styles.slideActions}>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit the text on slide ${i + 1}`}
+                    onPress={() => onOpenOverlay(i, 'text')}
+                    style={styles.slideAction}
+                  >
+                    <Icon name="pencil" size={14} color={color.slate500} />
+                    <Text style={styles.slideActionText}>
+                      {overlayBoxes.length > 0 ? 'Edit text' : 'Add text'}
+                    </Text>
+                  </PressableScale>
+                  {shotUrl !== undefined ? (
+                    <View style={styles.slideShotRow}>
+                      <PressableScale
+                        accessibilityRole="button"
+                        accessibilityLabel={`Place the picture on slide ${i + 1}`}
+                        disabled={shotBusy}
+                        onPress={() => onOpenOverlay(i, 'media')}
+                        style={styles.slideShotPress}
+                      >
+                        <Image
+                          source={{ uri: shotUrl }}
+                          style={styles.shotThumb}
+                        />
+                        <Text style={styles.shotName} numberOfLines={1}>
+                          {shotBusy ? 'Uploading…' : 'Picture'}
+                        </Text>
+                      </PressableScale>
+                      <PressableScale
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove the picture on slide ${i + 1}`}
+                        disabled={shotBusy}
+                        onPress={() => onRemoveScreenshot(i)}
+                        style={styles.slideShotRemove}
+                      >
+                        <Icon name="x" size={13} color={color.slate500} />
+                      </PressableScale>
+                    </View>
+                  ) : (
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add a picture to slide ${i + 1}`}
+                      disabled={shotBusy}
+                      onPress={() => onAttachScreenshot(i)}
+                      style={styles.slideAction}
+                    >
+                      <Icon name="images" size={14} color={color.slate500} />
+                      <Text style={styles.slideActionText}>
+                        {shotBusy ? 'Uploading…' : 'Add picture'}
+                      </Text>
+                    </PressableScale>
+                  )}
+                  <Text style={styles.slideHint}>
+                    The creator&apos;s photo fills the background. Your text and
+                    picture go on top.
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <>
             <TextInput
               multiline
               value={point.text ?? ''}
               onChangeText={(text) => updatePoint(point.id, text)}
-              placeholder={
-                family === 'photo_carousel'
-                  ? 'One slide per point. Written to be read.'
-                  : 'Beat, not a line. Under 25 words.'
-              }
+              placeholder="Beat, not a line. Under 25 words."
               placeholderTextColor={color.slate400}
               style={styles.text}
             />
@@ -381,6 +461,8 @@ export function PointsEditor(props: {
                 <Icon name="pencil" size={13} color={color.slate400} />
                 <Text style={styles.addShotText}>Add text</Text>
               </PressableScale>
+            )}
+              </>
             )}
           </View>
         );
@@ -594,6 +676,69 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: color.ink,
+  },
+  slideRow: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  slidePreviewPress: {
+    width: 128,
+  },
+  slidePreview: {
+    width: 128,
+    aspectRatio: 9 / 16,
+    borderRadius: radiusAdmin.md,
+  },
+  slideActions: {
+    flex: 1,
+    minWidth: 0,
+    gap: 8,
+  },
+  slideAction: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.sm,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: color.lineStrong,
+  },
+  slideActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  slideShotRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.sm,
+    backgroundColor: color.fillQuiet,
+  },
+  slideShotPress: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  slideShotRemove: {
+    width: 30,
+    height: 30,
+    borderRadius: radiusAdmin.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.white,
+  },
+  slideHint: {
+    fontSize: 11,
+    lineHeight: 11 * 1.45,
+    fontWeight: '600',
+    color: color.slate400,
   },
   addPoint: {
     flexDirection: 'row',

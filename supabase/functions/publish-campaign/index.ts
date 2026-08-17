@@ -2,12 +2,25 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { buildCreatorWeek, type CampaignBrief } from '../_shared/shuffle.ts';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
+type PublishDay = {
+  /** YYYY-MM-DD the day posts. */
+  date: string;
+  /** Brief ids in slot order; every creator gets this exact layout. */
+  brief_ids: string[];
+};
+
 type PublishBody = {
   campaign_id: string;
   /** Publish only reviewed briefs instead of the full week. */
   only_ready?: boolean;
   /** YYYY-MM-DD the plan starts on; defaults to the campaign drop date. */
   start_date?: string;
+  /**
+   * Day planner mode: the admin picked exactly which briefs post on which
+   * days. Only these days publish, creators are notified immediately, and
+   * the call can repeat later to add more days to the same campaign.
+   */
+  days?: PublishDay[];
 };
 
 function addDays(isoDate: string, days: number): string {
@@ -25,6 +38,15 @@ Deno.serve(async (req) => {
   }
   if (body.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(body.start_date)) {
     return jsonResponse({ error: 'start_date must be YYYY-MM-DD' }, 400);
+  }
+  const days = body.days ?? [];
+  for (const day of days) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day.date)) {
+      return jsonResponse({ error: 'day dates must be YYYY-MM-DD' }, 400);
+    }
+    if (!Array.isArray(day.brief_ids) || day.brief_ids.length === 0) {
+      return jsonResponse({ error: `day ${day.date} has no briefs` }, 400);
+    }
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -112,33 +134,78 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Pin to day is retired: every brief shuffles as unpinned. The column stays
-  // for historical display until it is dropped in a later migration.
-  const briefs: CampaignBrief[] = campaignBriefs.map((b) => ({
-    brief_id: b.brief_id,
-    pinned_day: null,
-    format:
-      (b.briefs as unknown as { format?: string } | null)?.format ?? 'video',
-  }));
-
-  const baseDate = body.start_date ?? campaign.drop_date;
   const rows: Array<{
     creator_id: string;
     brief_id: string;
     scheduled_date: string;
     slot_index: number;
   }> = [];
-  for (const creator of creators) {
-    const week = buildCreatorWeek(briefs, campaign.id, creator.id);
-    for (const slot of week.slots) {
-      rows.push({
-        creator_id: creator.id,
-        brief_id: slot.brief_id,
-        scheduled_date: addDays(baseDate, slot.day),
-        slot_index: slot.slot_index,
-      });
+  if (days.length > 0) {
+    // Day planner mode: the admin's layout, identical for every creator.
+    const ready = new Set(
+      (allCampaignBriefs ?? [])
+        .filter((b) => {
+          const brief = b.briefs as unknown as {
+            reviewed_at?: string | null;
+            kill_reason?: string | null;
+          } | null;
+          return brief?.reviewed_at != null && brief?.kill_reason == null;
+        })
+        .map((b) => b.brief_id),
+    );
+    const seen = new Set<string>();
+    for (const day of days) {
+      for (const briefId of day.brief_ids) {
+        if (!ready.has(briefId)) {
+          return jsonResponse(
+            { error: `brief ${briefId} is not a reviewed brief in this campaign` },
+            400,
+          );
+        }
+        if (seen.has(briefId)) {
+          return jsonResponse(
+            { error: `brief ${briefId} appears on more than one day` },
+            400,
+          );
+        }
+        seen.add(briefId);
+      }
     }
-    // Unassigned remainder stays in campaign_briefs as the swap pool.
+    for (const creator of creators) {
+      for (const day of days) {
+        day.brief_ids.forEach((briefId, slotIndex) => {
+          rows.push({
+            creator_id: creator.id,
+            brief_id: briefId,
+            scheduled_date: day.date,
+            slot_index: slotIndex,
+          });
+        });
+      }
+    }
+  } else {
+    // Legacy full-week publish: deterministic shuffle per creator. Pin to day
+    // is retired; every brief shuffles as unpinned.
+    const briefs: CampaignBrief[] = campaignBriefs.map((b) => ({
+      brief_id: b.brief_id,
+      pinned_day: null,
+      format:
+        (b.briefs as unknown as { format?: string } | null)?.format ?? 'video',
+    }));
+
+    const baseDate = body.start_date ?? campaign.drop_date;
+    for (const creator of creators) {
+      const week = buildCreatorWeek(briefs, campaign.id, creator.id);
+      for (const slot of week.slots) {
+        rows.push({
+          creator_id: creator.id,
+          brief_id: slot.brief_id,
+          scheduled_date: addDays(baseDate, slot.day),
+          slot_index: slot.slot_index,
+        });
+      }
+      // Unassigned remainder stays in campaign_briefs as the swap pool.
+    }
   }
 
   // All inserts plus the draft -> published flip commit in one transaction.
@@ -152,7 +219,8 @@ Deno.serve(async (req) => {
 
   // Published before Sunday 8PM EST notifies at Sunday 8PM EST (the cron
   // sweeps notify-scheduled); published after notifies immediately. A
-  // partial publish is for starting now, so it always notifies immediately.
+  // partial publish or a day-planner publish is for starting now, so it
+  // always notifies immediately.
   const { data: notifyAtRaw, error: notifyAtError } = await db.rpc(
     'campaign_notify_at',
     { p_drop_date: campaign.drop_date },
@@ -160,9 +228,10 @@ Deno.serve(async (req) => {
   if (notifyAtError) {
     return jsonResponse({ error: notifyAtError.message }, 500);
   }
-  const notifyAt = body.only_ready
-    ? new Date().toISOString()
-    : String(notifyAtRaw);
+  const notifyAt =
+    body.only_ready || days.length > 0
+      ? new Date().toISOString()
+      : String(notifyAtRaw);
 
   if (new Date() < new Date(notifyAt)) {
     const { error: scheduleError } = await db

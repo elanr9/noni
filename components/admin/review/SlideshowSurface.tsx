@@ -1,44 +1,60 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import type { OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { SlideStage, type SlideInset } from '../../SlideStage';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 
+export type SlideshowSurfaceSlide = {
+  /** The creator's submitted photo (final baked file once render is ready). */
+  photoUri?: string;
+  /** Composited client-side only while the bake is still running. */
+  boxes: OverlayBox[];
+  inset?: SlideInset;
+  /** Legacy centered fallback when a slide has no boxes. */
+  text: string;
+};
+
 export interface SlideshowSurfaceProps {
-  /** Slide copy, slide 1 first. */
-  slides: string[];
+  slides: SlideshowSurfaceSlide[];
   index: number;
   onIndex: (index: number) => void;
-  /** Per-slot flag from brief_segments.screenshot_url. */
-  hasScreenshot: boolean[];
 }
 
 /**
- * Admin handoff §3 — real slides in the platform box: overlay text centred
- * 800 25px/1.26, dot pager at top:62 (active dot 18px), glass 34px arrows,
- * `Screenshot` chip when the slide has one.
+ * Admin handoff §3 — the real post in the platform box: the creator's photos
+ * with the admin's text and pictures on them, dot pager at top:62 (active dot
+ * 18px), glass 34px arrows.
  */
-export function SlideshowSurface({ slides, index, onIndex, hasScreenshot }: SlideshowSurfaceProps) {
-  const slide = slides[index] ?? '';
+export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfaceProps) {
+  const slide = slides[index];
 
   return (
     <View style={styles.fill}>
-      <View style={styles.centre} pointerEvents="none">
-        <Text style={styles.overlayText}>{slide}</Text>
-      </View>
+      {slide !== undefined ? (
+        <SlideStage
+          boxes={slide.boxes}
+          photoUri={slide.photoUri}
+          inset={slide.inset}
+          tint={color.ink800}
+          style={StyleSheet.absoluteFill}
+        />
+      ) : null}
+      {slide !== undefined &&
+      slide.boxes.length === 0 &&
+      slide.photoUri === undefined &&
+      slide.text.length > 0 ? (
+        <View style={styles.centre} pointerEvents="none">
+          <Text style={styles.overlayText}>{slide.text}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.dots} pointerEvents="none">
         {slides.map((_, i) => (
           <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
         ))}
       </View>
-
-      {hasScreenshot[index] === true && (
-        <View style={styles.screenshotChip} pointerEvents="none">
-          <Icon name="images" size={12} color={color.white} />
-          <Text style={styles.screenshotText}>Screenshot</Text>
-        </View>
-      )}
 
       {index > 0 && (
         <PressableScale
@@ -102,23 +118,6 @@ const styles = StyleSheet.create({
   dotActive: {
     width: 18,
     backgroundColor: color.white,
-  },
-  screenshotChip: {
-    position: 'absolute',
-    top: 84,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: radiusAdmin.pill,
-    backgroundColor: color.whiteA16,
-  },
-  screenshotText: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.bold,
-    color: color.white,
   },
   arrow: {
     position: 'absolute',

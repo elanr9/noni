@@ -222,9 +222,10 @@ async function createAssignmentSubmission(params: {
       segment_paths: paths,
       duration_seconds: durationSeconds,
       version,
-      // Photos have nothing to stitch; videos start queued and the edit job
-      // is kicked below once the status hops land.
-      render_status: params.format === 'photo' ? 'ready' : 'queued',
+      // Both formats go through the edit pass: videos stitch and burn
+      // overlays, photos get the admin's text and pictures baked onto each
+      // slide so the reviewed file is the posted file.
+      render_status: 'queued',
     })
     .select('id')
     .single();
@@ -257,9 +258,7 @@ async function createAssignmentSubmission(params: {
     updated = await transitionAssignment(assignment.id, 'recorded', 'submitted');
   }
 
-  if (params.format === 'video') {
-    startRender(submission.id);
-  }
+  startRender(submission.id);
   return updated;
 }
 

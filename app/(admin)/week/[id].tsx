@@ -36,6 +36,7 @@ import {
   SkeletonCard,
   Thumb,
 } from '../../../components/admin/shared';
+import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { formatMetric } from '../../../lib/analytics';
@@ -51,7 +52,6 @@ import {
   listWeekPosts,
   parseHookOptions,
   parseTalkingPoints,
-  publishCampaign,
   removeBriefFromCampaign,
   updateBrief,
   updateCampaignTargets,
@@ -276,7 +276,6 @@ export default function WeekDetailScreen() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [legacyItem, setLegacyItem] = useState<CampaignBriefItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [publishing, setPublishing] = useState(false);
   const [targetsVisible, setTargetsVisible] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -535,54 +534,13 @@ export default function WeekDetailScreen() {
     }
   }
 
-  function confirmPublish() {
+  /** Both publish paths open the day planner: pick or randomize the days. */
+  function openPlanner() {
     if (!campaign) return;
-    Alert.alert(
-      'Publish to creators?',
-      `Every creator gets their week from these ${items.length} posts.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Publish', onPress: () => void publish() },
-      ],
-    );
-  }
-
-  /** Testing mode: publish only the reviewed posts, starting today. */
-  function confirmPublishReady() {
-    if (!campaign) return;
-    const days = Math.ceil(readyCount / 3);
-    Alert.alert(
-      `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'}?`,
-      `Creators get a ${days} day plan starting today and are notified right away. The unfinished rows stay behind and never reach creators.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Publish', onPress: () => void publish(true) },
-      ],
-    );
-  }
-
-  async function publish(onlyReady = false) {
-    if (!campaign) return;
-    setPublishing(true);
-    try {
-      const result = await publishCampaign(
-        campaign.id,
-        onlyReady
-          ? { onlyReady: true, startDate: isoDate(new Date()) }
-          : undefined,
-      );
-      Alert.alert(
-        result.scheduled ? 'Campaign scheduled' : 'Campaign is live',
-        result.scheduled
-          ? `${result.assignments_written} assignments across ${result.creators} creators. Creators get the push Sunday at 8PM Eastern.`
-          : `${result.assignments_written} assignments across ${result.creators} creators. Notifications are on the way.`,
-      );
-      await load();
-    } catch (e) {
-      Alert.alert('Publish failed', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setPublishing(false);
-    }
+    router.push({
+      pathname: '/(admin)/week-plan',
+      params: { id: campaign.id },
+    } as Href);
   }
 
   const gridActive = editable && hasStampedPosts && rows.length > 0;
@@ -616,13 +574,17 @@ export default function WeekDetailScreen() {
                   ? isBeforeNotifyCutoff(campaign.drop_date)
                   : true
               }
-              publishing={publishing}
-              onPublish={confirmPublish}
+              publishing={false}
+              onPublish={openPlanner}
               readyCount={readyCount}
-              onPublishReady={confirmPublishReady}
+              onPublishReady={openPlanner}
               onStartNext={() => router.push('/(admin)/week-setup')}
               onDismiss={dismissStrip}
             />
+          ) : campaign?.status === 'published' && !isDone ? (
+            <Button variant="outline" size="md" block onPress={openPlanner}>
+              Plan more days
+            </Button>
           ) : undefined
         }
       >

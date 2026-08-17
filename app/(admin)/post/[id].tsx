@@ -23,8 +23,15 @@ import {
   type OverlayEditorMode,
   type OverlaySavePatch,
 } from '../../../components/admin/editor/OverlayEditor';
-import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
+import {
+  DEFAULT_BOX_SIZE,
+  DEFAULT_OVERLAY_FILL,
+  DEFAULT_TEXT_Y,
+  parseOverlayBoxes,
+  serializeOverlayBoxes,
+} from '../../../lib/overlay-boxes';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
+import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { StepDots } from '../../../components/admin/editor/StepDots';
@@ -38,6 +45,7 @@ import {
   assistDeriveSegments,
   assistRegenerateField,
   confirmBriefReview,
+  confirmSlideshowReview,
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
@@ -173,6 +181,9 @@ export default function PostEditorScreen() {
   const [pendingOverlayLabels, setPendingOverlayLabels] = useState<
     (string | null)[] | null
   >(null);
+  /** Set by a slideshow "Regenerate all": the next save pushes the fresh
+   * slide copy into the segments' text boxes, replacing what was there. */
+  const slideRegenPending = useRef(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [baseline, setBaseline] = useState('');
 
@@ -424,6 +435,7 @@ export default function PostEditorScreen() {
           if (result.script !== null) setScript(result.script);
           if (result.target_words !== null) setTargetWords(result.target_words);
           setPendingOverlayLabels(result.overlay_labels);
+          if (family === 'photo_carousel') slideRegenPending.current = true;
           break;
         case 'talking_point': {
           setPoints((prev) =>
@@ -482,6 +494,29 @@ export default function PostEditorScreen() {
     return segmentForPointIndex(index);
   }
 
+  /** The admin's inset picture on a slide, for slide previews. */
+  function insetForPointIndex(index: number): SlideInset | undefined {
+    const seg = segmentForPointIndex(index);
+    if (!seg?.screenshot_url) return undefined;
+    const uri = screenshotUrls[seg.id];
+    if (uri === undefined) return undefined;
+    return {
+      uri,
+      x: seg.screenshot_x,
+      y: seg.screenshot_y,
+      width: seg.screenshot_width,
+    };
+  }
+
+  /** Boxes on a slide's segment, for slide previews. */
+  function boxesForPointIndex(index: number) {
+    const seg = segmentForPointIndex(index);
+    return parseOverlayBoxes(seg?.overlay_style, {
+      text: seg?.overlay_text,
+      textY: seg?.text_y,
+    });
+  }
+
   async function save(): Promise<boolean> {
     if (!id) return false;
     setSaving(true);
@@ -518,10 +553,43 @@ export default function PostEditorScreen() {
         (points.length > 0 || chosenHook !== null) &&
         (snapshot !== baseline || segments.length === 0);
       if (deriveNeeded) {
-        const rows = await assistDeriveSegments(
+        let rows = await assistDeriveSegments(
           id,
           pendingOverlayLabels ?? undefined,
         );
+        // Regenerated slide copy replaces each surviving slide's text boxes;
+        // derivation alone only seeds brand-new segments.
+        if (
+          slideRegenPending.current &&
+          currentType?.family === 'photo_carousel'
+        ) {
+          slideRegenPending.current = false;
+          rows = await Promise.all(
+            rows.map(async (row) => {
+              if (row.kind !== 'slide' || row.talking_point_index === null) {
+                return row;
+              }
+              const text = points[row.talking_point_index]?.text?.trim() ?? '';
+              const patch = serializeOverlayBoxes(
+                text
+                  ? [
+                      {
+                        id: `slide-${row.talking_point_index}-box-0`,
+                        text,
+                        color: DEFAULT_OVERLAY_FILL,
+                        bg: true,
+                        size: DEFAULT_BOX_SIZE,
+                        x: 0.5,
+                        y: DEFAULT_TEXT_Y,
+                      },
+                    ]
+                  : [],
+              );
+              await updateBriefSegment(row.id, patch);
+              return { ...row, ...patch } as BriefSegment;
+            }),
+          );
+        }
         setSegments(rows);
         refreshScreenshotUrls(rows);
         setPendingOverlayLabels(null);
@@ -836,6 +904,29 @@ export default function PostEditorScreen() {
       setSegments((prev) =>
         prev.map((s) => (s.id === segment.id ? { ...s, ...patch } : s)),
       );
+      // A slide's text lives in its boxes; mirror it into the carrier point
+      // so row states, creator screens and search keep reading real copy.
+      if (
+        family === 'photo_carousel' &&
+        segment.talking_point_index !== null &&
+        patch.overlay_style !== undefined
+      ) {
+        const slideIndex = segment.talking_point_index;
+        const joined = parseOverlayBoxes(patch.overlay_style, {
+          text: patch.overlay_text,
+          textY: patch.text_y,
+        })
+          .map((b) => b.text.trim())
+          .filter(Boolean)
+          .join('\n');
+        setPoints((prev) =>
+          prev.map((p, i) =>
+            i === slideIndex
+              ? { ...p, text: joined || null, edited_by_admin: true }
+              : p,
+          ),
+        );
+      }
     } catch (e) {
       Alert.alert(
         'Could not save overlay',
@@ -879,7 +970,9 @@ export default function PostEditorScreen() {
     if (step === 'caption') {
       await save();
       setStep('review');
-      void runReview();
+      // Slideshows have no spoken script to review; the last step is a
+      // visual preview of the slides put together.
+      if (family !== 'photo_carousel') void runReview();
       return;
     }
     if (idx < steps.length - 1) {
@@ -905,6 +998,25 @@ export default function PostEditorScreen() {
     if (step === 'review') setReviewVisible(false);
     const prev = steps[idx - 1];
     if (prev) setStep(prev);
+  }
+
+  /** Slideshow finish: the admin approved the visual preview. */
+  async function confirmSlideshow() {
+    if (!id) return;
+    setReviewConfirming(true);
+    try {
+      const ok = await save();
+      if (!ok) return;
+      await confirmSlideshowReview(id);
+      router.back();
+    } catch (e) {
+      Alert.alert(
+        'Could not save',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setReviewConfirming(false);
+    }
   }
 
   /** Summary Edit → Save: persist and drop back to the read-only page. */
@@ -1039,7 +1151,24 @@ export default function PostEditorScreen() {
               <SectionLabel>
                 {family === 'photo_carousel' ? 'Slides' : 'Talking points'}
               </SectionLabel>
-              {points.map((point, i) => {
+              {family === 'photo_carousel' ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.previewRow}
+                >
+                  {points.map((point, i) => (
+                    <SlideStage
+                      key={point.id}
+                      boxes={boxesForPointIndex(i)}
+                      inset={insetForPointIndex(i)}
+                      placeholder="Creator's photo"
+                      style={styles.previewSlide}
+                    />
+                  ))}
+                </ScrollView>
+              ) : (
+              points.map((point, i) => {
                 const seg = segmentForPointIndex(i);
                 const thumb = seg?.screenshot_url
                   ? screenshotUrls[seg.id]
@@ -1049,9 +1178,7 @@ export default function PostEditorScreen() {
                     <Text style={styles.summaryPointNum}>{i + 1}</Text>
                     <View style={styles.summaryPointBody}>
                       <Text style={styles.summaryText}>{point.text ?? ''}</Text>
-                      {family !== 'photo_carousel' &&
-                      point.is_product &&
-                      cta.trim() ? (
+                      {point.is_product && cta.trim() ? (
                         <Text style={styles.summaryPlug}>{cta.trim()}</Text>
                       ) : null}
                       {thumb !== undefined ? (
@@ -1063,7 +1190,8 @@ export default function PostEditorScreen() {
                     </View>
                   </View>
                 );
-              })}
+              })
+              )}
             </View>
             {mergedCaption() ? (
               <View style={styles.summaryCard}>
@@ -1112,13 +1240,8 @@ export default function PostEditorScreen() {
               screenshotBusyIndex={shotBusyIndex}
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              overlayBoxesForIndex={(i) => {
-                const seg = segmentForPointIndex(i);
-                return parseOverlayBoxes(seg?.overlay_style, {
-                  text: seg?.overlay_text,
-                  textY: seg?.text_y,
-                });
-              }}
+              overlayBoxesForIndex={boxesForPointIndex}
+              insetForIndex={insetForPointIndex}
               onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
             {family !== 'photo_carousel' ? (
@@ -1149,9 +1272,11 @@ export default function PostEditorScreen() {
           }}
         >
         <Text style={styles.h1}>
-          {step === 'points' && family === 'photo_carousel'
+          {family === 'photo_carousel' && step === 'points'
             ? 'Slides'
-            : STEP_TITLES[step]}
+            : family === 'photo_carousel' && step === 'review'
+              ? 'Preview'
+              : STEP_TITLES[step]}
         </Text>
 
         {killReason && step === 'title' ? (
@@ -1234,13 +1359,8 @@ export default function PostEditorScreen() {
               screenshotBusyIndex={shotBusyIndex}
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              overlayBoxesForIndex={(i) => {
-                const seg = segmentForPointIndex(i);
-                return parseOverlayBoxes(seg?.overlay_style, {
-                  text: seg?.overlay_text,
-                  textY: seg?.text_y,
-                });
-              }}
+              overlayBoxesForIndex={boxesForPointIndex}
+              insetForIndex={insetForPointIndex}
               onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
             />
           </View>
@@ -1264,20 +1384,50 @@ export default function PostEditorScreen() {
         ) : null}
 
         {step === 'review' ? (
-          <ReviewSheet
-            inline
-            hideHeader
-            hideConfirm
-            visible
-            running={reviewRunning}
-            confirming={reviewConfirming}
-            result={reviewResult}
-            appliedIndexes={appliedIndexes}
-            onApply={applySuggestion}
-            onClose={() => setStep('caption')}
-            onConfirm={() => void confirmReview()}
-            confirmLabel="Save post"
-          />
+          family === 'photo_carousel' ? (
+            <View style={styles.section}>
+              <Text style={styles.previewNote}>
+                Your text and pictures, put together. Creators add their own
+                photos behind them.
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.previewRow}
+              >
+                {points.map((point, i) => (
+                  <SlideStage
+                    key={point.id}
+                    boxes={boxesForPointIndex(i)}
+                    inset={insetForPointIndex(i)}
+                    placeholder="Creator's photo"
+                    style={styles.previewSlide}
+                  />
+                ))}
+              </ScrollView>
+              {mergedCaption() ? (
+                <View style={styles.summaryCard}>
+                  <SectionLabel>Caption</SectionLabel>
+                  <Text style={styles.summaryText}>{mergedCaption()}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <ReviewSheet
+              inline
+              hideHeader
+              hideConfirm
+              visible
+              running={reviewRunning}
+              confirming={reviewConfirming}
+              result={reviewResult}
+              appliedIndexes={appliedIndexes}
+              onApply={applySuggestion}
+              onClose={() => setStep('caption')}
+              onConfirm={() => void confirmReview()}
+              confirmLabel="Save post"
+            />
+          )
         ) : null}
 
         </Animated.View>
@@ -1301,6 +1451,16 @@ export default function PostEditorScreen() {
               onPress={() => void goNext()}
             >
               Next
+            </Button>
+          ) : family === 'photo_carousel' ? (
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              disabled={saving || reviewConfirming}
+              onPress={() => void confirmSlideshow()}
+            >
+              {reviewConfirming ? 'Saving…' : 'Save post'}
             </Button>
           ) : (
             <Button
@@ -1430,6 +1590,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   section: { gap: 10, marginBottom: 8 },
+  previewNote: {
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * 1.4,
+    color: color.slate500,
+  },
+  previewRow: {
+    gap: 10,
+    paddingVertical: 4,
+  },
+  previewSlide: {
+    width: 168,
+    aspectRatio: 9 / 16,
+    borderRadius: radius.md,
+  },
   footer: {
     flexDirection: 'row',
     gap: 10,

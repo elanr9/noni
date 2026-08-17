@@ -62,6 +62,7 @@ export default function AdminLayout() {
       <Stack.Screen name="week-setup" options={{ title: 'New week', headerShown: false }} />
       <Stack.Screen name="week/[id]" options={{ title: 'Week', headerShown: false }} />
       <Stack.Screen name="week-day" options={{ title: 'Day', headerShown: false }} />
+      <Stack.Screen name="week-plan" options={{ title: 'Plan days', headerShown: false }} />
       <Stack.Screen name="messages/index" options={{ title: 'Messages', headerShown: false }} />
       <Stack.Screen name="messages/[chatId]" options={{ title: 'Chat', headerShown: false }} />
       <Stack.Screen name="post/[id]" options={{ title: 'Post', headerShown: false }} />

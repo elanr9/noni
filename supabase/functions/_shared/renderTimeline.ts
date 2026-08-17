@@ -92,10 +92,17 @@ function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 }
 
+export type SegmentBox = {
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  bg: boolean;
+};
+
 /** Text boxes for one segment: overlay_style.boxes, else the legacy columns. */
-function segmentBoxes(
-  segment: BriefSegmentRow,
-): { text: string; x: number; y: number; size: number; color: string; bg: boolean }[] {
+export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
   const style = segment.overlay_style;
   if (isRecord(style) && Array.isArray(style.boxes)) {
     return style.boxes.flatMap((raw) => {

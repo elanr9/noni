@@ -34,8 +34,10 @@ import {
 import {
   listBriefSegments,
   listPostTypes,
+  signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
@@ -74,6 +76,10 @@ export default function ReviewScreen() {
   const [positionSec, setPositionSec] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
+  /** Signed URLs for the creator's submitted slide photos, slot order. */
+  const [slidePhotos, setSlidePhotos] = useState<string[]>([]);
+  /** Signed URLs for admin inset pictures, keyed by segment id. */
+  const [slideInsetUrls, setSlideInsetUrls] = useState<Record<string, string>>({});
   const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
   const [handle, setHandle] = useState<string | null>(null);
 
@@ -203,6 +209,8 @@ export default function ReviewScreen() {
     setPositionSec(0);
     setSlideIndex(0);
     setBriefSegments([]);
+    setSlidePhotos([]);
+    setSlideInsetUrls({});
     setHandle(null);
     void (async () => {
       try {
@@ -216,6 +224,25 @@ export default function ReviewScreen() {
       try {
         const segments = await listBriefSegments(current.assignment.brief_id);
         if (!cancelled) setBriefSegments(segments);
+        // Slideshows review the real thing: the creator's photos, plus the
+        // admin's inset pictures composited while the bake is still running.
+        if (current.row.format !== 'video') {
+          const paths = current.submission?.segment_paths ?? [];
+          const photos = await Promise.all(
+            paths.map((p) => signedVideoUrl(p).catch(() => '')),
+          );
+          if (!cancelled) setSlidePhotos(photos);
+          for (const seg of segments) {
+            if (seg.kind !== 'slide' || !seg.screenshot_url) continue;
+            void signedScreenshotUrl(seg.screenshot_url)
+              .then((url) => {
+                if (!cancelled) {
+                  setSlideInsetUrls((prev) => ({ ...prev, [seg.id]: url }));
+                }
+              })
+              .catch(() => undefined);
+          }
+        }
       } catch {
         if (!cancelled) setBriefSegments([]);
       }
@@ -284,20 +311,53 @@ export default function ReviewScreen() {
   const scriptTexts = isReel
     ? scriptToLines(briefRow.script).map((line) => line.text)
     : slidesFromScript(briefRow.script);
-  // brief_segments carry the render fields; slot order matches slide order.
-  const slideTexts = scriptTexts.map((text, i) => {
-    const overlay = briefSegments[i]?.overlay_text;
-    return overlay?.trim() ? overlay : text;
-  });
-  const hasScreenshot = scriptTexts.map(
-    (_, i) => briefSegments[i]?.screenshot_url != null,
-  );
+  // Slides come from brief_segments (the render manifest). Once the bake is
+  // ready the photos already carry the text, so nothing composites twice.
+  const slideSegs = briefSegments.filter((s) => s.kind === 'slide');
+  const slidesBaked = submission?.render_status === 'ready';
+  const surfaceSlides = isReel
+    ? []
+    : slideSegs.length > 0
+      ? slideSegs.map((s, i) => {
+          const boxes = parseOverlayBoxes(s.overlay_style, {
+            text: s.overlay_text,
+            textY: s.text_y,
+          });
+          const insetUri = s.screenshot_url ? slideInsetUrls[s.id] : undefined;
+          return {
+            photoUri: slidePhotos[i] || undefined,
+            boxes: slidesBaked ? ([] as OverlayBox[]) : boxes,
+            inset:
+              slidesBaked || insetUri === undefined
+                ? undefined
+                : {
+                    uri: insetUri,
+                    x: s.screenshot_x,
+                    y: s.screenshot_y,
+                    width: s.screenshot_width,
+                  },
+            text:
+              boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') ||
+              scriptTexts[i] ||
+              '',
+          };
+        })
+      : Array.from(
+          { length: Math.max(scriptTexts.length, slidePhotos.length) },
+          (_, i) => ({
+            photoUri: slidePhotos[i] || undefined,
+            boxes: [] as OverlayBox[],
+            inset: undefined,
+            text: scriptTexts[i] ?? '',
+          }),
+        );
 
+  const sectionTexts = isReel ? scriptTexts : surfaceSlides.map((s) => s.text);
   // Spoken sections only. Captions come from the brief and are placed
   // automatically, so revision mode never shows a caption card.
-  const sections: RevisionSection[] = scriptTexts.map((text, i) => ({
+  const sections: RevisionSection[] = sectionTexts.map((text, i) => ({
     key: `segment-${i}`,
-    label: sectionLabel(i, scriptTexts.length, isReel),
+    label: sectionLabel(i, sectionTexts.length, isReel),
     text,
   }));
   const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
@@ -397,10 +457,9 @@ export default function ReviewScreen() {
           />
         ) : (
           <SlideshowSurface
-            slides={slideTexts}
+            slides={surfaceSlides}
             index={slideIndex}
             onIndex={setSlideIndex}
-            hasScreenshot={hasScreenshot}
           />
         )}
 

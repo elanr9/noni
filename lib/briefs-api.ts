@@ -983,6 +983,65 @@ export type PublishResult = {
   notify_at: string | null;
 };
 
+export type PublishDayPlan = {
+  /** YYYY-MM-DD the day posts. */
+  date: string;
+  /** Brief ids in slot order; every creator gets this exact layout. */
+  briefIds: string[];
+};
+
+/**
+ * Day planner publish: only the picked days go out, every creator gets the
+ * same layout, and creators are notified right away. Call again later to add
+ * more days to the same campaign.
+ */
+export async function publishCampaignDays(
+  campaignId: string,
+  days: PublishDayPlan[],
+): Promise<PublishResult> {
+  const { data, error } = await supabase.functions.invoke('publish-campaign', {
+    body: {
+      campaign_id: campaignId,
+      days: days.map((d) => ({ date: d.date, brief_ids: d.briefIds })),
+    },
+  });
+  if (error) throw error;
+  const result = data as Partial<PublishResult> & { error?: string };
+  if (result.error) throw new Error(result.error);
+  return {
+    creators: result.creators ?? 0,
+    assignments_written: result.assignments_written ?? 0,
+    notified: result.notified ?? 0,
+    scheduled: result.scheduled === true,
+    notify_at: result.notify_at ?? null,
+  };
+}
+
+export type PublishedDays = {
+  /** Brief ids that already reached creators, any day. */
+  briefIds: Set<string>;
+  /** Dates (YYYY-MM-DD) that already have assignments. */
+  dates: Set<string>;
+};
+
+/** What already went out for a campaign, so the day planner can lock it. */
+export async function listPublishedCampaignDays(
+  campaignId: string,
+): Promise<PublishedDays> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('brief_id, scheduled_date')
+    .eq('campaign_id', campaignId);
+  if (error) throw error;
+  const briefIds = new Set<string>();
+  const dates = new Set<string>();
+  for (const row of data ?? []) {
+    briefIds.add(row.brief_id);
+    if (row.scheduled_date) dates.add(row.scheduled_date);
+  }
+  return { briefIds, dates };
+}
+
 /** Publishes through the deployed publish-campaign function (shuffle + RPC).
  * With onlyReady, only reviewed briefs go out, scheduled from startDate. */
 export async function publishCampaign(
@@ -1129,6 +1188,22 @@ export async function appendBannedPhrases(
     .update({ banned_phrases: merged })
     .eq('id', data.id);
   if (writeError) throw writeError;
+}
+
+/**
+ * Slideshow confirm: no spoken script, so there is no AI review to snapshot.
+ * The admin approved the visual preview; reviewed_at alone flips the row to
+ * complete (checks stay empty so the grid never shows a fake score).
+ */
+export async function confirmSlideshowReview(briefId: string): Promise<void> {
+  const { error } = await supabase
+    .from('briefs')
+    .update({
+      reviewed_at: new Date().toISOString(),
+      review_result: { checks: [] } as unknown as Json,
+    })
+    .eq('id', briefId);
+  if (error) throw error;
 }
 
 /** Confirm flips the post to complete: reviewed_at + the review snapshot. */

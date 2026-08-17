@@ -259,9 +259,35 @@ Deno.serve(async (req) => {
     if (target.isSlideshow) {
       // Slideshow: the slides in segment_paths post as a photo carousel
       // (TikTok photo post + Instagram carousel). Trending music is layered
-      // on afterwards through the existing music approval loop.
+      // on afterwards through the existing music approval loop. The bake
+      // (text boxes + inset pictures onto each slide) runs at submit time;
+      // assemble here only as a fallback for submissions never rendered.
       uploadUrl = 'https://api.upload-post.com/api/upload_photos';
-      const slidePaths = (submission.segment_paths ?? []) as string[];
+      let slidePaths = (submission.segment_paths ?? []) as string[];
+      if (submission.render_status !== 'ready') {
+        try {
+          const assembled = await assembleSubmission({
+            admin,
+            submission: {
+              id: submission.id as string,
+              video_path: submission.video_path as string,
+              segment_paths: (submission.segment_paths ?? null) as string[] | null,
+              version: (submission.version ?? null) as number | null,
+            },
+            targetId: target.id,
+            companyId: target.companyId,
+            briefId: target.briefId,
+          });
+          slidePaths = assembled.slidePaths ?? slidePaths;
+          overlayWarning = assembled.overlayWarning;
+        } catch (assembleError) {
+          const detail =
+            assembleError instanceof Error
+              ? assembleError.message
+              : String(assembleError);
+          return jsonResponse({ error: 'slide bake failed', detail }, 502);
+        }
+      }
       if (slidePaths.length === 0) {
         return jsonResponse({ error: 'submission has no slides' }, 400);
       }

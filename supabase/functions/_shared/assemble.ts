@@ -9,11 +9,16 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   buildRenderTimeline,
   DEFAULT_TEXT_OVERLAY,
+  segmentBoxes,
   timelineHasOverlays,
   type BriefSegmentRow,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
-import { renderGreenScreenClip, renderOverlays } from './renderAdapter.ts';
+import {
+  renderGreenScreenClip,
+  renderOverlays,
+  renderSlideImage,
+} from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
 
 export type AdminClient = ReturnType<typeof createClient>;
@@ -242,12 +247,19 @@ async function resolveSegmentClips(
 export type AssembleResult = {
   videoPath: string;
   overlayWarning: string | null;
+  /** Final slide image paths, photo submissions only. */
+  slidePaths?: string[];
 };
 
+function isVideoFile(path: string): boolean {
+  return /\.(mp4|mov|m4v|webm)$/i.test(path);
+}
+
 /**
- * Full edit pass for one submission: stitch clips, then burn overlays when the
- * brief has them. Updates submissions.video_path / render_timeline as it goes
- * and flips render_status to ready (or failed + render_error on throw).
+ * Full edit pass for one submission. Videos: stitch clips, then burn overlays
+ * when the brief has them. Photo carousels: bake the admin's text boxes and
+ * inset picture onto each slide. Updates submissions as it goes and flips
+ * render_status to ready (or failed + render_error on throw).
  */
 export async function assembleSubmission(params: {
   admin: AdminClient;
@@ -259,7 +271,11 @@ export async function assembleSubmission(params: {
 }): Promise<AssembleResult> {
   const { admin, submission } = params;
   try {
-    const result = await runAssembly(params);
+    const isPhoto =
+      submission.video_path !== null && !isVideoFile(submission.video_path);
+    const result = isPhoto
+      ? await runSlideshowAssembly(params)
+      : await runAssembly(params);
     await admin
       .from('submissions')
       .update({ render_status: 'ready', render_error: null })
@@ -273,6 +289,109 @@ export async function assembleSubmission(params: {
       .eq('id', submission.id);
     throw error;
   }
+}
+
+/**
+ * Photo carousel edit pass: for each submitted photo, bake the matching
+ * slide's text boxes and inset picture into a final 1080x1920 JPEG. Slides
+ * without any overlay pass through untouched. segment_paths ends up holding
+ * the exact files post-approved sends to Upload-Post.
+ */
+async function runSlideshowAssembly(params: {
+  admin: AdminClient;
+  submission: SubmissionRow;
+  targetId: string;
+  companyId: string;
+  briefId: string | null;
+}): Promise<AssembleResult> {
+  const { admin, submission, targetId, companyId, briefId } = params;
+  const rawPaths =
+    submission.segment_paths && submission.segment_paths.length > 0
+      ? submission.segment_paths
+      : submission.video_path
+        ? [submission.video_path]
+        : [];
+  if (rawPaths.length === 0) throw new Error('submission has no slides');
+  const version = submission.version ?? 1;
+
+  let slideSegments: BriefSegmentRow[] = [];
+  if (briefId) {
+    const { data: segmentRows } = await admin
+      .from('brief_segments')
+      .select(
+        'slot_index, kind, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+      )
+      .eq('brief_id', briefId)
+      .eq('company_id', companyId)
+      .eq('kind', 'slide')
+      .order('slot_index', { ascending: true });
+    slideSegments = (segmentRows ?? []) as BriefSegmentRow[];
+  }
+
+  let overlayWarning: string | null = null;
+  const finalPaths = await Promise.all(
+    rawPaths.map(async (rawPath, i) => {
+      const segment = slideSegments[i];
+      if (!segment) return rawPath;
+      const boxes = segment.show_on_screen ? segmentBoxes(segment) : [];
+      const insetPath =
+        segment.screenshot_url && !isVideoFile(segment.screenshot_url)
+          ? segment.screenshot_url
+          : null;
+      if (boxes.length === 0 && !insetPath) return rawPath;
+
+      const renderKey = Deno.env.get('CREATOMATE_API_KEY');
+      if (!renderKey) {
+        throw new Error(
+          'This slideshow has on-slide text or pictures but CREATOMATE_API_KEY is not set in the edge function env.',
+        );
+      }
+      const [photoUrl] = await signVideoUrls(admin, [rawPath]);
+      let inset: { url: string; x: number; y: number; width: number } | undefined;
+      if (insetPath) {
+        const { data: signedImg, error: imgError } = await admin.storage
+          .from('brief-assets')
+          .createSignedUrl(insetPath, 3600);
+        if (imgError || !signedImg?.signedUrl) {
+          throw new Error(
+            `could not sign inset ${insetPath}: ${imgError?.message}`,
+          );
+        }
+        inset = {
+          url: signedImg.signedUrl,
+          // Same defaults the app previews when no placement was saved.
+          x: segment.screenshot_x ?? 0.5,
+          y: segment.screenshot_y ?? 0.62,
+          width: segment.screenshot_width ?? 0.85,
+        };
+      }
+      const bytes = await renderSlideImage({
+        apiKey: renderKey,
+        photoUrl,
+        boxes,
+        inset,
+      });
+      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.jpg`;
+      const { error: uploadError } = await admin.storage
+        .from('videos')
+        .upload(outPath, bytes, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) {
+        throw new Error(`could not store slide ${i + 1}: ${uploadError.message}`);
+      }
+      return outPath;
+    }),
+  );
+
+  if (slideSegments.length === 0 && briefId) {
+    overlayWarning = 'slides posted without text: this brief has no slide segments';
+  }
+
+  await admin
+    .from('submissions')
+    .update({ segment_paths: finalPaths, video_path: finalPaths[0] })
+    .eq('id', submission.id);
+
+  return { videoPath: finalPaths[0], overlayWarning, slidePaths: finalPaths };
 }
 
 async function runAssembly(params: {
