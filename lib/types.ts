@@ -1783,6 +1783,16 @@ export type Database = {
           company_id: string
           creator_id: string
           id: string
+          mercury_invite_id: string | null
+          mercury_invite_reminder_sent_at: string | null
+          mercury_invite_sent_at: string | null
+          mercury_invite_status: string
+          mercury_onboarded_at: string | null
+          mercury_onboarding_url: string | null
+          mercury_recipient_id: string | null
+          mercury_w9_status: string
+          payout_rail: string
+          payout_ready: boolean
           pending_cents: number
           stripe_connect_account_id: string | null
         }
@@ -1791,6 +1801,16 @@ export type Database = {
           company_id: string
           creator_id: string
           id?: string
+          mercury_invite_id?: string | null
+          mercury_invite_reminder_sent_at?: string | null
+          mercury_invite_sent_at?: string | null
+          mercury_invite_status?: string
+          mercury_onboarded_at?: string | null
+          mercury_onboarding_url?: string | null
+          mercury_recipient_id?: string | null
+          mercury_w9_status?: string
+          payout_rail?: string
+          payout_ready?: boolean
           pending_cents?: number
           stripe_connect_account_id?: string | null
         }
@@ -1799,6 +1819,16 @@ export type Database = {
           company_id?: string
           creator_id?: string
           id?: string
+          mercury_invite_id?: string | null
+          mercury_invite_reminder_sent_at?: string | null
+          mercury_invite_sent_at?: string | null
+          mercury_invite_status?: string
+          mercury_onboarded_at?: string | null
+          mercury_onboarding_url?: string | null
+          mercury_recipient_id?: string | null
+          mercury_w9_status?: string
+          payout_rail?: string
+          payout_ready?: boolean
           pending_cents?: number
           stripe_connect_account_id?: string | null
         }
@@ -2393,6 +2423,96 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      mercury_payouts: {
+        Row: {
+          amount_cents: number
+          company_id: string
+          created_at: string
+          creator_id: string
+          failure_reason: string | null
+          id: string
+          idempotency_key: string
+          mercury_transaction_id: string | null
+          period_end: string
+          period_start: string
+          sent_at: string | null
+          settled_at: string | null
+          status: string
+        }
+        Insert: {
+          amount_cents: number
+          company_id: string
+          created_at?: string
+          creator_id: string
+          failure_reason?: string | null
+          id?: string
+          idempotency_key: string
+          mercury_transaction_id?: string | null
+          period_end: string
+          period_start: string
+          sent_at?: string | null
+          settled_at?: string | null
+          status?: string
+        }
+        Update: {
+          amount_cents?: number
+          company_id?: string
+          created_at?: string
+          creator_id?: string
+          failure_reason?: string | null
+          id?: string
+          idempotency_key?: string
+          mercury_transaction_id?: string | null
+          period_end?: string
+          period_start?: string
+          sent_at?: string | null
+          settled_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mercury_payouts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mercury_payouts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mercury_webhook_events: {
+        Row: {
+          id: string
+          operation_type: string | null
+          processed_at: string | null
+          received_at: string
+          resource_id: string | null
+          resource_type: string | null
+        }
+        Insert: {
+          id: string
+          operation_type?: string | null
+          processed_at?: string | null
+          received_at?: string
+          resource_id?: string | null
+          resource_type?: string | null
+        }
+        Update: {
+          id?: string
+          operation_type?: string | null
+          processed_at?: string | null
+          received_at?: string
+          resource_id?: string | null
+          resource_type?: string | null
+        }
+        Relationships: []
       }
       messages: {
         Row: {
@@ -3495,6 +3615,7 @@ export type Database = {
           creator_id: string
           id: string
           kind: string
+          mercury_payout_id: string | null
           note: string | null
           payout_id: string | null
           post_id: string | null
@@ -3506,6 +3627,7 @@ export type Database = {
           creator_id: string
           id?: string
           kind: string
+          mercury_payout_id?: string | null
           note?: string | null
           payout_id?: string | null
           post_id?: string | null
@@ -3517,6 +3639,7 @@ export type Database = {
           creator_id?: string
           id?: string
           kind?: string
+          mercury_payout_id?: string | null
           note?: string | null
           payout_id?: string | null
           post_id?: string | null
@@ -3534,6 +3657,13 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_ledger_mercury_payout_id_fkey"
+            columns: ["mercury_payout_id"]
+            isOneToOne: false
+            referencedRelation: "mercury_payouts"
             referencedColumns: ["id"]
           },
           {
