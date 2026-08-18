@@ -1,0 +1,45 @@
+[Unit]
+Description=Mercury egress proxy (static-IP bridge for Supabase Edge Functions)
+Documentation=https://docs.mercury.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mercury
+Group=mercury
+WorkingDirectory=/opt/mercury-proxy
+
+# Secrets live here, root-owned 0600. Absent or malformed -> server.js exits 1
+# and systemd retries, which is the behaviour we want: no token, no service.
+EnvironmentFile=/etc/mercury-proxy.env
+
+ExecStart=/usr/bin/node /opt/mercury-proxy/server.js
+
+Restart=always
+RestartSec=3
+# Do not give up. This service is the payment path; a crash loop that stops
+# retrying would silently skip a payout run.
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mercury-proxy
+
+# Hardening. The process needs outbound HTTPS and nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=/opt/mercury-proxy
+
+[Install]
+WantedBy=multi-user.target

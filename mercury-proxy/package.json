@@ -1,0 +1,20 @@
+{
+  "name": "mercury-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static-IP egress proxy for the Mercury API. Holds the Mercury write token so Supabase Edge Functions never have to.",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "fastify": "^5.2.0",
+    "undici": "^7.2.0"
+  }
+}

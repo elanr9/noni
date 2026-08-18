@@ -1,3 +1,26 @@
+/*
+ * PARTIALLY DISABLED 2026-08-17: Migrated to Mercury payouts.
+ * Kept for reference and rollback. See mercury-* functions.
+ *
+ * ⚠️ This function is NOT fully disabled, deliberately.
+ *
+ * Only creator payouts moved to Mercury. Company billing did not: Stripe
+ * Checkout still funds company_billing and company_credit_ledger, and this
+ * endpoint is where those land. Returning early for every event would silently
+ * stop recording credit top-ups — companies would be charged by Stripe and
+ * receive nothing, which is the money the creator bounties are paid out of.
+ *
+ * Still live:
+ *   checkout.session.completed  -> company billing setup, credit top-ups,
+ *                                  FieldVision revenue attribution
+ * Retired (payout rail):
+ *   transfer.created / transfer.updated / transfer.reversed
+ *   account.updated              (Stripe Connect accounts)
+ *
+ * Signature validation is untouched, so anything still delivering the retired
+ * events gets a clean 200 and Stripe stops retrying.
+ */
+
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import { adminPushTokens, sendExpoPush } from '../_shared/push.ts';
@@ -496,13 +519,17 @@ Deno.serve(async (req) => {
       case 'checkout.session.completed':
         result = await handleCheckoutCompleted(admin, stripe, event);
         break;
+      // DISABLED 2026-08-17 — payout rail retired, see header. Acknowledged so
+      // Stripe stops retrying; handleTransferEvent / handleAccountUpdated are
+      // left in place for rollback.
       case 'transfer.created':
       case 'transfer.updated':
       case 'transfer.reversed':
-        result = await handleTransferEvent(admin, event);
-        break;
       case 'account.updated':
-        result = await handleAccountUpdated(admin, event);
+        result = {
+          skipped: true,
+          reason: 'Stripe payout rail retired; creator payouts run through Mercury',
+        };
         break;
       default:
         result = { skipped: true, reason: `ignored ${event.type}` };

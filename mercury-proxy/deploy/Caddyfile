@@ -1,0 +1,45 @@
+# Caddy terminates TLS and reverse-proxies to the Node process on loopback.
+#
+# A real DNS name is REQUIRED — Let's Encrypt does not issue certificates for
+# bare IP addresses, and a self-signed cert would be rejected by Deno's fetch
+# inside Supabase Edge Functions with no supported way to add a custom CA. So
+# the proxy is reached by hostname; the Elastic IP is what Mercury whitelists.
+#
+# PROXY_DOMAIN is injected by a systemd drop-in written by cloud-init.sh.
+
+{
+	# Bind ACME to the standard ports. Port 80 must be open in the security
+	# group for the HTTP-01 challenge and the HTTP->HTTPS redirect.
+	email {$ACME_EMAIL}
+}
+
+{$PROXY_DOMAIN} {
+	encode zstd gzip
+
+	# Health check is unauthenticated by design so it can be curled to confirm
+	# the outbound IP matches the Elastic IP.
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			# The Sunday payout run is sequential; do not let Caddy give up
+			# before the upstream timeout in server.js.
+			transport http {
+				response_header_timeout 30s
+				dial_timeout 5s
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/mercury-proxy.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		# Request bodies and headers carry the proxy secret and Mercury payloads.
+		# Log the request line and status only.
+		format json
+	}
+}

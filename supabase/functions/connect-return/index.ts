@@ -1,3 +1,20 @@
+/*
+ * PARTIALLY DISABLED 2026-08-17: Migrated to Mercury payouts.
+ * Kept for reference and rollback. See mercury-* functions.
+ *
+ * ⚠️ Left fully functional on purpose.
+ *
+ * The creator Stripe Connect path through here is dead — Mercury onboarding
+ * happens on Mercury's own hosted page, reached from an emailed link, and the
+ * creator returns to the app by hand rather than through a redirect.
+ *
+ * But company-billing/index.ts still uses this as its Stripe Checkout return
+ * URL (?to=admin-billing) for billing setup and credit top-ups, which have not
+ * moved off Stripe. Disabling this would strand every admin mid-top-up on a
+ * dead page, so the code is unchanged and only the creator branch is now
+ * unreachable.
+ */
+
 // HTTPS landing for Stripe Connect / Checkout return (live mode requires HTTPS).
 // Redirects creators to Balance, admins to billing when ?to=admin-billing.
 

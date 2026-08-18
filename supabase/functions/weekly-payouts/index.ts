@@ -1,3 +1,16 @@
+/*
+ * DISABLED 2026-08-17: Migrated to Mercury payouts.
+ * Kept for reference and rollback. See mercury-* functions.
+ *
+ * Superseded by mercury-weekly-payouts. Migration 068 unschedules the
+ * 'noni-weekly-payouts' cron job, so nothing invokes this any more; the guard
+ * below is belt and braces in case the schedule is ever restored by accident.
+ *
+ * To roll back to Stripe: delete the DISABLED guard, then re-schedule the cron
+ * with the SQL in SETUP_MERCURY.md ("Rollback"), and set MERCURY_PAYOUTS_ENABLED
+ * to false so both rails cannot run at once.
+ */
+
 import Stripe from 'npm:stripe@17';
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
@@ -244,6 +257,13 @@ async function processCompany(
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
   if (preflight) return preflight;
+
+  // DISABLED 2026-08-17 — see header. 200 rather than 410: if a stray cron
+  // entry survives, pg_net should treat it as done and not retry.
+  return jsonResponse({
+    skipped: true,
+    reason: 'Stripe payouts retired; superseded by mercury-weekly-payouts',
+  });
 
   try {
     const admin = adminClient();

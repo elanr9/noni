@@ -1,3 +1,13 @@
+/*
+ * DISABLED 2026-08-17: Migrated to Mercury payouts.
+ * Kept for reference and rollback. See mercury-* functions.
+ *
+ * Manual cash-out was already unreachable from the app — lib/wallet-api.ts
+ * requestPayout() has thrown "Payouts run Sunday 8PM ET" since the weekly job
+ * landed. Mercury has no manual cash-out equivalent; mercury-weekly-payouts is
+ * the only send path.
+ */
+
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
@@ -11,6 +21,13 @@ function stripeClient(): Stripe {
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
   if (preflight) return preflight;
+
+  // DISABLED 2026-08-17 — see header.
+  return jsonResponse(
+    { error: 'Manual cash-out is retired. Payouts run automatically on Sunday.' },
+    410,
+  );
+
   try {
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,

@@ -1,3 +1,17 @@
+/*
+ * DISABLED 2026-08-17: Migrated to Mercury payouts.
+ * Kept for reference and rollback. See mercury-* functions.
+ *
+ * Creator bank onboarding now runs through mercury-create-invite and
+ * mercury-verify-onboarding. This function stays deployed and answers 410 so
+ * any app build still calling it fails loudly with a message rather than
+ * opening a Stripe Connect flow that will never be paid out.
+ *
+ * To roll back: delete the DISABLED guard in the handler, restore the
+ * getStripeConnectStatus/Url helpers in lib/wallet-api.ts, and re-point
+ * lib/setup.ts at them.
+ */
+
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
@@ -75,6 +89,13 @@ async function accountFlags(stripe: Stripe, accountId: string) {
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
   if (preflight) return preflight;
+
+  // DISABLED 2026-08-17 — see header.
+  return jsonResponse(
+    { error: 'Stripe Connect is retired. Payout setup now runs through Mercury.' },
+    410,
+  );
+
   try {
     const body = (await req.json().catch(() => null)) as {
       action?: 'status' | 'onboard_url';

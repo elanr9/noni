@@ -454,3 +454,29 @@ verify_jwt = false
 
 [functions.notify-reminders]
 verify_jwt = false
+
+# --- Mercury payouts --------------------------------------------------------
+# Mercury signs its webhooks with an HMAC over the raw body; it has no Supabase
+# JWT to present, so the platform check has to be off and the signature is the
+# authentication. mercury-webhook/index.ts verifies it before touching anything.
+[functions.mercury-webhook]
+verify_jwt = false
+
+# The three cron-triggered functions authenticate with x-cron-secret. pg_net
+# sends no Authorization header at all (see 008_wp8_cron.sql), so leaving
+# verify_jwt on would have the gateway reject every scheduled run with a 401
+# before the function was ever reached — silently, since pg_cron does not
+# surface the response body.
+[functions.mercury-weekly-payouts]
+verify_jwt = false
+
+[functions.mercury-onboarding-sweep]
+verify_jwt = false
+
+[functions.mercury-token-liveness]
+verify_jwt = false
+
+# mercury-create-invite and mercury-verify-onboarding are deliberately absent.
+# Both are called from the app with a real user session, so they keep the
+# default verify_jwt = true and get the platform JWT check on top of the
+# authenticate() call inside them.
