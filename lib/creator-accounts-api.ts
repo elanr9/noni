@@ -48,10 +48,10 @@ export const VERIFICATION_BUCKET = 'account-verification';
 /**
  * Storage rejects anything larger with a bare "The object exceeded the maximum
  * allowed size", so the size is checked here to say something a creator can act
- * on. The cap is the Supabase project limit, not the bucket limit, and it only
- * moves on a paid plan. A 20 second screen recording lands well under it.
+ * on. Keep in step with the bucket and the project storage limit, whichever is
+ * smaller wins. A 20 second screen recording lands far under this.
  */
-export const MAX_VERIFICATION_BYTES = 50 * 1024 * 1024;
+export const MAX_VERIFICATION_BYTES = 500 * 1024 * 1024;
 
 function sizeLabel(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
@@ -86,7 +86,7 @@ export async function uploadVerificationAsset(params: {
     throw new Error(
       `That recording is ${sizeLabel(blob.size)} and the limit is ${sizeLabel(
         MAX_VERIFICATION_BYTES,
-      )}. Trim it in Photos to about 20 seconds and pick it again.`,
+      )}. Trim it in Photos and pick it again.`,
     );
   }
   const ext =
