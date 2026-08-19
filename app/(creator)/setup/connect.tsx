@@ -55,6 +55,17 @@ const HOW_IT_WORKS: { icon: IconName; text: string }[] = [
 const POLL_ATTEMPTS = 6;
 const POLL_INTERVAL_MS = 1500;
 
+/**
+ * Instagram's consent page lives on www.instagram.com, which the Instagram app
+ * claims as a universal link. SFSafariViewController (openBrowserAsync) honours
+ * that claim, so the OAuth URL was being handed to the Instagram app, which
+ * cannot render it and shows "Something went wrong". ASWebAuthenticationSession
+ * keeps universal links inside the session, so the consent screen loads in the
+ * browser where it belongs. TikTok never hit this because the TikTok app does
+ * not claim its authorize path.
+ */
+const RETURN_URL = 'noni://social-connected';
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -188,7 +199,7 @@ export default function ConnectAccountsScreen() {
     try {
       const url = await getSocialConnectUrl();
       setAttempted(true);
-      await WebBrowser.openBrowserAsync(url);
+      await WebBrowser.openAuthSessionAsync(url, RETURN_URL);
       await pollUntilLinked();
     } catch (e) {
       Alert.alert(
@@ -264,6 +275,17 @@ export default function ConnectAccountsScreen() {
             />
           ))}
         </View>
+
+        {!loading && !accounts.instagram.connected && (
+          <View style={styles.notice}>
+            <Icon name="circle-alert" size={18} color={color.amber} />
+            <Text style={styles.noticeText}>
+              Instagram only allows linking from a professional account. In
+              Instagram open Settings, then Account type and tools, then Switch
+              to professional account and pick Creator.
+            </Text>
+          </View>
+        )}
 
         {checking && (
           <View style={styles.checking}>
@@ -396,6 +418,22 @@ const styles = StyleSheet.create({
     fontSize: type.size.chip,
     fontWeight: type.weight.bold,
     color: color.blue700,
+  },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space[3],
+    padding: space[4],
+    borderRadius: radius.md,
+    backgroundColor: color.amberSoft,
+    marginTop: -space[3],
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * type.leading.snug,
+    fontWeight: type.weight.semibold,
+    color: color.ink,
   },
   checking: {
     flexDirection: 'row',
