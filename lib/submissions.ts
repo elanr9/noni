@@ -1,5 +1,6 @@
 import { createVideoPlayer } from 'expo-video';
 
+import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
 import type { Assignment, ContentTask, TaskStatus } from './tasks';
@@ -104,17 +105,12 @@ function startRender(submissionId: string): void {
 }
 
 export async function uploadClip(localUri: string, path: string): Promise<void> {
-  const response = await fetch(localUri);
-  if (!response.ok) {
-    throw new Error('Could not read the recorded video');
-  }
-  const blob = await response.blob();
-
-  const { error } = await supabase.storage.from('videos').upload(path, blob, {
+  await uploadFileToStorage({
+    bucket: 'videos',
+    path,
+    localUri,
     contentType: 'video/mp4',
-    upsert: false,
   });
-  if (error) throw error;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { fileSize, uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import type { Database, Json } from './types';
 
@@ -79,12 +80,10 @@ export async function uploadVerificationAsset(params: {
   localUri: string;
   contentType: string;
 }): Promise<string> {
-  const response = await fetch(params.localUri);
-  if (!response.ok) throw new Error('Could not read the file');
-  const blob = await response.blob();
-  if (blob.size > MAX_VERIFICATION_BYTES) {
+  const size = fileSize(params.localUri);
+  if (size > MAX_VERIFICATION_BYTES) {
     throw new Error(
-      `That recording is ${sizeLabel(blob.size)} and the limit is ${sizeLabel(
+      `That recording is ${sizeLabel(size)} and the limit is ${sizeLabel(
         MAX_VERIFICATION_BYTES,
       )}. Trim it in Photos and pick it again.`,
     );
@@ -96,10 +95,12 @@ export async function uploadVerificationAsset(params: {
         ? 'mp4'
         : 'jpg';
   const path = `${params.companyId}/${params.creatorId}/${params.kind}-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage
-    .from(VERIFICATION_BUCKET)
-    .upload(path, blob, { contentType: params.contentType, upsert: false });
-  if (error) throw error;
+  await uploadFileToStorage({
+    bucket: VERIFICATION_BUCKET,
+    path,
+    localUri: params.localUri,
+    contentType: params.contentType,
+  });
   return path;
 }
 
