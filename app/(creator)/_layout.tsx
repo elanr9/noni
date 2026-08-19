@@ -113,6 +113,16 @@ export default function CreatorLayout() {
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="setup/index" />
           <Stack.Screen
+            name="setup/connect"
+            options={{
+              headerShown: true,
+              title: 'Connect accounts',
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: color.offWhite },
+              headerTintColor: color.ink,
+            }}
+          />
+          <Stack.Screen
             name="setup/warmup"
             options={{
               headerShown: true,

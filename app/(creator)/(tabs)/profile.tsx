@@ -27,12 +27,17 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import {
   getSocialConnectStatus,
-  getSocialConnectUrl,
   type SocialConnectStatus,
 } from '../../../lib/admin-api';
 import { modesForProfile } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
+import {
+  formatHandle,
+  parseSocialAccount,
+  socialAccountSummary,
+  type SocialAccountInfo,
+} from '../../../lib/social-accounts';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
 import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
@@ -47,12 +52,6 @@ import {
 } from '../../../theme/tokens';
 
 const TERMS_URL = 'https://www.usenoni.app/terms';
-
-type AccountInfo = {
-  connected: boolean;
-  handle: string | null;
-  followers: number | null;
-};
 
 async function unreadAdminCount(
   companyId: string,
@@ -71,44 +70,6 @@ async function unreadAdminCount(
   const { count, error } = await query;
   if (error) throw error;
   return count ?? 0;
-}
-
-function parseAccount(value: unknown): AccountInfo {
-  if (!value) return { connected: false, handle: null, followers: null };
-  if (typeof value === 'string') {
-    return value.length > 0
-      ? { connected: true, handle: value, followers: null }
-      : { connected: false, handle: null, followers: null };
-  }
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const handle =
-      typeof obj.username === 'string'
-        ? obj.username
-        : typeof obj.display_name === 'string'
-          ? obj.display_name
-          : null;
-    const raw = obj.followers ?? obj.follower_count;
-    const followers =
-      typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : null;
-    return { connected: true, handle, followers };
-  }
-  return { connected: true, handle: null, followers: null };
-}
-
-function formatFollowers(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-  return `${n}`;
-}
-
-function accountSub(info: AccountInfo): string {
-  if (!info.connected) return 'Not connected';
-  if (!info.handle) return 'Connected';
-  const handle = `@${info.handle.replace(/^@/, '')}`;
-  return info.followers !== null
-    ? `${handle} · ${formatFollowers(info.followers)} followers`
-    : handle;
 }
 
 function GroupCard({ children }: { children: ReactNode }) {
@@ -172,7 +133,6 @@ export default function ProfileScreen() {
 
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
-  const [connectBusy, setConnectBusy] = useState(false);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -262,20 +222,6 @@ export default function ProfileScreen() {
     }).start();
   }
 
-  async function connect() {
-    if (connectBusy) return;
-    setConnectBusy(true);
-    try {
-      const url = await getSocialConnectUrl();
-      await WebBrowser.openBrowserAsync(url);
-      await loadStatus();
-    } catch (e) {
-      Alert.alert('Connect failed', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setConnectBusy(false);
-    }
-  }
-
   async function pickAvatar() {
     if (!profile || avatarBusy) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -339,12 +285,14 @@ export default function ProfileScreen() {
   if (!profile) return null;
 
   const accounts = status?.social_accounts ?? {};
-  const instagram = parseAccount(accounts.instagram);
-  const tiktok = parseAccount(accounts.tiktok);
+  const instagram = parseSocialAccount(accounts.instagram);
+  const tiktok = parseSocialAccount(accounts.tiktok);
+  const bothConnected = instagram.connected && tiktok.connected;
 
   const name = profile.full_name?.trim() || 'Creator';
   const initial = name.charAt(0).toUpperCase();
-  const handle = status?.profile ? `@${status.profile.replace(/^@/, '')}` : null;
+  const publicHandle = instagram.handle ?? tiktok.handle;
+  const handle = publicHandle !== null ? formatHandle(publicHandle) : null;
   const company = companyName ?? 'Your company';
   const companyInitial = company.charAt(0).toUpperCase();
   const canManage = modesForProfile(profile).includes('admin');
@@ -448,42 +396,43 @@ export default function ProfileScreen() {
               [
                 { icon: 'at-sign' as IconName, label: 'Instagram', info: instagram },
                 { icon: 'music-2' as IconName, label: 'TikTok', info: tiktok },
-              ]
-            ).map((row, i) => (
-              <View
-                key={row.label}
-                style={[styles.row, i === 0 && styles.rowBorder]}
-              >
-                <Icon name={row.icon} size={19} color={color.slate500} />
+              ] satisfies { icon: IconName; label: string; info: SocialAccountInfo }[]
+            ).map((row) => (
+              <View key={row.label} style={[styles.row, styles.rowBorder]}>
+                <Icon
+                  name={row.icon}
+                  size={19}
+                  color={row.info.connected ? color.green : color.slate500}
+                />
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>{row.label}</Text>
                   {statusLoading ? (
                     <SkeletonLine width={140} height={13} radius={6} />
                   ) : (
                     <Text numberOfLines={1} style={styles.rowSub}>
-                      {accountSub(row.info)}
+                      {socialAccountSummary(row.info)}
                     </Text>
                   )}
                 </View>
-                {!statusLoading &&
-                  (row.info.connected ? (
-                    <View style={styles.connectedChip}>
-                      <View style={styles.connectedDot} />
-                      <Text style={styles.connectedText}>Connected</Text>
-                    </View>
-                  ) : (
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel={`Connect ${row.label}`}
-                      disabled={connectBusy}
-                      onPress={() => void connect()}
-                      style={styles.connectBtn}
-                    >
-                      <Text style={styles.connectBtnText}>Connect</Text>
-                    </PressableScale>
-                  ))}
+                {!statusLoading && row.info.connected && (
+                  <View style={styles.connectedChip}>
+                    <View style={styles.connectedDot} />
+                    <Text style={styles.connectedText}>Connected</Text>
+                  </View>
+                )}
               </View>
             ))}
+            <Row
+              icon="link"
+              label={bothConnected ? 'Manage connections' : 'Connect accounts'}
+              sub={
+                bothConnected
+                  ? 'Approved posts publish automatically'
+                  : 'Link both so approved posts publish for you'
+              }
+              last
+              onPress={() => router.push('/(creator)/setup/connect' as Href)}
+            />
           </GroupCard>
         </View>
 
@@ -841,17 +790,6 @@ const styles = StyleSheet.create({
     fontSize: type.size.chip,
     fontWeight: type.weight.bold,
     color: color.green,
-  },
-  connectBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-  },
-  connectBtnText: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.blue700,
   },
   signOut: {
     alignSelf: 'center',

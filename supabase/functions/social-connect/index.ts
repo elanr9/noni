@@ -139,7 +139,9 @@ Deno.serve(async (req) => {
         : { data: null };
       if (
         !opsProfile ||
-        !['admin', 'campaign_manager'].includes(opsProfile.role as string)
+        !['admin', 'company_admin', 'campaign_manager'].includes(
+          opsProfile.role as string,
+        )
       ) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
@@ -220,9 +222,11 @@ Deno.serve(async (req) => {
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
-    // Platform admin (role admin) inherits campaign manager powers.
+    // Platform admin and company admin inherit campaign manager powers.
     const isManager =
-      caller.role === 'campaign_manager' || caller.role === 'admin';
+      caller.role === 'campaign_manager' ||
+      caller.role === 'admin' ||
+      caller.role === 'company_admin';
 
     const apiKey = uploadPostKey();
 

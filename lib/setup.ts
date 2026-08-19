@@ -3,6 +3,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { CREATOR_PROFILE_OR } from './active-mode';
 import { getSocialConnectStatus, type SocialConnectStatus } from './admin-api';
 import { getCreatorAccount, type CreatorAccount } from './creator-accounts-api';
+import { parseSocialAccount } from './social-accounts';
 import { supabase } from './supabase';
 import type { Json } from './types';
 
@@ -28,19 +29,13 @@ export type SetupState = {
   complete: boolean;
 };
 
-function isSocialLinked(value: unknown): boolean {
-  if (!value) return false;
-  if (typeof value === 'string') return value.length > 0;
-  return typeof value === 'object';
-}
-
 export function deriveSetupState(
   account: CreatorAccount | null,
   social: SocialConnectStatus | null,
 ): SetupState {
   const socialAccounts = social?.social_accounts ?? {};
-  const instagramConnected = isSocialLinked(socialAccounts.instagram);
-  const tiktokConnected = isSocialLinked(socialAccounts.tiktok);
+  const instagramConnected = parseSocialAccount(socialAccounts.instagram).connected;
+  const tiktokConnected = parseSocialAccount(socialAccounts.tiktok).connected;
   const bothConnected = instagramConnected && tiktokConnected;
 
   const warmup: SetupStepStatus =

@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Animated,
-  Modal,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Animated, Modal, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as WebBrowser from 'expo-web-browser';
 import { Redirect, useFocusEffect, useRouter, type Href } from 'expo-router';
 
 import { Screen } from '../../../components/layout/Screen';
@@ -18,7 +10,6 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { Wordmark } from '../../../components/ui/Wordmark';
-import { getSocialConnectUrl } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
 import { getCompany } from '../../../lib/onboarding';
 import { useSetupState, type SetupState, type SetupStepStatus } from '../../../lib/setup';
@@ -52,13 +43,23 @@ type StepView = {
   status: SetupStepStatus;
 };
 
+function connectSub(state: SetupState): string {
+  if (state.accounts !== 'done') {
+    return 'Save your handles, then link the apps so we can post for you.';
+  }
+  if (state.connect === 'done') return 'Instagram and TikTok are linked.';
+  if (state.instagramConnected) return 'Instagram is linked. TikTok is left.';
+  if (state.tiktokConnected) return 'TikTok is linked. Instagram is left.';
+  return 'Link TikTok and Instagram so we can post for you.';
+}
+
 function stepViews(state: SetupState): StepView[] {
   return [
     {
       key: 'accounts',
       icon: 'link',
       title: 'Connect accounts',
-      sub: 'Link TikTok and Instagram so we can post for you.',
+      sub: connectSub(state),
       status:
         state.accounts === 'done' && state.connect === 'done' ? 'done' : 'todo',
     },
@@ -89,11 +90,9 @@ function StepPill({ status }: { status: SetupStepStatus }) {
 
 function StepCard({
   step,
-  busy,
   onPress,
 }: {
   step: StepView;
-  busy: boolean;
   onPress: () => void;
 }) {
   const done = step.status === 'done';
@@ -101,9 +100,8 @@ function StepCard({
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={step.title}
-      disabled={busy}
       onPress={onPress}
-      style={[styles.card, shadow.shadowCard, busy && styles.cardBusy]}
+      style={[styles.card, shadow.shadowCard]}
     >
       <View
         style={[
@@ -203,7 +201,6 @@ export function CreatorSetupChecklist() {
   const { state, refresh } = useSetupState(profile);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [connectBusy, setConnectBusy] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -250,34 +247,18 @@ export function CreatorSetupChecklist() {
     }
   };
 
-  const connectSocials = async () => {
-    setConnectBusy(true);
-    try {
-      const url = await getSocialConnectUrl();
-      await WebBrowser.openBrowserAsync(url);
-      await refresh();
-    } catch (e) {
-      Alert.alert('Connect failed', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setConnectBusy(false);
-    }
-  };
-
   const stepAction = (key: StepKey): void => {
     if (state === null) return;
     if (key === 'accounts') {
-      if (state.accounts !== 'done') {
-        router.push('/(creator)/account-setup' as Href);
-        return;
-      }
-      void connectSocials();
+      router.push(
+        (state.accounts !== 'done'
+          ? '/(creator)/account-setup'
+          : '/(creator)/setup/connect') as Href,
+      );
       return;
     }
     router.push('/(creator)/setup/warmup' as Href);
   };
-
-  const stepBusy = (key: StepKey): boolean =>
-    key === 'accounts' ? connectBusy : false;
 
   const steps = state !== null ? stepViews(state) : [];
   const doneCount = steps.filter((s) => s.status === 'done').length;
@@ -290,7 +271,6 @@ export function CreatorSetupChecklist() {
           size="lg"
           block
           icon={firstOpen.icon}
-          disabled={stepBusy(firstOpen.key)}
           onPress={() => stepAction(firstOpen.key)}
         >
           {firstOpen.title}
@@ -336,7 +316,6 @@ export function CreatorSetupChecklist() {
               <StepCard
                 key={step.key}
                 step={step}
-                busy={stepBusy(step.key)}
                 onPress={() => stepAction(step.key)}
               />
             ))}
@@ -414,9 +393,6 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.hair,
     borderColor: color.line,
     padding: space.cardPad,
-  },
-  cardBusy: {
-    opacity: 0.6,
   },
   cardIcon: {
     width: 40,
