@@ -1,12 +1,13 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { borderWidth, color, radius, radiusAdmin, shadow, type } from '../../../theme/tokens';
 import { Icon, type IconName } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 
-export type PartKey = 'ig' | 'tt' | 'shots' | 'feed' | 'handles';
-export type PartKind = 'clip' | 'shots' | 'feed' | 'handles';
+export type PartKey = 'ig_account' | 'tt_account' | 'ig_clip' | 'tt_clip';
+export type PartKind = 'account' | 'clip';
+export type PartPlatform = 'instagram' | 'tiktok';
 
 /** One inspectable slice of an account submission. */
 export interface AccountPart {
@@ -14,6 +15,9 @@ export interface AccountPart {
   label: string;
   meta: string;
   kind: PartKind;
+  platform: PartPlatform;
+  /** Profile screenshot for account cards; clip cards show the play disc. */
+  thumbUri: string | null;
 }
 
 /** PostThumb's 160deg light-blue media gradient (blue100 to mediaGradEnd). */
@@ -31,10 +35,9 @@ export function MediaGradient() {
   );
 }
 
-const KIND_ICON: Record<Exclude<PartKind, 'clip'>, IconName> = {
-  shots: 'images',
-  feed: 'zap',
-  handles: 'at-sign',
+export const PLATFORM_ICON: Record<PartPlatform, IconName> = {
+  instagram: 'at-sign',
+  tiktok: 'music-2',
 };
 
 export interface PartCardProps {
@@ -60,14 +63,22 @@ export function PartCard({ part, noted, width, onPress }: PartCardProps) {
     >
       <View style={styles.topRow}>
         <View style={styles.thumb}>
-          <MediaGradient />
+          {part.thumbUri !== null ? (
+            <Image
+              source={{ uri: part.thumbUri }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <MediaGradient />
+          )}
           {part.kind === 'clip' ? (
             <View style={[styles.playDisc, shadow.shadowCard]}>
               <Icon name="play" size={10} color={color.ink} />
             </View>
-          ) : (
-            <Icon name={KIND_ICON[part.kind]} size={16} color={color.blue300} />
-          )}
+          ) : part.thumbUri === null ? (
+            <Icon name={PLATFORM_ICON[part.platform]} size={16} color={color.blue300} />
+          ) : null}
         </View>
         {noted ? (
           <View style={styles.changesTag}>

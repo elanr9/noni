@@ -85,22 +85,45 @@ export default function AccountApprovalScreen() {
   }, [load]);
 
   const parts = useMemo<AccountPart[]>(() => {
-    const handleList = [account?.tiktok_handle, account?.instagram_handle]
-      .filter((h): h is string => typeof h === 'string' && h.length > 0)
-      .map((h) => `@${h}`);
+    const at = (handle: string | null | undefined) =>
+      typeof handle === 'string' && handle.length > 0
+        ? `@${handle.replace(/^@/, '')}`
+        : 'Handle not set';
     return [
-      { key: 'ig', label: 'Instagram scroll', meta: '20s: home, explore, reels', kind: 'clip' },
-      { key: 'tt', label: 'TikTok For You scroll', meta: '15s minimum, continuous', kind: 'clip' },
-      { key: 'shots', label: 'Profile screenshots', meta: 'Both platforms, bio visible', kind: 'shots' },
-      { key: 'feed', label: 'Feed test', meta: 'For You is college soccer', kind: 'feed' },
       {
-        key: 'handles',
-        label: 'Handles to link',
-        meta: handleList.length > 0 ? handleList.join(' \u00b7 ') : 'Not set',
-        kind: 'handles',
+        key: 'ig_account',
+        label: 'Instagram account',
+        meta: at(account?.instagram_handle),
+        kind: 'account',
+        platform: 'instagram',
+        thumbUri: urls.instagramScreenshot,
+      },
+      {
+        key: 'tt_account',
+        label: 'TikTok account',
+        meta: at(account?.tiktok_handle),
+        kind: 'account',
+        platform: 'tiktok',
+        thumbUri: urls.tiktokScreenshot,
+      },
+      {
+        key: 'ig_clip',
+        label: 'Instagram feed',
+        meta: 'Home, explore, reels',
+        kind: 'clip',
+        platform: 'instagram',
+        thumbUri: null,
+      },
+      {
+        key: 'tt_clip',
+        label: 'TikTok For You',
+        meta: 'College soccer and recruiting',
+        kind: 'clip',
+        platform: 'tiktok',
+        thumbUri: null,
       },
     ];
-  }, [account]);
+  }, [account, urls]);
 
   const openPart = openKey === null ? null : (parts.find((p) => p.key === openKey) ?? null);
   const count = Object.keys(notes).length;
@@ -126,10 +149,12 @@ export default function AccountApprovalScreen() {
               profile_matches_template: true,
             }
           : {
-              instagram_recording_ok: notes.ig === undefined,
-              tiktok_recording_ok: notes.tt === undefined,
-              feed_is_niche: notes.feed === undefined,
-              profile_matches_template: notes.shots === undefined,
+              instagram_recording_ok: notes.ig_clip === undefined,
+              tiktok_recording_ok: notes.tt_clip === undefined,
+              feed_is_niche:
+                notes.ig_clip === undefined && notes.tt_clip === undefined,
+              profile_matches_template:
+                notes.ig_account === undefined && notes.tt_account === undefined,
             };
 
       setBusy(true);
@@ -161,7 +186,7 @@ export default function AccountApprovalScreen() {
           <SkeletonCard height={74} />
           <SkeletonCard height={18} radius={8} style={styles.hintSkeleton} />
           <View style={styles.grid}>
-            {[0, 1, 2, 3, 4].map((i) => (
+            {[0, 1, 2, 3].map((i) => (
               <SkeletonCard key={i} height={122} style={{ width: cardWidth }} />
             ))}
           </View>
@@ -288,8 +313,8 @@ export default function AccountApprovalScreen() {
         )}
 
         <Text style={styles.hint}>
-          Tap a part to check it. Request changes on anything that is wrong, the rest
-          counts as approved.
+          Open each card to check it. Account cards jump straight into Instagram
+          and TikTok. Leave a note on anything wrong, the rest counts as approved.
         </Text>
 
         <View style={styles.grid}>

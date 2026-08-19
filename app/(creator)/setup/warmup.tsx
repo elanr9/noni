@@ -18,13 +18,12 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { SentBackCard } from '../../../components/states';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { useAuth } from '../../../lib/auth';
+import { startAccountSubmission } from '../../../lib/account-submission';
 import {
   getCreatorAccount,
-  submitCreatorAccount,
-  uploadVerificationAsset,
   type CreatorAccount,
 } from '../../../lib/creator-accounts-api';
-import { markWarmupTutorialSeen, refreshSetupState } from '../../../lib/setup';
+import { markWarmupTutorialSeen } from '../../../lib/setup';
 import { borderWidth, color, radius, shadow, space, type } from '../../../theme/tokens';
 
 type RecordingKind = 'tiktok-recording' | 'instagram-recording';
@@ -92,7 +91,7 @@ export default function WarmupScreen() {
   const [page, setPage] = useState(0);
   const [account, setAccount] = useState<CreatorAccount | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [picked, setPicked] = useState<
     Partial<Record<RecordingKind, { uri: string; mimeType: string }>>
   >({});
@@ -168,7 +167,7 @@ export default function WarmupScreen() {
     }));
   };
 
-  const submitProof = async () => {
+  const submitProof = () => {
     if (!profile || !account) return;
     const tiktokHandle = account.tiktok_handle;
     const instagramHandle = account.instagram_handle;
@@ -189,47 +188,27 @@ export default function WarmupScreen() {
       Alert.alert('Recordings missing', missing.map((s) => s.label).join('\n'));
       return;
     }
-    setBusy(true);
-    try {
-      const paths: Record<RecordingKind, string> = {
-        'tiktok-recording': '',
-        'instagram-recording': '',
-      };
-      for (const slot of RECORDING_SLOTS) {
-        const local = picked[slot.kind];
-        paths[slot.kind] =
-          local !== undefined
-            ? await uploadVerificationAsset({
-                companyId: profile.company_id,
-                creatorId: profile.id,
-                kind: slot.kind,
-                localUri: local.uri,
-                contentType: local.mimeType,
-              })
-            : existingRecordingPath(slot.kind) ?? '';
-      }
-      await submitCreatorAccount({
-        companyId: profile.company_id,
-        creatorId: profile.id,
-        tiktokHandle,
-        instagramHandle,
-        instagramRecordingPath: paths['instagram-recording'],
-        tiktokRecordingPath: paths['tiktok-recording'],
-        instagramScreenshotPath: instagramScreenshot,
-        tiktokScreenshotPath: tiktokScreenshot,
-      });
-      setPicked({});
-      await refreshSetupState(profile.company_id, profile.id);
-      Alert.alert(
-        'Proof submitted',
-        'Your accounts are in review. You will hear back soon.',
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
-    } catch (e) {
-      Alert.alert('Could not submit', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setBusy(false);
-    }
+    const source = (kind: RecordingKind) => {
+      const local = picked[kind];
+      return local !== undefined
+        ? { uri: local.uri, mimeType: local.mimeType }
+        : { path: existingRecordingPath(kind) ?? '' };
+    };
+
+    // The upload keeps running after this screen closes, so the creator is not
+    // held on a spinner while a screen recording goes up.
+    startAccountSubmission({
+      companyId: profile.company_id,
+      creatorId: profile.id,
+      tiktokHandle,
+      instagramHandle,
+      instagramScreenshotPath: instagramScreenshot,
+      tiktokScreenshotPath: tiktokScreenshot,
+      instagramRecording: source('instagram-recording'),
+      tiktokRecording: source('tiktok-recording'),
+    });
+    setPicked({});
+    setSubmitted(true);
   };
 
   const status = account?.status ?? null;
@@ -239,6 +218,25 @@ export default function WarmupScreen() {
     (slot) =>
       picked[slot.kind] !== undefined || existingRecordingPath(slot.kind) !== null,
   );
+
+  if (submitted) {
+    return (
+      <View style={styles.submitted}>
+        <View style={styles.submittedSeal}>
+          <Icon name="check" size={34} color={color.white} strokeWidth={3} />
+        </View>
+        <Text style={styles.submittedTitle}>Application submitted!</Text>
+        <Text style={styles.submittedBody}>
+          Your recordings keep uploading in the background, so you can close this
+          and carry on. A campaign manager reviews your accounts and you will
+          hear back right here.
+        </Text>
+        <Button size="lg" block variant="primary" onPress={() => router.back()}>
+          Done
+        </Button>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -330,7 +328,6 @@ export default function WarmupScreen() {
                     key={slot.kind}
                     accessibilityRole="button"
                     accessibilityLabel={slot.label}
-                    disabled={busy}
                     onPress={() => void pickRecording(slot)}
                     style={[styles.slot, shadow.shadowCard]}
                   >
@@ -359,10 +356,10 @@ export default function WarmupScreen() {
                 size="lg"
                 variant="primary"
                 block
-                disabled={busy || !recordingsReady}
-                onPress={() => void submitProof()}
+                disabled={!recordingsReady}
+                onPress={submitProof}
               >
-                {busy ? 'Uploading…' : 'Submit for review'}
+                Submit for review
               </Button>
             </>
           )}
@@ -396,6 +393,37 @@ export default function WarmupScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
+  submitted: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.offWhite,
+    paddingHorizontal: space.gutter,
+    gap: space[4],
+  },
+  submittedSeal: {
+    width: 68,
+    height: 68,
+    borderRadius: radius.pill,
+    backgroundColor: color.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space[2],
+  },
+  submittedTitle: {
+    fontSize: type.size.titleSm,
+    letterSpacing: type.tracking.title,
+    fontWeight: '700',
+    color: color.ink,
+    textAlign: 'center',
+  },
+  submittedBody: {
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.slate500,
+    textAlign: 'center',
+    marginBottom: space[4],
+  },
   page: {
     paddingHorizontal: space.gutter,
     paddingTop: 24,

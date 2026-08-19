@@ -10,6 +10,10 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { Wordmark } from '../../../components/ui/Wordmark';
+import {
+  retryAccountSubmission,
+  useAccountSubmission,
+} from '../../../lib/account-submission';
 import { useAuth } from '../../../lib/auth';
 import { getCompany } from '../../../lib/onboarding';
 import { useSetupState, type SetupState, type SetupStepStatus } from '../../../lib/setup';
@@ -199,6 +203,7 @@ export function CreatorSetupChecklist() {
   const router = useRouter();
   const { profile } = useAuth();
   const { state, refresh } = useSetupState(profile);
+  const submission = useAccountSubmission();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -304,6 +309,33 @@ export function CreatorSetupChecklist() {
           </View>
         </View>
 
+        {submission.status === 'sending' && (
+          <View style={styles.uploadBanner}>
+            <Icon name="clock" size={17} color={color.blue700} />
+            <Text style={styles.uploadText}>
+              Sending your application. You can keep using the app.
+            </Text>
+          </View>
+        )}
+
+        {submission.status === 'failed' && (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Retry sending your application"
+            onPress={retryAccountSubmission}
+            style={styles.failBanner}
+          >
+            <Icon name="circle-alert" size={17} color={color.danger} />
+            <View style={styles.failText}>
+              <Text style={styles.failTitle}>Your application did not send</Text>
+              <Text style={styles.failBody}>
+                {submission.error ?? 'Tap to try again.'}
+              </Text>
+            </View>
+            <Icon name="rotate-ccw" size={17} color={color.danger} />
+          </PressableScale>
+        )}
+
         {state === null ? (
           <View style={styles.list}>
             {[0, 1].map((i) => (
@@ -383,6 +415,44 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: space.stackGap,
+  },
+  uploadBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    padding: space[4],
+    borderRadius: radius.md,
+    backgroundColor: color.blue100,
+  },
+  uploadText: {
+    flex: 1,
+    fontSize: type.size.chip,
+    fontWeight: type.weight.semibold,
+    color: color.blue700,
+  },
+  failBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    padding: space[4],
+    borderRadius: radius.md,
+    backgroundColor: color.dangerSoft,
+  },
+  failText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  failTitle: {
+    fontSize: type.size.meta,
+    fontWeight: type.weight.bold,
+    color: color.danger,
+  },
+  failBody: {
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * type.leading.snug,
+    fontWeight: type.weight.regular,
+    color: color.danger,
   },
   card: {
     flexDirection: 'row',

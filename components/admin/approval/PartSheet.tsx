@@ -1,12 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { borderWidth, color, radius, radiusAdmin, shadow, type } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
-import { Icon, type IconName } from '../../ui/Icon';
+import { Icon } from '../../ui/Icon';
 import { NoteBlock, Sheet } from '../shared';
-import { MediaGradient, type AccountPart, type PartKey } from './PartCard';
+import {
+  MediaGradient,
+  PLATFORM_ICON,
+  type AccountPart,
+  type PartKey,
+  type PartPlatform,
+} from './PartCard';
+
+/**
+ * Both hosts are universal links, so an installed Instagram or TikTok app
+ * takes over and lands the reviewer on the real profile. Without the app it
+ * opens the web profile, which is the same check either way.
+ */
+function profileUrl(platform: PartPlatform, handle: string): string {
+  const clean = handle.replace(/^@/, '');
+  return platform === 'instagram'
+    ? `https://www.instagram.com/${clean}`
+    : `https://www.tiktok.com/@${clean}`;
+}
 
 export interface PartSheetUrls {
   instagramRecording: string | null;
@@ -63,25 +81,66 @@ const clip = StyleSheet.create({
   },
 });
 
-function ScreenshotFrame({ label, uri }: { label: string; uri: string | null }) {
+/**
+ * The account widget: the profile screenshot the creator sent, the handle, and
+ * one tap into the live profile so the reviewer checks the real thing rather
+ * than trusting a screenshot.
+ */
+function AccountWidget({
+  platform,
+  label,
+  handle,
+  uri,
+}: {
+  platform: PartPlatform;
+  label: string;
+  handle: string | null;
+  uri: string | null;
+}) {
+  const linkable = handle !== null && handle.length > 0;
   return (
-    <View style={[shot.frame, shadow.shadowMedia]}>
-      {uri !== null ? (
-        <Image source={{ uri }} resizeMode="cover" style={StyleSheet.absoluteFill} />
-      ) : (
-        <>
-          <MediaGradient />
-          <Icon name="images" size={20} color={color.blue300} />
-        </>
-      )}
-      <Text style={shot.badge}>{label}</Text>
+    <View style={account.wrap}>
+      <View style={[account.frame, shadow.shadowMedia]}>
+        {uri !== null ? (
+          <Image source={{ uri }} resizeMode="cover" style={StyleSheet.absoluteFill} />
+        ) : (
+          <>
+            <MediaGradient />
+            <Icon name="images" size={20} color={color.blue300} />
+          </>
+        )}
+      </View>
+      <View style={account.side}>
+        <View style={account.handleRow}>
+          <Icon name={PLATFORM_ICON[platform]} size={16} color={color.slate400} />
+          <Text style={account.platform}>{label}</Text>
+        </View>
+        <Text numberOfLines={1} style={account.handle}>
+          {linkable ? `@${handle.replace(/^@/, '')}` : 'Not set'}
+        </Text>
+        <Button
+          variant="outline"
+          size="sm"
+          iconRight="arrow-right"
+          disabled={!linkable}
+          onPress={() => {
+            if (linkable) void Linking.openURL(profileUrl(platform, handle));
+          }}
+        >
+          {`Open ${label}`}
+        </Button>
+      </View>
     </View>
   );
 }
 
-const shot = StyleSheet.create({
+const account = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row',
+    gap: 14,
+  },
   frame: {
-    width: 132,
+    width: 118,
     aspectRatio: 9 / 16,
     borderRadius: radius.lg,
     overflow: 'hidden',
@@ -89,64 +148,28 @@ const shot = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: color.fillQuiet,
   },
-  badge: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: radiusAdmin.pill,
-    backgroundColor: color.inkA55,
-    fontSize: type.size.micro,
-    fontWeight: type.weight.bold,
-    color: color.white,
-    overflow: 'hidden',
+  side: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
-});
-
-function HandleRow({
-  icon,
-  label,
-  handle,
-}: {
-  icon: IconName;
-  label: string;
-  handle: string | null;
-}) {
-  return (
-    <View style={handles.row}>
-      <Icon name={icon} size={17} color={color.slate400} />
-      <Text style={handles.label}>{label}</Text>
-      <Text numberOfLines={1} style={handles.value}>
-        {handle !== null && handle.length > 0 ? `@${handle}` : 'Not set'}
-      </Text>
-    </View>
-  );
-}
-
-const handles = StyleSheet.create({
-  row: {
+  handleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    minHeight: 44,
-    paddingVertical: 12,
-    paddingHorizontal: 13,
-    borderRadius: radiusAdmin.md,
-    borderWidth: borderWidth.field,
-    borderColor: color.lineStrong,
-    backgroundColor: color.white,
+    gap: 6,
   },
-  label: {
-    width: 66,
+  platform: {
     fontSize: type.size.chip,
     fontWeight: type.weight.semibold,
     color: color.slate400,
   },
-  value: {
-    flex: 1,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
+  handle: {
+    alignSelf: 'stretch',
+    fontSize: type.size.cardLg,
+    fontWeight: type.weight.bold,
+    letterSpacing: -0.3,
     color: color.ink,
   },
 });
@@ -193,7 +216,10 @@ export function PartSheet({
   if (shown === null) return null;
 
   const note = notes[shown.key];
-  const clipUri = shown.key === 'ig' ? urls.instagramRecording : urls.tiktokRecording;
+  const instagram = shown.platform === 'instagram';
+  const clipUri = instagram ? urls.instagramRecording : urls.tiktokRecording;
+  const shotUri = instagram ? urls.instagramScreenshot : urls.tiktokScreenshot;
+  const handle = instagram ? accountHandles.instagram : accountHandles.tiktok;
 
   const footer = noteMode ? (
     <View style={styles.footerRow}>
@@ -251,32 +277,15 @@ export function PartSheet({
       subtitle={shown.meta}
       footer={footer}
     >
-      {shown.kind === 'clip' && <ClipPreview uri={clipUri} />}
-
-      {shown.kind === 'shots' && (
-        <View style={styles.shotsRow}>
-          <ScreenshotFrame label="TikTok" uri={urls.tiktokScreenshot} />
-          <ScreenshotFrame label="Instagram" uri={urls.instagramScreenshot} />
-        </View>
-      )}
-
-      {shown.kind === 'feed' && (
-        <View style={styles.feedBlock}>
-          <Text style={styles.feedText}>
-            For You has to be college soccer and recruiting. A cold or off-topic feed
-            throttles every post this creator will ever make.
-          </Text>
-        </View>
-      )}
-
-      {shown.kind === 'handles' && (
-        <View style={styles.handlesCol}>
-          <HandleRow icon="music-2" label="TikTok" handle={accountHandles.tiktok} />
-          <HandleRow icon="at-sign" label="Instagram" handle={accountHandles.instagram} />
-          <Text style={styles.handlesNote}>
-            Captured on approval. Upload-Post needs both before anything can go out.
-          </Text>
-        </View>
+      {shown.kind === 'clip' ? (
+        <ClipPreview uri={clipUri} />
+      ) : (
+        <AccountWidget
+          platform={shown.platform}
+          label={instagram ? 'Instagram' : 'TikTok'}
+          handle={handle}
+          uri={shotUri}
+        />
       )}
 
       {note !== undefined && !noteMode && (
@@ -313,31 +322,6 @@ const styles = StyleSheet.create({
   },
   footerRight: {
     flex: 1,
-  },
-  shotsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  feedBlock: {
-    padding: 14,
-    borderRadius: radiusAdmin.md,
-    backgroundColor: color.offWhite,
-  },
-  feedText: {
-    fontSize: type.size.meta,
-    lineHeight: type.size.meta * 1.5,
-    color: color.ink,
-  },
-  handlesCol: {
-    gap: 10,
-  },
-  handlesNote: {
-    marginTop: 2,
-    marginHorizontal: 2,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * 1.45,
-    color: color.slate400,
   },
   noteBlock: {
     marginTop: 12,
