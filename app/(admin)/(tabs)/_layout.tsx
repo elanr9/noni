@@ -3,7 +3,8 @@ import { Tabs, useFocusEffect } from 'expo-router';
 
 import { TabBar } from '../../../components/ui/TabBar';
 import type { IconName } from '../../../components/ui/Icon';
-import { listAssignmentQueue } from '../../../lib/admin-api';
+import { listAssignmentQueue, listMusicApprovalQueue } from '../../../lib/admin-api';
+import { listAccountApprovalQueue } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, screenTransition } from '../../../theme/tokens';
@@ -12,6 +13,8 @@ import { color, screenTransition } from '../../../theme/tokens';
 // Analytics; the Briefs tab is the calendar route (week list + calendar view
 // toggle per the design handoff). Hidden routes stay in the folder so they
 // remain navigable.
+const QUEUE_POLL_MS = 45_000;
+
 const ADMIN_ITEMS: Record<string, { icon: IconName; label: string }> = {
   index: { icon: 'inbox', label: 'Review' },
   calendar: { icon: 'plus', label: 'Briefs' },
@@ -38,12 +41,33 @@ export default function AdminTabsLayout() {
     profile?.role === 'campaign_manager' &&
     !isManagerSetupCompleteFlag(profile.onboarding_answers);
 
+  const companyId = profile?.company_id;
+
+  // Mirrors the total the Review screen shows. Polled because the tabs layout
+  // does not refocus when a manager moves between tabs, and an account waiting
+  // for review is the only in-app signal that a creator has applied.
   useFocusEffect(
     useCallback(() => {
-      void listAssignmentQueue()
-        .then((q) => setQueueCount(q.length))
-        .catch(() => setQueueCount(0));
-    }, []),
+      if (companyId === undefined) return;
+      const read = () => {
+        void Promise.all([
+          listAssignmentQueue(),
+          listMusicApprovalQueue(companyId),
+          listAccountApprovalQueue(companyId),
+        ])
+          .then(([assignments, music, accounts]) =>
+            setQueueCount(
+              assignments.length +
+                music.length +
+                accounts.filter((a) => a.status !== 'needs_changes').length,
+            ),
+          )
+          .catch(() => undefined);
+      };
+      read();
+      const timer = setInterval(read, QUEUE_POLL_MS);
+      return () => clearInterval(timer);
+    }, [companyId]),
   );
 
   return (

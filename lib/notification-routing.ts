@@ -33,9 +33,16 @@ export function routeNotificationTap(
       router.push(`/(admin)/chat/${creatorId}`);
       return;
     }
-    if (event === 'account_submitted' && creatorId) {
-      router.push(`/(admin)/creator/${creatorId}`);
-      return;
+    if (event === 'account_submitted') {
+      const accountId = str(data, 'account_id');
+      if (accountId) {
+        router.push(`/(admin)/account-approval/${accountId}`);
+        return;
+      }
+      if (creatorId) {
+        router.push(`/(admin)/creator/${creatorId}`);
+        return;
+      }
     }
     if (event === 'music_pending' && assignmentId) {
       router.push(`/(admin)/review/${assignmentId}`);

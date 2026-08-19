@@ -149,26 +149,36 @@ export async function submitCreatorAccount(params: {
   instagramScreenshotPath: string;
   tiktokScreenshotPath: string;
 }): Promise<void> {
-  const { error } = await supabase.from('creator_accounts').upsert(
-    {
-      company_id: params.companyId,
-      creator_id: params.creatorId,
-      status: 'pending',
-      tiktok_handle: params.tiktokHandle,
-      instagram_handle: params.instagramHandle,
-      instagram_recording_path: params.instagramRecordingPath,
-      tiktok_recording_path: params.tiktokRecordingPath,
-      instagram_screenshot_path: params.instagramScreenshotPath,
-      tiktok_screenshot_path: params.tiktokScreenshotPath,
-      reason: null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'company_id,creator_id' },
-  );
+  const { data, error } = await supabase
+    .from('creator_accounts')
+    .upsert(
+      {
+        company_id: params.companyId,
+        creator_id: params.creatorId,
+        status: 'pending',
+        tiktok_handle: params.tiktokHandle,
+        instagram_handle: params.instagramHandle,
+        instagram_recording_path: params.instagramRecordingPath,
+        tiktok_recording_path: params.tiktokRecordingPath,
+        instagram_screenshot_path: params.instagramScreenshotPath,
+        tiktok_screenshot_path: params.tiktokScreenshotPath,
+        reason: null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'company_id,creator_id' },
+    )
+    .select('id')
+    .single();
   if (error) throw error;
 
+  // The id rides along so a tapped push opens the review screen itself rather
+  // than the creator profile, which has no approve action on it.
   void supabase.functions.invoke('notify', {
-    body: { creator_id: params.creatorId, event: 'account_submitted' },
+    body: {
+      creator_id: params.creatorId,
+      account_id: data.id,
+      event: 'account_submitted',
+    },
   });
 }
 

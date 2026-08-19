@@ -31,6 +31,8 @@ type NotifyBody = {
   campaign_id?: string;
   creator_id?: string;
   company_id?: string;
+  /** account_submitted only, so the tap opens the review screen. */
+  account_id?: string;
   /** account_decided only. */
   status?: 'approved' | 'needs_changes';
   /** streak_bonus / streak_progress / bounty_earned / company_topup. */
@@ -326,9 +328,13 @@ Deno.serve(async (req) => {
       if (body.event === 'account_submitted') {
         const tokens = await adminPushTokens(admin, caller.companyId);
         const sent = await sendExpoPush(tokens, {
-          title: 'Account submitted',
-          body: `${name} submitted their accounts for approval`,
-          data: { creator_id: creatorId, event: body.event },
+          title: 'Account ready to review',
+          body: `${name} submitted their TikTok and Instagram for approval`,
+          data: {
+            creator_id: creatorId,
+            event: body.event,
+            ...(body.account_id ? { account_id: body.account_id } : {}),
+          },
         });
         return jsonResponse({ sent });
       }
