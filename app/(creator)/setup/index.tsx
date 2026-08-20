@@ -57,7 +57,10 @@ function connectSub(state: SetupState): string {
   return 'Link TikTok and Instagram so we can post for you.';
 }
 
-function stepViews(state: SetupState): StepView[] {
+function stepViews(state: SetupState, submitting: boolean): StepView[] {
+  // While the proof is still uploading there is no account row yet, so the
+  // step would read "To do" even though the creator has already applied.
+  const warmup: SetupStepStatus = submitting ? 'in_review' : state.warmup;
   return [
     {
       key: 'accounts',
@@ -71,8 +74,11 @@ function stepViews(state: SetupState): StepView[] {
       key: 'warmup',
       icon: 'zap',
       title: 'Warm up accounts',
-      sub: 'Scroll and like for a few days so your accounts look human.',
-      status: state.warmup,
+      sub:
+        warmup === 'in_review'
+          ? 'Your accounts are with the team. We will let you know once they are approved.'
+          : 'Scroll and like for a few days so your accounts look human.',
+      status: warmup,
     },
   ];
 }
@@ -100,6 +106,7 @@ function StepCard({
   onPress: () => void;
 }) {
   const done = step.status === 'done';
+  const inReview = step.status === 'in_review';
   return (
     <PressableScale
       accessibilityRole="button"
@@ -111,12 +118,13 @@ function StepCard({
         style={[
           styles.cardIcon,
           done && { backgroundColor: color.greenSoft },
+          inReview && { backgroundColor: color.amberSoft },
         ]}
       >
         <Icon
-          name={done ? 'check' : step.icon}
+          name={done ? 'check' : inReview ? 'clock' : step.icon}
           size={17}
-          color={done ? color.green : color.blue700}
+          color={done ? color.green : inReview ? color.amber : color.blue700}
         />
       </View>
       <View style={styles.cardText}>
@@ -265,7 +273,8 @@ export function CreatorSetupChecklist() {
     router.push('/(creator)/setup/warmup' as Href);
   };
 
-  const steps = state !== null ? stepViews(state) : [];
+  const steps =
+    state !== null ? stepViews(state, submission.status === 'sending') : [];
   const doneCount = steps.filter((s) => s.status === 'done').length;
   const firstOpen = steps.find((s) => s.status === 'todo');
 
@@ -308,15 +317,6 @@ export function CreatorSetupChecklist() {
             <Text style={styles.progressLabel}>{doneCount} of 2</Text>
           </View>
         </View>
-
-        {submission.status === 'sending' && (
-          <View style={styles.uploadBanner}>
-            <Icon name="clock" size={17} color={color.blue700} />
-            <Text style={styles.uploadText}>
-              Sending your application. You can keep using the app.
-            </Text>
-          </View>
-        )}
 
         {submission.status === 'failed' && (
           <PressableScale
@@ -415,20 +415,6 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: space.stackGap,
-  },
-  uploadBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    padding: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.blue100,
-  },
-  uploadText: {
-    flex: 1,
-    fontSize: type.size.chip,
-    fontWeight: type.weight.semibold,
-    color: color.blue700,
   },
   failBanner: {
     flexDirection: 'row',

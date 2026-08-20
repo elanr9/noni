@@ -30,6 +30,9 @@ export async function sendExpoPush(
   return tokens.length;
 }
 
+/** Manager-side roles, matching the is_campaign_manager() SQL helper. */
+export const MANAGER_ROLES = ['campaign_manager', 'company_admin', 'admin'];
+
 export async function adminPushTokens(
   admin: SupabaseClient,
   companyId: string,
@@ -38,7 +41,7 @@ export async function adminPushTokens(
     .from('profiles')
     .select('expo_push_token')
     .eq('company_id', companyId)
-    .eq('role', 'campaign_manager')
+    .in('role', MANAGER_ROLES)
     .not('expo_push_token', 'is', null);
   return (data ?? [])
     .map((p) => p.expo_push_token as string | null)

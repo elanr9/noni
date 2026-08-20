@@ -90,6 +90,7 @@ export default function CreatorLayout() {
         <Stack
           screenOptions={{
             headerShown: false,
+            headerBackButtonDisplayMode: 'minimal',
             contentStyle: { backgroundColor: color.offWhite },
             animation: screenTransition.push,
             animationDuration: motion.base,

@@ -4,6 +4,7 @@ import {
   adminPushTokens,
   creatorPushTokens,
   sendExpoPush,
+  MANAGER_ROLES,
   type PushMessage,
 } from '../_shared/push.ts';
 
@@ -190,12 +191,13 @@ Deno.serve(async (req) => {
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!profile) return jsonResponse({ error: 'forbidden' }, 403);
-    // Platform admin acts as a campaign manager inside their own company.
+    // Company admins and the platform admin act as campaign managers inside
+    // their own company, same as the is_campaign_manager() SQL helper.
     const role = profile.role as string;
     caller = {
       userId: userData.user.id,
       companyId: profile.company_id as string,
-      role: role === 'admin' ? 'campaign_manager' : role,
+      role: MANAGER_ROLES.includes(role) ? 'campaign_manager' : role,
     };
   } else if (!SERVICE_EVENTS.includes(body.event)) {
     return jsonResponse({ error: 'forbidden' }, 403);

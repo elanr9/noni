@@ -38,48 +38,31 @@ type RecordingSlot = {
 const RECORDING_SLOTS: RecordingSlot[] = [
   {
     kind: 'tiktok-recording',
-    label: 'TikTok For You recording',
-    hint: '15 seconds minimum of continuous For You scrolling',
+    label: 'TikTok',
+    hint: '15 seconds of For You scrolling',
     minSeconds: 15,
   },
   {
     kind: 'instagram-recording',
-    label: 'Instagram recording',
-    hint: '20 seconds scrolling home, then explore, then reels',
+    label: 'Instagram',
+    hint: '20 seconds of home, explore, reels',
     minSeconds: 20,
   },
 ];
 
-const INFO_PAGES: Array<{
-  icon: IconName;
-  title: string;
-  body: string;
-  bullets?: string[];
-}> = [
-  {
-    icon: 'flame',
-    title: 'Warm up your accounts',
-    body: 'Before your first post, both apps need to learn who you are. Warming up means 15 to 20 minutes of scrolling, searching, and liking college soccer and recruiting content on TikTok and Instagram.',
-  },
-  {
-    icon: 'eye',
-    title: 'Why it matters',
-    body: 'The For You page decides who sees your posts. A warm account gets shown to soccer players and their parents. A cold account gets shown to nobody, no matter how good the post is.',
-  },
-  {
-    icon: 'sparkles',
-    title: 'What to do',
-    body: 'Spend 15 to 20 minutes on each app doing this:',
-    bullets: [
-      'Search college soccer recruiting and watch what comes up',
-      'Like and save videos about recruiting, offers, and campus visits',
-      'Follow a few college programs and recruiting accounts',
-      'Watch videos to the end so the app knows you care',
-    ],
-  },
-];
+const STEPS_PAGE: { icon: IconName; title: string; steps: string[] } = {
+  icon: 'flame',
+  title: 'Warm up your accounts',
+  steps: [
+    'Search college soccer recruiting',
+    'Like and save recruiting videos',
+    'Follow a few college programs',
+    'Watch videos to the end',
+    '15 minutes on TikTok and Instagram',
+  ],
+};
 
-const PAGE_COUNT = INFO_PAGES.length + 1;
+const PAGE_COUNT = 2;
 
 export default function WarmupScreen() {
   const { width } = useWindowDimensions();
@@ -227,9 +210,7 @@ export default function WarmupScreen() {
         </View>
         <Text style={styles.submittedTitle}>Application submitted!</Text>
         <Text style={styles.submittedBody}>
-          Your recordings keep uploading in the background, so you can close this
-          and carry on. A campaign manager reviews your accounts and you will
-          hear back right here.
+          We will let you know once your accounts are approved.
         </Text>
         <Button size="lg" block variant="primary" onPress={() => router.back()}>
           Done
@@ -247,26 +228,22 @@ export default function WarmupScreen() {
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScrollEnd}
       >
-        {INFO_PAGES.map((info) => (
-          <ScrollView
-            key={info.title}
-            style={{ width }}
-            contentContainerStyle={styles.page}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.pageIcon}>
-              <Icon name={info.icon} size={26} color={color.blue700} />
+        <ScrollView
+          style={{ width }}
+          contentContainerStyle={styles.page}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.pageIcon}>
+            <Icon name={STEPS_PAGE.icon} size={26} color={color.blue700} />
+          </View>
+          <Text style={styles.pageTitle}>{STEPS_PAGE.title}</Text>
+          {STEPS_PAGE.steps.map((step) => (
+            <View key={step} style={styles.bulletRow}>
+              <Icon name="check" size={16} color={color.green} />
+              <Text style={styles.bulletText}>{step}</Text>
             </View>
-            <Text style={styles.pageTitle}>{info.title}</Text>
-            <Text style={styles.pageBody}>{info.body}</Text>
-            {info.bullets?.map((bullet) => (
-              <View key={bullet} style={styles.bulletRow}>
-                <Icon name="check" size={16} color={color.green} />
-                <Text style={styles.bulletText}>{bullet}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        ))}
+          ))}
+        </ScrollView>
 
         <ScrollView
           style={{ width }}
@@ -278,8 +255,7 @@ export default function WarmupScreen() {
           </View>
           <Text style={styles.pageTitle}>Prove it</Text>
           <Text style={styles.pageBody}>
-            Record your screen while you scroll. If the feed shows soccer and
-            recruiting, you are warm. We need one recording per app.
+            Screen record each app while you scroll.
           </Text>
 
           {loading ? (
@@ -290,9 +266,7 @@ export default function WarmupScreen() {
           ) : account === null ? (
             <View style={styles.noticeCard}>
               <Icon name="circle-alert" size={19} color={color.amber} />
-              <Text style={styles.noticeText}>
-                Create your accounts first. We attach the proof to them.
-              </Text>
+              <Text style={styles.noticeText}>Create your accounts first.</Text>
               <Button
                 size="sm"
                 variant="outline"
@@ -304,16 +278,12 @@ export default function WarmupScreen() {
           ) : status === 'pending' ? (
             <View style={[styles.noticeCard, { backgroundColor: color.amberSoft }]}>
               <Icon name="clock" size={19} color={color.amber} />
-              <Text style={styles.noticeText}>
-                Proof submitted. We are reviewing it now.
-              </Text>
+              <Text style={styles.noticeText}>Submitted. In review.</Text>
             </View>
           ) : status === 'approved' ? (
             <View style={[styles.noticeCard, { backgroundColor: color.greenSoft }]}>
               <Icon name="circle-check-big" size={19} color={color.green} />
-              <Text style={styles.noticeText}>
-                Approved. Your accounts are cleared to receive posts.
-              </Text>
+              <Text style={styles.noticeText}>Approved.</Text>
             </View>
           ) : (
             <>
