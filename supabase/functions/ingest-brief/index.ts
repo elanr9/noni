@@ -22,15 +22,14 @@ import {
 import {
   brandDocBlocks,
   buildBriefSystem,
+  generateValidated,
   isKill,
   loadPostType,
   normalizeGenerated,
-  toPostTypeShape,
   type GenOutcome,
   type PostTypeRow,
   type RawGenerated,
 } from '../_shared/generateBrief.ts';
-import { validateBrief, type ValidationResult } from '../_shared/validateBrief.ts';
 
 type Body = { url?: string; context?: string; query?: string; post_type?: string };
 
@@ -201,47 +200,6 @@ async function generateOnce(
     postType ? postType.family : fallbackFormat,
     postType?.key ?? null,
   );
-}
-
-async function generateValidated(
-  admin: ReturnType<typeof adminClient>,
-  companyId: string,
-  generationId: string,
-  postType: PostTypeRow | null,
-  draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
-  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[] },
-): Promise<{ outcome: GenOutcome; warnings: string[] }> {
-  const ctx = {
-    ...validationCtx,
-    postType: postType ? toPostTypeShape(postType) : null,
-  };
-  const logAttempt = async (attempt: number, res: ValidationResult) => {
-    const { error } = await admin.from('brief_validations').insert({
-      company_id: companyId,
-      generation_id: generationId,
-      attempt,
-      passed: res.passed,
-      failures: res.failures,
-      warnings: res.warnings,
-    });
-    if (error) console.error('brief_validations insert failed:', error.message);
-  };
-
-  let outcome = await draftOnce([]);
-  if (isKill(outcome)) return { outcome, warnings: [] };
-  let result = validateBrief(outcome.draft, ctx);
-  await logAttempt(1, result);
-  if (!result.passed) {
-    const retry = await draftOnce(result.failures);
-    if (isKill(retry)) return { outcome: retry, warnings: [] };
-    outcome = retry;
-    result = validateBrief(outcome.draft, ctx);
-    await logAttempt(2, result);
-  }
-  const warnings = result.passed
-    ? result.warnings
-    : [...result.failures, ...result.warnings];
-  return { outcome, warnings };
 }
 
 Deno.serve(async (req) => {

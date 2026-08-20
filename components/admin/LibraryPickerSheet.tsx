@@ -1,10 +1,11 @@
 // The Library picker that opens from inside the post editor. Filtered to the
 // post's type (README §9): a filter line names the type, a References /
-// Our posts segmented control, and one primary action — Attach to post.
-// Attaching marks the item used — used_count increments, nothing is ever
+// Our posts / Ideas segmented control, and one primary action — Build this
+// post. Picking marks the item used — used_count increments, nothing is ever
 // removed — then hands the result to the editor:
-//   { kind: 'example', url }  -> attach as example_url
-//   { kind: 'fill', text }    -> seed the post's content
+//   { kind: 'port', briefId }  -> port that finished post into this slot
+//   { kind: 'example', url }   -> generate from the reference, keep the link
+//   { kind: 'fill', text }     -> generate from the idea
 
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -31,6 +32,7 @@ import {
 } from './LibraryItemCard';
 
 export type LibraryPick =
+  | { kind: 'port'; briefId: string }
   | { kind: 'example'; url: string }
   | { kind: 'fill'; text: string };
 
@@ -38,6 +40,8 @@ export interface LibraryPickerSheetProps {
   visible: boolean;
   /** The post's type; filters both lanes. Null on legacy briefs shows all. */
   postTypeId: string | null;
+  /** True while the editor is generating from the pick. */
+  busy?: boolean;
   onClose: () => void;
   onPick: (pick: LibraryPick) => void;
 }
@@ -61,6 +65,7 @@ function filterLine(postType: PostType | null): string | null {
 export function LibraryPickerSheet({
   visible,
   postTypeId,
+  busy = false,
   onClose,
   onPick,
 }: LibraryPickerSheetProps) {
@@ -86,7 +91,7 @@ export function LibraryPickerSheet({
         setRows(posts.map((post): Row => ({ kind: 'our_post', post })));
       } else {
         const items = await listLibraryItems({
-          source: 'reference',
+          source: segment === 2 ? 'idea' : 'reference',
           search,
           postTypeId: postTypeId ?? undefined,
         });
@@ -97,7 +102,7 @@ export function LibraryPickerSheet({
     } finally {
       setLoading(false);
     }
-  }, [ourPosts, search, postTypeId]);
+  }, [ourPosts, segment, search, postTypeId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -126,6 +131,12 @@ export function LibraryPickerSheet({
       marked.catch(() => undefined);
     }
 
+    // One of ours carries its brief, so it ports whole rather than being
+    // re-scraped off the platform.
+    if (selected.kind === 'our_post' && selected.post.brief_id) {
+      onPick({ kind: 'port', briefId: selected.post.brief_id });
+      return;
+    }
     const url = selected.kind === 'item' ? selected.item.url : selected.post.post_url;
     const text =
       selected.kind === 'item'
@@ -143,8 +154,8 @@ export function LibraryPickerSheet({
       onClose={onClose}
       pinnedTop={90}
       footer={
-        <Button block disabled={selected === null} onPress={attach}>
-          Attach to post
+        <Button block disabled={selected === null || busy} onPress={attach}>
+          {busy ? 'Building the post…' : 'Build this post'}
         </Button>
       }
     >
@@ -153,7 +164,11 @@ export function LibraryPickerSheet({
 
       <View style={styles.segmentWrap}>
         <Segmented
-          options={[{ label: 'References' }, { label: 'Our posts' }]}
+          options={[
+            { label: 'References' },
+            { label: 'Our posts' },
+            { label: 'Ideas' },
+          ]}
           value={segment}
           onChange={(index) => {
             if (index === segment) return;

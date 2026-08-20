@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -17,6 +17,7 @@ import {
   itemCardModel,
   ourPostCardModel,
 } from '../../../components/admin/LibraryItemCard';
+import { PortSheet, type PortOption } from '../../../components/admin/editor/PortSheet';
 import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
 import { QuickCapture, type IdeaFormat } from '../../../components/admin/library/QuickCapture';
 import { SourceChips } from '../../../components/admin/library/SourceChips';
@@ -25,13 +26,19 @@ import { Dropdown } from '../../../components/ui/Dropdown';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import type { IconName } from '../../../components/ui/Icon';
 import { useAuth } from '../../../lib/auth';
-import { listPostTypes, type PostType } from '../../../lib/briefs-api';
+import {
+  listCampaigns,
+  listPostTypes,
+  type PostType,
+} from '../../../lib/briefs-api';
+import { ensureSlot, fillPostSlot, type FillSource } from '../../../lib/post-fill';
 import {
   captureQuick,
   listCreatorOptions,
   listLibraryItems,
   listOurPosts,
   markLibraryItemUsed,
+  markOurPostUsed,
   type LibraryItem,
   type LibrarySource,
   type OurPost,
@@ -75,6 +82,7 @@ const EMPTY: Record<
 export default function LibraryScreen() {
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [source, setSource] = useState<LibrarySource>('idea');
   const [search, setSearch] = useState('');
@@ -93,6 +101,10 @@ export default function LibraryScreen() {
   const [endReached, setEndReached] = useState(false);
   const [creators, setCreators] = useState<Array<{ id: string; full_name: string | null }>>([]);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
+
+  /** The row waiting on a post type before it becomes a post. */
+  const [makeFrom, setMakeFrom] = useState<Row | null>(null);
+  const [makeBusyId, setMakeBusyId] = useState<string | null>(null);
 
   // One counter guards every list write: filter changes mid-flight discard
   // the stale response instead of racing it.
@@ -189,6 +201,71 @@ export default function LibraryScreen() {
     const url = row.kind === 'item' ? row.item.url : row.post.post_url;
     if (url) void Linking.openURL(url);
   }
+
+  /** One of ours ports from its brief; everything else generates fresh. */
+  function fillSourceFor(row: Row): FillSource | null {
+    if (row.kind === 'our_post') {
+      if (row.post.brief_id) {
+        return { kind: 'port', sourceBriefId: row.post.brief_id };
+      }
+      return row.post.post_url
+        ? { kind: 'example', url: row.post.post_url }
+        : null;
+    }
+    if (row.item.url) return { kind: 'example', url: row.item.url };
+    return row.item.text ? { kind: 'idea', text: row.item.text } : null;
+  }
+
+  /** Builds the picked row into the newest week's next empty slot. */
+  async function makePost(typeId: string) {
+    const row = makeFrom;
+    const postType = postTypes.find((t) => t.id === typeId);
+    const source = row ? fillSourceFor(row) : null;
+    if (!profile || !row || !postType || !source) return;
+    setMakeBusyId(typeId);
+    try {
+      const campaigns = await listCampaigns();
+      const family =
+        postType.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+      const briefId = await ensureSlot({
+        companyId: profile.company_id,
+        createdBy: profile.id,
+        campaignId: campaigns[0]?.id ?? null,
+        family,
+        postTypeId: postType.id,
+      });
+      const result = await fillPostSlot({
+        briefId,
+        postTypeId: postType.id,
+        postTypeKey: postType.key,
+        family,
+        source,
+      });
+      if (result.kind === 'kill') {
+        Alert.alert('Generation refused', result.kill_reason);
+        return;
+      }
+      if (row.kind === 'item') onUse(row.item);
+      else void markOurPostUsed(profile.company_id, profile.id, row.post).catch(
+        () => undefined,
+      );
+      setMakeFrom(null);
+      router.push(`/(admin)/post/${briefId}`);
+    } catch (e) {
+      Alert.alert(
+        'Could not make the post',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setMakeBusyId(null);
+    }
+  }
+
+  const makeTypeOptions: PortOption[] = postTypes.map((t) => ({
+    id: t.id,
+    label: t.label,
+    sub: t.family === 'photo_carousel' ? 'Slideshow' : 'Video',
+  }));
 
   function onUse(item: LibraryItem) {
     // Using never removes — the count just goes up.
@@ -293,6 +370,15 @@ export default function LibraryScreen() {
                 ? () => onUse(row.item)
                 : undefined
             }
+            action={
+              fillSourceFor(row) !== null
+                ? {
+                    label: 'Make post',
+                    disabled: makeBusyId !== null,
+                    onPress: () => setMakeFrom(row),
+                  }
+                : undefined
+            }
           />
         )}
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 116 }]}
@@ -325,6 +411,20 @@ export default function LibraryScreen() {
           )
         }
         keyboardShouldPersistTaps="handled"
+      />
+
+      <PortSheet
+        visible={makeFrom !== null}
+        title="Make a post from this"
+        subtitle="Pick the type. It fills the next empty slot in this week and opens."
+        options={makeTypeOptions}
+        emptyText="No post types set up yet."
+        busyId={makeBusyId}
+        onClose={() => {
+          if (makeBusyId !== null) return;
+          setMakeFrom(null);
+        }}
+        onPick={(typeId) => void makePost(typeId)}
       />
     </AdminScreen>
   );

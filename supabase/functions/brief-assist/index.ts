@@ -8,6 +8,12 @@
 //   Agent 3 surfaces the nudge, nothing regenerates silently. Responses may
 //   be { kill_reason } instead of content (kill rather than pad).
 //
+// { action: "port_format", brief_id, target_post_type }
+//   Ports a finished post into the other family (video <-> slideshow) and
+//   returns a draft in the same shape ingest-brief returns. Nothing is saved:
+//   the client writes the draft into an empty slot in the target lane, so the
+//   source post is never touched.
+//
 // { action: "derive_segments", brief_id, overlay_labels? }
 //   Derives or re-derives the render manifest for a saved brief through the
 //   sync_brief_segments RPC (transactional; survivors matched by
@@ -27,12 +33,19 @@ import {
 import {
   brandDocBlocks,
   buildFieldSystem,
+  buildPortSystem,
   deriveSegments,
+  generateValidated,
+  isKill,
   loadPostType,
+  normalizeGenerated,
   sortHooks,
+  sourceBriefLines,
   toPostTypeShape,
   type PostTypeRow,
+  type RawGenerated,
   type RegenField,
+  type SourceBrief,
 } from '../_shared/generateBrief.ts';
 import {
   validateBrief,
@@ -41,16 +54,21 @@ import {
 } from '../_shared/validateBrief.ts';
 
 type Body = {
-  action?: 'regenerate_field' | 'derive_segments';
+  action?: 'regenerate_field' | 'derive_segments' | 'port_format';
   // regenerate_field
   field?: RegenField;
   index?: number;
   post_type?: string;
   draft?: Record<string, unknown>;
-  // derive_segments
+  // derive_segments, port_format
   brief_id?: string;
   overlay_labels?: (string | null)[];
+  // port_format
+  target_post_type?: string;
 };
+
+const POST_TYPE_COLUMNS =
+  'id, key, label, family, min_points, max_points, clip_structure, requires_plug, requires_credential, target_words_min, target_words_max';
 
 const REGEN_FIELDS: RegenField[] = [
   'search_phrase',
@@ -75,6 +93,28 @@ function parsePoints(value: unknown): TalkingPoint[] {
     });
   }
   return points;
+}
+
+/** Slide copy lives in overlay_style.boxes; overlay_text is the legacy mirror. */
+function segmentText(overlayText: unknown, overlayStyle: unknown): string | null {
+  if (overlayStyle !== null && typeof overlayStyle === 'object') {
+    const boxes = (overlayStyle as Record<string, unknown>).boxes;
+    if (Array.isArray(boxes)) {
+      const joined = boxes
+        .map((b) =>
+          b !== null && typeof b === 'object'
+            ? String((b as Record<string, unknown>).text ?? '')
+            : '',
+        )
+        .filter((t) => t.trim().length > 0)
+        .join(' ');
+      if (joined.trim()) return joined.trim();
+    }
+  }
+  if (typeof overlayText === 'string' && overlayText.trim()) {
+    return overlayText.trim();
+  }
+  return null;
 }
 
 /** Tolerant read of the editor's current draft state. */
@@ -170,6 +210,125 @@ Deno.serve(async (req) => {
   const body = ((await req.json().catch(() => null)) ?? {}) as Body;
 
   try {
+    if (body.action === 'port_format') {
+      if (!body.brief_id) return jsonResponse({ error: 'brief_id required' }, 400);
+      const target = body.target_post_type?.trim();
+      if (!target) return jsonResponse({ error: 'target_post_type required' }, 400);
+
+      const { data: brief, error } = await admin
+        .from('briefs')
+        .select(
+          `id, title, search_phrase, format, hook, hook_options, talking_points, cta, caption, hashtags, script, post_types (${POST_TYPE_COLUMNS})`,
+        )
+        .eq('id', body.brief_id)
+        .eq('company_id', caller.companyId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!brief) return jsonResponse({ error: 'brief not found' }, 404);
+
+      const targetType = await loadPostType(admin, caller.companyId, target);
+      if (!targetType) {
+        return jsonResponse({ error: `unknown post type "${target}"` }, 400);
+      }
+
+      const { data: segments, error: segmentError } = await admin
+        .from('brief_segments')
+        .select('overlay_text, overlay_style, slot_index')
+        .eq('brief_id', body.brief_id)
+        .eq('company_id', caller.companyId)
+        .order('slot_index');
+      if (segmentError) throw new Error(segmentError.message);
+
+      const sourceType = (brief.post_types ?? null) as PostTypeRow | null;
+      const sourceHookOptions = Array.isArray(brief.hook_options)
+        ? (brief.hook_options as unknown[]).filter(
+            (h): h is string => typeof h === 'string',
+          )
+        : [];
+      const source: SourceBrief = {
+        title: (brief.title as string | null) ?? '',
+        searchPhrase: (brief.search_phrase as string | null) ?? null,
+        format: brief.format === 'photo_carousel' ? 'photo_carousel' : 'video',
+        postTypeLabel: sourceType?.label ?? null,
+        hook: (brief.hook as string | null) ?? sourceHookOptions[0] ?? null,
+        talkingPoints: parsePoints(brief.talking_points).map((p) => ({
+          text: p.text,
+          is_product: p.is_product,
+        })),
+        cta: (brief.cta as string | null) ?? null,
+        caption: (brief.caption as string | null) ?? null,
+        hashtags: Array.isArray(brief.hashtags)
+          ? (brief.hashtags as unknown[]).filter(
+              (h): h is string => typeof h === 'string',
+            )
+          : [],
+        script: (brief.script as string | null) ?? null,
+        overlayTexts: (segments ?? [])
+          .map((s) => segmentText(s.overlay_text, s.overlay_style))
+          .filter((t): t is string => t !== null),
+      };
+      if (source.talkingPoints.length === 0) {
+        return jsonResponse(
+          { error: 'that post has no talking points to port yet' },
+          400,
+        );
+      }
+
+      const brand = await loadBrandContext(admin, caller.companyId);
+      const generationId = crypto.randomUUID();
+      const system = buildPortSystem(
+        targetType,
+        targetType.family,
+        brand.bannedPhrases,
+      );
+      const askLine = `Port this ${source.format === 'photo_carousel' ? 'slideshow' : 'video'} into a ${targetType.label} ${targetType.family === 'photo_carousel' ? 'slideshow' : 'video'}.`;
+
+      const { outcome, warnings } = await generateValidated(
+        admin,
+        caller.companyId,
+        generationId,
+        targetType,
+        async (priorFailures) => {
+          const lines = [...sourceBriefLines(source), '', askLine];
+          if (priorFailures.length) {
+            lines.push(
+              `Your previous draft failed validation. Fix every one of these and return the corrected JSON:\n${priorFailures.map((f) => `- ${f}`).join('\n')}`,
+            );
+          }
+          const raw = await askClaude(
+            system,
+            [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
+            4096,
+          );
+          return normalizeGenerated(
+            parseClaudeJson<RawGenerated>(raw),
+            targetType.family,
+            targetType.key,
+          );
+        },
+        {
+          hashtagBank: brand.hashtagBank,
+          approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+        },
+      );
+      if (isKill(outcome)) {
+        return jsonResponse({
+          kill_reason: outcome.kill_reason,
+          generation_id: generationId,
+          post_type_id: targetType.id,
+        });
+      }
+      return jsonResponse({
+        ...outcome.draft,
+        overlay_labels: outcome.overlayLabels,
+        post_type_id: targetType.id,
+        generation_id: generationId,
+        warnings,
+        example_url: null,
+        example_transcript: null,
+      });
+    }
+
     if (body.action === 'derive_segments') {
       if (!body.brief_id) return jsonResponse({ error: 'brief_id required' }, 400);
       const { data: brief, error } = await admin
@@ -212,7 +371,10 @@ Deno.serve(async (req) => {
 
     if (body.action !== 'regenerate_field') {
       return jsonResponse(
-        { error: 'expected action "regenerate_field" or "derive_segments"' },
+        {
+          error:
+            'expected action "regenerate_field", "derive_segments" or "port_format"',
+        },
         400,
       );
     }

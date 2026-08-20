@@ -128,6 +128,8 @@ export interface LibraryItemCardProps {
   onPress: () => void;
   /** From-creator rows carry a Use button. */
   onUse?: () => void;
+  /** The row's trailing action, when it is not the Use button. */
+  action?: { label: string; onPress: () => void; disabled?: boolean };
   /** Picker rows highlight the choice before Attach. */
   selected?: boolean;
 }
@@ -141,6 +143,7 @@ export function LibraryItemCard({
   model,
   onPress,
   onUse,
+  action,
   selected = false,
 }: LibraryItemCardProps) {
   const showThumb = model.kind === 'reference' || model.kind === 'our_post';
@@ -182,6 +185,16 @@ export function LibraryItemCard({
       {model.kind === 'from_creator' && onUse !== undefined && (
         <Button size="sm" variant="tint" onPress={onUse}>
           Use
+        </Button>
+      )}
+      {action !== undefined && (
+        <Button
+          size="sm"
+          variant="tint"
+          disabled={action.disabled}
+          onPress={action.onPress}
+        >
+          {action.label}
         </Button>
       )}
     </PressableScale>

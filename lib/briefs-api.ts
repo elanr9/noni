@@ -169,7 +169,14 @@ export async function generatePost(params: {
     body,
   });
   if (error) throw error;
-  const raw = data as RawDraftResponse;
+  return toDraftResult(data as RawDraftResponse, params.url ?? '');
+}
+
+/** Shared by every generator: ingest-brief and the format port. */
+function toDraftResult(
+  raw: RawDraftResponse,
+  fallbackExampleUrl: string,
+): GeneratePostResult {
   if (raw.error) throw new Error(raw.error);
   if (raw.kill_reason) {
     return {
@@ -200,10 +207,30 @@ export async function generatePost(params: {
       overlay_labels: raw.overlay_labels ?? [],
       generation_id: raw.generation_id ?? null,
       warnings: raw.warnings ?? [],
-      example_url: raw.example_url ?? params.url ?? '',
+      example_url: raw.example_url ?? fallbackExampleUrl,
       example_transcript: raw.example_transcript ?? null,
     },
   };
+}
+
+/**
+ * Ports a finished post into the other family (video <-> slideshow). The
+ * source post is never touched: the draft comes back for the caller to write
+ * into a different, empty slot.
+ */
+export async function portPost(params: {
+  briefId: string;
+  targetPostTypeKey: string;
+}): Promise<GeneratePostResult> {
+  const { data, error } = await supabase.functions.invoke('brief-assist', {
+    body: {
+      action: 'port_format',
+      brief_id: params.briefId,
+      target_post_type: params.targetPostTypeKey,
+    },
+  });
+  if (error) throw error;
+  return toDraftResult(data as RawDraftResponse, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -894,6 +921,35 @@ export async function listCampaignBriefs(
     .order('created_at', { ascending: true });
   if (error) throw error;
   return (data ?? []) as unknown as CampaignBriefItem[];
+}
+
+/**
+ * The slot a generated post should land in: an untouched row in the target
+ * lane, exact post type first so the week's type split stays honest. Null
+ * when the lane is full, and the caller creates a row instead.
+ */
+export async function findEmptySlot(params: {
+  campaignId: string;
+  family: BriefFormat;
+  postTypeId?: string | null;
+}): Promise<CampaignBriefItem | null> {
+  const items = await listCampaignBriefs(params.campaignId);
+  const open = items.filter((item) => {
+    const type = item.briefs.post_types;
+    const family = (type?.family ?? item.briefs.format) as BriefFormat;
+    return (
+      family === params.family &&
+      briefRowState(item.briefs, type) === 'empty' &&
+      !item.briefs.kill_reason
+    );
+  });
+  if (params.postTypeId) {
+    const exact = open.find(
+      (item) => item.briefs.post_type_id === params.postTypeId,
+    );
+    if (exact) return exact;
+  }
+  return open[0] ?? null;
 }
 
 export async function addBriefToCampaign(params: {

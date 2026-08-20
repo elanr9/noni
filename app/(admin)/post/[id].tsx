@@ -31,6 +31,11 @@ import {
   serializeOverlayBoxes,
 } from '../../../lib/overlay-boxes';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
+import { PortSheet, type PortOption } from '../../../components/admin/editor/PortSheet';
+import {
+  LibraryPickerSheet,
+  type LibraryPick,
+} from '../../../components/admin/LibraryPickerSheet';
 import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
@@ -46,9 +51,11 @@ import {
   assistRegenerateField,
   confirmBriefReview,
   confirmSlideshowReview,
+  briefRowState,
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
+  listCampaignBriefs,
   listCampaigns,
   listNoniLibrary,
   listPostTypes,
@@ -64,6 +71,7 @@ import {
   type BriefReviewEventInput,
   type BriefReviewResult,
   type BriefSegment,
+  type CampaignBriefItem,
   type NoniLibraryGroup,
   type PostType,
   type PostTypeShape,
@@ -71,6 +79,7 @@ import {
   type RegenField,
   type TalkingPoint,
 } from '../../../lib/briefs-api';
+import { ensureSlot, fillPostSlot, type FillSource } from '../../../lib/post-fill';
 import { supabase } from '../../../lib/supabase';
 import { color, motion, radius, type } from '../../../theme/tokens';
 
@@ -210,6 +219,17 @@ export default function PostEditorScreen() {
   /** The brand account shown on the merged caption preview. */
   const [accountName, setAccountName] = useState('');
 
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [weekPosts, setWeekPosts] = useState<CampaignBriefItem[]>([]);
+  /** target: pick the format to port this post into. source: pick the post
+   * this empty slot is built from. */
+  const [portSheet, setPortSheet] = useState<'target' | 'source' | null>(null);
+  const [portBusyId, setPortBusyId] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [filling, setFilling] = useState(false);
+  /** Bumped after a fill so the screen re-reads the row it just wrote. */
+  const [reloadNonce, setReloadNonce] = useState(0);
+
   const currentType = useMemo(
     () => postTypes.find((t) => t.id === postTypeId) ?? null,
     [postTypes, postTypeId],
@@ -329,6 +349,10 @@ export default function PostEditorScreen() {
         // "Week 14" from the campaign's chronological number.
         if (link) {
           if (typeof link.position === 'number') setPostNumber(link.position + 1);
+          setCampaignId(link.campaign_id);
+          void listCampaignBriefs(link.campaign_id)
+            .then(setWeekPosts)
+            .catch(() => undefined);
           void listCampaigns()
             .then((all) => {
               const idx = all.findIndex((c) => c.id === link.campaign_id);
@@ -380,7 +404,7 @@ export default function PostEditorScreen() {
         setLoaded(true);
       }
     })();
-  }, [id, refreshScreenshotUrls]);
+  }, [id, refreshScreenshotUrls, reloadNonce]);
 
   // Auto-draft the caption: landing on the caption step with nothing
   // written generates caption and hashtags from the post, once per open.
@@ -605,6 +629,119 @@ export default function PostEditorScreen() {
       setSaving(false);
     }
   }
+
+  // --- Format port and library fills. A port always writes a different,
+  // empty slot: the post you are looking at is never overwritten. ----------
+
+  const otherFamily: 'video' | 'photo_carousel' =
+    family === 'photo_carousel' ? 'video' : 'photo_carousel';
+
+  /** Ports this finished post into the other format as a new post. */
+  async function portToFormat(targetTypeId: string) {
+    const target = postTypes.find((t) => t.id === targetTypeId);
+    if (!profile || !id || !target) return;
+    const targetFamily =
+      target.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+    setPortBusyId(targetTypeId);
+    try {
+      const slotId = await ensureSlot({
+        companyId: profile.company_id,
+        createdBy: profile.id,
+        campaignId,
+        family: targetFamily,
+        postTypeId: target.id,
+      });
+      const result = await fillPostSlot({
+        briefId: slotId,
+        postTypeId: target.id,
+        postTypeKey: target.key,
+        family: targetFamily,
+        source: { kind: 'port', sourceBriefId: id },
+      });
+      if (result.kind === 'kill') {
+        Alert.alert('Generation refused', result.kill_reason);
+        return;
+      }
+      setPortSheet(null);
+      router.push(`/(admin)/post/${slotId}`);
+    } catch (e) {
+      Alert.alert(
+        'Could not make that version',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setPortBusyId(null);
+    }
+  }
+
+  /** Fills this empty slot: from a finished post, a reference, or an idea. */
+  async function fillThisSlot(source: FillSource, busyKey: string) {
+    if (!id || !currentType) return;
+    setPortBusyId(busyKey);
+    setFilling(true);
+    try {
+      const result = await fillPostSlot({
+        briefId: id,
+        postTypeId: currentType.id,
+        postTypeKey: currentType.key,
+        family,
+        source,
+      });
+      if (result.kind === 'kill') {
+        Alert.alert('Generation refused', result.kill_reason);
+        return;
+      }
+      setPortSheet(null);
+      setLibraryOpen(false);
+      setReloadNonce((n) => n + 1);
+    } catch (e) {
+      Alert.alert(
+        'Could not fill this post',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setPortBusyId(null);
+      setFilling(false);
+    }
+  }
+
+  function onLibraryPick(pick: LibraryPick) {
+    if (pick.kind === 'port') {
+      void fillThisSlot({ kind: 'port', sourceBriefId: pick.briefId }, pick.briefId);
+      return;
+    }
+    if (pick.kind === 'example') {
+      void fillThisSlot({ kind: 'example', url: pick.url }, pick.url);
+      return;
+    }
+    void fillThisSlot({ kind: 'idea', text: pick.text }, pick.text);
+  }
+
+  /** Finished posts in this week on the other side, as port sources. */
+  const portSourceOptions: PortOption[] = weekPosts
+    .filter((item) => {
+      const type = item.briefs.post_types;
+      const itemFamily = type?.family ?? item.briefs.format;
+      const state = briefRowState(item.briefs, type);
+      return (
+        item.brief_id !== id &&
+        itemFamily === otherFamily &&
+        (state === 'filled' || state === 'complete')
+      );
+    })
+    .map((item) => ({
+      id: item.brief_id,
+      label: item.briefs.title || 'Untitled post',
+      sub: item.briefs.post_types?.label ?? undefined,
+    }));
+
+  const portTargetOptions: PortOption[] = postTypes
+    .filter((t) => t.family === otherFamily)
+    .map((t) => ({
+      id: t.id,
+      label: t.label,
+      sub: `${t.min_points} to ${t.max_points} ${otherFamily === 'photo_carousel' ? 'slides' : 'points'}`,
+    }));
 
   // --- AI review. A step, not a background check: on demand, never blocks,
   // never edits anything without an explicit Apply. -------------------------
@@ -1199,6 +1336,29 @@ export default function PostEditorScreen() {
                 <Text style={styles.summaryText}>{mergedCaption()}</Text>
               </View>
             ) : null}
+            <View style={styles.summaryCard}>
+              <SectionLabel>
+                {otherFamily === 'photo_carousel'
+                  ? 'Slideshow version'
+                  : 'Video version'}
+              </SectionLabel>
+              <Text style={styles.summaryHint}>
+                {otherFamily === 'photo_carousel'
+                  ? 'Same idea, rewritten as slides in a new post. This one stays as it is.'
+                  : 'Same idea, rewritten as a spoken video in a new post. This one stays as it is.'}
+              </Text>
+              <Button
+                size="md"
+                variant="outline"
+                block
+                disabled={portBusyId !== null}
+                onPress={() => setPortSheet('target')}
+              >
+                {otherFamily === 'photo_carousel'
+                  ? 'Make a slideshow version'
+                  : 'Make a video version'}
+              </Button>
+            </View>
           </View>
         ) : summaryMode === 'edit' ? (
           <View style={styles.summaryStack}>
@@ -1299,6 +1459,35 @@ export default function PostEditorScreen() {
         {step === 'title' ? (
           <View style={styles.section}>
             <TitleCard value={title} onChange={setTitle} />
+            {points.length === 0 ? (
+              <View style={styles.startFrom}>
+                <SectionLabel>Start from something</SectionLabel>
+                <Text style={styles.summaryHint}>
+                  Build this post out of a reference, a saved idea, or a post
+                  you already made, instead of writing it from scratch.
+                </Text>
+                <Button
+                  size="md"
+                  variant="outline"
+                  block
+                  disabled={filling}
+                  onPress={() => setLibraryOpen(true)}
+                >
+                  {filling ? 'Building the post…' : 'Start from the library'}
+                </Button>
+                <Button
+                  size="md"
+                  variant="ghost"
+                  block
+                  disabled={filling}
+                  onPress={() => setPortSheet('source')}
+                >
+                  {otherFamily === 'photo_carousel'
+                    ? 'Start from a slideshow this week'
+                    : 'Start from a video this week'}
+                </Button>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -1513,6 +1702,56 @@ export default function PostEditorScreen() {
         />
       ) : null}
 
+      <PortSheet
+        visible={portSheet !== null}
+        title={
+          portSheet === 'source'
+            ? otherFamily === 'photo_carousel'
+              ? 'Start from a slideshow'
+              : 'Start from a video'
+            : otherFamily === 'photo_carousel'
+              ? 'Make a slideshow version'
+              : 'Make a video version'
+        }
+        subtitle={
+          portSheet === 'source'
+            ? 'The post you pick is rewritten into this slot. It stays as it is.'
+            : 'Pick the type for the new post. This post stays as it is.'
+        }
+        options={portSheet === 'source' ? portSourceOptions : portTargetOptions}
+        emptyText={
+          portSheet === 'source'
+            ? 'No finished posts on the other side of this week yet.'
+            : 'No post types on the other side yet.'
+        }
+        busyId={portBusyId}
+        onClose={() => {
+          if (portBusyId !== null) return;
+          setPortSheet(null);
+        }}
+        onPick={(optionId) => {
+          if (portSheet === 'source') {
+            void fillThisSlot(
+              { kind: 'port', sourceBriefId: optionId },
+              optionId,
+            );
+            return;
+          }
+          void portToFormat(optionId);
+        }}
+      />
+
+      <LibraryPickerSheet
+        visible={libraryOpen}
+        postTypeId={postTypeId}
+        busy={filling}
+        onClose={() => {
+          if (filling) return;
+          setLibraryOpen(false);
+        }}
+        onPick={onLibraryPick}
+      />
+
       <CameraRollSheet
         visible={shotPickerIndex !== null}
         library={noniLibrary}
@@ -1636,6 +1875,19 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 15 * 1.4,
     color: color.ink,
+  },
+  summaryHint: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 13 * 1.45,
+    color: color.slate500,
+  },
+  startFrom: {
+    gap: 10,
+    padding: 16,
+    marginTop: 6,
+    borderRadius: radius.md,
+    backgroundColor: color.white,
   },
   summaryPlug: {
     marginTop: 4,

@@ -14,10 +14,12 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import type { BrandContext } from './wp8.ts';
 import { legacyBrandLines } from './wp8.ts';
+import { validateBrief } from './validateBrief.ts';
 import type {
   BriefDraftShape,
   PostTypeShape,
   TalkingPoint,
+  ValidationResult,
 } from './validateBrief.ts';
 
 export type PostTypeRow = {
@@ -175,17 +177,20 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
   return lines.join('\n');
 }
 
-export function buildBriefSystem(
+function briefSystemBlocks(
   postType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
   bannedPhrases: string[],
+  preamble: string,
+  portRule: string | null,
 ): string {
   const requiresPlug = postType ? postType.requires_plug : true;
   return [
-    `You write structured UGC content briefs for creators posting on TikTok and Instagram from their own accounts.`,
+    preamble,
     KILL_RULE,
     `Otherwise answer with a single JSON object, no markdown fences, no preamble. Generate the keys IN THIS EXACT ORDER — the order is the method: the claim and search phrase anchor the body, the hooks are written last against the finished body, the caption after the hooks:\n${JSON_CONTRACT}`,
     postTypeBlock(postType, fallbackFormat),
+    portRule,
     `Rules, measured against real high performing posts. Follow the numbers exactly.`,
     plugRule(requiresPlug),
     SEARCH_PHRASE_RULE,
@@ -202,6 +207,89 @@ export function buildBriefSystem(
   ]
     .filter((l): l is string => l !== null)
     .join('\n\n');
+}
+
+export function buildBriefSystem(
+  postType: PostTypeRow | null,
+  fallbackFormat: 'video' | 'photo_carousel',
+  bannedPhrases: string[],
+): string {
+  return briefSystemBlocks(
+    postType,
+    fallbackFormat,
+    bannedPhrases,
+    `You write structured UGC content briefs for creators posting on TikTok and Instagram from their own accounts.`,
+    null,
+  );
+}
+
+const PORT_PREAMBLE = `You port a finished UGC post into a different format for the same brand. The source post is in the message. Keep its idea, angle and substance; rewrite every line so it is native to the target format. This is a port, not a new topic: the ported post covers the same ground as the source and answers the same viewer question.`;
+
+function portRule(
+  targetPostType: PostTypeRow | null,
+  fallbackFormat: 'video' | 'photo_carousel',
+): string {
+  const family = targetPostType ? targetPostType.family : fallbackFormat;
+  if (family === 'photo_carousel') {
+    return `PORTING A VIDEO TO A SLIDESHOW: the source points were spoken, these are read. Each talking point becomes one slide the reader takes in under three seconds, so compress hard and keep the concrete detail, never the filler. Strip every spoken-only phrase ("in this video", "stick around", "let me explain"). The first slide's text is the hook, rewritten to stop a scroll rather than open a monologue. Keep the source's point order and its point count unless the type's limits forbid it.`;
+  }
+  return `PORTING A SLIDESHOW TO A VIDEO: the source slides were read, these are spoken. Each slide becomes a talking point with the substance a creator can actually talk around for a few seconds, not the clipped slide wording. The source's first slide was its hook, so write fresh hook_options against the finished points rather than reusing that line verbatim. Keep the source's point order and its point count unless the type's limits forbid it.`;
+}
+
+export function buildPortSystem(
+  targetPostType: PostTypeRow | null,
+  fallbackFormat: 'video' | 'photo_carousel',
+  bannedPhrases: string[],
+): string {
+  return briefSystemBlocks(
+    targetPostType,
+    fallbackFormat,
+    bannedPhrases,
+    PORT_PREAMBLE,
+    portRule(targetPostType, fallbackFormat),
+  );
+}
+
+/** The finished post a port reads from, flattened for the user message. */
+export type SourceBrief = {
+  title: string;
+  searchPhrase: string | null;
+  format: 'video' | 'photo_carousel';
+  postTypeLabel: string | null;
+  hook: string | null;
+  talkingPoints: Array<{ text: string | null; is_product: boolean }>;
+  cta: string | null;
+  caption: string | null;
+  hashtags: string[];
+  script: string | null;
+  /** On-screen copy per clip or slide, in slot order. */
+  overlayTexts: string[];
+};
+
+export function sourceBriefLines(source: SourceBrief): string[] {
+  const kind = source.format === 'photo_carousel' ? 'slideshow' : 'video';
+  const lines = [
+    `Source post (a finished ${kind}${source.postTypeLabel ? `, type "${source.postTypeLabel}"` : ''}):`,
+    `Title: ${source.title || '(none)'}`,
+    `Search phrase: ${source.searchPhrase ?? '(none)'}`,
+    `Hook: ${source.hook ?? '(none)'}`,
+    `${source.format === 'photo_carousel' ? 'Slides' : 'Talking points'} (${source.talkingPoints.length}):\n${source.talkingPoints
+      .map(
+        (p, i) =>
+          `[${i}]${p.is_product ? ' (product point)' : ''} ${p.text ?? '(empty)'}`,
+      )
+      .join('\n')}`,
+    `Plug sentence (cta): ${source.cta ?? '(none)'}`,
+    `Caption: ${source.caption || '(none)'}`,
+    `Hashtags: ${source.hashtags.join(' ') || '(none)'}`,
+  ];
+  if (source.overlayTexts.length) {
+    lines.push(`On-screen text, in order: ${source.overlayTexts.join(' | ')}`);
+  }
+  if (source.script?.trim()) {
+    lines.push(`Slide copy:\n${source.script.trim()}`);
+  }
+  return lines;
 }
 
 export type RegenField =
@@ -426,6 +514,52 @@ export function normalizeGenerated(
     },
     overlayLabels,
   };
+}
+
+/**
+ * One draft, validated, with a single corrective retry. Every attempt is
+ * logged to brief_validations against the generation_id, which joins to the
+ * brief once the client saves it.
+ */
+export async function generateValidated(
+  admin: SupabaseClient,
+  companyId: string,
+  generationId: string,
+  postType: PostTypeRow | null,
+  draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
+  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[] },
+): Promise<{ outcome: GenOutcome; warnings: string[] }> {
+  const ctx = {
+    ...validationCtx,
+    postType: postType ? toPostTypeShape(postType) : null,
+  };
+  const logAttempt = async (attempt: number, res: ValidationResult) => {
+    const { error } = await admin.from('brief_validations').insert({
+      company_id: companyId,
+      generation_id: generationId,
+      attempt,
+      passed: res.passed,
+      failures: res.failures,
+      warnings: res.warnings,
+    });
+    if (error) console.error('brief_validations insert failed:', error.message);
+  };
+
+  let outcome = await draftOnce([]);
+  if (isKill(outcome)) return { outcome, warnings: [] };
+  let result = validateBrief(outcome.draft, ctx);
+  await logAttempt(1, result);
+  if (!result.passed) {
+    const retry = await draftOnce(result.failures);
+    if (isKill(retry)) return { outcome: retry, warnings: [] };
+    outcome = retry;
+    result = validateBrief(outcome.draft, ctx);
+    await logAttempt(2, result);
+  }
+  const warnings = result.passed
+    ? result.warnings
+    : [...result.failures, ...result.warnings];
+  return { outcome, warnings };
 }
 
 // ---------------------------------------------------------------------------
