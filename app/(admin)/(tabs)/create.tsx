@@ -39,6 +39,7 @@ import {
   listCampaignBriefs,
   listCampaigns,
   publishCampaign,
+  updateCampaignDropDate,
   updateCampaignTargets,
   type Campaign,
   type CampaignBriefItem,
@@ -283,12 +284,20 @@ export default function BriefsScreen() {
     if (!campaign) return;
     setPublishing(true);
     try {
-      const result = await publishCampaign(
-        campaign.id,
-        onlyReady
-          ? { onlyReady: true, startDate: isoDate(new Date()) }
-          : undefined,
-      );
+      const today = isoDate(new Date());
+      // A draft is not tied to its stamped week. When its drop week is
+      // already past, the plan starts today and the drop date moves to
+      // publish day so the label and stats track the real dates.
+      const weekIsPast =
+        campaign.drop_date !== null &&
+        isoDate(addDays(mondayOf(campaign.drop_date), 6)) < today;
+      if (campaign.status === 'draft' && weekIsPast) {
+        await updateCampaignDropDate(campaign.id, today);
+      }
+      const result = await publishCampaign(campaign.id, {
+        ...(onlyReady ? { onlyReady: true } : {}),
+        ...(onlyReady || weekIsPast ? { startDate: today } : {}),
+      });
       Alert.alert(
         result.scheduled ? 'Campaign scheduled' : 'Campaign is live',
         result.scheduled
@@ -304,9 +313,13 @@ export default function BriefsScreen() {
   }
 
   const subtitle =
-    campaign?.drop_date != null
-      ? `Week ${weekNumber} · ${weekRangeLabel(campaign.drop_date)}`
-      : 'A week is one shared pool of posts for the whole roster.';
+    campaign === null
+      ? 'A week is one shared pool of posts for the whole roster.'
+      : campaign.status === 'draft'
+        ? `Week ${weekNumber} · Dates set when you publish`
+        : campaign.drop_date != null
+          ? `Week ${weekNumber} · ${weekRangeLabel(campaign.drop_date)}`
+          : `Week ${weekNumber}`;
 
   const showFooter = campaign !== null && rows.length > 0 && view === 'grid';
 

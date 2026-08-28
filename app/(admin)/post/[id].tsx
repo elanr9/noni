@@ -145,6 +145,8 @@ export default function PostEditorScreen() {
   const [step, setStep] = useState<EditorStep>('title');
   /** Completed posts open as one read-only page; Edit flips it to inputs. */
   const [summaryMode, setSummaryMode] = useState<'view' | 'edit' | null>(null);
+  /** reviewed_at from the row; null means the post never counted as complete. */
+  const [reviewedAt, setReviewedAt] = useState<string | null>(null);
   // Direction-aware step transition: Next slides in from the right,
   // Back from the left, with a fade. Driven by index delta so every
   // setStep caller gets it for free.
@@ -337,6 +339,7 @@ export default function PostEditorScreen() {
         setGenerationId(brief.generation_id);
         setExampleUrl(brief.example_url);
         setKillReason(brief.kill_reason);
+        setReviewedAt(brief.reviewed_at);
         setBaseline(
           deriveSnapshot({
             hook: brief.hook,
@@ -1664,6 +1667,40 @@ export default function PostEditorScreen() {
           )}
         </View>
       </View>
+      ) : null}
+
+      {summaryMode === 'view' && reviewedAt === null ? (
+        <View
+          style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}
+        >
+          <View style={styles.nextButton}>
+            {family === 'photo_carousel' ? (
+              <Button
+                size="lg"
+                variant="primary"
+                block
+                disabled={saving || reviewConfirming}
+                onPress={() => void confirmSlideshow()}
+              >
+                {reviewConfirming ? 'Saving…' : 'Mark complete'}
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                variant="primary"
+                block
+                disabled={reviewRunning}
+                onPress={() => {
+                  setSummaryMode(null);
+                  setStep('review');
+                  void runReview();
+                }}
+              >
+                Run final review
+              </Button>
+            )}
+          </View>
+        </View>
       ) : null}
 
       {overlayIndex !== null ? (

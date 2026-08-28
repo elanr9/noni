@@ -219,8 +219,8 @@ Deno.serve(async (req) => {
 
   // Published before Sunday 8PM EST notifies at Sunday 8PM EST (the cron
   // sweeps notify-scheduled); published after notifies immediately. A
-  // partial publish or a day-planner publish is for starting now, so it
-  // always notifies immediately.
+  // partial publish, a day-planner publish, or any publish with an explicit
+  // start date is for starting now, so it always notifies immediately.
   const { data: notifyAtRaw, error: notifyAtError } = await db.rpc(
     'campaign_notify_at',
     { p_drop_date: campaign.drop_date },
@@ -229,7 +229,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: notifyAtError.message }, 500);
   }
   const notifyAt =
-    body.only_ready || days.length > 0
+    body.only_ready || body.start_date || days.length > 0
       ? new Date().toISOString()
       : String(notifyAtRaw);
 

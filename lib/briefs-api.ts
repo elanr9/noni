@@ -888,6 +888,18 @@ export async function listCampaigns(): Promise<Campaign[]> {
   );
 }
 
+/** Stale drafts publish on real dates: the drop date moves to publish day. */
+export async function updateCampaignDropDate(
+  id: string,
+  dropDate: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ drop_date: dropDate })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 /** Draft-week target edits. Counts only; stamped rows and the split stay. */
 export async function updateCampaignTargets(
   id: string,
@@ -1099,17 +1111,17 @@ export async function listPublishedCampaignDays(
 }
 
 /** Publishes through the deployed publish-campaign function (shuffle + RPC).
- * With onlyReady, only reviewed briefs go out, scheduled from startDate. */
+ * With onlyReady, only reviewed briefs go out. A startDate schedules the
+ * plan from that day and notifies creators immediately. */
 export async function publishCampaign(
   campaignId: string,
-  options?: { onlyReady: boolean; startDate: string },
+  options?: { onlyReady?: boolean; startDate?: string },
 ): Promise<PublishResult> {
   const { data, error } = await supabase.functions.invoke('publish-campaign', {
     body: {
       campaign_id: campaignId,
-      ...(options?.onlyReady
-        ? { only_ready: true, start_date: options.startDate }
-        : {}),
+      ...(options?.onlyReady ? { only_ready: true } : {}),
+      ...(options?.startDate ? { start_date: options.startDate } : {}),
     },
   });
   if (error) throw error;
