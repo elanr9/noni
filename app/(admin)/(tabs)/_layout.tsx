@@ -108,7 +108,6 @@ export default function AdminTabsLayout() {
           tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
         }}
       />
-      <Tabs.Screen name="creators" options={{ title: 'Creators', href: null }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
       <Tabs.Screen name="trends" options={{ title: 'Trends', href: null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', href: null }} />

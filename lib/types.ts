@@ -79,6 +79,9 @@ export type Database = {
           music_approved_by: string | null
           music_marked_by_creator_at: string | null
           post_url: string | null
+          publish_at: string | null
+          publish_claimed_at: string | null
+          publish_error: string | null
           scheduled_date: string
           slot_index: number
           status: string
@@ -99,6 +102,9 @@ export type Database = {
           music_approved_by?: string | null
           music_marked_by_creator_at?: string | null
           post_url?: string | null
+          publish_at?: string | null
+          publish_claimed_at?: string | null
+          publish_error?: string | null
           scheduled_date: string
           slot_index?: number
           status?: string
@@ -119,6 +125,9 @@ export type Database = {
           music_approved_by?: string | null
           music_marked_by_creator_at?: string | null
           post_url?: string | null
+          publish_at?: string | null
+          publish_claimed_at?: string | null
+          publish_error?: string | null
           scheduled_date?: string
           slot_index?: number
           status?: string
@@ -1113,6 +1122,59 @@ export type Database = {
           },
         ]
       }
+      chat_mutes: {
+        Row: {
+          chat_id: string | null
+          company_id: string
+          created_at: string
+          creator_id: string | null
+          profile_id: string
+        }
+        Insert: {
+          chat_id?: string | null
+          company_id: string
+          created_at?: string
+          creator_id?: string | null
+          profile_id: string
+        }
+        Update: {
+          chat_id?: string | null
+          company_id?: string
+          created_at?: string
+          creator_id?: string | null
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_mutes_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "manager_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_mutes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_mutes_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_mutes_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       claims: {
         Row: {
           audience_segment: string | null
@@ -1236,6 +1298,7 @@ export type Database = {
           stripe_account_id: string | null
           stripe_budget_subscription_id: string | null
           stripe_connected: boolean
+          stripe_connected_at: string | null
           stripe_customer_id: string | null
           stripe_payment_method_id: string | null
           stripe_subscription_id: string | null
@@ -1260,6 +1323,7 @@ export type Database = {
           stripe_account_id?: string | null
           stripe_budget_subscription_id?: string | null
           stripe_connected?: boolean
+          stripe_connected_at?: string | null
           stripe_customer_id?: string | null
           stripe_payment_method_id?: string | null
           stripe_subscription_id?: string | null
@@ -1284,6 +1348,7 @@ export type Database = {
           stripe_account_id?: string | null
           stripe_budget_subscription_id?: string | null
           stripe_connected?: boolean
+          stripe_connected_at?: string | null
           stripe_customer_id?: string | null
           stripe_payment_method_id?: string | null
           stripe_subscription_id?: string | null
@@ -2415,6 +2480,39 @@ export type Database = {
           },
         ]
       }
+      manager_chat_members: {
+        Row: {
+          added_at: string
+          chat_id: string
+          profile_id: string
+        }
+        Insert: {
+          added_at?: string
+          chat_id: string
+          profile_id: string
+        }
+        Update: {
+          added_at?: string
+          chat_id?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manager_chat_members_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "manager_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chat_members_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       manager_chat_reads: {
         Row: {
           chat_id: string
@@ -2450,29 +2548,38 @@ export type Database = {
       }
       manager_chats: {
         Row: {
+          all_creators: boolean
           campaign_id: string | null
           company_id: string
           created_at: string
+          created_by: string | null
           id: string
           kind: string
+          name: string | null
           user_a: string | null
           user_b: string | null
         }
         Insert: {
+          all_creators?: boolean
           campaign_id?: string | null
           company_id: string
           created_at?: string
+          created_by?: string | null
           id?: string
           kind: string
+          name?: string | null
           user_a?: string | null
           user_b?: string | null
         }
         Update: {
+          all_creators?: boolean
           campaign_id?: string | null
           company_id?: string
           created_at?: string
+          created_by?: string | null
           id?: string
           kind?: string
+          name?: string | null
           user_a?: string | null
           user_b?: string | null
         }
@@ -2489,6 +2596,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manager_chats_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -2780,6 +2894,49 @@ export type Database = {
           resource_type?: string | null
         }
         Relationships: []
+      }
+      message_reads: {
+        Row: {
+          company_id: string
+          creator_id: string
+          last_read_at: string
+          profile_id: string
+        }
+        Insert: {
+          company_id: string
+          creator_id: string
+          last_read_at?: string
+          profile_id: string
+        }
+        Update: {
+          company_id?: string
+          creator_id?: string
+          last_read_at?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reads_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reads_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -3381,6 +3538,7 @@ export type Database = {
           created_at: string | null
           id: string
           note: string | null
+          notes: Json | null
           segment_id: string | null
           submission_id: string
         }
@@ -3390,6 +3548,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           note?: string | null
+          notes?: Json | null
           segment_id?: string | null
           submission_id: string
         }
@@ -3399,6 +3558,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           note?: string | null
+          notes?: Json | null
           segment_id?: string | null
           submission_id?: string
         }
@@ -4002,8 +4162,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assignment_publish_at: {
+        Args: { p_assignment_id: string }
+        Returns: string
+      }
       brief_snapshot_json: { Args: { p_brief_id: string }; Returns: Json }
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
+      can_access_manager_chat: { Args: { p_chat_id: string }; Returns: boolean }
       can_create: { Args: never; Returns: boolean }
       claim_pending_invite: {
         Args: never
@@ -4116,9 +4281,17 @@ export type Database = {
         Returns: Json
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
+      schedule_assignment_publish: {
+        Args: { p_assignment_id: string }
+        Returns: string
+      }
       seed_company_post_types: {
         Args: { p_company_id: string }
         Returns: undefined
+      }
+      slot_publish_time: {
+        Args: { p_rank: number; p_total: number }
+        Returns: string
       }
       snapshot_ai_brief: {
         Args: { p_brief_id: string; p_source_kind: string }
@@ -4152,6 +4325,7 @@ export type Database = {
         }
         Returns: number
       }
+      stripe_connected_at: { Args: never; Returns: string }
       sync_brief_segments: {
         Args: { p_brief_id: string; p_company_id: string; p_segments: Json }
         Returns: {
@@ -4311,3 +4485,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

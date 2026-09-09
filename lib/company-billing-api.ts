@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase } from "./supabase";
 
 export type CompanyBillingStatus = {
   company_id: string;
@@ -11,12 +11,14 @@ export type CompanyBillingStatus = {
   monthly_budget_cents: number;
   credit_balance_cents: number;
   bank_connected: boolean;
+  /** Stamped once when a payment method first attaches; never moves. */
+  stripe_connected_at: string | null;
   updated_at: string;
 };
 
 export async function getBillingStatus(): Promise<CompanyBillingStatus> {
-  const { data, error } = await supabase.functions.invoke('company-billing', {
-    body: { action: 'status' },
+  const { data, error } = await supabase.functions.invoke("company-billing", {
+    body: { action: "status" },
   });
   if (error) throw error;
   const payload = data as CompanyBillingStatus & { error?: string };
@@ -25,25 +27,25 @@ export async function getBillingStatus(): Promise<CompanyBillingStatus> {
 }
 
 export async function getTopUpUrl(amountCents: number): Promise<string> {
-  const { data, error } = await supabase.functions.invoke('company-billing', {
-    body: { action: 'topup_url', amount_cents: amountCents },
+  const { data, error } = await supabase.functions.invoke("company-billing", {
+    body: { action: "topup_url", amount_cents: amountCents },
   });
   if (error) throw error;
   const payload = data as { url?: string; error?: string };
   if (payload.error) throw new Error(payload.error);
-  if (!payload.url) throw new Error('No top-up URL returned');
+  if (!payload.url) throw new Error("No top-up URL returned");
   return payload.url;
 }
 
 /** Optional saved card / bank for faster checkout. */
 export async function getPaymentMethodSetupUrl(): Promise<string> {
-  const { data, error } = await supabase.functions.invoke('company-billing', {
-    body: { action: 'setup_url' },
+  const { data, error } = await supabase.functions.invoke("company-billing", {
+    body: { action: "setup_url" },
   });
   if (error) throw error;
   const payload = data as { url?: string; error?: string };
   if (payload.error) throw new Error(payload.error);
-  if (!payload.url) throw new Error('No setup URL returned');
+  if (!payload.url) throw new Error("No setup URL returned");
   return payload.url;
 }
 
@@ -52,16 +54,14 @@ export async function getBankSetupUrl(): Promise<string> {
   return getPaymentMethodSetupUrl();
 }
 
-export async function setMonthlyBudget(
-  monthlyBudgetCents: number,
-): Promise<{
+export async function setMonthlyBudget(monthlyBudgetCents: number): Promise<{
   monthly_budget_cents: number;
   credit_balance_cents: number;
   bank_connected: boolean;
   warn: string | null;
 }> {
-  const { data, error } = await supabase.functions.invoke('company-billing', {
-    body: { action: 'set_budget', monthly_budget_cents: monthlyBudgetCents },
+  const { data, error } = await supabase.functions.invoke("company-billing", {
+    body: { action: "set_budget", monthly_budget_cents: monthlyBudgetCents },
   });
   if (error) throw error;
   const payload = data as {
@@ -72,8 +72,8 @@ export async function setMonthlyBudget(
     error?: string;
   };
   if (payload.error) throw new Error(payload.error);
-  if (typeof payload.monthly_budget_cents !== 'number') {
-    throw new Error('Budget update failed');
+  if (typeof payload.monthly_budget_cents !== "number") {
+    throw new Error("Budget update failed");
   }
   return {
     monthly_budget_cents: payload.monthly_budget_cents,
@@ -86,7 +86,11 @@ export async function setMonthlyBudget(
 /** @deprecated Use setMonthlyBudget */
 export async function setWeeklyBudget(
   weeklyBudgetCents: number,
-): Promise<{ weekly_budget_cents: number; bank_connected: boolean; warn: string | null }> {
+): Promise<{
+  weekly_budget_cents: number;
+  bank_connected: boolean;
+  warn: string | null;
+}> {
   const result = await setMonthlyBudget(weeklyBudgetCents * 4);
   return {
     weekly_budget_cents: Math.floor(result.monthly_budget_cents / 4),
@@ -96,13 +100,14 @@ export async function setWeeklyBudget(
 }
 
 /**
- * Day one for money data: when the company's Stripe was connected. Null
- * until then, and analytics hides every dollar surface. Requires the
- * manage_billing permission (the caller falls back on payout history).
+ * Day one for money data: when the company's payment method first attached.
+ * Null until then, and analytics hides every dollar surface. Readable by every
+ * campaign manager of the company, not only those with manage_billing.
  */
 export async function getStripeConnectedAt(): Promise<string | null> {
-  const status = await getBillingStatus();
-  return status.stripe_customer_id !== null ? status.updated_at : null;
+  const { data, error } = await supabase.rpc("stripe_connected_at");
+  if (error) throw error;
+  return typeof data === "string" ? data : null;
 }
 
 export function formatBudgetDollars(cents: number): string {

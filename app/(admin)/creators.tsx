@@ -1,30 +1,35 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, RefreshControl, View, StyleSheet } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from "react";
+import { Alert, RefreshControl, View, StyleSheet } from "react-native";
+import { router, useFocusEffect } from "expo-router";
 
 import {
   CREATOR_CARD_HEIGHT,
   CreatorCard,
-} from '../../../components/admin/creator/CreatorCard';
-import { SortChips } from '../../../components/admin/creator/SortChips';
-import { AdminScreen, PushHeader, SkeletonCard } from '../../../components/admin/shared';
-import { EmptyState } from '../../../components/ui/EmptyState';
-import { useAuth } from '../../../lib/auth';
+} from "../../components/admin/creator/CreatorCard";
+import { SortChips } from "../../components/admin/creator/SortChips";
+import {
+  AdminScreen,
+  PushHeader,
+  SkeletonCard,
+} from "../../components/admin/shared";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { useAuth } from "../../lib/auth";
 import {
   fetchCreatorLeaderboard,
+  listApprovedCreators,
   type CreatorLeaderboardRow,
-} from '../../../lib/admin-api';
-import { formatMetric } from '../../../lib/analytics';
-import { supabase } from '../../../lib/supabase';
-import { formatCents } from '../../../lib/wallet-api';
-import { radiusAdmin } from '../../../theme/tokens';
+} from "../../lib/admin-api";
+import { formatMetric } from "../../lib/analytics";
+import { supabase } from "../../lib/supabase";
+import { formatCents } from "../../lib/wallet-api";
+import { radiusAdmin } from "../../theme/tokens";
 
-type SortKey = 'earnedCents' | 'views' | 'postsCompleted';
+type SortKey = "earnedCents" | "views" | "postsCompleted";
 
 const ALL_SORTS: Array<{ key: SortKey; label: string }> = [
-  { key: 'earnedCents', label: 'Earnings' },
-  { key: 'views', label: 'Views' },
-  { key: 'postsCompleted', label: 'Posts' },
+  { key: "earnedCents", label: "Earnings" },
+  { key: "views", label: "Views" },
+  { key: "postsCompleted", label: "Posts" },
 ];
 
 /** Handle + profile photo live outside the leaderboard query. */
@@ -38,14 +43,14 @@ async function fetchCreatorExtras(
 ): Promise<Map<string, CreatorExtras>> {
   const [{ data: profiles }, { data: accounts }] = await Promise.all([
     supabase
-      .from('profiles')
-      .select('id, avatar_path')
-      .eq('company_id', companyId)
-      .or('role.eq.creator,can_create.eq.true'),
+      .from("profiles")
+      .select("id, avatar_path")
+      .eq("company_id", companyId)
+      .or("role.eq.creator,can_create.eq.true"),
     supabase
-      .from('creator_accounts')
-      .select('creator_id, tiktok_handle, instagram_handle')
-      .eq('company_id', companyId),
+      .from("creator_accounts")
+      .select("creator_id, tiktok_handle, instagram_handle")
+      .eq("company_id", companyId),
   ]);
 
   const avatarPaths = (profiles ?? [])
@@ -54,7 +59,7 @@ async function fetchCreatorExtras(
   const signedByPath = new Map<string, string>();
   if (avatarPaths.length > 0) {
     const { data: signed } = await supabase.storage
-      .from('avatars')
+      .from("avatars")
       .createSignedUrls(avatarPaths, 3600);
     for (const entry of signed ?? []) {
       if (entry.path !== null && entry.signedUrl) {
@@ -74,7 +79,9 @@ async function fetchCreatorExtras(
     extras.set(p.id, {
       handle: handleByCreator.get(p.id) ?? null,
       avatarUri:
-        p.avatar_path !== null ? (signedByPath.get(p.avatar_path) ?? null) : null,
+        p.avatar_path !== null
+          ? (signedByPath.get(p.avatar_path) ?? null)
+          : null,
     });
   }
   return extras;
@@ -84,20 +91,26 @@ export default function CreatorsScreen() {
   const { profile, managerAccess, refreshManagerAccess } = useAuth();
   const [rows, setRows] = useState<CreatorLeaderboardRow[]>([]);
   const [extras, setExtras] = useState<Map<string, CreatorExtras>>(new Map());
+  const [approvedIds, setApprovedIds] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('views');
+  const [sortKey, setSortKey] = useState<SortKey>("views");
 
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      const [next] = await Promise.all([
+      const [next, approved] = await Promise.all([
         fetchCreatorLeaderboard(profile.company_id),
+        listApprovedCreators(profile.company_id),
         refreshManagerAccess(),
       ]);
       setRows(next);
+      setApprovedIds(new Set(approved.map((c) => c.id)));
     } catch (e) {
-      Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
+      Alert.alert(
+        "Could not load",
+        e instanceof Error ? e.message : "Try again",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -116,13 +129,19 @@ export default function CreatorsScreen() {
 
   const sorts = managerAccess.viewFinancials
     ? ALL_SORTS
-    : ALL_SORTS.filter((s) => s.key !== 'earnedCents');
+    : ALL_SORTS.filter((s) => s.key !== "earnedCents");
   const activeSort: SortKey =
-    sortKey === 'earnedCents' && !managerAccess.viewFinancials ? 'views' : sortKey;
+    sortKey === "earnedCents" && !managerAccess.viewFinancials
+      ? "views"
+      : sortKey;
 
+  // Only creators whose account passed review; the rest sit in the Review queue.
   const sorted = useMemo(
-    () => [...rows].sort((a, b) => b[activeSort] - a[activeSort]),
-    [rows, activeSort],
+    () =>
+      rows
+        .filter((r) => approvedIds?.has(r.creatorId) ?? false)
+        .sort((a, b) => b[activeSort] - a[activeSort]),
+    [rows, approvedIds, activeSort],
   );
 
   return (
@@ -137,14 +156,24 @@ export default function CreatorsScreen() {
         />
       }
     >
-      <PushHeader title="Creators" onBack={() => router.back()} />
+      <PushHeader
+        title="Creators"
+        subtitle={loading ? undefined : `${sorted.length} approved`}
+        onBack={() => router.back()}
+      />
 
-      <SortChips options={sorts} value={activeSort} onChange={setSortKey} />
+      {!loading && sorted.length > 0 && (
+        <SortChips options={sorts} value={activeSort} onChange={setSortKey} />
+      )}
 
       <View style={styles.list}>
         {loading ? (
           Array.from({ length: 4 }, (_, i) => (
-            <SkeletonCard key={i} height={CREATOR_CARD_HEIGHT} radius={radiusAdmin.lg} />
+            <SkeletonCard
+              key={i}
+              height={CREATOR_CARD_HEIGHT}
+              radius={radiusAdmin.lg}
+            />
           ))
         ) : sorted.length === 0 ? (
           <EmptyState
@@ -152,10 +181,10 @@ export default function CreatorsScreen() {
             title="No creators yet"
             body={
               managerAccess.inviteCreators
-                ? 'Invite creators from Settings and they show up here once they join.'
-                : 'Creators show up here once they join.'
+                ? "Invite from Settings. They upload warm-up proof, you approve, then briefs start landing."
+                : "Creators show up here once they join. They upload warm-up proof, you approve, then briefs start landing."
             }
-            compact
+            style={styles.empty}
           />
         ) : (
           sorted.map((c) => {
@@ -175,7 +204,7 @@ export default function CreatorsScreen() {
                 views={formatMetric(c.views)}
                 onPress={() =>
                   router.push({
-                    pathname: '/(admin)/creator/[id]',
+                    pathname: "/(admin)/creator/[id]",
                     params: { id: c.creatorId },
                   })
                 }
@@ -192,5 +221,8 @@ const styles = StyleSheet.create({
   list: {
     marginTop: 12,
     gap: 10,
+  },
+  empty: {
+    marginTop: 40,
   },
 });

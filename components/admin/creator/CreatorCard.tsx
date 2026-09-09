@@ -1,9 +1,16 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from "react-native";
 
-import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
-import { CreatorAvatar } from '../shared';
-import { PressableScale } from '../../ui/PressableScale';
-import { StatBlock } from './StatBlock';
+import {
+  borderWidth,
+  color,
+  radiusAdmin,
+  shadow,
+  type,
+} from "../../../theme/tokens";
+import { CreatorAvatar } from "../shared";
+import { Icon } from "../../ui/Icon";
+import { PressableScale } from "../../ui/PressableScale";
+import { StatBlock } from "./StatBlock";
 
 export interface CreatorCardProps {
   name: string;
@@ -43,12 +50,15 @@ export function CreatorCard({
             {name}
           </Text>
           <Text style={styles.handle} numberOfLines={1}>
-            {handle !== null ? `@${handle}` : 'No handle yet'}
+            {handle !== null ? `@${handle}` : "No handle yet"}
           </Text>
         </View>
+        <Icon name="chevron-right" size={18} color={color.slate300} />
       </View>
       <View style={styles.stats}>
-        {earned !== null ? <StatBlock label="Earned" value={earned} /> : null}
+        {earned !== null ? (
+          <StatBlock label="Earned" value={earned} tone="green" />
+        ) : null}
         <StatBlock label="Posts" value={posts} />
         <StatBlock label="Views" value={views} />
       </View>
@@ -56,12 +66,12 @@ export function CreatorCard({
   );
 }
 
-/** Fixed card height so the roster scrolls as one rhythm. */
-export const CREATOR_CARD_HEIGHT = 132;
+/** Skeleton height; the card itself sizes to its content so stats never clip. */
+export const CREATOR_CARD_HEIGHT = 136;
 
 const styles = StyleSheet.create({
   card: {
-    height: CREATOR_CARD_HEIGHT,
+    minHeight: CREATOR_CARD_HEIGHT,
     backgroundColor: color.white,
     borderRadius: radiusAdmin.lg,
     borderWidth: borderWidth.hair,
@@ -70,8 +80,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   head: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   names: {
@@ -80,17 +90,17 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: type.size.body,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: type.tracking.title,
     color: color.ink,
   },
   handle: {
     fontSize: type.size.label,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   stats: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
 });

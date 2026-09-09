@@ -129,6 +129,8 @@ export async function reviewAssignment(params: {
   reviewerId: string;
   action: 'approved' | 'changes_requested';
   note: string | null;
+  /** Structured send-back notes; `note` stays the flat text for legacy readers. */
+  notes?: { label: string; text: string }[] | null;
 }): Promise<Assignment> {
   const { assignment, submissionId, reviewerId, action, note } = params;
 
@@ -141,30 +143,22 @@ export async function reviewAssignment(params: {
     author_id: reviewerId,
     action,
     note,
+    notes: params.notes ?? null,
   });
   if (eventError) throw eventError;
 
   const updated = await transitionAssignment(assignment.id, assignment.status, action);
 
+  if (action === 'approved') {
+    const { error: scheduleError } = await supabase.rpc('schedule_assignment_publish', {
+      p_assignment_id: assignment.id,
+    });
+    if (scheduleError) throw scheduleError;
+  }
+
   void supabase.functions.invoke('notify', {
     body: { assignment_id: assignment.id, event: action },
   });
-
-  if (action === 'approved') {
-    const { data: postResult, error: postError } =
-      await supabase.functions.invoke('post-approved', {
-        body: { assignment_id: assignment.id },
-      });
-    if (postError) throw postError;
-    const errMsg = (postResult as { error?: string } | null)?.error;
-    if (errMsg) throw new Error(errMsg);
-
-    // The post is through Upload-Post: tell the creator, with deep links to
-    // both platforms resolved server-side by notify.
-    void supabase.functions.invoke('notify', {
-      body: { assignment_id: assignment.id, event: 'post_live' },
-    });
-  }
 
   return updated;
 }
@@ -414,6 +408,22 @@ export async function listCreators(companyId: string): Promise<Profile[]> {
   if (error) throw error;
   // Rows are filtered to this company, so company_id is never null here.
   return (data ?? []) as Profile[];
+}
+
+export type ApprovedCreator = { id: string; name: string };
+
+/** Creators whose account passed review, alphabetical. Drives the Analytics creators pill and the Creators list meta. */
+export async function listApprovedCreators(companyId: string): Promise<ApprovedCreator[]> {
+  const { data, error } = await supabase
+    .from('creator_accounts')
+    .select('creator_id, profiles:creator_id ( full_name )')
+    .eq('company_id', companyId)
+    .eq('status', 'approved');
+  if (error) throw error;
+  type Row = { creator_id: string; profiles: { full_name: string | null } | null };
+  return ((data ?? []) as Row[])
+    .map((r) => ({ id: r.creator_id, name: r.profiles?.full_name?.trim() || 'Creator' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function updateTask(params: {
@@ -1467,6 +1477,10 @@ export async function requestMusicChanges(params: {
     .eq('company_id', params.companyId)
     .eq('id', params.assignmentId);
   if (error) throw error;
+
+  void supabase.functions.invoke('notify', {
+    body: { assignment_id: params.assignmentId, event: 'music_changes' },
+  });
 
   const parts = [...params.reasons];
   const note = params.note?.trim();

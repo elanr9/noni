@@ -1,18 +1,34 @@
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 
-import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { color, radiusAdmin, type } from "../../../theme/tokens";
 
 export interface StatBlockProps {
   label: string;
   value: string;
+  /** Money reads green everywhere in the admin app. */
+  tone?: "ink" | "green";
   style?: StyleProp<ViewStyle>;
 }
 
 /** Admin handoff §10 — one stat on an off-white inner block. */
-export function StatBlock({ label, value, style }: StatBlockProps) {
+export function StatBlock({
+  label,
+  value,
+  tone = "ink",
+  style,
+}: StatBlockProps) {
   return (
     <View style={[styles.block, style]}>
-      <Text style={styles.value} numberOfLines={1}>
+      <Text
+        style={[styles.value, tone === "green" && styles.valueGreen]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
       <Text style={styles.label} numberOfLines={1}>
@@ -33,15 +49,18 @@ const styles = StyleSheet.create({
   },
   value: {
     fontSize: type.size.body,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: type.tracking.title,
     color: color.ink,
   },
+  valueGreen: {
+    color: color.green,
+  },
   label: {
     fontSize: type.size.micro,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.slate400,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: type.tracking.label,
   },
 });

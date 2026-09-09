@@ -26,6 +26,7 @@ type BillingRow = {
   weekly_budget_cents: number;
   monthly_budget_cents: number;
   credit_balance_cents: number;
+  stripe_connected_at: string | null;
   updated_at: string;
 };
 
@@ -127,6 +128,7 @@ Deno.serve(async (req) => {
         monthly_budget_cents: billing.monthly_budget_cents,
         credit_balance_cents: billing.credit_balance_cents,
         bank_connected: bankConnected,
+        stripe_connected_at: billing.stripe_connected_at ?? null,
         updated_at: billing.updated_at,
       });
     }

@@ -3,20 +3,27 @@
 // Money exists only from the day the admin connected the company's Stripe:
 // views and posts are platform data and are always there; anything in
 // dollars starts on the connect day and earlier days simply have no money.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Animated,
   Linking,
   Modal,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
-} from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+} from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 
 import {
   AdminHeader,
@@ -27,11 +34,16 @@ import {
   SectionLabel,
   SkeletonCard,
   Thumb,
-} from '../../../components/admin/shared';
-import { Button } from '../../../components/ui/Button';
-import { Icon } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import type { ContentFormat } from '../../../lib/admin-review-types';
+} from "../../../components/admin/shared";
+import { CreatorsPill } from "../../../components/admin/insights/CreatorsPill";
+import { Button } from "../../../components/ui/Button";
+import { Icon } from "../../../components/ui/Icon";
+import { PressableScale } from "../../../components/ui/PressableScale";
+import {
+  listApprovedCreators,
+  type ApprovedCreator,
+} from "../../../lib/admin-api";
+import type { ContentFormat } from "../../../lib/admin-review-types";
 import {
   ANALYTICS_RANGES,
   buildMoneyGate,
@@ -46,21 +58,32 @@ import {
   type ChartSeries,
   type CompanyAnalytics,
   type MoneyGate,
-} from '../../../lib/analytics-api';
-import { formatMetric } from '../../../lib/analytics';
-import { useAuth } from '../../../lib/auth';
-import { getStripeConnectedAt } from '../../../lib/company-billing-api';
-import { borderWidth, color, motion, shadow, type } from '../../../theme/tokens';
+} from "../../../lib/analytics-api";
+import { formatMetric } from "../../../lib/analytics";
+import { useAuth } from "../../../lib/auth";
+import { getStripeConnectedAt } from "../../../lib/company-billing-api";
+import {
+  borderWidth,
+  color,
+  motion,
+  shadow,
+  type,
+} from "../../../theme/tokens";
 
-const SORTS = ['Views over time', 'Top creators', 'Top posts', 'Formats'] as const;
+const SORTS = [
+  "Views over time",
+  "Top creators",
+  "Top posts",
+  "Formats",
+] as const;
 type SortKey = (typeof SORTS)[number];
 
-const ALL_FORMATS = 'All formats';
-const ALL_CREATORS = 'All creators';
-const FORMAT_LABELS = ['Reel', 'Slideshow'] as const;
+const ALL_FORMATS = "All formats";
+const ALL_CREATORS = "All creators";
+const FORMAT_LABELS = ["Reel", "Slideshow"] as const;
 
 function formatLabel(format: ContentFormat): string {
-  return format === 'video' ? 'Reel' : 'Slideshow';
+  return format === "video" ? "Reel" : "Slideshow";
 }
 
 // ————— Anchored menu pill —————
@@ -77,8 +100,12 @@ function MenuPill({
   active?: boolean;
   sections: MenuSection[];
 }) {
-  const { width: winW } = useWindowDimensions();
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  const { width: winW, height: winH } = useWindowDimensions();
+  const [anchor, setAnchor] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+  } | null>(null);
   const ref = useRef<View>(null);
   const appear = useRef(new Animated.Value(0)).current;
 
@@ -95,10 +122,14 @@ function MenuPill({
 
   function open() {
     ref.current?.measureInWindow((x, y, w, h) => {
-      setAnchor({
-        top: y + h + 6,
-        left: Math.max(12, Math.min(x, winW - 200)),
-      });
+      const top = y + h + 6;
+      // Pills on the right half open toward the left so the panel never
+      // runs off the screen edge.
+      if (x + w / 2 > winW / 2) {
+        setAnchor({ top, right: Math.max(12, winW - (x + w)) });
+      } else {
+        setAnchor({ top, left: Math.max(12, x) });
+      }
     });
   }
 
@@ -115,7 +146,9 @@ function MenuPill({
             active && styles.menuPillActive,
           ]}
         >
-          <Text style={[styles.menuPillText, active && styles.menuPillTextActive]}>
+          <Text
+            style={[styles.menuPillText, active && styles.menuPillTextActive]}
+          >
             {label}
           </Text>
           <Icon
@@ -146,7 +179,9 @@ function MenuPill({
               {
                 top: anchor.top,
                 left: anchor.left,
+                right: anchor.right,
                 maxWidth: winW - 24,
+                maxHeight: Math.max(160, winH - anchor.top - 24),
                 opacity: appear,
                 transform: [
                   {
@@ -165,29 +200,33 @@ function MenuPill({
               },
             ]}
           >
-            {sections.map((section, si) => (
-              <View key={si} style={si > 0 && styles.menuSectionDivider}>
-                {section.header !== undefined && (
-                  <SectionLabel style={styles.menuSectionHeader}>
-                    {section.header}
-                  </SectionLabel>
-                )}
-                {section.items.map((item) => (
-                  <Pressable
-                    key={item.label}
-                    accessibilityRole="button"
-                    onPress={() => {
-                      setAnchor(null);
-                      item.onPick();
-                    }}
-                    style={styles.menuItem}
-                  >
-                    <Text style={styles.menuItemLabel}>{item.label}</Text>
-                    {item.on && <Icon name="check" size={13} color={color.blue700} />}
-                  </Pressable>
-                ))}
-              </View>
-            ))}
+            <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
+              {sections.map((section, si) => (
+                <View key={si} style={si > 0 && styles.menuSectionDivider}>
+                  {section.header !== undefined && (
+                    <SectionLabel style={styles.menuSectionHeader}>
+                      {section.header}
+                    </SectionLabel>
+                  )}
+                  {section.items.map((item, ii) => (
+                    <Pressable
+                      key={`${si}-${ii}`}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setAnchor(null);
+                        item.onPick();
+                      }}
+                      style={styles.menuItem}
+                    >
+                      <Text style={styles.menuItemLabel}>{item.label}</Text>
+                      {item.on && (
+                        <Icon name="check" size={13} color={color.blue700} />
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
           </Animated.View>
         )}
       </Modal>
@@ -211,8 +250,10 @@ function AreaChart({ series }: { series: ChartSeries }) {
     CHART_PAD.t + ih * (1 - v / max),
   ]);
   const line = pts
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`)
-    .join(' ');
+    .map(
+      (p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`,
+    )
+    .join(" ");
   const last = pts[pts.length - 1];
 
   return (
@@ -235,7 +276,7 @@ function AreaChart({ series }: { series: ChartSeries }) {
             x={CHART_PAD.l - 7}
             y={CHART_PAD.t + ih * f + 4}
             textAnchor="end"
-            fontSize={11}
+            fontSize={10}
             fontWeight="600"
             fill={color.slate400}
           >
@@ -268,13 +309,18 @@ function AreaChart({ series }: { series: ChartSeries }) {
             key={`${w}${i}`}
             x={
               CHART_PAD.l +
-              (iw * (series.labels.length > 1 ? i / (series.labels.length - 1) : 0))
+              iw *
+                (series.labels.length > 1 ? i / (series.labels.length - 1) : 0)
             }
             y={CHART_H - 6}
             textAnchor={
-              i === 0 ? 'start' : i === series.labels.length - 1 ? 'end' : 'middle'
+              i === 0
+                ? "start"
+                : i === series.labels.length - 1
+                  ? "end"
+                  : "middle"
             }
-            fontSize={11}
+            fontSize={10}
             fontWeight="600"
             fill={color.slate400}
           >
@@ -302,7 +348,11 @@ function RankRow({
   onOpen: () => void;
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onOpen} style={styles.rankRow}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onOpen}
+      style={styles.rankRow}
+    >
       <Text style={[styles.rankNum, rank === 1 && { color: color.blue700 }]}>
         {`#${rank}`}
       </Text>
@@ -316,7 +366,10 @@ function RankRow({
         </View>
         <View style={styles.rankTrack}>
           <View
-            style={[styles.rankFill, { width: `${Math.round((views / max) * 100)}%` }]}
+            style={[
+              styles.rankFill,
+              { width: `${Math.round((views / max) * 100)}%` },
+            ]}
           />
         </View>
       </View>
@@ -357,7 +410,9 @@ function PostRow({
       <View style={styles.postRowRight}>
         <Text style={styles.postRowViews}>{formatMetric(post.views)}</Text>
         {money && (
-          <Text style={styles.postRowEarned}>{formatMoney(post.earnedCents)}</Text>
+          <Text style={styles.postRowEarned}>
+            {formatMoney(post.earnedCents)}
+          </Text>
         )}
       </View>
       <Icon name="chevron-right" size={15} color={color.slate300} />
@@ -373,13 +428,13 @@ function PlatformCol({
   stats,
 }: {
   name: string;
-  icon: 'music-2' | 'at-sign';
+  icon: "music-2" | "at-sign";
   stats: { views: number; likes: number; saves: number };
 }) {
   const rows: Array<[string, string]> = [
-    ['Views', formatMetric(stats.views)],
-    ['Likes', formatMetric(stats.likes)],
-    ['Saves', formatMetric(stats.saves)],
+    ["Views", formatMetric(stats.views)],
+    ["Likes", formatMetric(stats.likes)],
+    ["Saves", formatMetric(stats.saves)],
   ];
   return (
     <View style={styles.platformCol}>
@@ -410,13 +465,13 @@ function PostDetail({
 }) {
   const money = showFinancials && moneyOn(gate, post.day);
   const cells: Array<[string, string]> = [
-    ['Total views', formatMetric(post.views)],
+    ["Total views", formatMetric(post.views)],
     ...(showFinancials
-      ? ([['Earned', money ? formatMoney(post.earnedCents) : 'Not tracked']] as Array<
-          [string, string]
-        >)
+      ? ([
+          ["Earned", money ? formatMoney(post.earnedCents) : "Not tracked"],
+        ] as Array<[string, string]>)
       : []),
-    ['Posted', shortDayLabel(post.day)],
+    ["Posted", shortDayLabel(post.day)],
   ];
   return (
     <View>
@@ -503,21 +558,21 @@ function DayDetail({
         <Text style={styles.dayTitle}>{shortDayLabel(day.day)}</Text>
         <Text numberOfLines={1} style={styles.daySummary}>
           <Text style={styles.daySummaryStrong}>{formatMetric(day.views)}</Text>
-          {' views'}
+          {" views"}
           {showSignups && (
             <>
-              {' · '}
+              {" · "}
               <Text style={styles.daySummaryStrong}>{day.signups}</Text>
-              {' sign-ups'}
+              {" sign-ups"}
             </>
           )}
           {money && (
             <>
-              {' · '}
+              {" · "}
               <Text style={styles.daySummaryStrong}>
                 {formatMoney(day.salesCents)}
               </Text>
-              {' sales'}
+              {" sales"}
             </>
           )}
         </Text>
@@ -534,7 +589,7 @@ function DayDetail({
 
       {showFinancials && gate.connectedDay !== null && !money && (
         <Text style={styles.dayNoMoney}>
-          {`No money data for this day. Stripe was connected ${gate.sinceLabel ?? ''}.`}
+          {`No money data for this day. Stripe was connected ${gate.sinceLabel ?? ""}.`}
         </Text>
       )}
 
@@ -584,7 +639,7 @@ function MonthCal({
   const byDay = new Map<string, AnalyticsDay>();
   for (const d of days) byDay.set(d.day, d);
   const keyOf = (d: number) =>
-    `${year}-${`${month + 1}`.padStart(2, '0')}-${`${d}`.padStart(2, '0')}`;
+    `${year}-${`${month + 1}`.padStart(2, "0")}-${`${d}`.padStart(2, "0")}`;
 
   const cells: Array<number | null> = [
     ...Array.from({ length: offset }, () => null),
@@ -594,7 +649,7 @@ function MonthCal({
   return (
     <View>
       <View style={styles.calGrid}>
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <View key={`${d}${i}`} style={styles.calCellWrap}>
             <Text style={styles.calWeekday}>{d}</Text>
           </View>
@@ -602,7 +657,8 @@ function MonthCal({
       </View>
       <View style={styles.calGrid}>
         {cells.map((d, i) => {
-          if (d === null) return <View key={`e${i}`} style={styles.calCellWrap} />;
+          if (d === null)
+            return <View key={`e${i}`} style={styles.calCellWrap} />;
           const key = keyOf(d);
           const data = byDay.get(key);
           const posted = data !== undefined && data.postIds.length > 0;
@@ -643,9 +699,9 @@ function MonthCal({
       <Text numberOfLines={1} style={styles.calFoot}>
         {showFinancials
           ? gate.connectedDay !== null
-            ? `$ = sales, tracked since ${gate.sinceLabel ?? ''} · dot = posts`
-            : '$ appears once Stripe is connected · dot = posts'
-          : 'dot = posts'}
+            ? `$ = sales, tracked since ${gate.sinceLabel ?? ""} · dot = posts`
+            : "$ appears once Stripe is connected · dot = posts"
+          : "dot = posts"}
       </Text>
     </View>
   );
@@ -656,12 +712,18 @@ function MonthCal({
 export default function AnalyticsScreen() {
   const { profile, managerAccess, refreshManagerAccess } = useAuth();
   const [data, setData] = useState<CompanyAnalytics | null>(null);
-  const [gate, setGate] = useState<MoneyGate>({ connectedDay: null, sinceLabel: null });
+  const [gate, setGate] = useState<MoneyGate>({
+    connectedDay: null,
+    sinceLabel: null,
+  });
+  const [approvedCreators, setApprovedCreators] = useState<ApprovedCreator[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [mode, setMode] = useState<0 | 1>(0);
-  const [range, setRange] = useState<AnalyticsRange>('Last 7 days');
-  const [sortBy, setSortBy] = useState<SortKey>('Views over time');
+  const [range, setRange] = useState<AnalyticsRange>("Last 7 days");
+  const [sortBy, setSortBy] = useState<SortKey>("Views over time");
   const [formatF, setFormatF] = useState<string>(ALL_FORMATS);
   const [creatorF, setCreatorF] = useState<string>(ALL_CREATORS);
   const [day, setDay] = useState<string | null>(null);
@@ -670,15 +732,19 @@ export default function AnalyticsScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      const [analytics, connectedAt] = await Promise.all([
+      const [analytics, connectedAt, approved] = await Promise.all([
         fetchCompanyAnalytics(profile.company_id),
         // Managers without the billing permission fall back on the first
         // completed payout: money can only exist after Stripe connected.
         getStripeConnectedAt().catch(() => null),
-        refreshManagerAccess(),
+        listApprovedCreators(profile.company_id).catch(
+          (): ApprovedCreator[] => [],
+        ),
+        refreshManagerAccess().catch(() => undefined),
       ]);
       setData(analytics);
       setGate(buildMoneyGate(connectedAt, analytics.payouts[0]?.day));
+      setApprovedCreators(approved);
     } catch {
       // Pull to refresh retries; the skeleton keeps the surface calm.
     } finally {
@@ -704,14 +770,19 @@ export default function AnalyticsScreen() {
     const map = new Map<string, { id: string; name: string; views: number }>();
     for (const p of posts) {
       if (p.creatorId === null) continue;
-      const entry = map.get(p.creatorId) ?? { id: p.creatorId, name: p.creatorName, views: 0 };
+      const entry = map.get(p.creatorId) ?? {
+        id: p.creatorId,
+        name: p.creatorName,
+        views: 0,
+      };
       entry.views += p.views;
       map.set(p.creatorId, entry);
     }
     return [...map.values()].sort((a, b) => b.views - a.views);
   })();
 
-  const nF = (formatF !== ALL_FORMATS ? 1 : 0) + (creatorF !== ALL_CREATORS ? 1 : 0);
+  const nF =
+    (formatF !== ALL_FORMATS ? 1 : 0) + (creatorF !== ALL_CREATORS ? 1 : 0);
   const byFormat = (p: AnalyticsPost) =>
     formatF === ALL_FORMATS || formatLabel(p.format) === formatF;
   const byCreator = (p: AnalyticsPost) =>
@@ -735,13 +806,14 @@ export default function AnalyticsScreen() {
     (k) => formatF === ALL_FORMATS || k === formatF,
   ).map((k) => ({
     label: k,
-    count: posts.filter((p) => formatLabel(p.format) === k && byCreator(p)).length,
+    count: posts.filter((p) => formatLabel(p.format) === k && byCreator(p))
+      .length,
   }));
   const maxFmt = Math.max(...fmtEntries.map((f) => f.count), 1);
 
   const cut =
-    (formatF !== ALL_FORMATS ? ` · ${formatF}s` : '') +
-    (crObj ? ` · ${crObj.name.split(' ')[0]}` : '');
+    (formatF !== ALL_FORMATS ? ` · ${formatF}s` : "") +
+    (crObj ? ` · ${crObj.name.split(" ")[0]}` : "");
 
   const chart = buildViewsSeries(filtered, range);
 
@@ -755,34 +827,38 @@ export default function AnalyticsScreen() {
   const stats: Array<[string, string, string]> = data
     ? [
         [
-          'Views',
+          "Views",
           formatMetric(data.totals.views),
           data.totals.viewsDeltaPct !== null
-            ? `${data.totals.viewsDeltaPct >= 0 ? '+' : ''}${data.totals.viewsDeltaPct}%`
-            : '',
+            ? `${data.totals.viewsDeltaPct >= 0 ? "+" : ""}${data.totals.viewsDeltaPct}%`
+            : "",
         ],
         [
-          'Posts',
+          "Posts",
           `${data.totals.posts}`,
-          data.totals.postsThisWeek > 0 ? `+${data.totals.postsThisWeek} wk` : '',
+          data.totals.postsThisWeek > 0
+            ? `+${data.totals.postsThisWeek} wk`
+            : "",
         ],
         ...(showSignups
           ? ([
               [
-                'Sign-ups',
-                data.totals.signups.toLocaleString('en-US'),
+                "Sign-ups",
+                data.totals.signups.toLocaleString("en-US"),
                 data.totals.signupsDeltaPct !== null
-                  ? `${data.totals.signupsDeltaPct >= 0 ? '+' : ''}${data.totals.signupsDeltaPct}%`
-                  : '',
+                  ? `${data.totals.signupsDeltaPct >= 0 ? "+" : ""}${data.totals.signupsDeltaPct}%`
+                  : "",
               ],
             ] as Array<[string, string, string]>)
           : []),
         ...(showFinancials
           ? ([
               [
-                'Paid out',
-                gate.connectedDay !== null ? formatMoney(paidOutCents) : 'Not tracked',
-                gate.sinceLabel !== null ? `since ${gate.sinceLabel}` : '',
+                "Paid out",
+                gate.connectedDay !== null
+                  ? formatMoney(paidOutCents)
+                  : "Not tracked",
+                gate.sinceLabel !== null ? `since ${gate.sinceLabel}` : "",
               ],
             ] as Array<[string, string, string]>)
           : []),
@@ -794,7 +870,7 @@ export default function AnalyticsScreen() {
   const dayPosts = day !== null ? posts.filter((p) => p.day === day) : [];
 
   let graphBody: ReactNode = null;
-  if (sortBy === 'Views over time') {
+  if (sortBy === "Views over time") {
     graphBody = (
       <>
         <SectionLabel style={styles.chartLabel}>
@@ -803,7 +879,7 @@ export default function AnalyticsScreen() {
         <AreaChart series={chart} />
       </>
     );
-  } else if (sortBy === 'Top creators') {
+  } else if (sortBy === "Top creators") {
     graphBody = (
       <>
         <SectionLabel>{`Top creators${cut}`}</SectionLabel>
@@ -819,7 +895,7 @@ export default function AnalyticsScreen() {
         ))}
       </>
     );
-  } else if (sortBy === 'Top posts') {
+  } else if (sortBy === "Top posts") {
     graphBody = (
       <>
         <SectionLabel>{`Top posts${cut}`}</SectionLabel>
@@ -843,7 +919,7 @@ export default function AnalyticsScreen() {
     graphBody = (
       <>
         <SectionLabel style={styles.fmtLabel}>
-          {`Posts by format${crObj ? ` · ${crObj.name.split(' ')[0]}` : ''}`}
+          {`Posts by format${crObj ? ` · ${crObj.name.split(" ")[0]}` : ""}`}
         </SectionLabel>
         <View style={styles.fmtList}>
           {fmtEntries.map((f) => (
@@ -883,7 +959,7 @@ export default function AnalyticsScreen() {
           <View style={styles.headerRight}>
             {!loading && !empty && (
               <View style={styles.modeTrack}>
-                {(['Graph', 'Calendar'] as const).map((t, i) => (
+                {(["Graph", "Calendar"] as const).map((t, i) => (
                   <Pressable
                     key={t}
                     accessibilityRole="button"
@@ -899,7 +975,10 @@ export default function AnalyticsScreen() {
                     ]}
                   >
                     <Text
-                      style={[styles.modeText, mode === i && styles.modeTextActive]}
+                      style={[
+                        styles.modeText,
+                        mode === i && styles.modeTextActive,
+                      ]}
                     >
                       {t}
                     </Text>
@@ -909,16 +988,8 @@ export default function AnalyticsScreen() {
             )}
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel="Creators"
-              onPress={() => router.push('/(admin)/(tabs)/creators')}
-              style={[styles.gearBtn, shadow.shadowCard]}
-            >
-              <Icon name="users" size={19} color={color.slate500} />
-            </PressableScale>
-            <PressableScale
-              accessibilityRole="button"
               accessibilityLabel="Settings"
-              onPress={() => router.push('/(admin)/(tabs)/settings')}
+              onPress={() => router.push("/(admin)/(tabs)/settings")}
               style={[styles.gearBtn, shadow.shadowCard]}
             >
               <Icon name="settings" size={19} color={color.slate500} />
@@ -926,6 +997,13 @@ export default function AnalyticsScreen() {
           </View>
         }
       />
+
+      {!loading && !empty && (
+        <CreatorsPill
+          creators={approvedCreators}
+          onPress={() => router.push("/(admin)/creators")}
+        />
+      )}
 
       {loading && (
         <View style={styles.stack}>
@@ -977,11 +1055,11 @@ export default function AnalyticsScreen() {
                 <>
                   <View style={styles.filterRow}>
                     <MenuPill
-                      label={nF > 0 ? `Filters · ${nF}` : 'Filters'}
+                      label={nF > 0 ? `Filters · ${nF}` : "Filters"}
                       active={nF > 0}
                       sections={[
                         {
-                          header: 'Format',
+                          header: "Format",
                           items: [ALL_FORMATS, ...FORMAT_LABELS].map((f) => ({
                             label: f,
                             on: formatF === f,
@@ -989,14 +1067,15 @@ export default function AnalyticsScreen() {
                           })),
                         },
                         {
-                          header: 'Creator',
-                          items: [ALL_CREATORS, ...creators.map((c) => c.name)].map(
-                            (c) => ({
-                              label: c,
-                              on: creatorF === c,
-                              onPick: () => setCreatorF(c),
-                            }),
-                          ),
+                          header: "Creator",
+                          items: [
+                            ALL_CREATORS,
+                            ...creators.map((c) => c.name),
+                          ].map((c) => ({
+                            label: c,
+                            on: creatorF === c,
+                            onPick: () => setCreatorF(c),
+                          })),
                         },
                       ]}
                     />
@@ -1033,7 +1112,7 @@ export default function AnalyticsScreen() {
             <>
               <Card pad={12}>
                 <SectionLabel style={styles.calLabel}>
-                  {`Daily activity · ${new Date().toLocaleDateString('en-US', { month: 'long' })}`}
+                  {`Daily activity · ${new Date().toLocaleDateString("en-US", { month: "long" })}`}
                 </SectionLabel>
                 <MonthCal
                   days={data.days}
@@ -1079,12 +1158,12 @@ export default function AnalyticsScreen() {
 
 const styles = StyleSheet.create({
   headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   modeTrack: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 3,
     padding: 3,
     borderRadius: 999,
@@ -1100,7 +1179,7 @@ const styles = StyleSheet.create({
   },
   modeText: {
     fontSize: 12.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.slate400,
   },
   modeTextActive: {
@@ -1110,8 +1189,8 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: color.white,
   },
   stack: {
@@ -1121,7 +1200,7 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   statRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
   statCell: {
@@ -1130,31 +1209,31 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: type.size.micro11,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   statValue: {
     marginTop: 2,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: -0.4,
     color: color.ink,
   },
   statHint: {
     marginTop: 1,
     fontSize: type.size.micro11,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   filterRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 7,
     marginBottom: 16,
   },
   menuPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingVertical: 9,
     paddingHorizontal: 13,
@@ -1168,7 +1247,7 @@ const styles = StyleSheet.create({
   },
   menuPillText: {
     fontSize: type.size.chip,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   menuPillTextActive: {
@@ -1178,7 +1257,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
   },
   menuPanel: {
-    position: 'absolute',
+    position: "absolute",
     minWidth: 180,
     backgroundColor: color.white,
     borderWidth: borderWidth.hair,
@@ -1197,8 +1276,8 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     minHeight: 44,
     paddingHorizontal: 12,
@@ -1207,26 +1286,26 @@ const styles = StyleSheet.create({
   menuItemLabel: {
     flex: 1,
     fontSize: type.size.chip,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   chartLabel: {
     paddingBottom: 10,
   },
   chartBox: {
-    width: '100%',
+    width: "100%",
     aspectRatio: CHART_W / CHART_H,
   },
   noMatch: {
     marginTop: 10,
     marginBottom: 2,
     fontSize: type.size.chip,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     paddingVertical: 11,
     minHeight: 44,
@@ -1234,7 +1313,7 @@ const styles = StyleSheet.create({
   rankNum: {
     width: 24,
     fontSize: type.size.chip,
-    fontWeight: '800',
+    fontWeight: "800",
     color: color.slate400,
   },
   rankMid: {
@@ -1242,19 +1321,20 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   rankNameRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     gap: 8,
   },
   rankName: {
     flex: 1,
     fontSize: 13.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   rankViews: {
+    flexShrink: 0,
     fontSize: 12.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.slate500,
   },
   rankTrack: {
@@ -1262,16 +1342,16 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 999,
     backgroundColor: color.fillQuiet,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   rankFill: {
-    height: '100%',
+    height: "100%",
     borderRadius: 999,
     backgroundColor: color.blue500,
   },
   postRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 11,
     paddingVertical: 11,
     minHeight: 44,
@@ -1286,31 +1366,32 @@ const styles = StyleSheet.create({
   },
   postRowTitle: {
     fontSize: 13.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   postRowMeta: {
     marginTop: 2,
     fontSize: type.size.label,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   postRowRight: {
-    alignItems: 'flex-end',
+    flexShrink: 0,
+    alignItems: "flex-end",
   },
   postRowViews: {
     fontSize: 13.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   postRowEarned: {
     fontSize: 11.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.green,
   },
   detailHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     marginBottom: 12,
   },
@@ -1321,8 +1402,8 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.hair,
     borderColor: color.line,
     backgroundColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   detailHeadText: {
     flex: 1,
@@ -1330,12 +1411,12 @@ const styles = StyleSheet.create({
   },
   detailTitle: {
     fontSize: type.size.bodySm,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: -0.3,
     color: color.ink,
   },
   detailStrip: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 10,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -1349,18 +1430,18 @@ const styles = StyleSheet.create({
   },
   detailCellLabel: {
     fontSize: type.size.micro11,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   detailCellValue: {
     marginTop: 2,
     fontSize: type.size.body,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: -0.3,
     color: color.ink,
   },
   platformRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 10,
     marginBottom: 12,
   },
@@ -1373,97 +1454,97 @@ const styles = StyleSheet.create({
     padding: 13,
   },
   platformHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 7,
     marginBottom: 8,
   },
   platformName: {
     fontSize: type.size.chip,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   platformStat: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     gap: 8,
     paddingVertical: 4,
   },
   platformStatLabel: {
     flex: 1,
     fontSize: type.size.label,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   platformStatValue: {
     fontSize: 13.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   openPostRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   dayHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
   dayTitle: {
     fontSize: type.size.body,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: -0.3,
     color: color.ink,
   },
   daySummary: {
     flex: 1,
     minWidth: 0,
-    textAlign: 'right',
+    textAlign: "right",
     fontSize: 12.5,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate500,
   },
   daySummaryStrong: {
     color: color.ink,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   dayClose: {
     width: 26,
     height: 26,
     borderRadius: 999,
     backgroundColor: color.fillQuiet,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   dayNoMoney: {
     marginBottom: 8,
     fontSize: type.size.label,
-    fontWeight: '600',
+    fontWeight: "600",
     lineHeight: type.size.label * 1.4,
     color: color.slate400,
   },
   dayNothing: {
     marginTop: 8,
     fontSize: 12.5,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   calLabel: {
     paddingBottom: 8,
   },
   calGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 6,
   },
   calCellWrap: {
-    width: `${100 / 7}%`,
+    width: "14.28%",
     padding: 2,
   },
   calWeekday: {
-    textAlign: 'center',
+    textAlign: "center",
     fontSize: type.size.micro11,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.6,
     color: color.slate400,
   },
@@ -1483,13 +1564,13 @@ const styles = StyleSheet.create({
     backgroundColor: color.blue100,
   },
   calDayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 3,
   },
   calDayNum: {
     fontSize: type.size.micro11,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
   calDot: {
@@ -1500,13 +1581,13 @@ const styles = StyleSheet.create({
   },
   calMoney: {
     fontSize: type.size.micro11,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.blue700,
   },
   calFoot: {
     marginTop: 8,
     fontSize: type.size.micro11,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate400,
   },
   fmtLabel: {
@@ -1516,14 +1597,14 @@ const styles = StyleSheet.create({
     gap: 13,
   },
   fmtRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   fmtName: {
     width: 74,
     fontSize: 12.5,
-    fontWeight: '600',
+    fontWeight: "600",
     color: color.slate500,
   },
   fmtTrack: {
@@ -1531,18 +1612,18 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 999,
     backgroundColor: color.fillQuiet,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   fmtFill: {
-    height: '100%',
+    height: "100%",
     borderRadius: 999,
     backgroundColor: color.blue500,
   },
   fmtCount: {
     width: 34,
-    textAlign: 'right',
+    textAlign: "right",
     fontSize: 12.5,
-    fontWeight: '700',
+    fontWeight: "700",
     color: color.ink,
   },
 });

@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
+import { color, radiusAdmin, shadow, type } from '../../../theme/tokens';
+import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 
 export interface SortChipsProps<T extends string> {
@@ -9,7 +10,7 @@ export interface SortChipsProps<T extends string> {
   onChange: (key: T) => void;
 }
 
-/** Admin handoff §10 — roster sort chips, active solid blue-500. */
+/** Creators list sort chips: selected blue-100/blue-700 with a trending-up glyph, unselected white on card shadow. */
 export function SortChips<T extends string>({
   options,
   value,
@@ -25,8 +26,9 @@ export function SortChips<T extends string>({
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             onPress={() => onChange(option.key)}
-            style={[styles.chip, active && styles.chipActive]}
+            style={[styles.chip, active ? styles.chipActive : shadow.shadowCard]}
           >
+            {active && <Icon name="trending-up" size={12} color={color.blue700} />}
             <Text style={[styles.text, active && styles.textActive]}>
               {option.label}
             </Text>
@@ -43,16 +45,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    minHeight: 32,
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: radiusAdmin.pill,
     backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
   },
   chipActive: {
-    backgroundColor: color.blue500,
-    borderColor: color.blue500,
+    backgroundColor: color.blue100,
   },
   text: {
     fontSize: type.size.label,
@@ -60,6 +63,6 @@ const styles = StyleSheet.create({
     color: color.slate500,
   },
   textActive: {
-    color: color.white,
+    color: color.blue700,
   },
 });
