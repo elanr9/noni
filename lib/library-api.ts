@@ -22,11 +22,27 @@ export function isCaptureUrl(raw: string): boolean {
   return /^https?:\/\/\S+$/i.test(line) && !line.includes('\n');
 }
 
+export type LibraryUsedFilter = 'new' | 'made';
+
+/** Unused and used counts for one source, for the sub tab pills. */
+export async function countLibraryItems(
+  source: Exclude<LibrarySource, 'our_post'>,
+): Promise<{ unused: number; used: number }> {
+  const base = () =>
+    supabase.from('library_items').select('id', { count: 'exact', head: true }).eq('source', source);
+  const [unused, used] = await Promise.all([base().eq('used_count', 0), base().gt('used_count', 0)]);
+  if (unused.error) throw unused.error;
+  if (used.error) throw used.error;
+  return { unused: unused.count ?? 0, used: used.count ?? 0 };
+}
+
 export async function listLibraryItems(params: {
   source: Exclude<LibrarySource, 'our_post'>;
   search?: string;
   /** Picker filter: items of this type OR untyped (ideas carry no type). */
   postTypeId?: string;
+  /** new = never made into a post, made = used at least once. */
+  used?: LibraryUsedFilter;
   limit?: number;
   offset?: number;
 }): Promise<LibraryItem[]> {
@@ -48,9 +64,24 @@ export async function listLibraryItems(params: {
       `post_type_id.is.null,post_type_id.eq.${params.postTypeId}`,
     );
   }
+  if (params.used === 'new') query = query.eq('used_count', 0);
+  if (params.used === 'made') query = query.gt('used_count', 0);
   const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
+}
+
+export async function updateLibraryItemText(id: string, text: string): Promise<void> {
+  const { error } = await supabase
+    .from('library_items')
+    .update({ text: text.trim() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteLibraryItem(id: string): Promise<void> {
+  const { error } = await supabase.from('library_items').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function listOurPosts(params: {
@@ -134,12 +165,16 @@ export async function saveReference(
   return data;
 }
 
+type LinkPreview = { thumbnail_url?: string | null; title?: string | null };
+
+async function resolveLinkPreview(url: string): Promise<LinkPreview | null> {
+  const { data } = await supabase.functions.invoke('library-link', { body: { url } });
+  return (data as LinkPreview | null) ?? null;
+}
+
 async function enrichReference(itemId: string, url: string): Promise<void> {
   try {
-    const { data } = await supabase.functions.invoke('library-link', {
-      body: { url },
-    });
-    const preview = data as { thumbnail_url?: string | null; title?: string | null } | null;
+    const preview = await resolveLinkPreview(url);
     if (!preview?.thumbnail_url && !preview?.title) return;
     await supabase
       .from('library_items')
@@ -153,10 +188,78 @@ async function enrichReference(itemId: string, url: string): Promise<void> {
   }
 }
 
+/**
+ * Our posts have no library_items row until something needs one (a use, a
+ * thumbnail). Find by post_id, else insert with used_count 0.
+ */
+async function findOrCreateOurPostItem(
+  companyId: string,
+  userId: string,
+  post: OurPost,
+): Promise<LibraryItem> {
+  if (post.library_item_id) {
+    const { data, error } = await supabase
+      .from('library_items')
+      .select('*')
+      .eq('id', post.library_item_id)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+  }
+  const { data: existing, error: findError } = await supabase
+    .from('library_items')
+    .select('*')
+    .eq('source', 'our_post')
+    .eq('post_id', post.post_id)
+    .maybeSingle();
+  if (findError) throw findError;
+  if (existing) return existing;
+
+  const { data, error } = await supabase
+    .from('library_items')
+    .insert({
+      company_id: companyId,
+      source: 'our_post',
+      post_id: post.post_id,
+      creator_id: post.creator_id,
+      post_type_id: post.post_type_id,
+      text: post.title ?? post.hook,
+      url: post.post_url,
+      created_by: userId,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Resolve a thumbnail for one of our posts through the same edge function
+ * references use, storing it on the our_post library row. Returns the URL
+ * that landed, or null when nothing resolved.
+ */
+export async function enrichOurPostThumbnail(
+  companyId: string,
+  userId: string,
+  post: OurPost,
+): Promise<string | null> {
+  if (!post.post_url) return null;
+  const item = await findOrCreateOurPostItem(companyId, userId, post);
+  if (item.thumbnail_url) return item.thumbnail_url;
+  const preview = await resolveLinkPreview(post.post_url);
+  if (!preview?.thumbnail_url) return null;
+  const { error } = await supabase
+    .from('library_items')
+    .update({ thumbnail_url: preview.thumbnail_url })
+    .eq('id', item.id);
+  if (error) throw error;
+  return preview.thumbnail_url;
+}
+
 /** Creator filter options for the Our posts chip; lighter than the leaderboard. */
 export async function listCreatorOptions(
   companyId: string,
-): Promise<Array<{ id: string; full_name: string | null }>> {
+): Promise<{ id: string; full_name: string | null }[]> {
   const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name')
@@ -167,51 +270,29 @@ export async function listCreatorOptions(
   return data ?? [];
 }
 
-/** Increment usage; never deletes. */
-export async function markLibraryItemUsed(item: LibraryItem): Promise<void> {
+/** Increment usage and remember the post it became; never deletes. */
+export async function markLibraryItemUsed(
+  item: LibraryItem,
+  briefId?: string,
+): Promise<void> {
   const { error } = await supabase
     .from('library_items')
     .update({
       used_count: item.used_count + 1,
       last_used_at: new Date().toISOString(),
+      ...(briefId ? { last_brief_id: briefId } : {}),
     })
     .eq('id', item.id);
   if (error) throw error;
 }
 
-/**
- * Our posts have no library_items row until first use: find-or-create by
- * post_id, then increment.
- */
+/** Our posts: find or create the our_post row by post_id, then increment. */
 export async function markOurPostUsed(
   companyId: string,
   userId: string,
   post: OurPost,
+  briefId?: string,
 ): Promise<void> {
-  const { data: existing, error: findError } = await supabase
-    .from('library_items')
-    .select('*')
-    .eq('source', 'our_post')
-    .eq('post_id', post.post_id)
-    .maybeSingle();
-  if (findError) throw findError;
-
-  if (existing) {
-    await markLibraryItemUsed(existing);
-    return;
-  }
-
-  const { error } = await supabase.from('library_items').insert({
-    company_id: companyId,
-    source: 'our_post',
-    post_id: post.post_id,
-    creator_id: post.creator_id,
-    post_type_id: post.post_type_id,
-    text: post.title ?? post.hook,
-    url: post.post_url,
-    used_count: 1,
-    last_used_at: new Date().toISOString(),
-    created_by: userId,
-  });
-  if (error) throw error;
+  const item = await findOrCreateOurPostItem(companyId, userId, post);
+  await markLibraryItemUsed(item, briefId);
 }

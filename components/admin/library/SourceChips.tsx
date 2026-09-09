@@ -1,36 +1,39 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { LibrarySource } from '../../../lib/library-api';
-import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
+import { color, radiusAdmin, shadow, type } from '../../../theme/tokens';
 import { PressableScale } from '../../ui/PressableScale';
 
-const CHIPS: Array<{ source: LibrarySource; label: string }> = [
-  { source: 'idea', label: 'Ideas' },
-  { source: 'our_post', label: 'Our posts' },
-  { source: 'reference', label: 'References' },
-  { source: 'from_creator', label: 'From creator' },
+/** The tab's lanes: three library sources plus the shared media grid. */
+export type LibraryLane = Exclude<LibrarySource, 'from_creator'> | 'media';
+
+const CHIPS: { lane: LibraryLane; label: string }[] = [
+  { lane: 'idea', label: 'Ideas' },
+  { lane: 'reference', label: 'References' },
+  { lane: 'media', label: 'Media' },
+  { lane: 'our_post', label: 'Our posts' },
 ];
 
 export interface SourceChipsProps {
-  value: LibrarySource;
-  onChange: (source: LibrarySource) => void;
+  value: LibraryLane;
+  onChange: (lane: LibraryLane) => void;
 }
 
-/** Admin handoff §9 — the four source chips, active solid blue-500 with white text. */
+/** Segmented lane switcher: grey track, the active lane lifts as a white pill. */
 export function SourceChips({ value, onChange }: SourceChipsProps) {
   return (
-    <View style={styles.row}>
+    <View style={styles.track}>
       {CHIPS.map((chip) => {
-        const active = chip.source === value;
+        const active = chip.lane === value;
         return (
           <PressableScale
-            key={chip.source}
+            key={chip.lane}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            onPress={() => onChange(chip.source)}
-            style={[styles.chip, active && styles.chipActive]}
+            onPress={() => onChange(chip.lane)}
+            style={[styles.chip, active && styles.chipActive, active && shadow.shadowCard]}
           >
-            <Text style={[styles.text, active && styles.textActive]}>
+            <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>
               {chip.label}
             </Text>
           </PressableScale>
@@ -41,21 +44,21 @@ export function SourceChips({ value, onChange }: SourceChipsProps) {
 }
 
 const styles = StyleSheet.create({
-  row: {
+  track: {
     flexDirection: 'row',
-    gap: 6,
+    padding: 4,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.fillQuiet,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     borderRadius: radiusAdmin.pill,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
   },
   chipActive: {
-    backgroundColor: color.blue500,
-    borderColor: color.blue500,
+    backgroundColor: color.white,
   },
   text: {
     fontSize: type.size.label,
@@ -63,6 +66,6 @@ const styles = StyleSheet.create({
     color: color.slate500,
   },
   textActive: {
-    color: color.white,
+    color: color.ink,
   },
 });

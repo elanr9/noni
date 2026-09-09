@@ -1,49 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
-  ActivityIndicator,
   Animated,
-  Keyboard,
-  Platform,
   ScrollView,
   StyleSheet,
-  Text,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { color, motion, space, type } from '../../theme/tokens';
-
-// The footer is pinned to the bottom of the screen, so an open keyboard would
-// cover it. Some keyboards (the number pad on the phone step) have no return
-// key, which leaves no way to reach the CTA at all. Measuring the keyboard is
-// more reliable than KeyboardAvoidingView, which infers the overlap from its
-// own onLayout frame and gets it wrong once a SafeAreaView insets the view.
-// metrics() seeds the height for a screen that mounts with the keyboard open.
-function useKeyboardHeight(): number {
-  const [height, setHeight] = useState(() =>
-    typeof Keyboard.metrics === 'function' ? (Keyboard.metrics()?.height ?? 0) : 0,
-  );
-
-  useEffect(() => {
-    const shown = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow',
-      (event) => setHeight(event.endCoordinates?.height ?? 0),
-    );
-    const hidden = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setHeight(0),
-    );
-
-    return () => {
-      shown.remove();
-      hidden.remove();
-    };
-  }, []);
-
-  return height;
-}
+import { useKeyboardHeight } from '../../lib/keyboard';
+import { color, motion, radius, space } from '../../theme/tokens';
+import { SkeletonCard, SkeletonLine } from '../ui/Skeleton';
 
 /** Short fade-up used by screen shells so mounts never pop in. */
 export function useScreenEnter() {
@@ -127,9 +95,15 @@ export function Screen({
 
 export function LoadingScreen({ label = 'Loading' }: { label?: string }) {
   return (
-    <Screen contentStyle={styles.center}>
-      <ActivityIndicator size="large" color={color.accent} />
-      <Text style={styles.muted}>{label}</Text>
+    <Screen contentStyle={styles.skeleton}>
+      <View accessibilityLabel={label} style={styles.skeleton}>
+        <SkeletonLine width={40} height={40} radius={radius.pill} />
+        <SkeletonLine width="70%" height={26} radius={8} />
+        <SkeletonLine width="40%" height={14} radius={6} />
+        <SkeletonCard height={160} radius={radius.lg} />
+        <SkeletonCard height={96} radius={radius.lg} />
+        <SkeletonCard height={96} radius={radius.lg} />
+      </View>
     </Screen>
   );
 }
@@ -154,14 +128,8 @@ const styles = StyleSheet.create({
     paddingBottom: space[5],
     gap: space[3],
   },
-  center: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[3],
-  },
-  muted: {
-    fontSize: type.size.body,
-    lineHeight: type.size.body * type.leading.body,
-    color: color.textMuted,
+  skeleton: {
+    gap: space[4],
+    paddingTop: space[3],
   },
 });

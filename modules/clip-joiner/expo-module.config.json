@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["ClipJoinerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.clipjoiner.ClipJoinerModule"]
+  }
+}

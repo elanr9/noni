@@ -14,6 +14,9 @@ export type TalkingPoint = {
   edited_by_admin: boolean;
   // Which approved product_features row the plug sentence was composed from.
   claim_id?: string | null;
+  // True when the creator reads this point word for word from the teleprompter.
+  // Unset or false shows it as a talking hint.
+  script?: boolean;
 };
 
 export type BriefDraftShape = {

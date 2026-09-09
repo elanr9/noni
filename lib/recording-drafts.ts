@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { Json } from './types';
+import { parseStoredEdits, type StoredEdits } from './video-edit';
 
 export type DraftSegmentKind = 'hook' | 'point' | 'outro' | 'slide';
 
@@ -82,6 +83,48 @@ export async function saveDraftSegment(params: {
   );
   if (error) throw error;
   return next;
+}
+
+/** Creator editor edits for an assignment, empty when there is no draft. */
+export async function loadDraftEdits(
+  companyId: string,
+  assignmentId: string,
+): Promise<StoredEdits> {
+  const { data, error } = await supabase
+    .from('recording_drafts')
+    .select('edits')
+    .eq('company_id', companyId)
+    .eq('assignment_id', assignmentId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? parseStoredEdits(data.edits) : {};
+}
+
+/**
+ * Persist the full edit map. The row may not exist yet, so the kept clips
+ * are loaded first and written back to keep the upsert from wiping them.
+ */
+export async function saveDraftEdits(params: {
+  companyId: string;
+  assignmentId: string;
+  creatorId: string;
+  edits: StoredEdits;
+}): Promise<void> {
+  const { companyId, assignmentId, creatorId, edits } = params;
+  const existing = await loadDraftSegments(companyId, assignmentId);
+
+  const { error } = await supabase.from('recording_drafts').upsert(
+    {
+      company_id: companyId,
+      assignment_id: assignmentId,
+      creator_id: creatorId,
+      segments: existing,
+      edits,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'assignment_id' },
+  );
+  if (error) throw error;
 }
 
 /**

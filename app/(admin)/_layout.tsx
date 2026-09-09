@@ -46,6 +46,7 @@ export default function AdminLayout() {
         headerShadowVisible: false,
         headerStyle: { backgroundColor: color.offWhite },
         headerTintColor: color.ink,
+        headerBackButtonDisplayMode: 'minimal',
         contentStyle: { backgroundColor: color.offWhite },
       }}
     >

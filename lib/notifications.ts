@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { router, type Router } from 'expo-router';
+import { router, type ImperativeRouter as Router } from 'expo-router';
 import { Platform } from 'react-native';
 
 import type { AppMode } from './active-mode';

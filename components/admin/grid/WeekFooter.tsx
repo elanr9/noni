@@ -1,12 +1,10 @@
-// Admin handoff §6 — the footer state machine. One week at a time: no
-// buttons while in progress, Publish when all thirty are complete, Start
+// Admin handoff §6: the footer state machine. One week at a time: no
+// buttons while in progress, Publish when every row is complete, Start
 // week N+1 only after publish. Publishing never creates the next week.
 import { StyleSheet, Text, View } from 'react-native';
 
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
-import { Icon } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
 
 export type WeekPhase = 'in_progress' | 'complete' | 'published';
 
@@ -19,14 +17,11 @@ export interface WeekFooterProps {
   beforeCutoff: boolean;
   publishing: boolean;
   onPublish: () => void;
-  /** Reviewed rows so far; enables the partial publish while in progress. */
-  readyCount: number;
-  onPublishReady: () => void;
   onStartNext: () => void;
-  /** When set, the in-progress strip shows an X that calls this. */
-  onDismiss?: () => void;
-  /** Strip already dismissed: show only the publish button. */
-  hideStrip?: boolean;
+  /** Published and still live: opens the day planner above Start week. */
+  onPlanMore?: () => void;
+  readyCount?: number;
+  onPublishReady?: () => void;
 }
 
 export function WeekFooter({
@@ -36,50 +31,18 @@ export function WeekFooter({
   beforeCutoff,
   publishing,
   onPublish,
-  readyCount,
-  onPublishReady,
   onStartNext,
-  onDismiss,
-  hideStrip,
+  onPlanMore,
 }: WeekFooterProps) {
   if (phase === 'in_progress') {
     return (
-      <View style={styles.stack}>
-        {hideStrip ? null : (
-        <View style={[styles.strip, shadow.shadowCard]}>
-          <View style={styles.bubble}>
-            <Text style={styles.bubbleText}>{left}</Text>
-          </View>
-          <Text style={styles.stripText}>
-            {left} posts left this week. Publish opens when all thirty are
-            complete.
-          </Text>
-          {onDismiss !== undefined ? (
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss"
-              hitSlop={8}
-              onPress={onDismiss}
-              style={styles.dismiss}
-            >
-              <Icon name="x" size={16} color={color.slate400} />
-            </PressableScale>
-          ) : null}
+      <View style={[styles.strip, shadow.shadowCard]}>
+        <View style={styles.bubble}>
+          <Text style={styles.bubbleText}>{left}</Text>
         </View>
-        )}
-        {readyCount > 0 ? (
-          <Button
-            variant="outline"
-            size="md"
-            block
-            disabled={publishing}
-            onPress={onPublishReady}
-          >
-            {publishing
-              ? 'Publishing…'
-              : `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'} now`}
-          </Button>
-        ) : null}
+        <Text style={styles.stripText}>
+          {`${left} ${left === 1 ? 'post' : 'posts'} left this week. Publish opens when every row is complete.`}
+        </Text>
       </View>
     );
   }
@@ -107,6 +70,11 @@ export function WeekFooter({
 
   return (
     <View style={styles.stack}>
+      {onPlanMore ? (
+        <Button variant="outline" size="md" block onPress={onPlanMore}>
+          Plan more days
+        </Button>
+      ) : null}
       <Button variant="outline" size="md" block onPress={onStartNext}>
         {`Start week ${weekNumber + 1}`}
       </Button>
@@ -127,18 +95,18 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
   },
   bubble: {
-    minWidth: 26,
-    height: 26,
+    minWidth: 28,
+    height: 28,
     borderRadius: radiusAdmin.pill,
-    paddingHorizontal: 7,
-    backgroundColor: color.blue500,
+    paddingHorizontal: 8,
+    backgroundColor: color.blue100,
     alignItems: 'center',
     justifyContent: 'center',
   },
   bubbleText: {
     fontSize: 13,
     fontWeight: '700',
-    color: color.white,
+    color: color.blue700,
   },
   stripText: {
     flex: 1,
@@ -147,21 +115,14 @@ const styles = StyleSheet.create({
     lineHeight: 13 * 1.45,
     color: color.slate500,
   },
-  dismiss: {
-    width: 26,
-    height: 26,
-    borderRadius: radiusAdmin.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   stack: {
     gap: 8,
   },
   line: {
     textAlign: 'center',
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '400',
-    lineHeight: 12 * 1.45,
+    lineHeight: 12.5 * 1.45,
     color: color.slate400,
   },
 });

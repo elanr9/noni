@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 
@@ -32,6 +30,7 @@ import {
 } from '../../../components/admin/shared';
 import { useAuth } from '../../../lib/auth';
 import { listCampaignManagers } from '../../../lib/briefs-api';
+import { useKeyboardPadding } from '../../../lib/keyboard';
 import {
   bubbleTimeLabel,
   firstNameOf,
@@ -73,8 +72,9 @@ export default function ManagerChatScreen() {
   const { chatId: chatIdParam } = useLocalSearchParams<{ chatId: string }>();
   const chatId = param(chatIdParam);
   const { profile } = useAuth();
+  const keyboardPadding = useKeyboardPadding();
   const scrollRef = useRef<ScrollView>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
 
   const [chat, setChat] = useState<ManagerChatInfo | null>(null);
   const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
@@ -131,8 +131,8 @@ export default function ManagerChatScreen() {
       const timer = setInterval(() => void load(), POLL_MS);
       return () => {
         clearInterval(timer);
-        void soundRef.current?.unloadAsync();
-        soundRef.current = null;
+        playerRef.current?.remove();
+        playerRef.current = null;
         setPlayingId(null);
       };
     }, [load, chatId, profile]),
@@ -245,31 +245,31 @@ export default function ManagerChatScreen() {
   const playVoice = async (message: ManagerMessage) => {
     if (!message.mediaPath) return;
     if (playingId === message.id) {
-      await soundRef.current?.stopAsync();
-      await soundRef.current?.unloadAsync();
-      soundRef.current = null;
+      playerRef.current?.pause();
+      playerRef.current?.remove();
+      playerRef.current = null;
       setPlayingId(null);
       return;
     }
     const uri = mediaUrls[message.mediaPath];
     if (!uri) return;
     try {
-      await soundRef.current?.unloadAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
+      playerRef.current?.remove();
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
       });
-      const { sound } = await Audio.Sound.createAsync({ uri });
-      soundRef.current = sound;
+      const player = createAudioPlayer({ uri });
+      playerRef.current = player;
       setPlayingId(message.id);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
           setPlayingId(null);
-          void sound.unloadAsync();
-          soundRef.current = null;
+          player.remove();
+          playerRef.current = null;
         }
       });
-      await sound.playAsync();
+      player.play();
     } catch (e) {
       setPlayingId(null);
       Alert.alert('Could not play', e instanceof Error ? e.message : 'Try again');
@@ -316,10 +316,7 @@ export default function ManagerChatScreen() {
   return (
     <AdminScreen scroll={false} contentStyle={styles.fill}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView
-        style={styles.fill}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={[styles.fill, { paddingBottom: keyboardPadding }]}>
         <View style={styles.headerPad}>
           <PushHeader
             title={title}
@@ -425,7 +422,7 @@ export default function ManagerChatScreen() {
           onClearReply={() => setReplyTo(null)}
           onSendVoice={sendVoice}
         />
-      </KeyboardAvoidingView>
+      </View>
     </AdminScreen>
   );
 }

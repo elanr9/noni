@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardPadding } from '../lib/keyboard';
 import {
   listThread,
   parseMessageMedia,
@@ -19,6 +19,7 @@ import {
 import { borderWidth, color, radius, type } from '../theme/tokens';
 import { ChatMediaBlock } from './admin/chat/MessageBubble';
 import { Icon } from './ui/Icon';
+import { SkeletonCard } from './ui/Skeleton';
 import { PressableScale } from './ui/PressableScale';
 
 const POLL_MS = 5000;
@@ -50,7 +51,6 @@ export function ChatThread(props: {
   initialRef?: PendingPostRef | null;
   scrollToAssignmentId?: string;
   onOpenPostRef?: (ref: MessagePostRef) => void;
-  keyboardOffset?: number;
 }) {
   const {
     companyId,
@@ -59,8 +59,9 @@ export function ChatThread(props: {
     initialRef = null,
     scrollToAssignmentId,
     onOpenPostRef,
-    keyboardOffset = 0,
   } = props;
+  const insets = useSafeAreaInsets();
+  const keyboardPadding = useKeyboardPadding();
 
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,19 +134,21 @@ export function ChatThread(props: {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={keyboardOffset}
-    >
+    <View style={[styles.flex, { paddingBottom: keyboardPadding }]}>
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
         contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
-          <Text style={styles.empty}>Loading messages…</Text>
+          <View style={styles.skeletons}>
+            <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonTheirs} />
+            <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonMine} />
+            <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonTheirs} />
+          </View>
         ) : messages.length === 0 ? (
           <Text style={styles.empty}>No messages yet. Say hello.</Text>
         ) : (
@@ -217,7 +220,7 @@ export function ChatThread(props: {
         )}
       </ScrollView>
 
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 26) }]}>
         {pendingRef !== null && (
           <View style={styles.pendingRef}>
             <Icon name="link" size={14} color={color.blue700} />
@@ -257,7 +260,7 @@ export function ChatThread(props: {
           </PressableScale>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -267,6 +270,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     gap: 12,
+  },
+  skeletons: {
+    gap: 10,
+  },
+  skeletonTheirs: {
+    width: '72%',
+    alignSelf: 'flex-start',
+  },
+  skeletonMine: {
+    width: '60%',
+    alignSelf: 'flex-end',
   },
   empty: {
     fontSize: type.size.bodySm,
@@ -368,7 +382,6 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 26,
     gap: 8,
   },
   pendingRef: {

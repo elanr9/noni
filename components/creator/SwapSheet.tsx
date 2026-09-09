@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: color.scrim,
   },
   panel: {
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   previewScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: color.scrim,
     alignItems: 'center',
     justifyContent: 'center',
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   previewCenter: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

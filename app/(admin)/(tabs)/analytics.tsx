@@ -909,6 +909,14 @@ export default function AnalyticsScreen() {
             )}
             <PressableScale
               accessibilityRole="button"
+              accessibilityLabel="Creators"
+              onPress={() => router.push('/(admin)/(tabs)/creators')}
+              style={[styles.gearBtn, shadow.shadowCard]}
+            >
+              <Icon name="users" size={19} color={color.slate500} />
+            </PressableScale>
+            <PressableScale
+              accessibilityRole="button"
               accessibilityLabel="Settings"
               onPress={() => router.push('/(admin)/(tabs)/settings')}
               style={[styles.gearBtn, shadow.shadowCard]}
@@ -1167,7 +1175,7 @@ const styles = StyleSheet.create({
     color: color.blue700,
   },
   menuScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   menuPanel: {
     position: 'absolute',

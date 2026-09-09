@@ -1,4 +1,4 @@
-// Admin handoff §7 step 1 — one ratio card per format with a blue-100
+// Admin handoff §7 step 1: one ratio card per format with a blue-100
 // icon circle and a 34px round stepper.
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -25,7 +25,7 @@ export function RatioCard({ icon, label, sub, value, onChange }: RatioCardProps)
         <Text style={styles.label}>{label}</Text>
         <Text style={styles.sub}>{sub}</Text>
       </View>
-      <Stepper label={label} value={value} onChange={onChange} valueSize={26} />
+      <Stepper label={label} value={value} onChange={onChange} valueSize={22} />
     </View>
   );
 }
@@ -35,13 +35,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 14,
+    padding: 16,
     borderRadius: radiusAdmin.lg,
     backgroundColor: color.white,
   },
   iconCircle: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
     borderRadius: radiusAdmin.pill,
     backgroundColor: color.blue100,
     alignItems: 'center',
@@ -52,8 +52,9 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   label: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
+    letterSpacing: -0.3,
     color: color.ink,
   },
   sub: {

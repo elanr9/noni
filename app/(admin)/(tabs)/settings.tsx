@@ -15,17 +15,39 @@ import {
 } from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { Icon, type IconName } from '../../../components/ui/Icon';
+import { OutlinedText } from '../../../components/ui/OutlinedText';
 import { TextField } from '../../../components/ui/TextField';
 import { inviteCreator } from '../../../lib/admin-api';
 import { modesForProfile, switchAccountRowLabel } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
+import { saveOverlayThemeColor } from '../../../lib/briefs-api';
+import {
+  CLASSIC_TEXT_COLOR,
+  overlayBoxFill,
+  overlayTextContrast,
+  parseOverlayThemeColor,
+} from '../../../lib/overlay-boxes';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
 import { borderWidth, color, type } from '../../../theme/tokens';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type OpenSheet = 'invite' | 'notifs' | 'terms' | 'signout' | 'delete' | null;
+type OpenSheet = 'invite' | 'notifs' | 'theme' | 'terms' | 'signout' | 'delete' | null;
+
+/** TikTok's own text background palette, so a theme reads like a native caption. */
+const THEME_SWATCHES = [
+  '#EA403F',
+  '#FF933D',
+  '#F2CD46',
+  '#78C25E',
+  '#3496F0',
+  '#5756D4',
+  '#F7D7E9',
+  '#EB4C89',
+  '#000000',
+];
+const HEX_RE = /^#?[0-9a-fA-F]{6}$/;
 type Ended = 'signedout' | 'deleted' | null;
 
 function NavRow({
@@ -95,19 +117,45 @@ export default function SettingsScreen() {
   const [sent, setSent] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [notifs, setNotifs] = useState({ subs: true, live: true, weekly: false });
+  const [themeColor, setThemeColor] = useState<string | null>(null);
+  const [themeDraft, setThemeDraft] = useState('');
+  const [savingTheme, setSavingTheme] = useState(false);
+  const [themeError, setThemeError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       void refreshManagerAccess();
       void supabase
         .from('companies')
-        .select('name')
+        .select('name, settings')
         .maybeSingle()
         .then(({ data }) => {
-          if (data !== null) setCompanyName(data.name);
+          if (data !== null) {
+            setCompanyName(data.name);
+            setThemeColor(parseOverlayThemeColor(data.settings));
+          }
         });
     }, [refreshManagerAccess]),
   );
+
+  const themeDraftValid = themeDraft.trim() === '' || HEX_RE.test(themeDraft.trim());
+
+  async function saveTheme() {
+    if (!profile || !themeDraftValid) return;
+    const raw = themeDraft.trim();
+    const hex = raw === '' ? null : `#${raw.replace('#', '').toUpperCase()}`;
+    setSavingTheme(true);
+    setThemeError(null);
+    try {
+      await saveOverlayThemeColor(profile.company_id, hex);
+      setThemeColor(hex);
+      setOpen(null);
+    } catch (e) {
+      setThemeError(e instanceof Error ? e.message : 'Could not save. Try again.');
+    } finally {
+      setSavingTheme(false);
+    }
+  }
 
   const company = companyName ?? 'your company';
   const inviteValid = name.trim().length > 0 && EMAIL_RE.test(email.trim());
@@ -192,6 +240,15 @@ export default function SettingsScreen() {
             />
           ) : null}
           <NavRow icon="bell" label="Notifications" onPress={() => setOpen('notifs')} />
+          <NavRow
+            icon="palette"
+            label="Post text color"
+            onPress={() => {
+              setThemeDraft(themeColor ?? '');
+              setThemeError(null);
+              setOpen('theme');
+            }}
+          />
           <NavRow
             icon="message-circle"
             label="Contact support"
@@ -312,6 +369,87 @@ export default function SettingsScreen() {
               />
             </View>
           ))}
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={open === 'theme'}
+        onClose={() => setOpen(null)}
+        title="Post text color"
+        subtitle="One color for every post. Text boxes set to Theme use it as their bubble. Leave it empty to keep the classic white TikTok text."
+        footer={
+          <Button
+            variant="primary"
+            size="lg"
+            block
+            disabled={savingTheme || !themeDraftValid}
+            onPress={() => void saveTheme()}
+          >
+            {savingTheme ? 'Saving' : 'Save color'}
+          </Button>
+        }
+      >
+        <View>
+          <View style={styles.themePreview}>
+            {themeDraftValid && themeDraft.trim() !== '' ? (
+              <Text
+                style={[
+                  styles.themePreviewPill,
+                  {
+                    color: overlayTextContrast(`#${themeDraft.trim().replace('#', '')}`),
+                    backgroundColor: overlayBoxFill(`#${themeDraft.trim().replace('#', '')}`),
+                  },
+                ]}
+              >
+                Your hook goes here
+              </Text>
+            ) : (
+              <OutlinedText
+                text="Your hook goes here"
+                fontSize={17}
+                color={CLASSIC_TEXT_COLOR}
+                style={styles.themePreviewClassic}
+              />
+            )}
+          </View>
+          <View style={styles.swatchRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Classic white, no theme"
+              accessibilityState={{ selected: themeDraft.trim() === '' }}
+              onPress={() => setThemeDraft('')}
+              style={[
+                styles.swatch,
+                styles.swatchClassic,
+                themeDraft.trim() === '' && styles.swatchActive,
+              ]}
+            >
+              <Icon name="x" size={14} color={color.slate500} />
+            </Pressable>
+            {THEME_SWATCHES.map((hex) => {
+              const active = themeDraft.trim().toUpperCase().replace('#', '') === hex.slice(1);
+              return (
+                <Pressable
+                  key={hex}
+                  accessibilityRole="button"
+                  accessibilityLabel={hex}
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setThemeDraft(hex)}
+                  style={[styles.swatch, { backgroundColor: hex }, active && styles.swatchActive]}
+                />
+              );
+            })}
+          </View>
+          <TextField
+            value={themeDraft}
+            onChangeText={setThemeDraft}
+            placeholder="Custom hex, like #1A73E8"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            accessibilityLabel="Custom hex color"
+            style={styles.fieldGap}
+          />
+          {themeError !== null && <Text style={styles.inviteError}>{themeError}</Text>}
         </View>
       </Sheet>
 
@@ -468,6 +606,55 @@ const styles = StyleSheet.create({
   },
   fieldGap: {
     marginTop: 10,
+  },
+  themePreview: {
+    height: 120,
+    borderRadius: 14,
+    backgroundColor: '#16181d',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  themePreviewPill: {
+    fontFamily: 'TikTokSans_700Bold',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    textAlign: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  themePreviewClassic: {
+    fontFamily: 'TikTokSans_700Bold',
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+  },
+  swatch: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: color.lineStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatchClassic: {
+    backgroundColor: color.white,
+  },
+  swatchActive: {
+    borderWidth: 3,
+    borderColor: color.blue500,
   },
   inviteError: {
     marginTop: 10,

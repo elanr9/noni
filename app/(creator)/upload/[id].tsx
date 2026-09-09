@@ -26,8 +26,10 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { color, motion, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
+  creatorPlaceSegment,
   listBriefSegments,
   parseTalkingPoints,
+  segmentWithBoxMoved,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
@@ -142,6 +144,7 @@ export default function UploadScreen() {
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [placedOnce, setPlacedOnce] = useState(false);
   const reviewSheet = useRef(new Animated.Value(0)).current;
 
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
@@ -307,6 +310,47 @@ export default function UploadScreen() {
     }
   }
 
+  function slideSegment(slideIndex: number): BriefSegment | null {
+    const slot = slides[slideIndex]?.slotIndex;
+    return (
+      briefSegments.find((s) => s.kind === 'slide' && s.slot_index === slot) ??
+      null
+    );
+  }
+
+  function persistPlacement(params: Parameters<typeof creatorPlaceSegment>[0]) {
+    setPlacedOnce(true);
+    creatorPlaceSegment(params).catch(() =>
+      setErrorToast('Could not save that position. Try again.'),
+    );
+  }
+
+  function moveSlideBox(slideIndex: number, boxId: string, x: number, y: number) {
+    const segment = slideSegment(slideIndex);
+    if (!segment) return;
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segment.id ? segmentWithBoxMoved(s, boxId, x, y) : s,
+      ),
+    );
+    persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
+  }
+
+  function moveSlideInset(slideIndex: number, x: number, y: number) {
+    const segment = slideSegment(slideIndex);
+    if (!segment) return;
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segment.id ? { ...s, screenshot_x: x, screenshot_y: y } : s,
+      ),
+    );
+    persistPlacement({ segmentId: segment.id, screenshot: { x, y } });
+  }
+
+  const canPlace = slides.some(
+    (s) => s.boxes.length > 0 || s.inset !== undefined,
+  );
+
   if (loading) {
     return <DetailSkeleton />;
   }
@@ -366,7 +410,16 @@ export default function UploadScreen() {
                 inset: s.inset,
               }))}
               style={StyleSheet.absoluteFill}
+              onMoveBox={moveSlideBox}
+              onMoveInset={moveSlideInset}
             />
+            {canPlace && !placedOnce ? (
+              <View style={styles.placeHint} pointerEvents="none">
+                <Text style={styles.placeHintText}>
+                  Hold any text or picture to move it
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -714,6 +767,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingTop: space[6],
     gap: 10,
+  },
+  placeHint: {
+    position: 'absolute',
+    top: 12,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  placeHintText: {
+    color: color.white,
+    fontSize: type.size.micro,
+    fontWeight: type.weight.bold,
   },
   reviewLabel: {
     fontSize: type.size.micro,

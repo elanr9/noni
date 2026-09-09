@@ -434,6 +434,9 @@ verify_jwt = false
 [functions.brief-assist]
 verify_jwt = false
 
+[functions.learn-from-edits]
+verify_jwt = false
+
 [functions.sync-conversions]
 verify_jwt = false
 

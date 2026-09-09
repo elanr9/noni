@@ -2,6 +2,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { buildCreatorWeek, type CampaignBrief } from '../_shared/shuffle.ts';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+
 type PublishDay = {
   /** YYYY-MM-DD the day posts. */
   date: string;
@@ -216,6 +218,19 @@ Deno.serve(async (req) => {
   if (publishError) {
     return jsonResponse({ error: publishError.message }, 500);
   }
+
+  // Publishing is sign-off: compare each post with the AI's version and
+  // learn from the edits. Runs after the response, never blocks the publish.
+  EdgeRuntime.waitUntil(
+    fetch(`${supabaseUrl}/functions/v1/learn-from-edits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({
+        campaign_id: campaign.id,
+        brief_ids: [...new Set(rows.map((r) => r.brief_id))],
+      }),
+    }).catch((e) => console.error('publish-campaign: learn-from-edits failed:', e)),
+  );
 
   // Published before Sunday 8PM EST notifies at Sunday 8PM EST (the cron
   // sweeps notify-scheduled); published after notifies immediately. A

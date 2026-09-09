@@ -6,6 +6,7 @@ import type { IconName } from '../../../components/ui/Icon';
 import { listAssignmentQueue, listMusicApprovalQueue } from '../../../lib/admin-api';
 import { listAccountApprovalQueue } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
+import { unreadManagerMessageCount } from '../../../lib/manager-messages-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, screenTransition } from '../../../theme/tokens';
 
@@ -17,25 +18,26 @@ const QUEUE_POLL_MS = 45_000;
 
 const ADMIN_ITEMS: Record<string, { icon: IconName; label: string }> = {
   index: { icon: 'inbox', label: 'Review' },
-  calendar: { icon: 'plus', label: 'Briefs' },
-  library: { icon: 'layout-list', label: 'Library' },
-  creators: { icon: 'users', label: 'Creators' },
+  calendar: { icon: 'layout-list', label: 'Briefs' },
+  library: { icon: 'images', label: 'Library' },
+  messages: { icon: 'message-circle', label: 'Messages' },
   analytics: { icon: 'chart-column', label: 'Analytics' },
 };
 
-// Fresh campaign managers get Onboarding on the left in place of Creators.
+// Fresh campaign managers get Onboarding on the left in place of Messages.
 // The tab retires once the checklist is done. The platform admin never sees it.
 const ONBOARDING_ITEMS: Record<string, { icon: IconName; label: string }> = {
   setup: { icon: 'sparkles', label: 'Onboarding' },
   index: { icon: 'inbox', label: 'Review' },
-  calendar: { icon: 'plus', label: 'Briefs' },
-  library: { icon: 'layout-list', label: 'Library' },
+  calendar: { icon: 'layout-list', label: 'Briefs' },
+  library: { icon: 'images', label: 'Library' },
   analytics: { icon: 'chart-column', label: 'Analytics' },
 };
 
 export default function AdminTabsLayout() {
   const { profile } = useAuth();
   const [queueCount, setQueueCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const showSetup =
     profile?.role === 'campaign_manager' &&
@@ -62,6 +64,9 @@ export default function AdminTabsLayout() {
                 accounts.filter((a) => a.status !== 'needs_changes').length,
             ),
           )
+          .catch(() => undefined);
+        void unreadManagerMessageCount()
+          .then(setUnreadCount)
           .catch(() => undefined);
       };
       read();
@@ -96,9 +101,14 @@ export default function AdminTabsLayout() {
       <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
       <Tabs.Screen name="library" options={{ title: 'Library' }} />
       <Tabs.Screen
-        name="creators"
-        options={{ title: 'Creators', href: showSetup ? null : undefined }}
+        name="messages"
+        options={{
+          title: 'Messages',
+          href: showSetup ? null : undefined,
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+        }}
       />
+      <Tabs.Screen name="creators" options={{ title: 'Creators', href: null }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
       <Tabs.Screen name="trends" options={{ title: 'Trends', href: null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', href: null }} />

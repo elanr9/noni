@@ -57,6 +57,10 @@ export type RenderTimeline = {
   height: number;
   /** Admin-configured on-screen text look for the whole post. */
   text_overlay: TimelineTextOverlay;
+  /** Burn auto-transcribed two-line captions at the bottom of the frame. */
+  subtitles: boolean;
+  /** Centre of the subtitle block as a fraction of frame height. */
+  subtitles_y: number;
   clips: TimelineClip[];
   texts: TimelineText[];
   images: TimelineImage[];
@@ -82,7 +86,17 @@ export type BriefSegmentRow = {
 
 /** Editor stage the legacy px sizes were designed on (see lib/overlay-boxes). */
 const LEGACY_STAGE_WIDTH = 390;
-const DEFAULT_BOX_SIZE = 26 / LEGACY_STAGE_WIDTH;
+
+/** TikTok classic caption: white letters, black outline (see lib/overlay-boxes). */
+const CLASSIC_TEXT_COLOR = '#FFFFFF';
+
+/** Auto placement, mirrored from lib/overlay-boxes.ts autoLayoutBox. */
+const AUTO_MIN_SIZE = 14 / LEGACY_STAGE_WIDTH;
+const AUTO_MAX_SIZE = 28 / LEGACY_STAGE_WIDTH;
+const AUTO_MAX_LINES = 5;
+const AUTO_GLYPH_WIDTH = 0.55;
+const BOX_MAX_WIDTH = 0.86;
+const AUTO_Y_BY_INDEX = [0.3, 0.7, 0.5];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -90,6 +104,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Size and position for text nobody placed by hand. */
+export function autoLayoutBox(
+  text: string,
+  index = 0,
+): { size: number; x: number; y: number } {
+  const chars = Math.max(1, text.trim().length);
+  const fit = (BOX_MAX_WIDTH * AUTO_MAX_LINES) / (AUTO_GLYPH_WIDTH * chars);
+  return {
+    size: clamp(fit, AUTO_MIN_SIZE, AUTO_MAX_SIZE),
+    x: 0.5,
+    y: AUTO_Y_BY_INDEX[Math.min(index, AUTO_Y_BY_INDEX.length - 1)] ?? TEXT_Y,
+  };
 }
 
 export type SegmentBox = {
@@ -105,18 +137,19 @@ export type SegmentBox = {
 export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
   const style = segment.overlay_style;
   if (isRecord(style) && Array.isArray(style.boxes)) {
-    return style.boxes.flatMap((raw) => {
+    return style.boxes.flatMap((raw, index) => {
       if (!isRecord(raw)) return [];
       const text = typeof raw.text === 'string' ? raw.text.trim() : '';
       if (text.length === 0) return [];
+      const auto = autoLayoutBox(text, index);
       return [
         {
           text,
-          x: num(raw.x, 0.5),
-          y: num(raw.y, TEXT_Y),
-          size: num(raw.size, DEFAULT_BOX_SIZE),
-          color: typeof raw.color === 'string' ? raw.color : '#EB4C89',
-          bg: typeof raw.bg === 'boolean' ? raw.bg : true,
+          x: num(raw.x, auto.x),
+          y: num(raw.y, auto.y),
+          size: num(raw.size, auto.size),
+          color: typeof raw.color === 'string' ? raw.color : CLASSIC_TEXT_COLOR,
+          bg: typeof raw.bg === 'boolean' ? raw.bg : false,
         },
       ];
     });
@@ -124,14 +157,19 @@ export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
   const text = segment.overlay_text?.trim() ?? '';
   if (text.length === 0) return [];
   const legacy = isRecord(style) ? style : {};
+  // Text the AI wrote but nobody placed: classic look, auto layout.
+  const auto = autoLayoutBox(text, 0);
   return [
     {
       text,
-      x: num(legacy.x, 0.5),
-      y: segment.text_y ?? TEXT_Y,
-      size: num(legacy.size, 26) / LEGACY_STAGE_WIDTH,
-      color: typeof legacy.color === 'string' ? legacy.color : '#EB4C89',
-      bg: typeof legacy.bg === 'boolean' ? legacy.bg : true,
+      x: num(legacy.x, auto.x),
+      y: segment.text_y ?? auto.y,
+      size:
+        typeof legacy.size === 'number'
+          ? legacy.size / LEGACY_STAGE_WIDTH
+          : auto.size,
+      color: typeof legacy.color === 'string' ? legacy.color : CLASSIC_TEXT_COLOR,
+      bg: typeof legacy.bg === 'boolean' ? legacy.bg : false,
     },
   ];
 }
@@ -144,6 +182,7 @@ export const TEXT_HOLD_MS = 3000;
 /** Mid-frame text box position, used by the render adapter. */
 export const TEXT_Y = 0.45;
 const IMAGE_Y = 0.62;
+const DEFAULT_SUBTITLES_Y = 0.78;
 const IMAGE_WIDTH = 0.85;
 
 /**
@@ -157,6 +196,8 @@ export function buildRenderTimeline(params: {
   briefSegments: BriefSegmentRow[];
   durationsMs: number[];
   textOverlay?: TimelineTextOverlay;
+  subtitles?: boolean;
+  subtitlesY?: number;
   width?: number;
   height?: number;
 }): RenderTimeline {
@@ -212,6 +253,8 @@ export function buildRenderTimeline(params: {
     width: params.width ?? 1080,
     height: params.height ?? 1920,
     text_overlay: textOverlay,
+    subtitles: params.subtitles ?? false,
+    subtitles_y: params.subtitlesY ?? DEFAULT_SUBTITLES_Y,
     clips,
     texts,
     images,
@@ -219,5 +262,7 @@ export function buildRenderTimeline(params: {
 }
 
 export function timelineHasOverlays(timeline: RenderTimeline): boolean {
-  return timeline.texts.length > 0 || timeline.images.length > 0;
+  return (
+    timeline.subtitles || timeline.texts.length > 0 || timeline.images.length > 0
+  );
 }

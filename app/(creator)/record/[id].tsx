@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,26 +27,66 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FormatTag, TypeTag } from '../../../components/creator/Chips';
 import { usePostTypeMeta } from '../../../components/creator/PostCard';
 import {
+  CameraRail,
+  useDoubleTap,
+  type PrompterSpeed,
+} from '../../../components/creator/record/CameraRail';
+import {
+  lensForZoom,
+  useBackLenses,
+} from '../../../components/creator/record/useBackLenses';
+import {
+  GreenScreenBackdrop,
   SegmentOverlayPreview,
   type ShotPreview,
 } from '../../../components/creator/SegmentOverlayPreview';
 import { TeleprompterOverlay } from '../../../components/creator/TeleprompterOverlay';
+import {
+  isClipJoinerAvailable,
+  joinClips,
+} from '../../../modules/clip-joiner';
+import {
+  exportTimeline,
+  isVideoEditorAvailable,
+  toNativeTimeline,
+} from '../../../modules/video-editor';
+import {
+  PostEditor,
+  type EditorSlot,
+} from '../../../components/creator/editor/PostEditor';
+import { SheetShell } from '../../../components/ui/SheetShell';
+import {
+  replaceSlot,
+  serializeEdits,
+  slotIndices,
+  slotIsUntouched,
+  slotPieces,
+  timelineFromStored,
+  type EditTimeline,
+  type StoredEdits,
+} from '../../../lib/video-edit';
 import { useCreatorToast } from '../../../components/creator/Toast';
 import { parseChangesNote } from '../../../components/ReviewThread';
 import { SoftToast } from '../../../components/states';
+import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { color, motion, radius, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
+  DEFAULT_SUBTITLES_Y,
+  creatorPlaceSegment,
+  creatorPlaceSubtitles,
   listBriefSegments,
   parseHookOptions,
   parseTalkingPoints,
   parseTextOverlay,
+  segmentWithBoxMoved,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
 import { useCreatorQueue } from '../../../lib/creator-queue';
+import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
 import {
   latestChangesNote,
   listAssignmentReviewEvents,
@@ -58,7 +99,9 @@ import {
 } from '../../../lib/tasks-api';
 import {
   clearDraft,
+  loadDraftEdits,
   loadDraftSegments,
+  saveDraftEdits,
   saveDraftSegment,
   type DraftSegment,
   type DraftSegmentKind,
@@ -101,14 +144,17 @@ type KeptClip = {
 
 type PendingClip = { uri: string; durationMs: number };
 
+type EditorClip = Pick<EditorSlot, 'slotIndex' | 'label' | 'sourceUri' | 'durationMs'>;
+
 const COUNTDOWN_STEP_MS = 800;
-const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-const MAX_CLIP_MS = 90_000;
+const SPEEDS: PrompterSpeed[] = [0.75, 1, 1.25, 1.5];
 /** The visual fill reference: the current segment fills by elapsed / 20s. */
 const PROGRESS_REF_MS = 20_000;
 const PROCESSING_MIN_MS = 2_000;
 const STOP_WATCHDOG_MS = 5_000;
 const RECORD_ARM_MS = 350;
+/** Time for the capture session to settle after a lens or facing swap. */
+const SWITCH_SETTLE_MS = 450;
 const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
 
 function splitScriptParts(script: string): string[] {
@@ -143,9 +189,9 @@ function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
     );
   }
   const talkingPoints = parseTalkingPoints(brief.talking_points);
-  const pointTexts = talkingPoints
-    .map((p) => p.text?.trim() ?? '')
-    .filter((t) => t.length > 0);
+  const spokenPoints = talkingPoints
+    .map((p) => ({ text: p.text?.trim() ?? '', scripted: p.script === true }))
+    .filter((p) => p.text.length > 0);
   const hookLine =
     brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || '';
   const ctaLine = brief.cta?.trim() || '';
@@ -176,22 +222,20 @@ function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
       }
       pointNumber += 1;
       const pointIndex = s.talking_point_index ?? pointNumber - 1;
-      const text =
-        talkingPoints[pointIndex]?.text?.trim() ||
-        s.overlay_text?.trim() ||
-        '';
+      const point = talkingPoints[pointIndex];
+      const text = point?.text?.trim() || s.overlay_text?.trim() || '';
       return {
         slotIndex: s.slot_index,
         kind: 'point' as const,
         label: `Point ${pointNumber}`,
         chip: String(pointNumber),
         script: text,
-        scripted: false,
+        scripted: point?.script === true,
       };
     });
   }
 
-  if (pointTexts.length > 0) {
+  if (spokenPoints.length > 0) {
     const plan: ClipPlan[] = [];
     if (hookLine) {
       plan.push({
@@ -203,14 +247,14 @@ function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
         scripted: true,
       });
     }
-    pointTexts.forEach((text, i) => {
+    spokenPoints.forEach((point, i) => {
       plan.push({
         slotIndex: plan.length,
         kind: 'point',
         label: `Point ${i + 1}`,
         chip: String(i + 1),
-        script: text,
-        scripted: false,
+        script: point.text,
+        scripted: point.scripted,
       });
     });
     if (ctaLine) {
@@ -295,6 +339,7 @@ export default function RecordScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [facing, setFacing] = useState<CameraType>('front');
   const [flashOn, setFlashOn] = useState(false);
+  const [zoom, setZoom] = useState<0.5 | 1>(1);
   const [kept, setKept] = useState<Record<number, KeptClip>>({});
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -303,7 +348,7 @@ export default function RecordScreen() {
   const [pendingThumb, setPendingThumb] = useState<string | null>(null);
   const [pendingDurationMs, setPendingDurationMs] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
+  const [speed, setSpeed] = useState<PrompterSpeed>(1);
   const [takeCount, setTakeCount] = useState(0);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
@@ -314,15 +359,35 @@ export default function RecordScreen() {
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewPlaying, setReviewPlaying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [placedOnce, setPlacedOnce] = useState(false);
   const [reviewCardSize, setReviewCardSize] = useState<{
     w: number;
     h: number;
   } | null>(null);
   const reviewSheet = useRef(new Animated.Value(0)).current;
 
+  // Video editor (iOS with the native module): slots fed to the editor, the
+  // latest committed timeline, stored edits from the draft, and the send step.
+  const useEditor = Platform.OS === 'ios' && isVideoEditorAvailable();
+  const [editorClips, setEditorClips] = useState<EditorClip[]>([]);
+  const [editorInitial, setEditorInitial] = useState<EditTimeline | null>(null);
+  const [editorSession, setEditorSession] = useState(0);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [subtitlesY, setSubtitlesY] = useState<number>(DEFAULT_SUBTITLES_Y);
+  const editorTimelineRef = useRef<EditTimeline | null>(null);
+  const storedEditsRef = useRef<StoredEdits>({});
+  const signedUrlCache = useRef<Record<string, string>>({});
+  const editsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const returnToEditorRef = useRef(false);
+
   const recordingRef = useRef(false);
   const discardClipRef = useRef(false);
   const recordStartedRef = useRef(false);
+  // A flip or lens swap ends the native recording, so one clip is captured
+  // as parts that get joined into a single file when the creator stops.
+  const partsRef = useRef<PendingClip[]>([]);
+  const switchingRef = useRef(false);
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
   const saveTokenRef = useRef(0);
@@ -339,6 +404,16 @@ export default function RecordScreen() {
     }
     return [];
   }, [brief, briefSegments, task]);
+
+  const editorSlots = useMemo<EditorSlot[]>(
+    () =>
+      editorClips.map((clip) => {
+        const segment =
+          briefSegments.find((s) => s.slot_index === clip.slotIndex) ?? null;
+        return { ...clip, segment, shot: segment ? shots[segment.id] ?? null : null };
+      }),
+    [editorClips, briefSegments, shots],
+  );
 
   const activeClip = activeIndex !== null ? plan[activeIndex] ?? null : null;
   const activeSegment = activeClip
@@ -408,15 +483,18 @@ export default function RecordScreen() {
             return;
           }
           setAssignment(a);
+          if (a) setSubtitlesY(a.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
           if (a && profile) {
-            const [segs, draft, events] = await Promise.all([
+            const [segs, draft, events, edits] = await Promise.all([
               listBriefSegments(a.briefs.id),
               loadDraftSegments(profile.company_id, a.id),
               a.status === 'changes_requested'
                 ? listAssignmentReviewEvents(a.id)
                 : Promise.resolve([]),
+              loadDraftEdits(profile.company_id, a.id).catch(() => ({}) as StoredEdits),
             ]);
             if (cancelled) return;
+            storedEditsRef.current = edits;
             setBriefSegments(segs);
             const derivedPlan = briefPlan(a.briefs, segs);
             let skipSlots = new Set<number>();
@@ -477,10 +555,13 @@ export default function RecordScreen() {
     void Promise.all(
       withShots.map(async (s) => {
         const path = s.screenshot_url as string;
-        let url = await signedScreenshotUrl(path);
+        const signed = await signedScreenshotUrl(path);
+        let url = signed;
+        let videoUrl: string | undefined;
         if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(path)) {
+          videoUrl = signed;
           try {
-            const t = await VideoThumbnails.getThumbnailAsync(url, { time: 0 });
+            const t = await VideoThumbnails.getThumbnailAsync(signed, { time: 0 });
             url = t.uri;
           } catch {
             // keep the signed URL; the card just stays blank
@@ -493,7 +574,8 @@ export default function RecordScreen() {
             () => resolve(9 / 16),
           );
         });
-        return [s.id, { url, aspect }] as const;
+        const shot: ShotPreview = videoUrl ? { url, aspect, videoUrl } : { url, aspect };
+        return [s.id, shot] as const;
       }),
     )
       .then((entries) => {
@@ -522,12 +604,6 @@ export default function RecordScreen() {
     const t = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
     return () => clearInterval(t);
   }, [phase]);
-
-  useEffect(() => {
-    if (phase !== 'recording') return;
-    if (elapsedMs > MAX_CLIP_MS + 5000) stopClip();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, elapsedMs]);
 
   useEffect(() => {
     if (phase !== 'review') {
@@ -575,13 +651,15 @@ export default function RecordScreen() {
     if (!permissionsGranted) setCameraReady(false);
   }, [permissionsGranted]);
 
-  useEffect(() => {
-    setCameraReady(false);
-  }, [facing]);
-
+  // Facing and lens swaps reconfigure the live session in place (no remount),
+  // so onCameraReady only fires once per mount.
   useEffect(() => {
     if (!cameraMounted) setCameraReady(false);
   }, [cameraMounted]);
+
+  const lenses = useBackLenses(cameraRef, facing, cameraReady);
+  const selectedLens =
+    facing === 'back' ? lensForZoom(zoom, lenses) : undefined;
 
   async function restoreBrightness() {
     const prev = prevBrightnessRef.current;
@@ -637,6 +715,8 @@ export default function RecordScreen() {
     recordingRef.current = true;
     discardClipRef.current = false;
     recordStartedRef.current = false;
+    switchingRef.current = false;
+    partsRef.current = [];
     setElapsedMs(0);
     setPhase('recording');
     if (flashOn && facing === 'front') {
@@ -658,15 +738,39 @@ export default function RecordScreen() {
     const startedAt = Date.now();
     try {
       recordStartedRef.current = true;
-      const clip = await cam.recordAsync({
-        maxDuration: Math.ceil(MAX_CLIP_MS / 1000),
-      });
+      let keepGoing = true;
+      while (keepGoing) {
+        const partStartedAt = Date.now();
+        const part = await recordPart(cam);
+        if (part?.uri) {
+          partsRef.current.push({
+            uri: part.uri,
+            durationMs: Math.max(300, Date.now() - partStartedAt),
+          });
+        }
+        keepGoing =
+          switchingRef.current &&
+          recordingRef.current &&
+          !discardClipRef.current;
+        if (keepGoing) {
+          switchingRef.current = false;
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, SWITCH_SETTLE_MS),
+          );
+        }
+      }
+      const parts = partsRef.current;
+      partsRef.current = [];
       if (discardClipRef.current) {
         discardClipRef.current = false;
         setPhase('idle');
-      } else if (clip?.uri) {
+      } else if (parts.length > 0) {
+        const uri =
+          parts.length === 1
+            ? parts[0].uri
+            : await joinClips(parts.map((p) => p.uri));
         const captured: PendingClip = {
-          uri: clip.uri,
+          uri,
           durationMs: Math.max(500, Date.now() - startedAt),
         };
         setPendingClip(captured);
@@ -674,7 +778,7 @@ export default function RecordScreen() {
         setPendingThumb(null);
         setPendingDurationMs(captured.durationMs);
         setPhase('between');
-        void VideoThumbnails.getThumbnailAsync(clip.uri, { time: 0 })
+        void VideoThumbnails.getThumbnailAsync(uri, { time: 0 })
           .then((t) => setPendingThumb(t.uri))
           .catch(() => undefined);
         void saveClip(captured);
@@ -722,6 +826,54 @@ export default function RecordScreen() {
       }
     }, STOP_WATCHDOG_MS);
   }
+
+  /** One native recording. Right after a lens swap the session can still be
+   * reconfiguring, so a failed start gets a single retry. */
+  async function recordPart(cam: CameraView): Promise<{ uri: string } | undefined> {
+    try {
+      return await cam.recordAsync();
+    } catch (e) {
+      if (partsRef.current.length === 0) throw e;
+      await new Promise<void>((resolve) => setTimeout(resolve, SWITCH_SETTLE_MS));
+      return await cam.recordAsync();
+    }
+  }
+
+  /** Flip or lens change. Mid-recording it cuts the current part, swaps the
+   * device and the loop in startClip picks the recording back up. */
+  function switchDevice(apply: () => void) {
+    if (phase === 'recording') {
+      if (!recordingRef.current || !recordStartedRef.current) return;
+      if (switchingRef.current) return;
+      if (!isClipJoinerAvailable()) {
+        setErrorToast('Update Noni to switch cameras while recording.');
+        return;
+      }
+      switchingRef.current = true;
+      apply();
+      cameraRef.current?.stopRecording();
+      return;
+    }
+    if (phase === 'idle') apply();
+  }
+
+  function flipCamera() {
+    switchDevice(() => {
+      setFacing((f) => (f === 'front' ? 'back' : 'front'));
+      setZoom(1);
+    });
+  }
+
+  function toggleZoom() {
+    if (facing !== 'back' || !lenses.hasUltraWide) return;
+    switchDevice(() => setZoom((z) => (z === 1 ? 0.5 : 1)));
+  }
+
+  function cycleSpeed() {
+    setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length]);
+  }
+
+  const onStagePress = useDoubleTap(flipCamera);
 
   /** Stop saves this clip: probe, upload the draft, keep the slot. */
   async function saveClip(captured: PendingClip) {
@@ -784,9 +936,64 @@ export default function RecordScreen() {
 
   function nextClip() {
     setPendingClip(null);
+    if (returnToEditorRef.current) {
+      returnToEditorRef.current = false;
+      void processPost();
+      return;
+    }
     const next = plan.findIndex((c) => kept[c.slotIndex] === undefined);
     if (next !== -1) setActiveIndex(next);
     setPhase('idle');
+  }
+
+  async function clipUri(k: KeptClip): Promise<string> {
+    if (k.localUri !== null) return k.localUri;
+    if (k.storagePath !== null) {
+      const cached = signedUrlCache.current[k.storagePath];
+      if (cached !== undefined) return cached;
+      const url = await signedVideoUrl(k.storagePath);
+      signedUrlCache.current[k.storagePath] = url;
+      return url;
+    }
+    throw new Error('A clip is missing. Record it again.');
+  }
+
+  /** Build the editor's slots and reconcile the last timeline with the clips
+   * that exist now: a re-recorded slot drops its old cuts, missing slots go. */
+  function prepareEditor(clips: KeptClip[], uris: string[]) {
+    const inputs = clips.map((k, i) => ({
+      slotIndex: k.slotIndex,
+      sourceUri: uris[i],
+      durationMs: k.durationMs,
+    }));
+    let timeline = editorTimelineRef.current;
+    if (timeline === null) {
+      timeline = timelineFromStored(inputs, storedEditsRef.current);
+    } else {
+      for (const input of inputs) {
+        const pieces = slotPieces(timeline, input.slotIndex);
+        const same =
+          pieces.length > 0 &&
+          pieces[0].sourceUri === input.sourceUri &&
+          pieces[0].sourceDurationMs === input.durationMs;
+        if (!same) timeline = replaceSlot(timeline, input);
+      }
+      const present = new Set(inputs.map((s) => s.slotIndex));
+      timeline = { pieces: timeline.pieces.filter((p) => present.has(p.slotIndex)) };
+    }
+    editorTimelineRef.current = timeline;
+    setEditorClips(
+      inputs.map((input) => ({
+        slotIndex: input.slotIndex,
+        label:
+          plan.find((c) => c.slotIndex === input.slotIndex)?.label ??
+          `Clip ${input.slotIndex + 1}`,
+        sourceUri: input.sourceUri,
+        durationMs: input.durationMs,
+      })),
+    );
+    setEditorInitial(timeline);
+    setEditorSession((n) => n + 1);
   }
 
   async function processPost() {
@@ -797,18 +1004,17 @@ export default function RecordScreen() {
       const clips = plan
         .filter((c) => kept[c.slotIndex] !== undefined)
         .map((c) => kept[c.slotIndex]);
-      const uris = await Promise.all(
-        clips.map(async (k) => {
-          if (k.localUri !== null) return k.localUri;
-          if (k.storagePath !== null) return signedVideoUrl(k.storagePath);
-          throw new Error('A clip is missing. Record it again.');
-        }),
-      );
+      const uris = await Promise.all(clips.map(clipUri));
       const waitLeft = PROCESSING_MIN_MS - (Date.now() - startedAt);
       if (waitLeft > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, waitLeft));
       }
-      setReviewUris(uris);
+      if (useEditor) {
+        prepareEditor(clips, uris);
+        setReviewUris([]);
+      } else {
+        setReviewUris(uris);
+      }
       setReviewIndex(0);
       setReviewPlaying(false);
       setPhase('review');
@@ -820,15 +1026,134 @@ export default function RecordScreen() {
     }
   }
 
-  async function sendForApproval() {
+  const persistEdits = useCallback(
+    (timeline: EditTimeline) => {
+      editorTimelineRef.current = timeline;
+      if (!profile || !assignment) return;
+      if (editsSaveTimer.current) clearTimeout(editsSaveTimer.current);
+      const edits = serializeEdits(timeline);
+      storedEditsRef.current = edits;
+      editsSaveTimer.current = setTimeout(() => {
+        editsSaveTimer.current = null;
+        saveDraftEdits({
+          companyId: profile.company_id,
+          assignmentId: assignment.id,
+          creatorId: profile.id,
+          edits,
+        }).catch(() => undefined);
+      }, 600);
+    },
+    [profile, assignment],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (editsSaveTimer.current) clearTimeout(editsSaveTimer.current);
+    };
+  }, []);
+
+  function replaceSlotFromEditor(slotIndex: number) {
+    const index = plan.findIndex((c) => c.slotIndex === slotIndex);
+    if (index === -1) return;
+    returnToEditorRef.current = true;
+    setActiveIndex(index);
+    setPhase('idle');
+  }
+
+  function moveSubtitles(y: number) {
+    setSubtitlesY(y);
+    if (!brief) return;
+    creatorPlaceSubtitles({ briefId: brief.id, y }).catch(() =>
+      setErrorToast('Could not save that position. Try again.'),
+    );
+  }
+
+  /** Bake every edited slot into a fresh clip, swap it into the kept map and
+   * the draft, then hand the result to the normal submit path. */
+  async function sendEdited() {
     if (!profile || submitting) return;
+    const timeline = editorTimelineRef.current;
+    if (!timeline) return;
+    setSendOpen(false);
+    // A pending debounced edits save could land mid export with stale
+    // segments; every exported slot writes the draft itself below.
+    if (editsSaveTimer.current) {
+      clearTimeout(editsSaveTimer.current);
+      editsSaveTimer.current = null;
+    }
+    const edited = slotIndices(timeline).filter((s) => !slotIsUntouched(timeline, s));
+    const keptNow: Record<number, KeptClip> = { ...kept };
+    let current = timeline;
+    try {
+      for (let i = 0; i < edited.length; i++) {
+        const slot = edited[i];
+        const before = keptNow[slot];
+        if (before === undefined) continue;
+        setBusyLabel(
+          edited.length === 1
+            ? 'Finishing your clip…'
+            : `Finishing clip ${i + 1} of ${edited.length}…`,
+        );
+        const result = await exportTimeline(
+          toNativeTimeline({ pieces: slotPieces(current, slot) }),
+        );
+        let storagePath = before.storagePath;
+        if (assignment) {
+          storagePath = draftClipPath(profile.company_id, assignment.id, slot);
+          await uploadClip(result.uri, storagePath);
+          await saveDraftSegment({
+            companyId: profile.company_id,
+            assignmentId: assignment.id,
+            creatorId: profile.id,
+            segment: {
+              slot_index: slot,
+              kind: before.kind,
+              storage_path: storagePath,
+              duration_ms: Math.round(result.durationMs),
+            },
+          });
+        }
+        keptNow[slot] = {
+          ...before,
+          durationMs: Math.round(result.durationMs),
+          storagePath,
+          localUri: result.uri,
+        };
+        current = replaceSlot(current, {
+          slotIndex: slot,
+          sourceUri: result.uri,
+          durationMs: Math.round(result.durationMs),
+        });
+        editorTimelineRef.current = current;
+        setKept({ ...keptNow });
+        if (assignment) {
+          await saveDraftEdits({
+            companyId: profile.company_id,
+            assignmentId: assignment.id,
+            creatorId: profile.id,
+            edits: serializeEdits(current),
+          }).catch(() => undefined);
+        }
+      }
+      setBusyLabel('Sending for approval…');
+      await sendForApproval(keptNow);
+    } catch (e) {
+      setErrorToast(e instanceof Error ? e.message : 'Could not finish the video. Try again.');
+    } finally {
+      setBusyLabel(null);
+    }
+  }
+
+  async function sendForApproval(keptOverride?: Record<number, KeptClip>) {
+    if (!profile || submitting) return;
+    const clips = keptOverride ?? kept;
     setSubmitting(true);
     try {
       if (assignment) {
-        const clips = plan
-          .filter((c) => kept[c.slotIndex] !== undefined)
+        const uploaded = plan
+          .filter((c) => clips[c.slotIndex] !== undefined)
           .map((c) => {
-            const k = kept[c.slotIndex];
+            const k = clips[c.slotIndex];
             if (k.storagePath === null) {
               throw new Error('A clip is missing. Record it again.');
             }
@@ -842,7 +1167,7 @@ export default function RecordScreen() {
           assignment,
           companyId: profile.company_id,
           creatorId: profile.id,
-          clips,
+          clips: uploaded,
         });
         try {
           await clearDraft(profile.company_id, assignment.id);
@@ -852,9 +1177,9 @@ export default function RecordScreen() {
         queue.applyLocal(updated);
       } else if (task) {
         const segments = plan
-          .filter((c) => kept[c.slotIndex] !== undefined)
+          .filter((c) => clips[c.slotIndex] !== undefined)
           .map((c) => {
-            const k = kept[c.slotIndex];
+            const k = clips[c.slotIndex];
             if (k.localUri === null) {
               throw new Error('A clip is missing. Record it again.');
             }
@@ -891,6 +1216,55 @@ export default function RecordScreen() {
     }
   }
 
+  function pauseReview() {
+    reviewPlayer.pause();
+    setReviewPlaying(false);
+  }
+
+  function goToReviewClip(index: number) {
+    if (index < 0 || index >= reviewUris.length) return;
+    pauseReview();
+    setReviewIndex(index);
+  }
+
+  function persistPlacement(params: Parameters<typeof creatorPlaceSegment>[0]) {
+    setPlacedOnce(true);
+    creatorPlaceSegment(params).catch(() =>
+      setErrorToast('Could not save that position. Try again.'),
+    );
+  }
+
+  function moveReviewBox(boxId: string, x: number, y: number) {
+    if (!reviewSegment) return;
+    const segmentId = reviewSegment.id;
+    setBriefSegments((prev) =>
+      prev.map((s) => (s.id === segmentId ? segmentWithBoxMoved(s, boxId, x, y) : s)),
+    );
+    persistPlacement({ segmentId, box: { id: boxId, x, y } });
+  }
+
+  function moveReviewCard(x: number, y: number) {
+    if (!reviewSegment) return;
+    const segmentId = reviewSegment.id;
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segmentId ? { ...s, screenshot_x: x, screenshot_y: y } : s,
+      ),
+    );
+    persistPlacement({ segmentId, screenshot: { x, y } });
+  }
+
+  const reviewCanPlace =
+    reviewSegment !== null &&
+    reviewSegment.layout !== 'green_screen' &&
+    (reviewShot !== null ||
+      (reviewSegment.show_on_screen &&
+        parseTextOverlay(brief?.text_overlay).enabled &&
+        parseOverlayBoxes(reviewSegment.overlay_style, {
+          text: reviewSegment.overlay_text,
+          textY: reviewSegment.text_y,
+        }).length > 0));
+
   function onClose() {
     if (submitting) return;
     if (phase === 'countdown') {
@@ -911,7 +1285,7 @@ export default function RecordScreen() {
   if (loading) {
     return (
       <View style={styles.fallback}>
-        <ActivityIndicator size="large" color={color.accent} />
+        <SkeletonCard style={styles.fallbackSkeleton} radius={radius.xl} />
       </View>
     );
   }
@@ -929,7 +1303,6 @@ export default function RecordScreen() {
   const showPrompt =
     activeClip !== null &&
     (phase === 'idle' || phase === 'countdown' || phase === 'recording');
-  const prompterDurationMs = Math.round(PROGRESS_REF_MS / speed);
   const submitCount = keptCount;
   const clipNumber = (activeIndex ?? 0) + 1;
   const toGo = plan.filter(
@@ -937,12 +1310,6 @@ export default function RecordScreen() {
       kept[c.slotIndex] === undefined &&
       c.slotIndex !== (activeClip?.slotIndex ?? -1),
   ).length;
-
-  // Green screen: live camera ghosts over the screenshot background so the
-  // creator stands where the final cutout lands.
-  const ghostStyle = greenScreenActive
-    ? [StyleSheet.absoluteFill, { opacity: 0.68 }]
-    : StyleSheet.absoluteFill;
 
   const reviewData = brief ?? null;
 
@@ -957,6 +1324,42 @@ export default function RecordScreen() {
             adding your assets and captions.
           </Text>
         </View>
+      ) : phase === 'review' && useEditor && editorInitial !== null ? (
+        <PostEditor
+          key={editorSession}
+          slots={editorSlots}
+          initialTimeline={editorInitial}
+          overlay={parseTextOverlay(brief?.text_overlay)}
+          subtitles={brief?.subtitles ? { y: subtitlesY } : null}
+          onTimelineChange={persistEdits}
+          onMoveBox={(segment, boxId, x, y) => {
+            setBriefSegments((prev) =>
+              prev.map((s) =>
+                s.id === segment.id ? segmentWithBoxMoved(s, boxId, x, y) : s,
+              ),
+            );
+            persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
+          }}
+          onMoveCard={(segment, x, y) => {
+            setBriefSegments((prev) =>
+              prev.map((s) =>
+                s.id === segment.id ? { ...s, screenshot_x: x, screenshot_y: y } : s,
+              ),
+            );
+            persistPlacement({ segmentId: segment.id, screenshot: { x, y } });
+          }}
+          onMoveSubtitles={moveSubtitles}
+          onBack={retakeFromReview}
+          onReplaceSlot={replaceSlotFromEditor}
+          onContinue={(timeline) => {
+            editorTimelineRef.current = timeline;
+            setSendOpen(true);
+          }}
+          busyLabel={busyLabel ?? (submitting ? 'Sending for approval…' : null)}
+          showPlaceHint={!placedOnce}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+        />
       ) : phase === 'review' ? (
         <View style={[styles.review, { paddingTop: insets.top + space[2] }]}>
           <View style={styles.reviewHeader}>
@@ -1002,28 +1405,67 @@ export default function RecordScreen() {
                   stageWidth={reviewCardSize.w}
                   stageHeight={reviewCardSize.h}
                   overlay={parseTextOverlay(brief?.text_overlay)}
+                  onMoveBox={moveReviewBox}
+                  onMoveCard={moveReviewCard}
+                  onDragStart={pauseReview}
                 />
               ) : null}
               <View style={styles.reviewSegments}>
                 {reviewUris.map((uri, i) => (
-                  <View
+                  <Pressable
                     key={uri}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Clip ${i + 1} of ${reviewUris.length}`}
+                    hitSlop={{ top: 12, bottom: 16 }}
+                    onPress={() => goToReviewClip(i)}
                     style={[
                       styles.reviewSegment,
-                      i <= reviewIndex && reviewPlaying
+                      i === reviewIndex || i < reviewIndex
                         ? styles.reviewSegmentOn
-                        : i < reviewIndex
-                          ? styles.reviewSegmentOn
-                          : null,
+                        : null,
                     ]}
                   />
                 ))}
               </View>
+              {reviewUris.length > 1 ? (
+                <View style={styles.reviewClipLabel} pointerEvents="none">
+                  <Text style={styles.reviewClipLabelText}>
+                    Clip {reviewIndex + 1} of {reviewUris.length}
+                  </Text>
+                </View>
+              ) : null}
               {!reviewPlaying ? (
                 <View style={styles.reviewPlayWrap} pointerEvents="none">
                   <View style={styles.reviewPlay}>
                     <Icon name="play" size={24} color={color.ink} />
                   </View>
+                </View>
+              ) : null}
+              {!reviewPlaying && reviewIndex > 0 ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous clip"
+                  onPress={() => goToReviewClip(reviewIndex - 1)}
+                  style={[styles.reviewArrow, styles.reviewArrowLeft]}
+                >
+                  <Icon name="chevron-left" size={19} color={color.white} />
+                </PressableScale>
+              ) : null}
+              {!reviewPlaying && reviewIndex < reviewUris.length - 1 ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Next clip"
+                  onPress={() => goToReviewClip(reviewIndex + 1)}
+                  style={[styles.reviewArrow, styles.reviewArrowRight]}
+                >
+                  <Icon name="chevron-right" size={19} color={color.white} />
+                </PressableScale>
+              ) : null}
+              {reviewCanPlace && !placedOnce && !reviewPlaying ? (
+                <View style={styles.placeHint} pointerEvents="none">
+                  <Text style={styles.placeHintText}>
+                    Hold any text or picture to move it
+                  </Text>
                 </View>
               ) : null}
             </Pressable>
@@ -1097,21 +1539,17 @@ export default function RecordScreen() {
               })
             }
           >
-            {greenScreenActive && activeShot ? (
-              <Image
-                source={{ uri: activeShot.url }}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-              />
-            ) : null}
-
             {cameraMounted ? (
-              <View style={ghostStyle}>
+              <Pressable
+                accessibilityLabel="Camera preview. Double tap to flip."
+                onPress={onStagePress}
+                style={StyleSheet.absoluteFill}
+              >
                 <CameraView
-                  key={facing}
                   ref={cameraRef}
                   style={StyleSheet.absoluteFill}
                   facing={facing}
+                  selectedLens={selectedLens}
                   mode="video"
                   mute={false}
                   mirror={facing === 'front'}
@@ -1126,6 +1564,17 @@ export default function RecordScreen() {
                         'Could not start the camera. Close and open this screen again.',
                     );
                   }}
+                />
+              </Pressable>
+            ) : null}
+
+            {greenScreenActive && activeShot ? (
+              // The camera preview layer is never translucent on iOS, so the
+              // green screen media sits over it instead of under it.
+              <View style={styles.greenScreenLayer} pointerEvents="none">
+                <GreenScreenBackdrop
+                  shot={activeShot}
+                  recording={phase === 'recording'}
                 />
               </View>
             ) : null}
@@ -1157,6 +1606,7 @@ export default function RecordScreen() {
                 stageWidth={stageSize.w}
                 stageHeight={stageSize.h}
                 overlay={parseTextOverlay(brief?.text_overlay)}
+                recording={phase === 'recording'}
               />
             ) : null}
 
@@ -1192,34 +1642,62 @@ export default function RecordScreen() {
                   onPress={onClose}
                   hitSlop={10}
                 >
-                  <Text style={styles.closeText}>Close</Text>
+                  <Icon name="x" size={26} color={color.white} />
                 </Pressable>
-                <View style={styles.clipPill}>
-                  <Text style={styles.clipPillText}>
-                    Clip {clipNumber} of {plan.length}
-                  </Text>
-                </View>
+                {phase === 'recording' ? (
+                  <View style={styles.recPill}>
+                    <View style={styles.recDot} />
+                    <Text style={styles.recPillText}>{formatMs(elapsedMs)}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.clipPill}>
+                    <Text style={styles.clipPillText}>
+                      {activeClip?.label ?? 'Clip'} · {clipNumber} of {plan.length}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.headerSpacer} />
               </View>
             </View>
 
             {showPrompt && activeClip !== null ? (
-              <View style={[styles.promptSlot, { top: insets.top + 46 }]}>
+              <View style={[styles.promptSlot, { top: insets.top + 56 }]}>
                 {activeClip.scripted ? (
                   <TeleprompterOverlay
-                    key={`${activeIndex}-${takeCount}-${speed}`}
+                    key={`${activeIndex}-${takeCount}`}
                     text={activeClip.script}
-                    durationMs={prompterDurationMs}
+                    speed={speed}
+                    running={phase === 'recording'}
                   />
                 ) : (
                   <View style={styles.talkingPoint}>
-                    <Text style={styles.talkingLabel}>Talking point</Text>
+                    <Text style={styles.talkingLabel}>Talk about</Text>
                     <Text style={styles.talkingHint}>
-                      (Say it your way, this won&apos;t show on the video)
+                      Say it your way. Not shown on the video
                     </Text>
-                    <Text style={styles.talkingText}>{activeClip.script}</Text>
+                    <View style={styles.talkingBox}>
+                      <Text style={styles.talkingText}>{activeClip.script}</Text>
+                    </View>
                   </View>
                 )}
               </View>
+            ) : null}
+
+            {capturePhase && phase !== 'between' && activeClip !== null ? (
+              <CameraRail
+                style={{ top: insets.top + 56 }}
+                facing={facing}
+                onFlip={flipCamera}
+                flashOn={flashOn}
+                onToggleFlash={() => setFlashOn((v) => !v)}
+                zoom={zoom}
+                hasUltraWide={lenses.hasUltraWide}
+                onToggleZoom={toggleZoom}
+                speed={speed}
+                onCycleSpeed={cycleSpeed}
+                showSpeed={activeClip.scripted}
+                recording={phase === 'recording'}
+              />
             ) : null}
 
             {phase === 'countdown' ? (
@@ -1317,95 +1795,81 @@ export default function RecordScreen() {
                 { paddingBottom: Math.max(insets.bottom, 14) },
               ]}
             >
-              {phase === 'recording' ? (
-                <View style={styles.recordingRow}>
-                  <Text style={styles.elapsed}>{formatMs(elapsedMs)}</Text>
+              <View style={styles.shutterRow}>
+                <View style={styles.shutterSide}>
+                  {phase !== 'recording' && keptCount > 0 ? (
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel={`Finish with ${keptCount} clips`}
+                      onPress={() => void processPost()}
+                      style={styles.finishPill}
+                    >
+                      <Text style={styles.finishText}>
+                        Finish with {keptCount}
+                      </Text>
+                    </PressableScale>
+                  ) : null}
+                </View>
+                {phase === 'recording' ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Stop recording"
                     onPress={stopClip}
-                    style={styles.stopBtn}
+                    style={[styles.shutter, styles.shutterRecording]}
                   >
                     <View style={styles.stopSquare} />
                   </Pressable>
-                  <Text style={styles.stopHint}>Stop saves this clip</Text>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Start recording"
+                    style={[styles.shutter, !cameraReady && styles.shutterOff]}
+                    disabled={!cameraReady || phase === 'countdown'}
+                    onPress={onShutterPress}
+                  >
+                    <View style={styles.shutterInner} />
+                  </Pressable>
+                )}
+                <View style={styles.shutterSide}>
+                  <Text style={styles.clipsLeft}>
+                    {phase === 'recording'
+                      ? 'Tap to stop'
+                      : `${clipsLeft} ${clipsLeft === 1 ? 'clip' : 'clips'} left`}
+                  </Text>
                 </View>
-              ) : (
-                <>
-                  <View style={styles.controlsRow}>
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel="Switch camera"
-                      onPress={() =>
-                        setFacing((f) => (f === 'front' ? 'back' : 'front'))
-                      }
-                      style={styles.roundCtl}
-                    >
-                      <Icon name="switch-camera" size={20} color={color.white} />
-                    </PressableScale>
-                    <View style={styles.speedRow}>
-                      {SPEEDS.map((s) => (
-                        <Pressable
-                          key={s}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Teleprompter speed ${s}x`}
-                          onPress={() => setSpeed(s)}
-                          style={[styles.speedChip, speed === s && styles.speedOn]}
-                        >
-                          <Text style={styles.speedText}>{s}x</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel={flashOn ? 'Flash on' : 'Flash off'}
-                      onPress={() => setFlashOn((v) => !v)}
-                      style={[styles.roundCtl, flashOn && styles.roundCtlOn]}
-                    >
-                      <Icon
-                        name="zap"
-                        size={18}
-                        color={flashOn ? color.ink900 : color.white}
-                      />
-                    </PressableScale>
-                  </View>
-
-                  <View style={styles.shutterRow}>
-                    <View style={styles.shutterSide}>
-                      {keptCount > 0 ? (
-                        <PressableScale
-                          accessibilityRole="button"
-                          accessibilityLabel={`Finish with ${keptCount} clips`}
-                          onPress={() => void processPost()}
-                          style={styles.finishPill}
-                        >
-                          <Text style={styles.finishText}>
-                            Finish with {keptCount}
-                          </Text>
-                        </PressableScale>
-                      ) : null}
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Start recording"
-                      style={[styles.shutter, !cameraReady && styles.shutterOff]}
-                      disabled={!cameraReady || phase === 'countdown'}
-                      onPress={onShutterPress}
-                    >
-                      <View style={styles.shutterInner} />
-                    </Pressable>
-                    <View style={styles.shutterSide}>
-                      <Text style={styles.clipsLeft}>
-                        {clipsLeft} {clipsLeft === 1 ? 'clip' : 'clips'} left
-                      </Text>
-                    </View>
-                  </View>
-                </>
-              )}
+              </View>
             </View>
           ) : null}
         </>
       )}
+
+      <SheetShell visible={sendOpen} onClose={() => setSendOpen(false)}>
+        <Text style={styles.reviewLabel}>Autofilled from the brief</Text>
+        <Text style={styles.reviewTitle} numberOfLines={2}>
+          {reviewData?.title ?? task?.title ?? ''}
+        </Text>
+        <View style={styles.reviewChips}>
+          {reviewData !== null ? <FormatTag format={reviewData.format} /> : null}
+          {typeMeta !== null ? (
+            <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
+          ) : null}
+        </View>
+        {reviewData?.caption ? (
+          <View style={styles.captionBlock}>
+            <Text style={styles.captionLabel}>Caption</Text>
+            <Text style={styles.captionText}>{reviewData.caption}</Text>
+          </View>
+        ) : null}
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Send for approval"
+          onPress={() => void sendEdited()}
+          style={styles.sendBtn}
+        >
+          <Icon name="send" size={19} color={color.white} />
+          <Text style={styles.sendText}>Send for approval</Text>
+        </PressableScale>
+      </SheetShell>
 
       <SoftToast
         visible={errorToast !== null}
@@ -1419,6 +1883,11 @@ export default function RecordScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.ink900 },
+  fallbackSkeleton: {
+    flex: 1,
+    width: '100%',
+    opacity: 0.12,
+  },
   fallback: {
     flex: 1,
     alignItems: 'center',
@@ -1438,7 +1907,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.ink800,
   },
   permissionGate: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space[10],
@@ -1471,8 +1940,12 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.heavy,
   },
   frontGlow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: color.whiteA45,
+  },
+  greenScreenLayer: {
+    ...StyleSheet.absoluteFill,
+    opacity: 0.62,
   },
   topBar: {
     position: 'absolute',
@@ -1507,10 +1980,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  closeText: {
-    color: color.white,
-    fontSize: type.size.body,
-    fontWeight: type.weight.bold,
+  headerSpacer: {
+    width: 26,
   },
   clipPill: {
     paddingVertical: 6,
@@ -1523,17 +1994,45 @@ const styles = StyleSheet.create({
     fontSize: type.size.label,
     fontWeight: type.weight.bold,
   },
+  recPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.pill,
+    backgroundColor: color.inkA55,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radius.pill,
+    backgroundColor: color.danger,
+  },
+  recPillText: {
+    color: color.white,
+    fontSize: type.size.label,
+    fontWeight: type.weight.heavy,
+    fontVariant: ['tabular-nums'],
+  },
   promptSlot: {
     position: 'absolute',
     left: 0,
     right: 0,
     zIndex: 3,
     paddingTop: 40,
+    paddingHorizontal: 60,
   },
   talkingPoint: {
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 26,
+  },
+  talkingBox: {
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.42)',
   },
   talkingLabel: {
     fontSize: type.size.micro,
@@ -1548,15 +2047,14 @@ const styles = StyleSheet.create({
     color: color.whiteA45,
   },
   talkingText: {
-    marginTop: 8,
-    fontSize: 24,
-    lineHeight: 24 * 1.35,
+    fontSize: 21,
+    lineHeight: 21 * 1.35,
     fontWeight: type.weight.bold,
     color: color.white,
     textAlign: 'center',
   },
   countdownWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.scrim,
@@ -1568,7 +2066,7 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.heavy,
   },
   betweenScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
     backgroundColor: color.scrim,
     zIndex: 7,
@@ -1667,41 +2165,6 @@ const styles = StyleSheet.create({
     paddingTop: space[4],
     gap: 14,
   },
-  controlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  roundCtl: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roundCtlOn: {
-    backgroundColor: color.white,
-  },
-  speedRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  speedChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
-  },
-  speedOn: {
-    backgroundColor: color.accent,
-  },
-  speedText: {
-    color: color.white,
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-  },
   shutterRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1731,52 +2194,28 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: radius.pill,
-    borderWidth: 4,
-    borderColor: color.white,
+    borderWidth: 5,
+    borderColor: 'rgba(255,255,255,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  shutterRecording: {
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   shutterOff: {
     opacity: 0.4,
   },
   shutterInner: {
-    width: 68,
-    height: 68,
+    width: 66,
+    height: 66,
     borderRadius: radius.pill,
-    backgroundColor: color.white,
-  },
-  recordingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  elapsed: {
-    flex: 1,
-    color: color.white,
-    fontSize: 18,
-    fontWeight: type.weight.heavy,
-  },
-  stopBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: radius.pill,
-    borderWidth: 4,
-    borderColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: color.danger,
   },
   stopSquare: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: color.accent,
-  },
-  stopHint: {
-    flex: 1,
-    textAlign: 'right',
-    color: color.whiteA75,
-    fontSize: type.size.chip,
-    fontWeight: type.weight.semibold,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: color.danger,
   },
   processing: {
     flex: 1,
@@ -1863,8 +2302,53 @@ const styles = StyleSheet.create({
   reviewSegmentOn: {
     backgroundColor: color.white,
   },
+  reviewClipLabel: {
+    position: 'absolute',
+    top: 22,
+    alignSelf: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  reviewClipLabelText: {
+    color: color.white,
+    fontSize: type.size.micro,
+    fontWeight: type.weight.bold,
+  },
+  reviewArrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -17,
+    width: 34,
+    height: 34,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.whiteA16,
+  },
+  reviewArrowLeft: {
+    left: 10,
+  },
+  reviewArrowRight: {
+    right: 10,
+  },
+  placeHint: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  placeHintText: {
+    color: color.white,
+    fontSize: type.size.micro,
+    fontWeight: type.weight.bold,
+  },
   reviewPlayWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

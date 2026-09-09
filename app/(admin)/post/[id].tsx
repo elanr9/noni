@@ -1,11 +1,9 @@
-// Stepped post editor. Post type comes stamped from week setup but stays
-// editable on the title step. Nothing generates on open — AI assist is on
+// Single-page post editor. Every field sits on one scroll, filled posts
+// open as a read-only summary. Nothing generates on open — AI assist is on
 // demand. Screenshots live on brief_segments keyed by talking_point_index.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Animated,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,20 +12,31 @@ import {
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CameraRollSheet } from '../../../components/admin/editor/CameraRollSheet';
+import {
+  CameraRollSheet,
+  type MediaPick,
+} from '../../../components/admin/editor/CameraRollSheet';
+import { MediaThumb } from '../../../components/ui/MediaThumb';
+import {
+  copySegmentMediaToLibrary,
+  listMediaLibrary,
+  placeLibraryItemOnSegment,
+  placeRemoteImageOnSegment,
+  uploadSegmentMedia,
+  type MediaLibraryItem,
+} from '../../../lib/media-library-api';
 import { CaptionStep } from '../../../components/admin/editor/CaptionStep';
 import { CtaCard } from '../../../components/admin/editor/CtaCard';
-import { HookOptionsField } from '../../../components/admin/editor/HookOptionsField';
+import { SubtitlesCard } from '../../../components/admin/editor/SubtitlesCard';
 import {
   OverlayEditor,
   type OverlayEditorMode,
   type OverlaySavePatch,
 } from '../../../components/admin/editor/OverlayEditor';
 import {
-  DEFAULT_BOX_SIZE,
-  DEFAULT_OVERLAY_FILL,
-  DEFAULT_TEXT_Y,
+  newOverlayBox,
   parseOverlayBoxes,
+  parseOverlayThemeColor,
   serializeOverlayBoxes,
 } from '../../../lib/overlay-boxes';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
@@ -38,10 +47,19 @@ import {
 } from '../../../components/admin/LibraryPickerSheet';
 import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
+import {
+  KindOfPostCard,
+  rankTypeSuggestions,
+} from '../../../components/admin/editor/KindOfPostCard';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
-import { StepDots } from '../../../components/admin/editor/StepDots';
+import { StartPostCard } from '../../../components/admin/editor/StartPostCard';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
-import { PushHeader, SectionLabel } from '../../../components/admin/shared';
+import {
+  PushHeader,
+  SectionLabel,
+  SkeletonCard,
+  SkeletonLine,
+} from '../../../components/admin/shared';
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
@@ -52,6 +70,7 @@ import {
   confirmBriefReview,
   confirmSlideshowReview,
   briefRowState,
+  clearBrief,
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
@@ -67,52 +86,28 @@ import {
   signedScreenshotUrl,
   updateBrief,
   updateBriefSegment,
-  uploadSegmentScreenshot,
   type BriefReviewEventInput,
   type BriefReviewResult,
   type BriefSegment,
   type CampaignBriefItem,
   type NoniLibraryGroup,
+  type PointMedia,
   type PostType,
   type PostTypeShape,
   type RegenDraftPayload,
   type RegenField,
   type TalkingPoint,
 } from '../../../lib/briefs-api';
-import { ensureSlot, fillPostSlot, type FillSource } from '../../../lib/post-fill';
+import {
+  applyPointMedia,
+  ensureSlot,
+  fillPostSlot,
+  saveTypedIdea,
+  seedOverlayBoxes,
+  type FillSource,
+} from '../../../lib/post-fill';
 import { supabase } from '../../../lib/supabase';
-import { color, motion, radius, type } from '../../../theme/tokens';
-
-const VIDEO_STEPS = [
-  'title',
-  'search',
-  'hook',
-  'cta',
-  'points',
-  'caption',
-  'review',
-] as const;
-type EditorStep = (typeof VIDEO_STEPS)[number];
-
-/** Slideshows skip the spoken-video steps: no hook, no CTA. Slides carry
- * their own text and screenshots and are read, not performed. */
-const SLIDESHOW_STEPS: readonly EditorStep[] = [
-  'title',
-  'search',
-  'points',
-  'caption',
-  'review',
-];
-
-const STEP_TITLES: Record<EditorStep, string> = {
-  title: 'Title',
-  search: 'Search phrase',
-  hook: 'Hook',
-  cta: 'CTA',
-  points: 'Talking points',
-  caption: 'Caption + hashtags',
-  review: 'AI review',
-};
+import { color, radius, radiusAdmin, space, type } from '../../../theme/tokens';
 
 /** The fields as they stood when review opened, for edit diffs and the ban list. */
 type ReviewSnapshot = {
@@ -120,7 +115,7 @@ type ReviewSnapshot = {
   cta: string;
   caption: string;
   searchPhrase: string;
-  points: Array<{ id: string; text: string | null; edited_by_admin: boolean }>;
+  points: { id: string; text: string | null; edited_by_admin: boolean }[];
 };
 
 /** What save must re-derive segments for: points, hook, or type changed. */
@@ -136,23 +131,40 @@ function deriveSnapshot(params: {
   });
 }
 
+const FILL_STATUS_LABELS = [
+  'Writing the script',
+  'Placing screenshots from your library',
+  'Setting up overlays and subtitles',
+  'Almost there',
+] as const;
+
+/** Rotates through the fill status lines while a fill runs. */
+function useFillStatusLabel(filling: boolean): string | null {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    if (!filling) return;
+    const timer = setInterval(
+      () => setStep((s) => Math.min(s + 1, FILL_STATUS_LABELS.length - 1)),
+      1800,
+    );
+    return () => {
+      clearInterval(timer);
+      setStep(0);
+    };
+  }, [filling]);
+  return filling ? FILL_STATUS_LABELS[step] : null;
+}
+
 export default function PostEditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [step, setStep] = useState<EditorStep>('title');
   /** Completed posts open as one read-only page; Edit flips it to inputs. */
   const [summaryMode, setSummaryMode] = useState<'view' | 'edit' | null>(null);
   /** reviewed_at from the row; null means the post never counted as complete. */
   const [reviewedAt, setReviewedAt] = useState<string | null>(null);
-  // Direction-aware step transition: Next slides in from the right,
-  // Back from the left, with a fade. Driven by index delta so every
-  // setStep caller gets it for free.
-  const stepOpacity = useRef(new Animated.Value(1)).current;
-  const stepShift = useRef(new Animated.Value(0)).current;
-  const prevStepIndexRef = useRef(0);
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
   const [postNumber, setPostNumber] = useState<number | null>(null);
@@ -162,23 +174,31 @@ export default function PostEditorScreen() {
   const [segments, setSegments] = useState<BriefSegment[]>([]);
   const [screenshotUrls, setScreenshotUrls] = useState<Record<string, string>>({});
   const [noniLibrary, setNoniLibrary] = useState<NoniLibraryGroup[]>([]);
+  const [mediaLibrary, setMediaLibrary] = useState<MediaLibraryItem[]>([]);
 
-  /* Company Brain shots load once so the picker opens instantly. */
+  /* Shared library and Company Brain shots load once so the picker opens instantly. */
   useEffect(() => {
     if (!profile?.company_id) return;
     void listNoniLibrary(profile.company_id)
       .then(setNoniLibrary)
       .catch(() => setNoniLibrary([]));
+    void listMediaLibrary(profile.company_id)
+      .then(setMediaLibrary)
+      .catch(() => setMediaLibrary([]));
   }, [profile?.company_id]);
 
   const [title, setTitle] = useState('');
-  const [postTypeId, setPostTypeId] = useState<string | null>(null);
+  /** The type on the row or picked here; null on a fresh stamped row. */
+  const [pickedTypeId, setPostTypeId] = useState<string | null>(null);
+  /** The lane the row was stamped into; the type may still be unchosen. */
+  const [briefFormat, setBriefFormat] = useState<'video' | 'photo_carousel'>('video');
   const [hookOptions, setHookOptions] = useState<string[]>([]);
   const [chosenHookIndex, setChosenHookIndex] = useState(0);
   const [useCustomHook, setUseCustomHook] = useState(false);
   const [customHook, setCustomHook] = useState('');
   const [points, setPoints] = useState<TalkingPoint[]>([]);
   const [cta, setCta] = useState('');
+  const [subtitles, setSubtitles] = useState(false);
   const [searchPhrase, setSearchPhrase] = useState('');
   const [caption, setCaption] = useState('');
   const [hashtags, setHashtags] = useState<string[]>([]);
@@ -220,6 +240,7 @@ export default function PostEditorScreen() {
   const [overlaySaving, setOverlaySaving] = useState(false);
   /** The brand account shown on the merged caption preview. */
   const [accountName, setAccountName] = useState('');
+  const [themeColor, setThemeColor] = useState<string | null>(null);
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [weekPosts, setWeekPosts] = useState<CampaignBriefItem[]>([]);
@@ -229,41 +250,41 @@ export default function PostEditorScreen() {
   const [portBusyId, setPortBusyId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [filling, setFilling] = useState(false);
+  const fillStatusLabel = useFillStatusLabel(filling);
   /** Bumped after a fill so the screen re-reads the row it just wrote. */
   const [reloadNonce, setReloadNonce] = useState(0);
+  /** The manager chose to skip AI on this empty post; the form shows instead. */
+  const [startedBlank, setStartedBlank] = useState(false);
+  const [placedNote, setPlacedNote] = useState<string | null>(null);
+  /** Screenshots a regenerate picked from the feature library; the next save places them. */
+  const pendingPointMedia = useRef<(PointMedia | null)[]>([]);
 
+  const pickedType = postTypes.find((t) => t.id === pickedTypeId) ?? null;
+  const lane: 'video' | 'photo_carousel' =
+    pickedType === null
+      ? briefFormat
+      : pickedType.family === 'photo_carousel'
+        ? 'photo_carousel'
+        : 'video';
+  const typeSuggestions = useMemo(
+    () => rankTypeSuggestions(postTypes, lane, weekPosts),
+    [postTypes, lane, weekPosts],
+  );
+  // A typeless row opens with the kind the week lacks most preselected.
+  // The pick is written on save or when the manager changes it.
+  const postTypeId =
+    pickedTypeId ??
+    (summaryMode === null ? (typeSuggestions[0]?.type.id ?? null) : null);
   const currentType = useMemo(
     () => postTypes.find((t) => t.id === postTypeId) ?? null,
     [postTypes, postTypeId],
   );
   const family: 'video' | 'photo_carousel' =
-    currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video';
-  const steps: readonly EditorStep[] =
-    family === 'photo_carousel' ? SLIDESHOW_STEPS : VIDEO_STEPS;
-
-  useEffect(() => {
-    const idx = steps.indexOf(step);
-    const delta = idx - prevStepIndexRef.current;
-    prevStepIndexRef.current = idx;
-    if (delta === 0) return;
-    stepOpacity.setValue(0);
-    stepShift.setValue(delta > 0 ? 28 : -28);
-    Animated.parallel([
-      Animated.timing(stepOpacity, {
-        toValue: 1,
-        duration: motion.base,
-        easing: motion.easeOut,
-        useNativeDriver: true,
-      }),
-      Animated.timing(stepShift, {
-        toValue: 0,
-        duration: motion.base,
-        easing: motion.easeOut,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [step, steps, stepOpacity, stepShift]);
-
+    currentType === null
+      ? briefFormat
+      : currentType.family === 'photo_carousel'
+        ? 'photo_carousel'
+        : 'video';
   const refreshScreenshotUrls = useCallback((rows: BriefSegment[]) => {
     for (const row of rows) {
       if (!row.screenshot_url) continue;
@@ -298,7 +319,7 @@ export default function PostEditorScreen() {
             .select('position, campaign_id')
             .eq('brief_id', id)
             .maybeSingle(),
-          supabase.from('companies').select('slug, name').maybeSingle(),
+          supabase.from('companies').select('slug, name, settings').maybeSingle(),
         ]);
         if (!brief) {
           setMissing(true);
@@ -312,12 +333,14 @@ export default function PostEditorScreen() {
         // No posting-account handle lives in the data; the slug is the
         // closest stable stand-in for the merged preview.
         setAccountName(company?.slug ?? company?.name ?? '');
+        setThemeColor(parseOverlayThemeColor(company?.settings));
 
         const options = parseHookOptions(brief.hook_options);
         const chosen = brief.hook ? options.indexOf(brief.hook) : 0;
         const briefPoints = parseTalkingPoints(brief.talking_points);
         setTitle(brief.title);
         setPostTypeId(brief.post_type_id);
+        setBriefFormat(brief.format === 'photo_carousel' ? 'photo_carousel' : 'video');
         setHookOptions(options);
         if (brief.hook && chosen < 0) {
           setUseCustomHook(true);
@@ -330,6 +353,7 @@ export default function PostEditorScreen() {
         }
         setPoints(briefPoints);
         setCta(brief.cta ?? '');
+        setSubtitles(brief.subtitles);
         setSearchPhrase(brief.search_phrase ?? '');
         setCaption(brief.caption ?? '');
         setHashtags(brief.hashtags);
@@ -364,7 +388,7 @@ export default function PostEditorScreen() {
             .catch(() => undefined);
         }
 
-        // A finished post opens as one read-only page instead of a step.
+        // A finished post opens as one read-only page instead of the form.
         // Slideshows never require a hook or CTA.
         const rowType = types.find((t) => t.id === brief.post_type_id) ?? null;
         const isSlideshow = rowType?.family === 'photo_carousel';
@@ -374,30 +398,6 @@ export default function PostEditorScreen() {
           Boolean(brief.caption?.trim());
         if (complete) setSummaryMode('view');
 
-        // Entering the editor opens the first incomplete step, or step 1
-        // on an untouched row. Never lands on review — that would either
-        // generate on open (rule 1) or show an empty screen.
-        const untouched =
-          !brief.hook?.trim() &&
-          briefPoints.length === 0 &&
-          !brief.cta?.trim() &&
-          !brief.caption?.trim() &&
-          brief.hashtags.length === 0;
-        setStep(
-          untouched
-            ? 'title'
-            : !brief.search_phrase?.trim()
-              ? 'search'
-              : !isSlideshow && !brief.hook?.trim()
-                ? 'hook'
-                : !isSlideshow &&
-                    (rowType?.requires_plug ?? true) &&
-                    !brief.cta?.trim()
-                  ? 'cta'
-                  : briefPoints.length < (rowType?.min_points ?? 1)
-                    ? 'points'
-                    : 'caption',
-        );
       } catch (e) {
         Alert.alert(
           'Could not load',
@@ -409,17 +409,26 @@ export default function PostEditorScreen() {
     })();
   }, [id, refreshScreenshotUrls, reloadNonce]);
 
-  // Auto-draft the caption: landing on the caption step with nothing
-  // written generates caption and hashtags from the post, once per open.
+  function chooseType(next: PostType) {
+    if (next.id === pickedTypeId) return;
+    setPostTypeId(next.id);
+    if (id) {
+      void updateBrief(id, { post_type_id: next.id }).catch(() => undefined);
+    }
+  }
+
+  // Auto-draft the caption once the script reaches the type's minimum
+  // length and nothing is written yet, once per open.
   const autoCaptionRan = useRef(false);
   useEffect(() => {
-    if (step !== 'caption' || summaryMode !== null) return;
+    if (summaryMode !== null || !loaded) return;
     if (autoCaptionRan.current || caption.trim() || regenBusy !== null) return;
+    if (points.length < (currentType?.min_points ?? 1)) return;
     autoCaptionRan.current = true;
     void regenerate('caption');
-    // Fires on step entry only; regenerate reads the draft fields fresh.
+    // Fires when the script fills in; regenerate reads the draft fields fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, summaryMode]);
+  }, [points.length, caption, regenBusy, summaryMode, loaded]);
 
   function buildRegenPayload(): RegenDraftPayload {
     return {
@@ -462,12 +471,18 @@ export default function PostEditorScreen() {
           if (result.script !== null) setScript(result.script);
           if (result.target_words !== null) setTargetWords(result.target_words);
           setPendingOverlayLabels(result.overlay_labels);
+          pendingPointMedia.current = result.point_media;
           if (family === 'photo_carousel') slideRegenPending.current = true;
           break;
         case 'talking_point': {
           setPoints((prev) =>
             prev.map((p, i) => (i === result.index ? result.talking_point : p)),
           );
+          if (result.point_media) {
+            const sparse: (PointMedia | null)[] = [...pendingPointMedia.current];
+            sparse[result.index] = result.point_media;
+            pendingPointMedia.current = sparse;
+          }
           setPendingOverlayLabels((prev) => {
             const next = prev ? [...prev] : points.map(() => null);
             next[result.index] = result.overlay_label;
@@ -569,6 +584,7 @@ export default function PostEditorScreen() {
         caption: mergedCaption() || null,
         why_it_works: whyItWorks || null,
         cta: cta.trim() || null,
+        subtitles: family === 'video' && subtitles,
         post_type_id: postTypeId,
         kill_reason: killReason,
         generation_id: generationId,
@@ -580,9 +596,9 @@ export default function PostEditorScreen() {
         (points.length > 0 || chosenHook !== null) &&
         (snapshot !== baseline || segments.length === 0);
       if (deriveNeeded) {
-        let rows = await assistDeriveSegments(
-          id,
-          pendingOverlayLabels ?? undefined,
+        let rows = await seedOverlayBoxes(
+          await assistDeriveSegments(id, pendingOverlayLabels ?? undefined),
+          themeColor,
         );
         // Regenerated slide copy replaces each surviving slide's text boxes;
         // derivation alone only seeds brand-new segments.
@@ -600,15 +616,12 @@ export default function PostEditorScreen() {
               const patch = serializeOverlayBoxes(
                 text
                   ? [
-                      {
+                      newOverlayBox({
                         id: `slide-${row.talking_point_index}-box-0`,
                         text,
-                        color: DEFAULT_OVERLAY_FILL,
-                        bg: true,
-                        size: DEFAULT_BOX_SIZE,
-                        x: 0.5,
-                        y: DEFAULT_TEXT_Y,
-                      },
+                        style: themeColor ? 'theme' : 'classic',
+                        themeColor,
+                      }),
                     ]
                   : [],
               );
@@ -617,9 +630,14 @@ export default function PostEditorScreen() {
             }),
           );
         }
+        rows = await placePendingPointMedia(rows);
         setSegments(rows);
         refreshScreenshotUrls(rows);
         setPendingOverlayLabels(null);
+      } else if (pendingPointMedia.current.some(Boolean)) {
+        const rows = await placePendingPointMedia(segments);
+        setSegments(rows);
+        refreshScreenshotUrls(rows);
       }
       setBaseline(snapshot);
       setSavedFlash(true);
@@ -631,6 +649,29 @@ export default function PostEditorScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  /** Writes regenerate-picked feature screenshots onto the rows, then re-reads them. */
+  async function placePendingPointMedia(rows: BriefSegment[]): Promise<BriefSegment[]> {
+    const pointMedia = pendingPointMedia.current;
+    if (!profile || !id || !pointMedia.some(Boolean)) return rows;
+    pendingPointMedia.current = [];
+    const placed = await applyPointMedia({
+      companyId: profile.company_id,
+      briefId: id,
+      rows,
+      pointMedia,
+    });
+    if (placed === 0) return rows;
+    return listBriefSegments(id);
+  }
+
+  function flashPlacedNote(count: number) {
+    if (count === 0) return;
+    setPlacedNote(
+      `Placed ${count} ${count === 1 ? 'screenshot' : 'screenshots'} from your feature library`,
+    );
+    setTimeout(() => setPlacedNote(null), 3000);
   }
 
   // --- Format port and library fills. A port always writes a different,
@@ -660,6 +701,7 @@ export default function PostEditorScreen() {
         postTypeKey: target.key,
         family: targetFamily,
         source: { kind: 'port', sourceBriefId: id },
+        companyId: profile.company_id,
       });
       if (result.kind === 'kill') {
         Alert.alert('Generation refused', result.kill_reason);
@@ -679,7 +721,7 @@ export default function PostEditorScreen() {
 
   /** Fills this empty slot: from a finished post, a reference, or an idea. */
   async function fillThisSlot(source: FillSource, busyKey: string) {
-    if (!id || !currentType) return;
+    if (!id || !currentType || !profile) return;
     setPortBusyId(busyKey);
     setFilling(true);
     try {
@@ -689,13 +731,23 @@ export default function PostEditorScreen() {
         postTypeKey: currentType.key,
         family,
         source,
+        companyId: profile.company_id,
       });
       if (result.kind === 'kill') {
         Alert.alert('Generation refused', result.kill_reason);
         return;
       }
+      if (source.kind === 'idea') {
+        void saveTypedIdea({
+          companyId: profile.company_id,
+          userId: profile.id,
+          text: source.text,
+          briefId: id,
+        }).catch(() => undefined);
+      }
       setPortSheet(null);
       setLibraryOpen(false);
+      flashPlacedNote(result.placedScreenshots);
       setReloadNonce((n) => n + 1);
     } catch (e) {
       Alert.alert(
@@ -717,7 +769,16 @@ export default function PostEditorScreen() {
       void fillThisSlot({ kind: 'example', url: pick.url }, pick.url);
       return;
     }
+    if (pick.kind === 'feature') {
+      void fillThisSlot({ kind: 'feature', featureId: pick.featureId }, pick.featureId);
+      return;
+    }
     void fillThisSlot({ kind: 'idea', text: pick.text }, pick.text);
+  }
+
+  function startBlank() {
+    if (family === 'video') setSubtitles(true);
+    setStartedBlank(true);
   }
 
   /** Finished posts in this week on the other side, as port sources. */
@@ -746,7 +807,7 @@ export default function PostEditorScreen() {
       sub: `${t.min_points} to ${t.max_points} ${otherFamily === 'photo_carousel' ? 'slides' : 'points'}`,
     }));
 
-  // --- AI review. A step, not a background check: on demand, never blocks,
+  // --- AI review. On demand, not a background check: on demand, never blocks,
   // never edits anything without an explicit Apply. -------------------------
 
   function takeReviewSnapshot(): ReviewSnapshot {
@@ -861,7 +922,7 @@ export default function PostEditorScreen() {
       const snapshot = reviewSnapshot;
       const hookNow = resolvedHook() ?? '';
       const captionNow = mergedCaption();
-      const fieldDiffs: Array<{ field: string; before: string | null; after: string | null }> = [];
+      const fieldDiffs: { field: string; before: string | null; after: string | null }[] = [];
       if (snapshot.hook !== hookNow) {
         fieldDiffs.push({ field: 'hook', before: snapshot.hook || null, after: hookNow || null });
       }
@@ -961,25 +1022,57 @@ export default function PostEditorScreen() {
     setShotPickerIndex(pointIndex);
   }
 
-  /** Camera roll pick lands here: upload against the point's segment. */
-  async function uploadShotForPoint(pointIndex: number, localUri: string) {
+  /** A sheet pick lands here: device upload, library copy, or Company Brain fetch. */
+  /** The segment for a point, deriving clips first when the point has none yet. */
+  async function resolveSegmentForPoint(
+    pointIndex: number,
+  ): Promise<BriefSegment | undefined> {
+    const existing = segmentForPointIndex(pointIndex);
+    if (existing || !id) return existing;
+    const saved = await save();
+    if (!saved) return undefined;
+    const rows = await seedOverlayBoxes(
+      await assistDeriveSegments(id, pendingOverlayLabels ?? undefined),
+      themeColor,
+    );
+    setSegments(rows);
+    refreshScreenshotUrls(rows);
+    setPendingOverlayLabels(null);
+    return rows.find(
+      (s) =>
+        (s.kind === 'point' || s.kind === 'slide') &&
+        s.talking_point_index === pointIndex,
+    );
+  }
+
+  async function uploadShotForPoint(pointIndex: number, pick: MediaPick) {
     if (!profile || !id) return;
-    const segment =
-      segmentForPointIndex(pointIndex) ??
-      segments.find((s) => s.kind === 'hook') ??
-      segments[0];
+    const segment = await resolveSegmentForPoint(pointIndex);
     if (!segment) {
-      Alert.alert('No clip yet', 'Save the post so clips exist, then attach.');
+      Alert.alert('Save the post first', 'This talking point has no clip yet.');
       return;
     }
     setShotBusyIndex(pointIndex);
     try {
-      const path = await uploadSegmentScreenshot({
-        companyId: profile.company_id,
-        briefId: id,
-        segmentId: segment.id,
-        localUri,
-      });
+      const target = { companyId: profile.company_id, briefId: id, segmentId: segment.id };
+      let path: string;
+      if (pick.source === 'library') {
+        path = await placeLibraryItemOnSegment({ ...target, item: pick.item });
+      } else if (pick.source === 'noni') {
+        path = await placeRemoteImageOnSegment({ ...target, url: pick.url });
+      } else {
+        path = await uploadSegmentMedia({ ...target, media: pick.media });
+        if (pick.saveToLibrary) {
+          void copySegmentMediaToLibrary({
+            companyId: profile.company_id,
+            createdBy: profile.id,
+            segmentPath: path,
+            media: pick.media,
+          })
+            .then((item) => setMediaLibrary((prev) => [item, ...prev]))
+            .catch(() => undefined);
+        }
+      }
       await updateBriefSegment(segment.id, { screenshot_url: path });
       setSegments((prev) =>
         prev.map((s) => (s.id === segment.id ? { ...s, screenshot_url: path } : s)),
@@ -1093,32 +1186,21 @@ export default function PostEditorScreen() {
     });
   }
 
-  function stepIndex(s: EditorStep): number {
-    return steps.indexOf(s);
-  }
-
-  async function goNext() {
-    const idx = stepIndex(step);
-    if (step === 'cta' && cta.trim() && points.length > 0 && !points.some((p) => p.is_product)) {
+  /** Footer action. Video posts save then open the AI review; slideshows
+   * save and finish, there is no spoken script to review. */
+  async function finishPost() {
+    if (cta.trim() && points.length > 0 && !points.some((p) => p.is_product)) {
       setPoints((prev) =>
         prev.map((p, i) => ({ ...p, is_product: i === 0 })),
       );
     }
-    if (step === 'points') {
-      await ensureSegmentsDerived();
-    }
-    if (step === 'caption') {
-      await save();
-      setStep('review');
-      // Slideshows have no spoken script to review; the last step is a
-      // visual preview of the slides put together.
-      if (family !== 'photo_carousel') void runReview();
+    await ensureSegmentsDerived();
+    if (family === 'photo_carousel') {
+      await confirmSlideshow();
       return;
     }
-    if (idx < steps.length - 1) {
-      const next = steps[idx + 1];
-      if (next) setStep(next);
-    }
+    const ok = await save();
+    if (ok) void runReview();
   }
 
   function goBack() {
@@ -1126,18 +1208,7 @@ export default function PostEditorScreen() {
       setSummaryMode('view');
       return;
     }
-    if (summaryMode === 'view') {
-      router.back();
-      return;
-    }
-    const idx = stepIndex(step);
-    if (idx <= 0) {
-      router.back();
-      return;
-    }
-    if (step === 'review') setReviewVisible(false);
-    const prev = steps[idx - 1];
-    if (prev) setStep(prev);
+    router.back();
   }
 
   /** Slideshow finish: the admin approved the visual preview. */
@@ -1171,11 +1242,45 @@ export default function PostEditorScreen() {
     if (ok) router.back();
   }
 
+  /** Wipe this post back to an empty slot in its week, then leave. */
+  function confirmDeletePost() {
+    Alert.alert(
+      'Delete this post?',
+      'The slot stays in the week but everything in it is cleared. Clips and slides go too.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void deletePost(),
+        },
+      ],
+    );
+  }
+
+  async function deletePost() {
+    if (!id) return;
+    setSaving(true);
+    try {
+      await clearBrief(id);
+      router.back();
+    } catch (e) {
+      Alert.alert('Delete failed', e instanceof Error ? e.message : 'Try again');
+      setSaving(false);
+    }
+  }
+
   if (!loaded) {
     return (
-      <View style={styles.center}>
+      <View style={styles.loadingShell}>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.centerText}>Loading post…</Text>
+        <View style={styles.loadingHeader}>
+          <SkeletonLine height={36} width={36} radius={18} />
+          <SkeletonLine height={16} width={150} />
+        </View>
+        <SkeletonCard style={styles.loadingMedia} radius={radiusAdmin.xl} />
+        <SkeletonCard height={52} radius={radiusAdmin.lg} />
+        <SkeletonCard height={52} radius={radiusAdmin.lg} />
       </View>
     );
   }
@@ -1192,8 +1297,15 @@ export default function PostEditorScreen() {
   // searched" section renders only when some exist.
   const alsoSearched: string[] = [];
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
-  const currentStepIndex = stepIndex(step);
   const typeLabel = currentType?.label ?? 'Post';
+  const showStartCard =
+    summaryMode === null &&
+    points.length === 0 &&
+    !startedBlank &&
+    killReason === null;
+  /** A killed empty slot shows only the kill card until the manager starts blank. */
+  const hideForm =
+    showStartCard || (killReason !== null && points.length === 0 && !startedBlank);
 
   const overlaySegment =
     overlayIndex !== null
@@ -1249,21 +1361,19 @@ export default function PostEditorScreen() {
                 onPress={() => void saveProgress()}
               >
                 <Text style={styles.saveProgress}>
-                  {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save progress'}
+                  {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save'}
                 </Text>
               </PressableScale>
             )
           }
         />
-        {summaryMode === null ? (
-          <StepDots current={currentStepIndex} total={steps.length} />
-        ) : null}
       </View>
 
       <ScrollView
         style={styles.flex}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
         scrollEnabled={!pointsDragging}
       >
@@ -1322,10 +1432,7 @@ export default function PostEditorScreen() {
                         <Text style={styles.summaryPlug}>{cta.trim()}</Text>
                       ) : null}
                       {thumb !== undefined ? (
-                        <Image
-                          source={{ uri: thumb }}
-                          style={styles.summaryThumb}
-                        />
+                        <MediaThumb uri={thumb} style={styles.summaryThumb} />
                       ) : null}
                     </View>
                   </View>
@@ -1363,10 +1470,72 @@ export default function PostEditorScreen() {
               </Button>
             </View>
           </View>
-        ) : summaryMode === 'edit' ? (
+        ) : (
           <View style={styles.summaryStack}>
+            {placedNote ? (
+              <View style={styles.placedCard}>
+                <Text style={styles.placedText}>{placedNote}</Text>
+              </View>
+            ) : null}
+            {killReason ? (
+              <View style={styles.killCard}>
+                <Text style={styles.killTitle}>Generation killed this slot</Text>
+                <Text style={styles.killText}>{killReason}</Text>
+                {points.length === 0 && !startedBlank ? (
+                  <Button size="sm" variant="ghost" onPress={startBlank}>
+                    Start blank
+                  </Button>
+                ) : null}
+              </View>
+            ) : null}
+            {warnings.length > 0 ? (
+              <View style={styles.warnCard}>
+                {warnings.map((w) => (
+                  <Text key={w} style={styles.warnText}>
+                    {w}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+            {summaryMode === null && typeSuggestions.length > 0 ? (
+              <>
+                <SectionLabel>Kind of post</SectionLabel>
+                <Text style={styles.summaryHint}>
+                  Suggested from what the week still lacks. Change it if you have a better idea.
+                </Text>
+                <KindOfPostCard
+                  suggestions={typeSuggestions}
+                  family={family}
+                  selectedId={postTypeId}
+                  onSelect={chooseType}
+                />
+              </>
+            ) : null}
+            {showStartCard ? (
+              <StartPostCard
+                family={family}
+                typeLabel={typeLabel}
+                busy={filling}
+                busyLabel={fillStatusLabel}
+                onWriteFromIdea={(text) =>
+                  void fillThisSlot({ kind: 'idea', text }, 'idea')
+                }
+                onOpenLibrary={() => setLibraryOpen(true)}
+                onStartBlank={startBlank}
+                onRewriteFromThisWeek={
+                  portSourceOptions.length > 0
+                    ? () => setPortSheet('source')
+                    : undefined
+                }
+              />
+            ) : null}
+            {hideForm ? null : (
+            <>
             <SectionLabel>Title</SectionLabel>
             <TitleCard value={title} onChange={setTitle} />
+            <Text style={styles.summaryHint}>
+              Skip the title and the grid shows the hook instead.
+            </Text>
             <SectionLabel>Search phrase</SectionLabel>
             <SearchPhraseCard
               value={searchPhrase}
@@ -1400,6 +1569,9 @@ export default function PostEditorScreen() {
                   ? screenshotUrls[seg.id]
                   : undefined;
               }}
+              greenScreenForIndex={(i) =>
+                segmentForPointIndex(i)?.layout === 'green_screen'
+              }
               screenshotBusyIndex={shotBusyIndex}
               onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
               onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
@@ -1411,6 +1583,8 @@ export default function PostEditorScreen() {
               <>
                 <SectionLabel>CTA</SectionLabel>
                 <CtaCard value={cta} onChange={setCta} />
+                <SectionLabel>Subtitles</SectionLabel>
+                <SubtitlesCard value={subtitles} onChange={setSubtitles} />
               </>
             ) : null}
             <SectionLabel>Caption</SectionLabel>
@@ -1426,254 +1600,49 @@ export default function PostEditorScreen() {
               merged={mergedCaption()}
               accountName={accountName}
             />
+            </>
+            )}
           </View>
-        ) : (
-        <Animated.View
-          style={{
-            opacity: stepOpacity,
-            transform: [{ translateX: stepShift }],
-          }}
-        >
-        <Text style={styles.h1}>
-          {family === 'photo_carousel' && step === 'points'
-            ? 'Slides'
-            : family === 'photo_carousel' && step === 'review'
-              ? 'Preview'
-              : STEP_TITLES[step]}
-        </Text>
-
-        {killReason && step === 'title' ? (
-          <View style={styles.killCard}>
-            <Text style={styles.killTitle}>Generation killed this slot</Text>
-            <Text style={styles.killText}>{killReason}</Text>
-          </View>
-        ) : null}
-
-        {warnings.length > 0 && step === 'title' ? (
-          <View style={styles.warnCard}>
-            {warnings.map((w) => (
-              <Text key={w} style={styles.warnText}>
-                {w}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {step === 'title' ? (
-          <View style={styles.section}>
-            <TitleCard value={title} onChange={setTitle} />
-            {points.length === 0 ? (
-              <View style={styles.startFrom}>
-                <SectionLabel>Start from something</SectionLabel>
-                <Text style={styles.summaryHint}>
-                  Build this post out of a reference, a saved idea, or a post
-                  you already made, instead of writing it from scratch.
-                </Text>
-                <Button
-                  size="md"
-                  variant="outline"
-                  block
-                  disabled={filling}
-                  onPress={() => setLibraryOpen(true)}
-                >
-                  {filling ? 'Building the post…' : 'Start from the library'}
-                </Button>
-                <Button
-                  size="md"
-                  variant="ghost"
-                  block
-                  disabled={filling}
-                  onPress={() => setPortSheet('source')}
-                >
-                  {otherFamily === 'photo_carousel'
-                    ? 'Start from a slideshow this week'
-                    : 'Start from a video this week'}
-                </Button>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        {step === 'search' ? (
-          <View style={styles.section}>
-            <SearchPhraseCard
-              value={searchPhrase}
-              onChange={setSearchPhrase}
-              busy={regenBusy === 'search_phrase'}
-              onRegenerate={() => void regenerate('search_phrase')}
-              alternates={alsoSearched}
-              onPickAlternate={setSearchPhrase}
-            />
-          </View>
-        ) : null}
-
-        {step === 'hook' ? (
-          <View style={styles.section}>
-            <HookOptionsField
-              value={useCustomHook ? customHook : (hookOptions[chosenHookIndex] ?? '')}
-              onChange={(text) => {
-                setUseCustomHook(true);
-                setCustomHook(text);
-              }}
-            />
-          </View>
-        ) : null}
-
-        {step === 'cta' ? (
-          <View style={styles.section}>
-            <CtaCard value={cta} onChange={setCta} />
-          </View>
-        ) : null}
-
-        {step === 'points' ? (
-          <View style={styles.section}>
-            <PointsEditor
-              points={points}
-              family={family}
-              hook={useCustomHook ? customHook : (hookOptions[chosenHookIndex] ?? '')}
-              onChangeHook={(text) => {
-                setUseCustomHook(true);
-                setCustomHook(text);
-              }}
-              hookOverlayBoxes={hookOverlayBoxes}
-              onOpenHookOverlay={() => void openOverlay(-1, 'text')}
-              cta={cta}
-              busyAll={regenBusy === 'talking_points'}
-              onChange={setPoints}
-              onRegenerateAll={() => void regenerate('talking_points')}
-              onDragStateChange={setPointsDragging}
-              screenshotUrlForIndex={(i) => {
-                const seg = segmentForPointIndex(i);
-                return seg?.screenshot_url
-                  ? screenshotUrls[seg.id]
-                  : undefined;
-              }}
-              screenshotBusyIndex={shotBusyIndex}
-              onAttachScreenshot={(i) => void attachScreenshotToPoint(i)}
-              onRemoveScreenshot={(i) => void removeScreenshotFromPoint(i)}
-              overlayBoxesForIndex={boxesForPointIndex}
-              insetForIndex={insetForPointIndex}
-              onOpenOverlay={(i, mode) => void openOverlay(i, mode)}
-            />
-          </View>
-        ) : null}
-
-        {step === 'caption' ? (
-          <View style={styles.section}>
-            <CaptionStep
-              caption={caption}
-              onChangeCaption={setCaption}
-              busy={regenBusy === 'caption'}
-              onRegenerate={() => void regenerate('caption')}
-              hashtags={hashtags}
-              bankTags={bankTags}
-              onToggleTag={toggleHashtag}
-              onAddTag={addHashtag}
-              merged={mergedCaption()}
-              accountName={accountName}
-            />
-          </View>
-        ) : null}
-
-        {step === 'review' ? (
-          family === 'photo_carousel' ? (
-            <View style={styles.section}>
-              <Text style={styles.previewNote}>
-                Your text and pictures, put together. Creators add their own
-                photos behind them.
-              </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.previewRow}
-              >
-                {points.map((point, i) => (
-                  <SlideStage
-                    key={point.id}
-                    boxes={boxesForPointIndex(i)}
-                    inset={insetForPointIndex(i)}
-                    placeholder="Creator's photo"
-                    style={styles.previewSlide}
-                  />
-                ))}
-              </ScrollView>
-              {mergedCaption() ? (
-                <View style={styles.summaryCard}>
-                  <SectionLabel>Caption</SectionLabel>
-                  <Text style={styles.summaryText}>{mergedCaption()}</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : (
-            <ReviewSheet
-              inline
-              hideHeader
-              hideConfirm
-              visible
-              running={reviewRunning}
-              confirming={reviewConfirming}
-              result={reviewResult}
-              appliedIndexes={appliedIndexes}
-              onApply={applySuggestion}
-              onClose={() => setStep('caption')}
-              onConfirm={() => void confirmReview()}
-              confirmLabel="Save post"
-            />
-          )
-        ) : null}
-
-        </Animated.View>
         )}
+        {points.length > 0 || killReason !== null || reviewedAt !== null ? (
+          <View style={styles.deleteWrap}>
+            <Button
+              size="md"
+              variant="danger"
+              block
+              disabled={saving || reviewRunning || reviewConfirming}
+              onPress={confirmDeletePost}
+            >
+              Delete post
+            </Button>
+            <Text style={styles.deleteHint}>Leaves an empty slot in this week.</Text>
+          </View>
+        ) : null}
       </ScrollView>
 
-      {summaryMode === null ? (
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-        <View style={styles.backButton}>
-          <Button size="lg" variant="ghost" block onPress={goBack}>
-            Back
+      {summaryMode === null && !showStartCard ? (
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <Button
+            size="lg"
+            variant="primary"
+            block
+            disabled={saving || reviewRunning || reviewConfirming || points.length === 0}
+            onPress={() => void finishPost()}
+          >
+            {reviewConfirming
+              ? 'Saving…'
+              : family === 'photo_carousel'
+                ? 'Save post'
+                : 'Review and save'}
           </Button>
         </View>
-        <View style={styles.nextButton}>
-          {step !== 'review' ? (
-            <Button
-              size="lg"
-              variant="primary"
-              block
-              disabled={saving}
-              onPress={() => void goNext()}
-            >
-              Next
-            </Button>
-          ) : family === 'photo_carousel' ? (
-            <Button
-              size="lg"
-              variant="primary"
-              block
-              disabled={saving || reviewConfirming}
-              onPress={() => void confirmSlideshow()}
-            >
-              {reviewConfirming ? 'Saving…' : 'Save post'}
-            </Button>
-          ) : (
-            <Button
-              size="lg"
-              variant="primary"
-              block
-              disabled={reviewRunning || reviewConfirming || !reviewResult}
-              onPress={() => void confirmReview()}
-            >
-              {reviewConfirming ? 'Saving…' : 'Save post'}
-            </Button>
-          )}
-        </View>
-      </View>
       ) : null}
 
       {summaryMode === 'view' && reviewedAt === null ? (
         <View
           style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}
         >
-          <View style={styles.nextButton}>
+          <View style={styles.flex}>
             {family === 'photo_carousel' ? (
               <Button
                 size="lg"
@@ -1690,11 +1659,7 @@ export default function PostEditorScreen() {
                 variant="primary"
                 block
                 disabled={reviewRunning}
-                onPress={() => {
-                  setSummaryMode(null);
-                  setStep('review');
-                  void runReview();
-                }}
+                onPress={() => void runReview()}
               >
                 Run final review
               </Button>
@@ -1702,6 +1667,18 @@ export default function PostEditorScreen() {
           </View>
         </View>
       ) : null}
+
+      <ReviewSheet
+        visible={reviewVisible}
+        running={reviewRunning}
+        confirming={reviewConfirming}
+        result={reviewResult}
+        appliedIndexes={appliedIndexes}
+        onApply={applySuggestion}
+        onClose={() => setReviewVisible(false)}
+        onConfirm={() => void confirmReview()}
+        confirmLabel="Save post"
+      />
 
       {overlayIndex !== null ? (
         <OverlayEditor
@@ -1713,10 +1690,15 @@ export default function PostEditorScreen() {
               ? screenshotUrls[overlaySegment.id]
               : undefined
           }
+          layout={
+            overlaySegment?.layout === 'green_screen' ? 'green_screen' : 'standard'
+          }
+          layoutSelectable={family !== 'photo_carousel'}
           boxes={parseOverlayBoxes(overlaySegment?.overlay_style, {
             text: overlaySegment?.overlay_text,
             textY: overlaySegment?.text_y,
           })}
+          themeColor={themeColor}
           screenshotX={overlaySegment?.screenshot_x ?? null}
           screenshotY={overlaySegment?.screenshot_y ?? null}
           screenshotWidth={overlaySegment?.screenshot_width ?? null}
@@ -1789,16 +1771,23 @@ export default function PostEditorScreen() {
         onPick={onLibraryPick}
       />
 
-      <CameraRollSheet
-        visible={shotPickerIndex !== null}
-        library={noniLibrary}
-        onClose={() => setShotPickerIndex(null)}
-        onPick={(uri) => {
-          const index = shotPickerIndex;
-          setShotPickerIndex(null);
-          if (index !== null) void uploadShotForPoint(index, uri);
-        }}
-      />
+      {profile ? (
+        <CameraRollSheet
+          visible={shotPickerIndex !== null}
+          companyId={profile.company_id}
+          userId={profile.id}
+          allowRecordings={family === 'video'}
+          library={mediaLibrary}
+          onLibraryChange={setMediaLibrary}
+          noniLibrary={noniLibrary}
+          onClose={() => setShotPickerIndex(null)}
+          onPick={(pick) => {
+            const index = shotPickerIndex;
+            setShotPickerIndex(null);
+            if (index !== null) void uploadShotForPoint(index, pick);
+          }}
+        />
+      ) : null}
 
     </View>
   );
@@ -1808,6 +1797,21 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
   flex: { flex: 1 },
   content: { padding: 20, paddingBottom: 24 },
+  loadingShell: {
+    flex: 1,
+    backgroundColor: color.offWhite,
+    paddingHorizontal: space[4],
+    paddingTop: space[11] + space[8],
+    gap: space[3],
+  },
+  loadingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+  },
+  loadingMedia: {
+    flex: 1,
+  },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -1827,13 +1831,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: color.blue600,
-  },
-  h1: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: color.ink,
-    letterSpacing: type.tracking.title,
-    marginBottom: 16,
   },
   killCard: {
     gap: 6,
@@ -1865,12 +1862,6 @@ const styles = StyleSheet.create({
     color: color.amber,
     fontWeight: '600',
   },
-  section: { gap: 10, marginBottom: 8 },
-  previewNote: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * 1.4,
-    color: color.slate500,
-  },
   previewRow: {
     gap: 10,
     paddingVertical: 4,
@@ -1889,10 +1880,17 @@ const styles = StyleSheet.create({
     borderTopColor: color.line,
     backgroundColor: color.glass,
   },
-  backButton: { flexBasis: '30%' },
-  nextButton: { flex: 1 },
   summaryStack: {
     gap: 12,
+  },
+  deleteWrap: {
+    marginTop: 28,
+    gap: 8,
+    alignItems: 'center',
+  },
+  deleteHint: {
+    fontSize: 12,
+    color: color.slate500,
   },
   summaryCard: {
     gap: 10,
@@ -1919,12 +1917,15 @@ const styles = StyleSheet.create({
     lineHeight: 13 * 1.45,
     color: color.slate500,
   },
-  startFrom: {
-    gap: 10,
-    padding: 16,
-    marginTop: 6,
-    borderRadius: radius.md,
-    backgroundColor: color.white,
+  placedCard: {
+    padding: 12,
+    borderRadius: radius.sm,
+    backgroundColor: color.greenSoft,
+  },
+  placedText: {
+    fontSize: type.size.meta,
+    fontWeight: '600',
+    color: color.green,
   },
   summaryPlug: {
     marginTop: 4,

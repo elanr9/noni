@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,7 @@ import {
 } from '../../../../components/creator/ChatKit';
 import { FormatTag, TypeTag } from '../../../../components/creator/Chips';
 import { Screen } from '../../../../components/layout/Screen';
+import { DetailSkeleton } from '../../../../components/states';
 import { Button } from '../../../../components/ui/Button';
 import { Icon } from '../../../../components/ui/Icon';
 import { PressableScale } from '../../../../components/ui/PressableScale';
@@ -155,11 +155,7 @@ export default function ChangesDetailScreen() {
   };
 
   if (loading) {
-    return (
-      <Screen bg={color.offWhite} contentStyle={styles.center}>
-        <ActivityIndicator size="large" color={color.accent} />
-      </Screen>
-    );
+    return <DetailSkeleton />;
   }
 
   if (assignment === null || brief === null) {

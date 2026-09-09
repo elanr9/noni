@@ -33,12 +33,14 @@ import {
 import {
   brandDocBlocks,
   buildFieldSystem,
+  buildPointMedia,
   buildPortSystem,
   deriveSegments,
   generateValidated,
   isKill,
   loadPostType,
   normalizeGenerated,
+  sanitizeFeatureId,
   sortHooks,
   sourceBriefLines,
   toPostTypeShape,
@@ -90,6 +92,7 @@ function parsePoints(value: unknown): TalkingPoint[] {
       is_product: raw.is_product === true,
       edited_by_admin: raw.edited_by_admin === true,
       claim_id: typeof raw.claim_id === 'string' ? raw.claim_id : null,
+      script: raw.script === true,
     });
   }
   return points;
@@ -169,6 +172,7 @@ type RawPointOut = {
   text?: string | null;
   is_product?: boolean;
   claim_id?: string | null;
+  feature_id?: string | null;
   overlay_label?: string | null;
 };
 
@@ -239,7 +243,7 @@ Deno.serve(async (req) => {
         .order('slot_index');
       if (segmentError) throw new Error(segmentError.message);
 
-      const sourceType = (brief.post_types ?? null) as PostTypeRow | null;
+      const sourceType = (brief.post_types ?? null) as unknown as PostTypeRow | null;
       const sourceHookOptions = Array.isArray(brief.hook_options)
         ? (brief.hook_options as unknown[]).filter(
             (h): h is string => typeof h === 'string',
@@ -304,6 +308,7 @@ Deno.serve(async (req) => {
             parseClaudeJson<RawGenerated>(raw),
             targetType.family,
             targetType.key,
+            new Set(brand.features.map((f) => f.id)),
           );
         },
         {
@@ -321,6 +326,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
+        point_media: buildPointMedia(brand.features, outcome.featureIds),
         post_type_id: targetType.id,
         generation_id: generationId,
         warnings,
@@ -341,7 +347,7 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!brief) return jsonResponse({ error: 'brief not found' }, 404);
-      const postType = (brief.post_types ?? null) as PostTypeRow | null;
+      const postType = (brief.post_types ?? null) as unknown as PostTypeRow | null;
       if (!postType) {
         return jsonResponse(
           { error: 'legacy brief has no post type; segments are not derived' },
@@ -409,6 +415,7 @@ Deno.serve(async (req) => {
       postType: postType ? toPostTypeShape(postType) : null,
     };
     const system = buildFieldSystem(field, postType, draft.format, brand.bannedPhrases);
+    const knownFeatureIds = new Set(brand.features.map((f) => f.id));
 
     const askLines: string[] = [];
     if (field === 'talking_point') {
@@ -442,9 +449,16 @@ Deno.serve(async (req) => {
 
     // Merge the regenerated field into the draft so validation sees the
     // post as the editor will after applying it.
-    const merge = (out: RawFieldOut): { merged: BriefDraftShape; overlayLabels: (string | null)[] } => {
+    const merge = (
+      out: RawFieldOut,
+    ): {
+      merged: BriefDraftShape;
+      overlayLabels: (string | null)[];
+      featureIds: (string | null)[];
+    } => {
       const merged: BriefDraftShape = { ...draft };
       let overlayLabels: (string | null)[] = [];
+      let featureIds: (string | null)[] = [];
       if (field === 'search_phrase') {
         merged.search_phrase = out.search_phrase?.trim() || draft.search_phrase;
       } else if (field === 'talking_points') {
@@ -455,6 +469,9 @@ Deno.serve(async (req) => {
           typeof p.overlay_label === 'string' && p.overlay_label.trim()
             ? p.overlay_label.trim()
             : null,
+        );
+        featureIds = (out.talking_points ?? []).map((p) =>
+          sanitizeFeatureId(p.feature_id, knownFeatureIds),
         );
         merged.talking_points = points;
         merged.point_count =
@@ -470,7 +487,7 @@ Deno.serve(async (req) => {
         // Force the original id; the point is regenerated in place and the
         // model cannot be trusted to keep it.
         const point = out.talking_point
-          ? { ...toPoint(out.talking_point, current.id), id: current.id }
+          ? { ...toPoint(out.talking_point, current.id), id: current.id, script: current.script }
           : current;
         merged.talking_points = draft.talking_points.map((p, i) =>
           i === index ? point : p,
@@ -479,6 +496,7 @@ Deno.serve(async (req) => {
           typeof out.talking_point?.overlay_label === 'string'
             ? [out.talking_point.overlay_label.trim()]
             : [null];
+        featureIds = [sanitizeFeatureId(out.talking_point?.feature_id, knownFeatureIds)];
       } else if (field === 'hook') {
         merged.hook_options = sortHooks(out.hook_options);
       } else {
@@ -487,21 +505,21 @@ Deno.serve(async (req) => {
           ? out.hashtags.map((h) => String(h))
           : draft.hashtags;
       }
-      return { merged, overlayLabels };
+      return { merged, overlayLabels, featureIds };
     };
 
     let out = await generate([]);
     if (out.kill_reason?.trim()) {
       return jsonResponse({ kill_reason: out.kill_reason.trim() });
     }
-    let { merged, overlayLabels } = merge(out);
+    let { merged, overlayLabels, featureIds } = merge(out);
     let result = validateBrief(merged, validationCtx);
     if (!result.passed) {
       out = await generate(result.failures);
       if (out.kill_reason?.trim()) {
         return jsonResponse({ kill_reason: out.kill_reason.trim() });
       }
-      ({ merged, overlayLabels } = merge(out));
+      ({ merged, overlayLabels, featureIds } = merge(out));
       result = validateBrief(merged, validationCtx);
     }
     const warnings = result.passed
@@ -524,6 +542,7 @@ Deno.serve(async (req) => {
         script: merged.script,
         target_words: merged.target_words,
         overlay_labels: overlayLabels,
+        point_media: buildPointMedia(brand.features, featureIds),
         hook_may_be_stale: hookMayBeStale,
         warnings,
       });
@@ -532,6 +551,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         talking_point: merged.talking_points[body.index!],
         overlay_label: overlayLabels[0] ?? null,
+        point_media: buildPointMedia(brand.features, featureIds),
         index: body.index,
         hook_may_be_stale: hookMayBeStale,
         warnings,

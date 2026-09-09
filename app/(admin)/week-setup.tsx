@@ -1,28 +1,26 @@
-// Start week — the admin picks the start day and each lane's target,
-// then the grid is stamped from the post types' default_week_count
-// weights scaled to those targets. Types stay editable on the grid.
-import { useEffect, useMemo, useState } from 'react';
+// Week setup is one screen: how many videos and slideshows each creator
+// posts a day. Rows are stamped by format only; the kind of post is chosen
+// inside the editor.
+import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { router, Stack } from 'expo-router';
 
 import { AdminScreen, PushHeader, SectionLabel } from '../../components/admin/shared';
+import { RatioCard } from '../../components/admin/setup/RatioCard';
+import { StartDayCalendar } from '../../components/admin/StartDayCalendar';
 import { Button } from '../../components/ui/Button';
-import { PressableScale } from '../../components/ui/PressableScale';
-import { TextField } from '../../components/ui/TextField';
+import { Icon } from '../../components/ui/Icon';
 import { useAuth } from '../../lib/auth';
 import {
+  BRIEF_WEEK_DAYS,
   briefWeekRangeLabel,
   createWeek,
   listCampaigns,
-  listPostTypes,
-  type PostType,
 } from '../../lib/briefs-api';
-import { color, radius, type } from '../../theme/tokens';
+import { color, radiusAdmin } from '../../theme/tokens';
 
-const DEFAULT_VIDEO_TARGET = 20;
-const DEFAULT_SLIDESHOW_TARGET = 10;
-/** Mirrors the publish scheduler: three posts per creator per day. */
-const SLOTS_PER_DAY = 3;
+const DEFAULT_VIDEOS_PER_DAY = 2;
+const DEFAULT_SLIDESHOWS_PER_DAY = 1;
 
 function isoDate(d: Date): string {
   const y = d.getFullYear();
@@ -31,29 +29,10 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** The next seven days, starting tomorrow. */
-function startDayOptions(): string[] {
-  const options: string[] = [];
-  for (let i = 1; i <= 7; i += 1) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    options.push(isoDate(d));
-  }
-  return options;
-}
-
 function nextSunday(): string {
   const d = new Date();
   d.setDate(d.getDate() + (((7 - d.getDay()) % 7) || 7));
   return isoDate(d);
-}
-
-function dayChipLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 function formatDropDate(iso: string): string {
@@ -63,66 +42,19 @@ function formatDropDate(iso: string): string {
   });
 }
 
-/** "Aug 12 to 16" for the days the schedule actually covers from the start day. */
-function scheduleRangeLabel(dropDate: string, totalPosts: number): string {
-  const days = Math.min(7, Math.max(1, Math.ceil(totalPosts / SLOTS_PER_DAY)));
-  const start = new Date(`${dropDate}T00:00:00`);
-  const end = new Date(start);
-  end.setDate(start.getDate() + days - 1);
-  const startMonth = start.toLocaleDateString(undefined, { month: 'short' });
-  if (start.getMonth() === end.getMonth()) {
-    return `${startMonth} ${start.getDate()} to ${end.getDate()}`;
-  }
-  const endMonth = end.toLocaleDateString(undefined, { month: 'short' });
-  return `${startMonth} ${start.getDate()} to ${endMonth} ${end.getDate()}`;
-}
-
-function parseTarget(text: string): number {
-  const n = Number.parseInt(text, 10);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(99, n));
-}
-
-/**
- * Distribute one family's target across its types, proportional to
- * default_week_count (largest remainder), so the split always sums to
- * the target.
- */
-function splitFamily(types: PostType[], target: number): Record<string, number> {
-  const split: Record<string, number> = {};
-  if (types.length === 0 || target <= 0) return split;
-  const totalWeight = types.reduce((sum, t) => sum + t.default_week_count, 0);
-  const weightOf = (t: PostType): number =>
-    totalWeight > 0 ? t.default_week_count : 1;
-  const denominator = totalWeight > 0 ? totalWeight : types.length;
-  let assigned = 0;
-  const remainders: { key: string; frac: number }[] = [];
-  for (const t of types) {
-    const exact = (target * weightOf(t)) / denominator;
-    const base = Math.floor(exact);
-    split[t.key] = base;
-    assigned += base;
-    remainders.push({ key: t.key, frac: exact - base });
-  }
-  remainders.sort((a, b) => b.frac - a.frac);
-  for (let i = 0; assigned < target; i += 1) {
-    split[remainders[i % remainders.length].key] += 1;
-    assigned += 1;
-  }
-  return split;
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 export default function WeekSetupScreen() {
   const { profile } = useAuth();
   const [weekNumber, setWeekNumber] = useState<number | null>(null);
-  const [videoText, setVideoText] = useState(String(DEFAULT_VIDEO_TARGET));
-  const [slideshowText, setSlideshowText] = useState(
-    String(DEFAULT_SLIDESHOW_TARGET),
+  const [videosPerDay, setVideosPerDay] = useState(DEFAULT_VIDEOS_PER_DAY);
+  const [slideshowsPerDay, setSlideshowsPerDay] = useState(
+    DEFAULT_SLIDESHOWS_PER_DAY,
   );
   const [dropDate, setDropDate] = useState(nextSunday);
   const [submitting, setSubmitting] = useState(false);
-
-  const dayOptions = useMemo(startDayOptions, []);
 
   useEffect(() => {
     void listCampaigns()
@@ -130,39 +62,22 @@ export default function WeekSetupScreen() {
       .catch(() => setWeekNumber(null));
   }, []);
 
-  const videoTarget = parseTarget(videoText);
-  const slideshowTarget = parseTarget(slideshowText);
-  const totalPosts = videoTarget + slideshowTarget;
+  const perDay = videosPerDay + slideshowsPerDay;
+  const videosWeekly = videosPerDay * BRIEF_WEEK_DAYS;
+  const slideshowsWeekly = slideshowsPerDay * BRIEF_WEEK_DAYS;
+  const totalRows = videosWeekly + slideshowsWeekly;
 
   async function startWeek() {
-    if (!profile || totalPosts === 0) return;
+    if (!profile || totalRows === 0) return;
     setSubmitting(true);
     try {
-      const postTypes = await listPostTypes();
-      if (postTypes.length === 0) {
-        throw new Error(
-          'Post types are missing for this company. Contact support.',
-        );
-      }
-      const typeSplit = {
-        ...splitFamily(
-          postTypes.filter((t) => t.family === 'video'),
-          videoTarget,
-        ),
-        ...splitFamily(
-          postTypes.filter((t) => t.family === 'photo_carousel'),
-          slideshowTarget,
-        ),
-      };
       const campaign = await createWeek({
         companyId: profile.company_id,
         createdBy: profile.id,
         name: `Week of ${formatDropDate(dropDate)}`,
         dropDate,
-        videoTarget,
-        slideshowTarget,
-        typeSplit,
-        postTypes,
+        videosPerDay,
+        slideshowsPerDay,
       });
       router.replace(`/(admin)/week/${campaign.id}`);
     } catch (e) {
@@ -178,152 +93,115 @@ export default function WeekSetupScreen() {
     <>
       <Stack.Screen options={{ headerShown: false, title: 'Week setup' }} />
       <AdminScreen
-      actionBar={
-        <View style={styles.footerRow}>
-          <Button
-            variant="ghost"
-            size="md"
-            style={styles.backBtn}
-            onPress={() => router.back()}
-          >
-            Back
-          </Button>
+        actionBar={
           <Button
             variant="primary"
             size="md"
-            style={styles.nextBtn}
-            disabled={submitting || totalPosts === 0}
+            block
+            disabled={submitting || totalRows === 0}
             onPress={() => void startWeek()}
           >
-            {submitting ? 'Setting up…' : `Start week · ${totalPosts} posts`}
+            {submitting ? 'Creating rows' : `Create ${plural(totalRows, 'row', 'rows')}`}
           </Button>
-        </View>
-      }
-    >
-      <PushHeader
-        title={
-          weekNumber !== null
-            ? `Week ${weekNumber} · ${briefWeekRangeLabel(dropDate)}`
-            : `Week · ${briefWeekRangeLabel(dropDate)}`
         }
-        subtitle="Week setup"
-        onBack={() => router.back()}
-      />
+      >
+        <PushHeader
+          title={
+            weekNumber !== null
+              ? `Week ${weekNumber} · ${briefWeekRangeLabel(dropDate)}`
+              : briefWeekRangeLabel(dropDate)
+          }
+          subtitle="Week setup"
+          onBack={() => router.back()}
+        />
 
-      <View style={styles.body}>
-        <SectionLabel>Posts</SectionLabel>
-        <View style={styles.targetsRow}>
-          <View style={styles.targetField}>
-            <Text style={styles.fieldLabel}>Videos</Text>
-            <TextField
-              value={videoText}
-              onChangeText={setVideoText}
-              keyboardType="number-pad"
-              maxLength={2}
-              accessibilityLabel="Video target"
+        <View style={styles.body}>
+          <Text style={styles.h1}>Posts a day</Text>
+          <Text style={styles.intent}>
+            How many should each creator post a day? That is the whole setup.
+          </Text>
+
+          <View style={styles.cards}>
+            <RatioCard
+              icon="video"
+              label="Videos a day"
+              sub="Reels"
+              value={videosPerDay}
+              onChange={setVideosPerDay}
+            />
+            <RatioCard
+              icon="images"
+              label="Slideshows a day"
+              sub="Photo carousels"
+              value={slideshowsPerDay}
+              onChange={setSlideshowsPerDay}
             />
           </View>
-          <View style={styles.targetField}>
-            <Text style={styles.fieldLabel}>Slideshows</Text>
-            <TextField
-              value={slideshowText}
-              onChangeText={setSlideshowText}
-              keyboardType="number-pad"
-              maxLength={2}
-              accessibilityLabel="Slideshow target"
-            />
-          </View>
-        </View>
-        <Text style={styles.hint}>
-          {totalPosts === 0
-            ? 'Set at least one post.'
-            : `${totalPosts} posts, up to ${SLOTS_PER_DAY} per creator per day: ${scheduleRangeLabel(dropDate, totalPosts)}. Types are stamped from the usual mix and stay editable on the grid.`}
-        </Text>
 
-        <SectionLabel style={styles.startLabel}>Start day</SectionLabel>
-        <View style={styles.dayRow}>
-          {dayOptions.map((iso) => {
-            const selected = iso === dropDate;
-            return (
-              <PressableScale
-                key={iso}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => setDropDate(iso)}
-                style={[styles.dayChip, selected && styles.dayChipOn]}
-              >
-                <Text
-                  style={[styles.dayChipText, selected && styles.dayChipTextOn]}
-                >
-                  {dayChipLabel(iso)}
-                </Text>
-              </PressableScale>
-            );
-          })}
+          <View style={styles.summary}>
+            <Icon name="sparkles" size={16} color={color.blue700} />
+            <Text style={styles.summaryText}>
+              {totalRows === 0
+                ? 'Pick at least one post a day.'
+                : `${plural(perDay, 'post', 'posts')} a day, ${totalRows} this week: ${plural(videosWeekly, 'video', 'videos')} and ${plural(slideshowsWeekly, 'slideshow', 'slideshows')}. Each post suggests its kind when you open it.`}
+            </Text>
+          </View>
+
+          <SectionLabel style={styles.startLabel}>Start day</SectionLabel>
+          <StartDayCalendar value={dropDate} onChange={setDropDate} />
+          <Text style={styles.hint}>
+            {`Runs ${briefWeekRangeLabel(dropDate)}. The clock starts when the first post goes live.`}
+          </Text>
         </View>
-      </View>
-    </AdminScreen>
+      </AdminScreen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  footerRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  backBtn: {
-    flexBasis: '30%',
-  },
-  nextBtn: {
-    flex: 1,
-  },
   body: {
     marginTop: 8,
-    gap: 10,
+    gap: 12,
   },
-  targetsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  targetField: {
-    flex: 1,
-    gap: 6,
-  },
-  fieldLabel: {
-    fontSize: type.size.micro,
+  h1: {
+    fontSize: 28,
     fontWeight: '700',
-    color: color.slate400,
+    letterSpacing: -0.6,
+    color: color.ink,
   },
-  hint: {
-    fontSize: type.size.bodySm,
+  intent: {
+    marginTop: -4,
+    fontSize: 14,
     fontWeight: '400',
-    lineHeight: type.size.bodySm * 1.45,
+    lineHeight: 14 * 1.45,
     color: color.slate500,
+  },
+  cards: {
+    gap: 10,
+    marginTop: 4,
+  },
+  summary: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    borderRadius: radiusAdmin.md,
+    backgroundColor: color.blue50,
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: '600',
+    lineHeight: 13.5 * 1.4,
+    color: color.blue700,
   },
   startLabel: {
-    marginTop: 10,
+    marginTop: 8,
   },
-  dayRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  dayChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-  },
-  dayChipOn: {
-    backgroundColor: color.blue100,
-  },
-  dayChipText: {
-    fontSize: type.size.bodySm,
-    fontWeight: '700',
+  hint: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 13 * 1.45,
     color: color.slate500,
-  },
-  dayChipTextOn: {
-    color: color.blue700,
   },
 });

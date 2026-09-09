@@ -1,4 +1,4 @@
-// Admin draft flow: { query } or { url }, optionally with { post_type }, in;
+// Admin draft flow: { query }, { url } or { feature_id }, optionally with { post_type }, in;
 // structured draft brief out (or { kill_reason } when generation refuses to
 // pad). URL path scrapes via Apify, transcribes (actor / Deepgram), OCRs
 // carousels, then drafts. Query path drafts from the search string alone.
@@ -17,11 +17,14 @@ import {
   jsonResponse,
   loadBrandContext,
   parseClaudeJson,
+  toFeatureScreenshot,
+  type BrainFeature,
   type BrandContext,
 } from '../_shared/wp8.ts';
 import {
   brandDocBlocks,
   buildBriefSystem,
+  buildPointMedia,
   generateValidated,
   isKill,
   loadPostType,
@@ -31,7 +34,48 @@ import {
   type RawGenerated,
 } from '../_shared/generateBrief.ts';
 
-type Body = { url?: string; context?: string; query?: string; post_type?: string };
+type Body = {
+  url?: string;
+  context?: string;
+  query?: string;
+  feature_id?: string;
+  post_type?: string;
+};
+
+type BrainFeatureRow = {
+  id: string;
+  name: string;
+  sentence: string | null;
+  rank: number | null;
+  idea_title: string | null;
+  idea_action: string | null;
+  idea_example: string | null;
+};
+
+function featureSourceLines(feature: BrainFeatureRow, context: string | null): string[] {
+  const angleParts = [
+    feature.idea_title?.trim() ? feature.idea_title.trim() : null,
+    feature.idea_action?.trim() ? feature.idea_action.trim() : null,
+  ].filter((p): p is string => p !== null);
+  const example = feature.idea_example?.trim();
+  const angle = angleParts.length
+    ? `Angle that has worked: ${angleParts.join(' — ')}${example ? ` (${example})` : ''}`
+    : example
+      ? `Angle that has worked: ${example}`
+      : null;
+  return [
+    'There is no source post.',
+    [
+      `This post is about one product feature. Every product talking point must be about it and must carry feature_id "${feature.id}".`,
+      `Feature: ${feature.name}`,
+      feature.sentence?.trim() ? `What it is: ${feature.sentence.trim()}` : null,
+      angle,
+    ]
+      .filter((l): l is string => l !== null)
+      .join('\n'),
+    ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
+  ];
+}
 
 type SourcePost = {
   platform: 'tiktok' | 'instagram';
@@ -199,6 +243,7 @@ async function generateOnce(
     parseClaudeJson<RawGenerated>(raw),
     postType ? postType.family : fallbackFormat,
     postType?.key ?? null,
+    new Set(brand.features.map((f) => f.id)),
   );
 }
 
@@ -215,12 +260,17 @@ Deno.serve(async (req) => {
   const body = ((await req.json().catch(() => null)) ?? {}) as Body;
   const url = body.url?.trim();
   const query = body.query?.trim();
+  const featureId = body.feature_id?.trim();
   const context = body.context?.trim() || null;
-  if (url && query) {
-    return jsonResponse({ error: 'expected { url } or { query }, not both' }, 400);
+  const inputCount = [url, query, featureId].filter(Boolean).length;
+  if (inputCount > 1) {
+    return jsonResponse(
+      { error: 'expected exactly one of { url }, { query }, { feature_id }' },
+      400,
+    );
   }
-  if (!url && !query) {
-    return jsonResponse({ error: 'expected { url } or { query }' }, 400);
+  if (inputCount === 0) {
+    return jsonResponse({ error: 'expected { url }, { query } or { feature_id }' }, 400);
   }
 
   let postType: PostTypeRow | null = null;
@@ -267,6 +317,7 @@ Deno.serve(async (req) => {
         ...outcome.draft,
         search_phrase: query,
         overlay_labels: outcome.overlayLabels,
+        point_media: buildPointMedia(brand.features, outcome.featureIds),
         post_type_id: postType?.id ?? null,
         generation_id: generationId,
         warnings,
@@ -275,6 +326,83 @@ Deno.serve(async (req) => {
       });
     } catch (e) {
       console.error('ingest-brief query error:', e);
+      return jsonResponse(
+        { error: e instanceof Error ? e.message : 'ingest failed' },
+        500,
+      );
+    }
+  }
+
+  // Feature path: the brief is anchored on one brain_features row. The
+  // model writes the search phrase itself.
+  if (featureId) {
+    try {
+      const { data: featureRow, error: featureError } = await admin
+        .from('brain_features')
+        .select('id, name, sentence, rank, idea_title, idea_action, idea_example')
+        .eq('id', featureId)
+        .eq('company_id', caller.companyId)
+        .maybeSingle();
+      if (featureError) throw new Error(featureError.message);
+      if (!featureRow) return jsonResponse({ error: 'unknown feature' }, 400);
+      const feature = featureRow as BrainFeatureRow;
+
+      const loaded = await loadBrandContext(admin, caller.companyId);
+      let features: BrainFeature[] = loaded.features;
+      if (!features.some((f) => f.id === feature.id)) {
+        const { data: shots, error: shotsError } = await admin
+          .from('feature_screenshots')
+          .select('id, feature_id, path, shape, sort_order')
+          .eq('feature_id', feature.id)
+          .eq('company_id', caller.companyId)
+          .order('sort_order', { ascending: true });
+        if (shotsError) throw new Error(shotsError.message);
+        features = [
+          {
+            id: feature.id,
+            name: feature.name,
+            sentence: feature.sentence,
+            rank: feature.rank,
+            screenshots: (shots ?? []).map((s) => toFeatureScreenshot(admin, s)),
+          },
+          ...features,
+        ];
+      }
+      const brand: BrandContext = { ...loaded, features };
+      const validationCtx = {
+        hashtagBank: brand.hashtagBank,
+        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+      };
+      const generationId = crypto.randomUUID();
+      const sourceLines = featureSourceLines(feature, context);
+      const { outcome, warnings } = await generateValidated(
+        admin,
+        caller.companyId,
+        generationId,
+        postType,
+        (priorFailures) =>
+          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+        validationCtx,
+      );
+      if (isKill(outcome)) {
+        return jsonResponse({
+          kill_reason: outcome.kill_reason,
+          generation_id: generationId,
+          post_type_id: postType?.id ?? null,
+        });
+      }
+      return jsonResponse({
+        ...outcome.draft,
+        overlay_labels: outcome.overlayLabels,
+        point_media: buildPointMedia(brand.features, outcome.featureIds),
+        post_type_id: postType?.id ?? null,
+        generation_id: generationId,
+        warnings,
+        example_url: null,
+        example_transcript: null,
+      });
+    } catch (e) {
+      console.error('ingest-brief feature error:', e);
       return jsonResponse(
         { error: e instanceof Error ? e.message : 'ingest failed' },
         500,
@@ -361,6 +489,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       ...outcome.draft,
       overlay_labels: outcome.overlayLabels,
+      point_media: buildPointMedia(brand.features, outcome.featureIds),
       post_type_id: postType?.id ?? null,
       generation_id: generationId,
       warnings,

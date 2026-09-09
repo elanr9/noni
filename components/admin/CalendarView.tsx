@@ -12,6 +12,7 @@ import {
   type CalendarCellItem,
 } from './CalendarCell';
 import { Icon } from '../ui/Icon';
+import { SkeletonCard } from '../ui/Skeleton';
 import { PressableScale } from '../ui/PressableScale';
 import { useAuth } from '../../lib/auth';
 import {
@@ -21,7 +22,7 @@ import {
 } from '../../lib/admin-api';
 import type { ContentFormat, Creator } from '../../lib/admin-review-types';
 import type { TaskStatus } from '../../lib/tasks';
-import { color, type } from '../../theme/tokens';
+import { color, radiusAdmin, type } from '../../theme/tokens';
 
 const CREATOR_COL = 72;
 const DAY_GAP = 8;
@@ -171,7 +172,11 @@ export function CalendarView(props: {
       </View>
 
       {loading ? (
-        <Text style={styles.loading}>Loading calendar…</Text>
+        <View style={styles.skeletons}>
+          <SkeletonCard height={72} radius={radiusAdmin.lg} />
+          <SkeletonCard height={72} radius={radiusAdmin.lg} />
+          <SkeletonCard height={72} radius={radiusAdmin.lg} />
+        </View>
       ) : creators.length === 0 ? (
         <Text style={styles.loading}>
           No creators yet. Invite someone from Settings.
@@ -249,6 +254,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.fillQuiet,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  skeletons: {
+    gap: 10,
   },
   loading: {
     fontSize: type.size.bodySm,

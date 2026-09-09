@@ -13,6 +13,7 @@ export interface SectionNoteCardProps {
   label: string;
   text: string;
   format: ContentFormat;
+  thumbUri?: string | null;
   note: string | null;
   open: boolean;
   /** Card body tap: the watch sheet. */
@@ -33,6 +34,7 @@ export function SectionNoteCard({
   label,
   text,
   format,
+  thumbUri,
   note,
   open,
   onWatch,
@@ -57,7 +59,7 @@ export function SectionNoteCard({
         onPress={onWatch}
         style={styles.body}
       >
-        <PostThumb format={format} width={46} height={62} radius={9} />
+        <PostThumb format={format} uri={thumbUri} width={46} height={62} radius={9} />
         <View style={styles.main}>
           <View style={styles.labelRow}>
             <Text style={[styles.label, noted && styles.labelNoted]}>

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { useAuth } from '../../../lib/auth';
 import {
   createTask,
@@ -148,7 +149,11 @@ export default function TrendsScreen() {
       </Button>
 
       {loading ? (
-        <Text style={styles.empty}>Loading trends…</Text>
+        <View style={styles.skeletons}>
+          <SkeletonCard height={120} radius={radius.lg} />
+          <SkeletonCard height={120} radius={radius.lg} />
+          <SkeletonCard height={120} radius={radius.lg} />
+        </View>
       ) : trends.length === 0 ? (
         <Text style={styles.empty}>
           No trends yet. Tap Scrape now, then pull to refresh in a few minutes.
@@ -252,6 +257,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   scrapeBtn: { marginBottom: 4 },
+  skeletons: {
+    gap: space[3],
+  },
   empty: {
     fontSize: type.size.bodySm,
     color: color.slate500,

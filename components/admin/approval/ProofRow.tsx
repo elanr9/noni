@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   thumbGlyph: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

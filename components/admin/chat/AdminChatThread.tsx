@@ -6,8 +6,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +13,9 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardPadding } from '../../../lib/keyboard';
 import {
   listThread,
   sendMediaMessage,
@@ -53,7 +53,6 @@ export interface AdminChatThreadProps {
   initialRef?: PendingPostRef | null;
   scrollToAssignmentId?: string;
   onOpenPostRef?: (ref: MessagePostRef) => void;
-  keyboardOffset?: number;
 }
 
 export function AdminChatThread({
@@ -63,8 +62,9 @@ export function AdminChatThread({
   initialRef = null,
   scrollToAssignmentId,
   onOpenPostRef,
-  keyboardOffset = 0,
 }: AdminChatThreadProps) {
+  const insets = useSafeAreaInsets();
+  const keyboardPadding = useKeyboardPadding();
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
@@ -184,15 +184,13 @@ export function AdminChatThread({
   const canSend = draft.trim().length > 0 && !sending;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={keyboardOffset}
-    >
+    <View style={[styles.flex, { paddingBottom: keyboardPadding }]}>
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
         contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
@@ -215,7 +213,7 @@ export function AdminChatThread({
         )}
       </ScrollView>
 
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 26) }]}>
         {pendingRef !== null && (
           <View style={styles.pendingRef}>
             <Icon name="link" size={14} color={color.blue700} />
@@ -284,7 +282,7 @@ export function AdminChatThread({
           </PressableScale>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -321,7 +319,6 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 26,
     gap: 8,
   },
   pendingRef: {

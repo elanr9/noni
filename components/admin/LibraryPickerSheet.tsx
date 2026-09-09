@@ -1,17 +1,23 @@
-// The Library picker that opens from inside the post editor. Filtered to the
-// post's type (README §9): a filter line names the type, a References /
-// Our posts / Ideas segmented control, and one primary action — Build this
-// post. Picking marks the item used — used_count increments, nothing is ever
-// removed — then hands the result to the editor:
-//   { kind: 'port', briefId }  -> port that finished post into this slot
-//   { kind: 'example', url }   -> generate from the reference, keep the link
-//   { kind: 'fill', text }     -> generate from the idea
+// The Library picker that opens from inside the post editor. A Features /
+// References / Our posts / Ideas segmented control, a filter line naming the
+// post's type where it applies, and one primary action. Picking marks the
+// item used (used_count increments, nothing is ever removed) then hands the
+// result to the editor:
+//   { kind: 'feature', featureId } -> write a post about a Company Brain feature
+//   { kind: 'port', briefId }      -> port that finished post into this slot
+//   { kind: 'example', url }       -> generate from the reference, keep the link
+//   { kind: 'fill', text }         -> generate from the idea
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../../lib/auth';
-import { listPostTypes, type PostType } from '../../lib/briefs-api';
+import {
+  listNoniLibrary,
+  listPostTypes,
+  type NoniLibraryGroup,
+  type PostType,
+} from '../../lib/briefs-api';
 import {
   listLibraryItems,
   listOurPosts,
@@ -20,10 +26,12 @@ import {
   type LibraryItem,
   type OurPost,
 } from '../../lib/library-api';
-import { borderWidth, color, radiusAdmin, type } from '../../theme/tokens';
+import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
 import { LibraryListSkeleton } from './library/LibraryListSkeleton';
-import { Segmented, Sheet } from './shared';
+import { PostThumb, Segmented, Sheet } from './shared';
 import { Button } from '../ui/Button';
+import { Icon } from '../ui/Icon';
+import { PressableScale } from '../ui/PressableScale';
 import {
   LibraryItemCard,
   MEDIA_CARD_HEIGHT,
@@ -34,11 +42,12 @@ import {
 export type LibraryPick =
   | { kind: 'port'; briefId: string }
   | { kind: 'example'; url: string }
-  | { kind: 'fill'; text: string };
+  | { kind: 'fill'; text: string }
+  | { kind: 'feature'; featureId: string };
 
 export interface LibraryPickerSheetProps {
   visible: boolean;
-  /** The post's type; filters both lanes. Null on legacy briefs shows all. */
+  /** The post's type; filters references, our posts and ideas. Null on legacy briefs shows all. */
   postTypeId: string | null;
   /** True while the editor is generating from the pick. */
   busy?: boolean;
@@ -48,18 +57,104 @@ export interface LibraryPickerSheetProps {
 
 const SEARCH_DEBOUNCE_MS = 350;
 
+const SEGMENT_FEATURES = 0;
+const SEGMENT_OUR_POSTS = 2;
+const SEGMENT_IDEAS = 3;
+
 type Row =
+  | { kind: 'feature'; group: NoniLibraryGroup }
   | { kind: 'item'; item: LibraryItem }
   | { kind: 'our_post'; post: OurPost };
 
 function rowId(row: Row): string {
-  return row.kind === 'item' ? row.item.id : row.post.post_id;
+  switch (row.kind) {
+    case 'feature':
+      return row.group.featureId;
+    case 'item':
+      return row.item.id;
+    case 'our_post':
+      return row.post.post_id;
+  }
 }
 
 function filterLine(postType: PostType | null): string | null {
   if (!postType) return null;
   const noun = postType.family === 'photo_carousel' ? 'slideshows' : 'videos';
   return `Filtered to ${postType.label.toLowerCase()} ${noun}.`;
+}
+
+function matchesFeature(group: NoniLibraryGroup, search: string): boolean {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    group.name.toLowerCase().includes(q) ||
+    (group.sentence?.toLowerCase().includes(q) ?? false)
+  );
+}
+
+/** True when some loaded row already carries this exact idea text. */
+function ideaExists(rows: Row[], text: string): boolean {
+  const q = text.trim().toLowerCase();
+  return rows.some(
+    (row) => row.kind === 'item' && row.item.text?.trim().toLowerCase() === q,
+  );
+}
+
+function FeatureRow({
+  group,
+  selected,
+  onPress,
+}: {
+  group: NoniLibraryGroup;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const count = group.shots.length;
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityState={selected ? { selected } : undefined}
+      onPress={onPress}
+      style={[styles.card, shadow.shadowCard, selected && styles.cardSelected]}
+    >
+      <PostThumb uri={group.shots[0]?.url ?? null} format="video" width={54} height={72} />
+      <View style={styles.cardBody}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {group.name}
+        </Text>
+        {group.sentence !== null && (
+          <Text style={styles.cardMeta} numberOfLines={1}>
+            {group.sentence}
+          </Text>
+        )}
+      </View>
+      <Text style={styles.trailing}>
+        {count} {count === 1 ? 'screenshot' : 'screenshots'}
+      </Text>
+    </PressableScale>
+  );
+}
+
+function NewIdeaRow({ text, onPress }: { text: string; onPress: () => void }) {
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.card, styles.newIdea, shadow.shadowCard]}
+    >
+      <View style={styles.newIdeaGlyph}>
+        <Icon name="plus" size={18} color={color.blue700} />
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {`Use "${text}" as a new idea`}
+        </Text>
+        <Text style={styles.cardMeta} numberOfLines={1}>
+          Writes the post from what you typed
+        </Text>
+      </View>
+    </PressableScale>
+  );
 }
 
 export function LibraryPickerSheet({
@@ -70,19 +165,26 @@ export function LibraryPickerSheet({
   onPick,
 }: LibraryPickerSheetProps) {
   const { profile } = useAuth();
-  const [segment, setSegment] = useState(0);
+  const [segment, setSegment] = useState(SEGMENT_FEATURES);
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
+  const [features, setFeatures] = useState<NoniLibraryGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType | null>(null);
 
-  const ourPosts = segment === 1;
+  const companyId = profile?.company_id ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (ourPosts) {
+      if (segment === SEGMENT_FEATURES) {
+        if (!companyId) {
+          setFeatures([]);
+          return;
+        }
+        setFeatures(await listNoniLibrary(companyId));
+      } else if (segment === SEGMENT_OUR_POSTS) {
         const posts = await listOurPosts({
           postTypeId: postTypeId ?? undefined,
           search,
@@ -91,7 +193,7 @@ export function LibraryPickerSheet({
         setRows(posts.map((post): Row => ({ kind: 'our_post', post })));
       } else {
         const items = await listLibraryItems({
-          source: segment === 2 ? 'idea' : 'reference',
+          source: segment === SEGMENT_IDEAS ? 'idea' : 'reference',
           search,
           postTypeId: postTypeId ?? undefined,
         });
@@ -102,7 +204,7 @@ export function LibraryPickerSheet({
     } finally {
       setLoading(false);
     }
-  }, [ourPosts, segment, search, postTypeId]);
+  }, [segment, search, postTypeId, companyId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -117,10 +219,26 @@ export function LibraryPickerSheet({
       .catch(() => undefined);
   }, [visible, postTypeId]);
 
-  const selected = rows.find((row) => rowId(row) === selectedId) ?? null;
+  const visibleRows = useMemo<Row[]>(() => {
+    if (segment !== SEGMENT_FEATURES) return rows;
+    return features
+      .filter((group) => matchesFeature(group, search))
+      .map((group): Row => ({ kind: 'feature', group }));
+  }, [segment, rows, features, search]);
+
+  const selected = visibleRows.find((row) => rowId(row) === selectedId) ?? null;
+
+  const typedIdea = search.trim();
+  const showNewIdea =
+    segment === SEGMENT_IDEAS && typedIdea.length > 0 && !ideaExists(rows, typedIdea);
 
   function attach() {
     if (!selected) return;
+
+    if (selected.kind === 'feature') {
+      onPick({ kind: 'feature', featureId: selected.group.featureId });
+      return;
+    }
 
     if (profile) {
       // Usage tracking must never block the pick; using never removes.
@@ -146,7 +264,19 @@ export function LibraryPickerSheet({
     else if (text) onPick({ kind: 'fill', text });
   }
 
-  const line = filterLine(postType);
+  const writes = segment === SEGMENT_FEATURES || segment === SEGMENT_IDEAS;
+  const primaryLabel = busy
+    ? 'Building the post…'
+    : writes
+      ? 'Write this post'
+      : 'Attach to post';
+
+  const line = segment === SEGMENT_FEATURES ? null : filterLine(postType);
+
+  const emptyCopy =
+    segment === SEGMENT_FEATURES
+      ? 'No features with screenshots yet. Add them on the Company Brain page.'
+      : 'Nothing here for this post type yet.';
 
   return (
     <Sheet
@@ -155,7 +285,7 @@ export function LibraryPickerSheet({
       pinnedTop={90}
       footer={
         <Button block disabled={selected === null || busy} onPress={attach}>
-          {busy ? 'Building the post…' : 'Build this post'}
+          {primaryLabel}
         </Button>
       }
     >
@@ -165,6 +295,7 @@ export function LibraryPickerSheet({
       <View style={styles.segmentWrap}>
         <Segmented
           options={[
+            { label: 'Features' },
             { label: 'References' },
             { label: 'Our posts' },
             { label: 'Ideas' },
@@ -182,7 +313,7 @@ export function LibraryPickerSheet({
       <TextInput
         value={search}
         onChangeText={setSearch}
-        placeholder="Search"
+        placeholder={segment === SEGMENT_IDEAS ? 'Search or type a new idea' : 'Search'}
         placeholderTextColor={color.slate400}
         autoCapitalize="none"
         autoCorrect={false}
@@ -190,22 +321,27 @@ export function LibraryPickerSheet({
       />
 
       <View style={styles.list}>
-        {loading && rows.length === 0 ? (
+        {showNewIdea && !busy && (
+          <NewIdeaRow text={typedIdea} onPress={() => onPick({ kind: 'fill', text: typedIdea })} />
+        )}
+        {loading && visibleRows.length === 0 ? (
           <LibraryListSkeleton height={MEDIA_CARD_HEIGHT} count={3} />
-        ) : rows.length === 0 ? (
-          <Text style={styles.empty}>Nothing here for this post type yet.</Text>
+        ) : visibleRows.length === 0 ? (
+          !showNewIdea && <Text style={styles.empty}>{emptyCopy}</Text>
         ) : (
-          rows.map((row) => {
+          visibleRows.map((row) => {
             const id = rowId(row);
+            const isSelected = id === selectedId;
+            const toggle = () => setSelectedId(isSelected ? null : id);
+            if (row.kind === 'feature') {
+              return (
+                <FeatureRow key={id} group={row.group} selected={isSelected} onPress={toggle} />
+              );
+            }
             const model =
               row.kind === 'item' ? itemCardModel(row.item) : ourPostCardModel(row.post);
             return (
-              <LibraryItemCard
-                key={id}
-                model={model}
-                selected={id === selectedId}
-                onPress={() => setSelectedId(id === selectedId ? null : id)}
-              />
+              <LibraryItemCard key={id} model={model} selected={isSelected} onPress={toggle} />
             );
           })
         )}
@@ -252,5 +388,53 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: color.slate500,
     paddingVertical: 8,
+  },
+  card: {
+    height: MEDIA_CARD_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: color.white,
+    borderRadius: radiusAdmin.lg,
+    borderWidth: borderWidth.hair,
+    borderColor: color.line,
+    paddingHorizontal: 12,
+  },
+  cardSelected: {
+    backgroundColor: color.blue50,
+    borderColor: color.blue500,
+  },
+  cardBody: {
+    flex: 1,
+    gap: 4,
+    justifyContent: 'center',
+  },
+  cardTitle: {
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.ink,
+    lineHeight: type.size.bodySm * type.leading.snug,
+  },
+  cardMeta: {
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.slate400,
+  },
+  trailing: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  newIdea: {
+    borderColor: color.blue500,
+    borderStyle: 'dashed',
+  },
+  newIdeaGlyph: {
+    width: 54,
+    height: 72,
+    borderRadius: radiusAdmin.sm,
+    backgroundColor: color.blue50,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

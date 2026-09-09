@@ -4,7 +4,7 @@
 // as script inside its point. Overlay chrome lives on brief_segments and
 // opens OverlayEditor.
 import { useRef, useState, type JSX } from 'react';
-import { Alert, Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import type { TalkingPoint } from '../../../lib/briefs-api';
@@ -12,6 +12,7 @@ import { type OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { SlideStage, type SlideInset } from '../../SlideStage';
 import { Icon } from '../../ui/Icon';
+import { MediaThumb } from '../../ui/MediaThumb';
 import { PressableScale } from '../../ui/PressableScale';
 import { AiPill } from './AiPill';
 import { type OverlayEditorMode } from './OverlayEditor';
@@ -40,6 +41,8 @@ export function PointsEditor(props: {
   onRegenerateAll: () => void;
   /** Signed URL for a screenshot attached to this point's segment, if any. */
   screenshotUrlForIndex: (index: number) => string | undefined;
+  /** True when this point's segment renders as a green screen clip. */
+  greenScreenForIndex?: (index: number) => boolean;
   screenshotBusyIndex: number | null;
   onAttachScreenshot: (index: number) => void;
   onRemoveScreenshot: (index: number) => void;
@@ -62,6 +65,7 @@ export function PointsEditor(props: {
     onChange,
     onRegenerateAll,
     screenshotUrlForIndex,
+    greenScreenForIndex,
     screenshotBusyIndex,
     onAttachScreenshot,
     onRemoveScreenshot,
@@ -109,12 +113,17 @@ export function PointsEditor(props: {
         is_product: false,
         edited_by_admin: true,
         claim_id: null,
+        script: false,
       },
     ]);
   }
 
   function markProduct(id: string) {
     onChange(points.map((p) => ({ ...p, is_product: p.id === id })));
+  }
+
+  function setScript(id: string, next: boolean) {
+    onChange(points.map((p) => (p.id === id ? { ...p, script: next } : p)));
   }
 
   // Drag reorder: the grip handle owns the gesture. Deltas track our own
@@ -342,10 +351,7 @@ export function PointsEditor(props: {
                         onPress={() => onOpenOverlay(i, 'media')}
                         style={styles.slideShotPress}
                       >
-                        <Image
-                          source={{ uri: shotUrl }}
-                          style={styles.shotThumb}
-                        />
+                        <MediaThumb uri={shotUrl} style={styles.shotThumb} badgeSize={14} />
                         <Text style={styles.shotName} numberOfLines={1}>
                           {shotBusy ? 'Uploading…' : 'Picture'}
                         </Text>
@@ -391,6 +397,38 @@ export function PointsEditor(props: {
               style={styles.text}
             />
 
+            <View style={styles.modeBlock}>
+              <View style={styles.modeRow}>
+                {(
+                  [
+                    { label: 'Hint', value: false },
+                    { label: 'Script', value: true },
+                  ] as const
+                ).map((option) => {
+                  const selected = (point.script === true) === option.value;
+                  return (
+                    <PressableScale
+                      key={option.label}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`Show point ${i + 1} as a ${option.label.toLowerCase()}`}
+                      onPress={() => setScript(point.id, option.value)}
+                      style={[styles.modePill, selected && styles.modePillOn]}
+                    >
+                      <Text style={[styles.modePillText, selected && styles.modePillTextOn]}>
+                        {option.label}
+                      </Text>
+                    </PressableScale>
+                  );
+                })}
+              </View>
+              <Text style={styles.modeHint}>
+                {point.script
+                  ? 'Creator reads this word for word from the teleprompter.'
+                  : 'Creator sees this as a cue and says it their way.'}
+              </Text>
+            </View>
+
             {plug && cta.trim() ? (
               <Text style={styles.plugScript}>{cta.trim()}</Text>
             ) : null}
@@ -405,9 +443,13 @@ export function PointsEditor(props: {
                     onPress={() => onOpenOverlay(i, 'media')}
                     style={styles.shotPress}
                   >
-                    <Image source={{ uri: shotUrl }} style={styles.shotThumb} />
+                    <MediaThumb uri={shotUrl} style={styles.shotThumb} badgeSize={14} />
                     <Text style={styles.shotName} numberOfLines={1}>
-                      {shotBusy ? 'Uploading…' : shotLabel(shotUrl)}
+                      {shotBusy
+                        ? 'Uploading…'
+                        : greenScreenForIndex?.(i)
+                          ? `Green screen ${shotLabel(shotUrl).toLowerCase()}`
+                          : shotLabel(shotUrl)}
                     </Text>
                   </PressableScale>
                   <PressableScale
@@ -596,6 +638,37 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 15 * 1.4,
     color: color.slate500,
+  },
+  modeBlock: {
+    gap: 6,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  modePill: {
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: radiusAdmin.pill,
+    borderWidth: 1,
+    borderColor: color.lineStrong,
+  },
+  modePillOn: {
+    backgroundColor: color.ink,
+    borderColor: color.ink,
+  },
+  modePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  modePillTextOn: {
+    color: color.white,
+  },
+  modeHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.slate400,
   },
   shotRow: {
     flexDirection: 'row',

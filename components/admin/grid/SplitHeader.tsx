@@ -1,4 +1,5 @@
 // Type chips are filter buttons: tap to show that type, tap again to clear.
+// Counts come from the rows in the active lane that already carry a type.
 import { ScrollView, StyleSheet, Text } from 'react-native';
 
 import { color, radiusAdmin } from '../../../theme/tokens';
@@ -19,7 +20,7 @@ export interface SplitRow {
 }
 
 function isDone(state: GridRowState): boolean {
-  return state === 'complete' || state === 'filled' || state === 'killed';
+  return state === 'complete' || state === 'killed';
 }
 
 export function SplitHeader({
@@ -61,8 +62,8 @@ export function SplitHeader({
                 borderColor: on
                   ? color.blue500
                   : complete
-                    ? 'rgba(31,168,110,0.45)'
-                    : 'rgba(224,138,22,0.5)',
+                    ? color.green
+                    : color.amber,
               },
             ]}
           >
@@ -75,7 +76,7 @@ export function SplitHeader({
             >
               {`${done}/${total}`}
             </Text>
-            {complete ? <Icon name="check" size={13} color={color.green} /> : null}
+            {complete ? <Icon name="check" size={12} color={color.green} /> : null}
           </PressableScale>
         );
       })}

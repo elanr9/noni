@@ -19,6 +19,8 @@ import {
   type OverlayBox,
 } from '../lib/overlay-boxes';
 import { color } from '../theme/tokens';
+import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
+import { OutlinedText } from './ui/OutlinedText';
 
 const OVERLAY_FONT = 'TikTokSans_700Bold';
 /** Defaults when the admin attached a picture but never saved a placement.
@@ -45,8 +47,23 @@ export function SlideStage(props: {
   placeholder?: string;
   tint?: string;
   style?: StyleProp<ViewStyle>;
+  /** When set, the creator can hold and drag each text box. */
+  onMoveBox?: (boxId: string, x: number, y: number) => void;
+  /** When set, the creator can hold and drag the inset picture. */
+  onMoveInset?: PlacementMove;
+  onDragStart?: () => void;
 }): JSX.Element {
-  const { boxes, photoUri, inset, placeholder, tint, style } = props;
+  const {
+    boxes,
+    photoUri,
+    inset,
+    placeholder,
+    tint,
+    style,
+    onMoveBox,
+    onMoveInset,
+    onDragStart,
+  } = props;
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const [insetAspect, setInsetAspect] = useState(9 / 16);
 
@@ -92,17 +109,16 @@ export function SlideStage(props: {
       ) : null}
 
       {insetUri !== undefined && stage.w > 0 ? (
-        <View
-          pointerEvents="none"
+        <DragPlacement
+          x={inset?.x ?? SLIDE_INSET_DEFAULTS.x}
+          y={inset?.y ?? SLIDE_INSET_DEFAULTS.y}
+          stageWidth={stage.w}
+          stageHeight={stage.h}
+          onMove={onMoveInset}
+          onDragStart={onDragStart}
           style={[
             styles.inset,
-            {
-              left: (inset?.x ?? SLIDE_INSET_DEFAULTS.x) * stage.w - insetW / 2,
-              top: (inset?.y ?? SLIDE_INSET_DEFAULTS.y) * stage.h - insetH / 2,
-              width: insetW,
-              height: insetH,
-              borderRadius: 10 * k,
-            },
+            { width: insetW, height: insetH, borderRadius: 10 * k },
           ]}
         >
           <Image
@@ -110,28 +126,26 @@ export function SlideStage(props: {
             style={styles.insetImg}
             resizeMode="cover"
           />
-        </View>
+        </DragPlacement>
       ) : null}
 
       {stage.w > 0
         ? boxes.map((box) => {
             const fontSize = Math.max(6, box.size * stage.w);
             return (
-              <View
+              <DragPlacement
                 key={box.id}
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFill, styles.boxLayer]}
-              >
-              <View
-                style={[
-                  styles.boxWrap,
-                  {
-                    transform: [
-                      { translateX: (box.x - 0.5) * stage.w },
-                      { translateY: (box.y - 0.5) * stage.h },
-                    ],
-                  },
-                ]}
+                x={box.x}
+                y={box.y}
+                stageWidth={stage.w}
+                stageHeight={stage.h}
+                onMove={
+                  onMoveBox
+                    ? (nx, ny) => onMoveBox(box.id, nx, ny)
+                    : undefined
+                }
+                onDragStart={onDragStart}
+                style={styles.boxWrap}
               >
                 <View
                   style={[
@@ -146,28 +160,29 @@ export function SlideStage(props: {
                       : styles.pillClear,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.boxText,
-                      {
-                        color: box.bg ? overlayTextContrast(box.color) : box.color,
-                        fontSize,
-                        lineHeight: fontSize * 1.22,
-                        textShadowColor: box.bg
-                          ? 'transparent'
-                          : 'rgba(0,0,0,0.6)',
-                        textShadowOffset: box.bg
-                          ? { width: 0, height: 0 }
-                          : { width: 0, height: 1 },
-                        textShadowRadius: box.bg ? 0 : 10,
-                      },
-                    ]}
-                  >
-                    {box.text}
-                  </Text>
+                  {box.bg ? (
+                    <Text
+                      style={[
+                        styles.boxText,
+                        {
+                          color: overlayTextContrast(box.color),
+                          fontSize,
+                          lineHeight: fontSize * 1.22,
+                        },
+                      ]}
+                    >
+                      {box.text}
+                    </Text>
+                  ) : (
+                    <OutlinedText
+                      text={box.text}
+                      fontSize={fontSize}
+                      color={box.color}
+                      style={[styles.boxText, { lineHeight: fontSize * 1.22 }]}
+                    />
+                  )}
                 </View>
-              </View>
-              </View>
+              </DragPlacement>
             );
           })
         : null}
@@ -180,7 +195,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   placeholderWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: '8%',
@@ -191,17 +206,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inset: {
-    position: 'absolute',
     overflow: 'hidden',
     backgroundColor: color.ink800,
   },
   insetImg: {
     width: '100%',
     height: '100%',
-  },
-  boxLayer: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   boxWrap: {
     maxWidth: '86%',

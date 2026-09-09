@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { LibraryItem, OurPost } from '../../lib/library-api';
 import { formatMetric } from '../../lib/analytics';
@@ -22,7 +22,14 @@ export type LibraryCardModel = {
   meta: string;
   creatorName: string | null;
   usedCount: number;
+  /** The brief this row last became; the meta line links to it. */
+  lastBriefId?: string | null;
 };
+
+export function shortDate(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 /** Fixed card heights (README §1) — media rows and text rows, per list. */
 export const MEDIA_CARD_HEIGHT = 96;
@@ -61,9 +68,11 @@ function sourceKind(source: string): LibraryCardKind {
   }
 }
 
-function usedBit(usedCount: number): string[] {
-  if (usedCount <= 0) return [];
-  return [`Used ${usedCount} time${usedCount === 1 ? '' : 's'}`];
+/** `Made 2x · Aug 24` once a row has become a post; `New` until then. */
+function madeBits(usedCount: number, lastUsedAt: string | null): string[] {
+  if (usedCount <= 0) return ['New'];
+  const date = shortDate(lastUsedAt);
+  return date ? [`Made ${usedCount}x`, date] : [`Made ${usedCount}x`];
 }
 
 export function itemCardModel(
@@ -71,26 +80,23 @@ export function itemCardModel(
   creatorName?: string | null,
 ): LibraryCardModel {
   const kind = sourceKind(item.source);
-  const date = item.created_at
-    ? new Date(item.created_at).toLocaleDateString()
-    : null;
+  const date = shortDate(item.created_at);
 
   const bits: string[] = [];
   if (kind === 'reference') {
-    // README asks for `@handle · views`; views are not on library_items, so
-    // the handle (or host) stands alone.
     const handle = handleOf(item.url);
     const host = hostOf(item.url);
     if (handle) bits.push(`@${handle}`);
     else if (host) bits.push(host);
     if (date) bits.push(date);
+    if (item.used_count > 0) bits.push(`Made ${item.used_count}x`);
   } else if (kind === 'from_creator') {
     if (creatorName) bits.push(creatorName);
     if (date) bits.push(date);
-  } else if (date) {
-    bits.push(date);
+    if (item.used_count > 0) bits.push(`Made ${item.used_count}x`);
+  } else {
+    bits.push(...madeBits(item.used_count, item.last_used_at));
   }
-  bits.push(...usedBit(item.used_count));
 
   return {
     id: item.id,
@@ -102,6 +108,7 @@ export function itemCardModel(
     meta: bits.join(' · '),
     creatorName: creatorName ?? null,
     usedCount: item.used_count,
+    lastBriefId: item.last_brief_id,
   };
 }
 
@@ -110,16 +117,19 @@ export function ourPostCardModel(post: OurPost): LibraryCardModel {
   if (post.creator_name) bits.push(post.creator_name);
   if (post.post_type_label) bits.push(post.post_type_label);
   bits.push(`${formatMetric(post.views ?? 0)} views`);
+  bits.push(`${formatMetric(post.saves ?? 0)} saves`);
+  const usedCount = post.used_count ?? 0;
+  if (usedCount > 0) bits.push(`Remade ${usedCount}x`);
   return {
     id: post.post_id,
     kind: 'our_post',
     title: post.title ?? post.hook,
     url: post.post_url,
-    thumbnailUrl: null,
+    thumbnailUrl: post.thumbnail_url ?? null,
     format: post.family === 'photo_carousel' ? 'photo_carousel' : 'video',
     meta: bits.join(' · '),
     creatorName: post.creator_name ?? null,
-    usedCount: 0,
+    usedCount,
   };
 }
 
@@ -132,6 +142,10 @@ export interface LibraryItemCardProps {
   action?: { label: string; onPress: () => void; disabled?: boolean };
   /** Picker rows highlight the choice before Attach. */
   selected?: boolean;
+  /** Library rows open a Delete action sheet on long press. */
+  onLongPress?: () => void;
+  /** Tapping the meta line opens the post this row last became. */
+  onMetaPress?: () => void;
 }
 
 /**
@@ -145,6 +159,8 @@ export function LibraryItemCard({
   onUse,
   action,
   selected = false,
+  onLongPress,
+  onMetaPress,
 }: LibraryItemCardProps) {
   const showThumb = model.kind === 'reference' || model.kind === 'our_post';
 
@@ -153,6 +169,7 @@ export function LibraryItemCard({
       accessibilityRole="button"
       accessibilityState={selected ? { selected } : undefined}
       onPress={onPress}
+      onLongPress={onLongPress}
       style={[
         styles.card,
         { height: cardHeightFor(model.kind) },
@@ -176,11 +193,17 @@ export function LibraryItemCard({
         <Text style={styles.title} numberOfLines={2}>
           {model.title ?? ''}
         </Text>
-        {model.meta.length > 0 && (
+        {model.meta.length > 0 && onMetaPress !== undefined ? (
+          <Pressable onPress={onMetaPress} hitSlop={{ top: 6, bottom: 6 }}>
+            <Text style={[styles.meta, styles.metaLink]} numberOfLines={1}>
+              {model.meta}
+            </Text>
+          </Pressable>
+        ) : model.meta.length > 0 ? (
           <Text style={styles.meta} numberOfLines={1}>
             {model.meta}
           </Text>
-        )}
+        ) : null}
       </View>
       {model.kind === 'from_creator' && onUse !== undefined && (
         <Button size="sm" variant="tint" onPress={onUse}>
@@ -231,5 +254,8 @@ const styles = StyleSheet.create({
     fontSize: type.size.label,
     fontWeight: '600',
     color: color.slate400,
+  },
+  metaLink: {
+    color: color.blue700,
   },
 });

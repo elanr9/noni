@@ -41,6 +41,8 @@ export function AdminScreen({
         {scroll ? (
           <ScrollView
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
             refreshControl={refreshControl}
             contentContainerStyle={[styles.content, { paddingBottom: bottomPad }, contentStyle]}
           >

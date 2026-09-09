@@ -78,6 +78,8 @@ export default function ReviewScreen() {
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   /** Signed URLs for the creator's submitted slide photos, slot order. */
   const [slidePhotos, setSlidePhotos] = useState<string[]>([]);
+  /** Signed URLs for the creator's raw clips, slot order. Revision mode only. */
+  const [clipUris, setClipUris] = useState<string[]>([]);
   /** Signed URLs for admin inset pictures, keyed by segment id. */
   const [slideInsetUrls, setSlideInsetUrls] = useState<Record<string, string>>({});
   const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
@@ -210,6 +212,7 @@ export default function ReviewScreen() {
     setSlideIndex(0);
     setBriefSegments([]);
     setSlidePhotos([]);
+    setClipUris([]);
     setSlideInsetUrls({});
     setHandle(null);
     void (async () => {
@@ -226,12 +229,15 @@ export default function ReviewScreen() {
         if (!cancelled) setBriefSegments(segments);
         // Slideshows review the real thing: the creator's photos, plus the
         // admin's inset pictures composited while the bake is still running.
-        if (current.row.format !== 'video') {
-          const paths = current.submission?.segment_paths ?? [];
-          const photos = await Promise.all(
-            paths.map((p) => signedVideoUrl(p).catch(() => '')),
-          );
-          if (!cancelled) setSlidePhotos(photos);
+        const paths = current.submission?.segment_paths ?? [];
+        const segmentUrls = await Promise.all(
+          paths.map((p) => signedVideoUrl(p).catch(() => '')),
+        );
+        if (cancelled) return;
+        if (current.row.format === 'video') {
+          setClipUris(segmentUrls);
+        } else {
+          setSlidePhotos(segmentUrls);
           for (const seg of segments) {
             if (seg.kind !== 'slide' || !seg.screenshot_url) continue;
             void signedScreenshotUrl(seg.screenshot_url)
@@ -359,6 +365,8 @@ export default function ReviewScreen() {
     key: `segment-${i}`,
     label: sectionLabel(i, sectionTexts.length, isReel),
     text,
+    clipUri: isReel ? clipUris[i] || null : null,
+    slide: isReel ? undefined : surfaceSlides[i],
   }));
   const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
 
@@ -606,7 +614,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   editOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 14,

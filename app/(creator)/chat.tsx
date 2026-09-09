@@ -6,8 +6,6 @@ import {
   type ReactElement,
 } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,10 +19,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatMediaBlock } from '../../components/admin/chat/MessageBubble';
 import { Bubble, DayDivider, PostRefCard } from '../../components/creator/ChatKit';
 import { Icon } from '../../components/ui/Icon';
+import { SkeletonCard } from '../../components/ui/Skeleton';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuth } from '../../lib/auth';
 import { listCampaignManagers } from '../../lib/briefs-api';
 import { useCreatorQueue } from '../../lib/creator-queue';
+import { useKeyboardPadding } from '../../lib/keyboard';
 import {
   listThread,
   parseMessageMedia,
@@ -95,6 +95,7 @@ function pushRecordChanges(assignment: AssignmentWithBrief): void {
 export default function CreatorChat() {
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
+  const keyboardPadding = useKeyboardPadding();
   const { changesRequested } = useCreatorQueue();
 
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -291,19 +292,21 @@ export default function CreatorChat() {
         </View>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 64}
-      >
+      <View style={[styles.flex, { paddingBottom: keyboardPadding }]}>
         <ScrollView
           ref={scrollRef}
           style={styles.flex}
           contentContainerStyle={styles.thread}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
         >
           {loading ? (
-            <Text style={styles.empty}>Loading messages…</Text>
+            <View style={styles.skeletons}>
+              <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonTheirs} />
+              <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonMine} />
+              <SkeletonCard height={56} radius={radius.lg} style={styles.skeletonTheirs} />
+            </View>
           ) : thread.length === 0 ? (
             <Text style={styles.empty}>No messages yet. Say hello.</Text>
           ) : (
@@ -354,7 +357,7 @@ export default function CreatorChat() {
             <Icon name="send" size={17} color={color.white} />
           </PressableScale>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
@@ -418,6 +421,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingVertical: space[4],
     gap: 14,
+  },
+  skeletons: {
+    gap: 10,
+  },
+  skeletonTheirs: {
+    width: '72%',
+    alignSelf: 'flex-start',
+  },
+  skeletonMine: {
+    width: '60%',
+    alignSelf: 'flex-end',
   },
   empty: {
     fontSize: type.size.bodySm,

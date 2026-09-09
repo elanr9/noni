@@ -12,7 +12,7 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
-import type { BrandContext } from './wp8.ts';
+import type { BrainFeature, BrandContext } from './wp8.ts';
 import { legacyBrandLines } from './wp8.ts';
 import { validateBrief } from './validateBrief.ts';
 import type {
@@ -69,7 +69,7 @@ export function toPostTypeShape(row: PostTypeRow): PostTypeShape {
 // Prompt building
 
 const JSON_CONTRACT =
-  '{"claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
+  '{"claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
 
 const KILL_RULE = `KILL ONLY AS LAST RESORT: almost never kill. If the topic is thin, still write the best concrete brief you can from product truth and audience. Do NOT kill because the topic is a competitor, a comparison, or feels awkward for a plug — pick the closest approved claim and angle the plug as what to do instead. Only answer {"kill_reason": string} if the search phrase is empty or pure gibberish with zero usable topic.`;
 
@@ -82,6 +82,8 @@ const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points
 const CAPTION_RULES = `CAPTION (after the hooks): under 200 characters, no hashtags inside it, and the search phrase appears in the first sentence. HASHTAGS: 3 to 5 tags chosen from the hashtag bank in the message by topical fit, not the same set every time.`;
 
 const POINT_RULES = `TALKING POINTS: beats, not lines. Under 25 words each. A creator reads a point and starts talking; they do not recite it. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label: the on-screen label for its clip, 5 words or fewer, numbered when the type is a list ("4. Great thumbnail").`;
+
+const FEATURE_ID_RULE = `FEATURE ID: every talking point carries feature_id. On a product point it is the id of the one entry in the Feature library (in the message) that the point is about, copied exactly; null when the point is not about a specific feature. Non product points are always null. If the message says the Feature library is empty, feature_id is null on every point.`;
 
 const SEARCH_PHRASE_RULE = `SEARCH PHRASE: the search string a target viewer actually types with a deadline in mind, e.g. "why am i not getting recruited for college soccer".`;
 
@@ -195,6 +197,7 @@ function briefSystemBlocks(
     plugRule(requiresPlug),
     SEARCH_PHRASE_RULE,
     POINT_RULES,
+    FEATURE_ID_RULE,
     CREDENTIAL_RULE,
     SECOND_PERSON_RULE,
     HOOK_RULES,
@@ -326,10 +329,11 @@ export function buildFieldSystem(
     case 'talking_points':
       blocks.push(
         KILL_RULE,
-        `Otherwise answer with the keys IN THIS EXACT ORDER: {"claim_id": string | null, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number}`,
+        `Otherwise answer with the keys IN THIS EXACT ORDER: {"claim_id": string | null, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number}`,
         postTypeBlock(postType, fallbackFormat),
         plugRule(requiresPlug),
         POINT_RULES,
+        FEATURE_ID_RULE,
         CREDENTIAL_RULE,
         SECOND_PERSON_RULE,
         banned,
@@ -338,9 +342,10 @@ export function buildFieldSystem(
     case 'talking_point':
       blocks.push(
         KILL_RULE,
-        `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "overlay_label": string}}`,
+        `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}}`,
         `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim (the same sentence stays in cta, so keep it a single plug sentence riding with the point's advice).`,
         POINT_RULES,
+        FEATURE_ID_RULE,
         CREDENTIAL_RULE,
         SECOND_PERSON_RULE,
         banned,
@@ -385,12 +390,50 @@ export function brandDocBlocks(brand: BrandContext): string[] {
           .join('\n')}`
       : 'Approved claims: none exist yet. Write the brief without a product plug (cta null, is_product false).',
   );
+  if (brand.features.length) {
+    docBlocks.push(
+      `Feature library (pick feature_id per product talking point; null when the point is not about a specific feature):\n${brand.features
+        .map(
+          (f) =>
+            `- feature_id ${f.id}: ${f.name}${f.sentence ? ` — ${f.sentence}` : ''} (${f.screenshots.length} screenshot${f.screenshots.length === 1 ? '' : 's'})`,
+        )
+        .join('\n')}`,
+    );
+  } else {
+    docBlocks.push('Feature library: empty. Set feature_id null on every talking point.');
+  }
   docBlocks.push(
     brand.hashtagBank.length
       ? `Hashtag bank (pick 3 to 5): ${brand.hashtagBank.join(' ')}`
       : 'Hashtag bank: empty.',
   );
+  const learned = learningBlocks(brand.learnings);
+  if (learned) docBlocks.push(learned);
   return docBlocks;
+}
+
+/**
+ * Rules distilled from how this team (and every team) edited AI posts before
+ * publishing. Company rules first; each carries at most one before/after pair
+ * so the model sees the correction, not just the rule.
+ */
+export function learningBlocks(learnings: BrandContext['learnings']): string | null {
+  if (!learnings.length) return null;
+  const line = (l: BrandContext['learnings'][number]) => {
+    const example = l.examples[0];
+    const pair = example
+      ? `\n    AI wrote: ${example.before}\n    Manager published: ${example.after}`
+      : '';
+    return `- [${l.category}] ${l.insight} (seen ${l.evidence_count}x)${pair}`;
+  };
+  const own = learnings.filter((l) => l.company_id !== null);
+  const global = learnings.filter((l) => l.company_id === null);
+  const parts: string[] = [
+    'LEARNED FROM MANAGER EDITS. These are corrections managers made to previous AI posts before publishing. Apply them so the next post needs fewer edits. Team rules outrank general rules.',
+  ];
+  if (own.length) parts.push(`This team:\n${own.map(line).join('\n')}`);
+  if (global.length) parts.push(`Across all teams:\n${global.map(line).join('\n')}`);
+  return parts.join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +444,7 @@ type RawPoint = {
   text: string | null;
   is_product: boolean;
   claim_id?: string | null;
+  feature_id?: string | null;
   overlay_label?: string | null;
 };
 
@@ -429,7 +473,49 @@ export type GeneratedDraft = {
   // Model-authored on-screen labels, index-aligned with talking_points.
   // They live only in brief_segments, never in talking_points jsonb.
   overlayLabels: (string | null)[];
+  // Feature library ids per point, index-aligned; null when not about a
+  // feature or when the model named an id outside the loaded library.
+  featureIds: (string | null)[];
 };
+
+export type PointMedia = {
+  feature_id: string;
+  screenshot_url: string | null;
+  shape: 'phone' | 'laptop' | null;
+};
+
+export function sanitizeFeatureId(
+  value: unknown,
+  knownFeatureIds: ReadonlySet<string>,
+): string | null {
+  return typeof value === 'string' && knownFeatureIds.has(value) ? value : null;
+}
+
+/**
+ * One entry per point. Phone screenshots come first; points sharing a
+ * feature walk through its screenshots in order and cycle.
+ */
+export function buildPointMedia(
+  features: BrainFeature[],
+  featureIds: (string | null)[],
+): (PointMedia | null)[] {
+  const byId = new Map(features.map((f) => [f.id, f]));
+  const usedPerFeature = new Map<string, number>();
+  return featureIds.map((id) => {
+    if (!id) return null;
+    const feature = byId.get(id);
+    if (!feature) return { feature_id: id, screenshot_url: null, shape: null };
+    const ordered = [
+      ...feature.screenshots.filter((s) => s.shape === 'phone'),
+      ...feature.screenshots.filter((s) => s.shape !== 'phone'),
+    ];
+    if (ordered.length === 0) return { feature_id: id, screenshot_url: null, shape: null };
+    const used = usedPerFeature.get(id) ?? 0;
+    usedPerFeature.set(id, used + 1);
+    const shot = ordered[used % ordered.length];
+    return { feature_id: id, screenshot_url: shot.url, shape: shot.shape };
+  });
+}
 
 export type GenOutcome = { kill_reason: string } | GeneratedDraft;
 
@@ -473,6 +559,7 @@ export function normalizeGenerated(
   raw: RawGenerated,
   format: 'video' | 'photo_carousel',
   postTypeKey?: string | null,
+  knownFeatureIds: ReadonlySet<string> = new Set(),
 ): GenOutcome {
   if (typeof raw.kill_reason === 'string' && raw.kill_reason.trim()) {
     return { kill_reason: raw.kill_reason.trim() };
@@ -490,6 +577,7 @@ export function normalizeGenerated(
       ? p.overlay_label.trim()
       : null,
   );
+  const featureIds = rawPoints.map((p) => sanitizeFeatureId(p.feature_id, knownFeatureIds));
   const pointCount =
     typeof raw.point_count === 'number' ? raw.point_count : points.length;
   const searchPhrase = raw.search_phrase?.trim() || null;
@@ -513,6 +601,7 @@ export function normalizeGenerated(
       script: format === 'photo_carousel' ? (raw.script ?? null) : null,
     },
     overlayLabels,
+    featureIds,
   };
 }
 

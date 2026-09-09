@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Linking,
   StyleSheet,
   Text,
@@ -22,6 +21,7 @@ import {
 } from '../../../components/creator/posts-shared';
 import { SlideNav, type SlideNavSlide } from '../../../components/creator/SlideNav';
 import { Screen } from '../../../components/layout/Screen';
+import { DetailSkeleton } from '../../../components/states';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { Segmented } from '../../../components/ui/Segmented';
@@ -102,11 +102,7 @@ export default function PostDetailScreen() {
   );
 
   if (loading || (assignment !== null && !isPosted)) {
-    return (
-      <Screen contentStyle={styles.center}>
-        <ActivityIndicator size="large" color={color.accent} />
-      </Screen>
-    );
+    return <DetailSkeleton />;
   }
 
   if (assignment === null) {
@@ -370,7 +366,7 @@ const styles = StyleSheet.create({
     color: color.green,
   },
   playWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

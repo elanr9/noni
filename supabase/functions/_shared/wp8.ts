@@ -245,6 +245,96 @@ export type ProductFeature = {
   claim: string;
 };
 
+export type FeatureScreenshot = {
+  id: string;
+  url: string;
+  shape: 'phone' | 'laptop';
+};
+
+export type BrainFeature = {
+  id: string;
+  name: string;
+  sentence: string | null;
+  rank: number | null;
+  screenshots: FeatureScreenshot[];
+};
+
+const FEATURE_BUCKET = 'product-features';
+const MAX_FEATURES = 40;
+const MAX_SCREENSHOTS_PER_FEATURE = 6;
+
+export function featureScreenshotUrl(admin: SupabaseClient, path: string): string {
+  return admin.storage.from(FEATURE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+type FeatureScreenshotRow = {
+  id: string;
+  feature_id: string;
+  path: string;
+  shape: string | null;
+};
+
+export function toFeatureScreenshot(
+  admin: SupabaseClient,
+  row: FeatureScreenshotRow,
+): FeatureScreenshot {
+  return {
+    id: row.id,
+    url: featureScreenshotUrl(admin, row.path),
+    shape: row.shape === 'laptop' ? 'laptop' : 'phone',
+  };
+}
+
+/** A rule distilled from how managers edited AI posts before publishing. */
+export type AiLearning = {
+  id: string;
+  company_id: string | null;
+  category: string;
+  insight: string;
+  confidence: number;
+  evidence_count: number;
+  examples: Array<{ before: string; after: string }>;
+};
+
+const MAX_COMPANY_LEARNINGS = 14;
+const MAX_GLOBAL_LEARNINGS = 8;
+
+export async function loadLearnings(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<AiLearning[]> {
+  const [{ data: own }, { data: global }] = await Promise.all([
+    admin
+      .from('ai_learnings')
+      .select('id, company_id, category, insight, confidence, evidence_count, examples')
+      .eq('company_id', companyId)
+      .eq('active', true)
+      .order('confidence', { ascending: false })
+      .order('evidence_count', { ascending: false })
+      .limit(MAX_COMPANY_LEARNINGS),
+    admin
+      .from('ai_learnings')
+      .select('id, company_id, category, insight, confidence, evidence_count, examples')
+      .is('company_id', null)
+      .eq('active', true)
+      .order('confidence', { ascending: false })
+      .order('evidence_count', { ascending: false })
+      .limit(MAX_GLOBAL_LEARNINGS),
+  ]);
+  const rows = [...(own ?? []), ...(global ?? [])] as Array<
+    Omit<AiLearning, 'examples'> & { examples: unknown }
+  >;
+  return rows.map((r) => ({
+    ...r,
+    confidence: Number(r.confidence),
+    examples: Array.isArray(r.examples)
+      ? (r.examples as Array<{ before?: unknown; after?: unknown }>)
+          .filter((e) => typeof e.before === 'string' && typeof e.after === 'string')
+          .map((e) => ({ before: String(e.before), after: String(e.after) }))
+      : [],
+  }));
+}
+
 export type BrandContext = {
   companyName: string;
   tone: string | null;
@@ -258,8 +348,10 @@ export type BrandContext = {
   docs: BrandDocs;
   sourcingTerms: SourcingTerm[];
   approvedClaims: ProductFeature[];
+  features: BrainFeature[];
   hashtagBank: string[];
   bannedPhrases: string[];
+  learnings: AiLearning[];
 };
 
 const DOC_KIND_TO_KEY: Record<string, keyof BrandDocs> = {
@@ -273,7 +365,15 @@ export async function loadBrandContext(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<BrandContext> {
-  const [{ data: company }, { data: brand }, { data: docs }, { data: claims }] =
+  const [
+    { data: company },
+    { data: brand },
+    { data: docs },
+    { data: claims },
+    { data: featureRows },
+    { data: screenshotRows },
+    learnings,
+  ] =
     await Promise.all([
       admin.from('companies').select('name, settings').eq('id', companyId).single(),
       admin
@@ -292,7 +392,43 @@ export async function loadBrandContext(
         .select('id, name, what_it_does, claim')
         .eq('company_id', companyId)
         .eq('approved', true),
+      admin
+        .from('brain_features')
+        .select('id, name, sentence, rank')
+        .eq('company_id', companyId)
+        .order('rank', { ascending: true, nullsFirst: false }),
+      admin
+        .from('feature_screenshots')
+        .select('id, feature_id, path, shape, sort_order')
+        .eq('company_id', companyId)
+        .order('sort_order', { ascending: true }),
+      loadLearnings(admin, companyId).catch(() => [] as AiLearning[]),
     ]);
+  const screenshotsByFeature = new Map<string, FeatureScreenshot[]>();
+  for (const row of (screenshotRows ?? []) as FeatureScreenshotRow[]) {
+    const list = screenshotsByFeature.get(row.feature_id) ?? [];
+    if (list.length >= MAX_SCREENSHOTS_PER_FEATURE) continue;
+    list.push(toFeatureScreenshot(admin, row));
+    screenshotsByFeature.set(row.feature_id, list);
+  }
+  const features: BrainFeature[] = [];
+  for (const row of (featureRows ?? []) as Array<{
+    id: string;
+    name: string;
+    sentence: string | null;
+    rank: number | null;
+  }>) {
+    const screenshots = screenshotsByFeature.get(row.id);
+    if (!screenshots?.length) continue;
+    features.push({
+      id: row.id,
+      name: row.name,
+      sentence: row.sentence ?? null,
+      rank: row.rank ?? null,
+      screenshots,
+    });
+    if (features.length >= MAX_FEATURES) break;
+  }
   const settings = (company?.settings ?? {}) as {
     handles?: { instagram?: string; tiktok?: string };
     vertical?: string;
@@ -327,12 +463,14 @@ export async function loadBrandContext(
     docs: brandDocs,
     sourcingTerms: Array.isArray(sourcing.terms) ? sourcing.terms : [],
     approvedClaims: (claims ?? []) as ProductFeature[],
+    features,
     hashtagBank: Array.isArray(brand?.hashtag_bank)
       ? (brand.hashtag_bank as string[])
       : [],
     bannedPhrases: Array.isArray(brand?.banned_phrases)
       ? (brand.banned_phrases as string[])
       : [],
+    learnings,
   };
 }
 

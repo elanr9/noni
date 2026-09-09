@@ -54,7 +54,7 @@ export function PostsMadeList({ posts, loading, formatViews }: PostsMadeListProp
     );
   }
   if (posts.length === 0) {
-    return <Text style={styles.nothing}>Nothing recorded yet.</Text>;
+    return <Text style={styles.nothing}>Nothing posted this week.</Text>;
   }
   return (
     <View style={styles.stack}>
@@ -70,10 +70,7 @@ export function PostsMadeList({ posts, loading, formatViews }: PostsMadeListProp
               {`${it.creatorName} · ${it.format === 'video' ? 'Reel' : 'Slideshow'} · ${it.when}`}
             </Text>
           </View>
-          <View style={styles.postViews}>
-            <Text style={styles.viewsValue}>{formatViews(it.views)}</Text>
-            <Text style={styles.viewsUnit}>views</Text>
-          </View>
+          <Text style={styles.viewsValue}>{formatViews(it.views)}</Text>
         </Card>
       ))}
     </View>
@@ -139,29 +136,22 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   postTitle: {
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.2,
     color: color.ink,
   },
   postMeta: {
     marginTop: 2,
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '600',
     color: color.slate400,
   },
-  postViews: {
-    alignItems: 'flex-end',
-  },
   viewsValue: {
-    fontSize: 14,
+    flexShrink: 0,
+    fontSize: 13,
     fontWeight: '700',
     letterSpacing: -0.2,
     color: color.ink,
-  },
-  viewsUnit: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: color.slate400,
   },
 });

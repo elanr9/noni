@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
 import { color, radius, shadow, type } from '../../theme/tokens';
 import { Icon } from '../ui/Icon';
@@ -141,42 +141,40 @@ export interface VoiceNoteProps {
 }
 
 export function VoiceNote({ uri, durationLabel, onAccent = false }: VoiceNoteProps) {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const [playing, setPlaying] = useState(false);
 
-  useEffect(() => {
-    return () => {
-      void soundRef.current?.unloadAsync();
-      soundRef.current = null;
-    };
-  }, []);
+  const releasePlayer = () => {
+    playerRef.current?.remove();
+    playerRef.current = null;
+  };
+
+  useEffect(() => releasePlayer, []);
 
   const toggle = async () => {
     if (uri === undefined) return;
     if (playing) {
-      await soundRef.current?.stopAsync();
-      await soundRef.current?.unloadAsync();
-      soundRef.current = null;
+      playerRef.current?.pause();
+      releasePlayer();
       setPlaying(false);
       return;
     }
     try {
-      await soundRef.current?.unloadAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
+      releasePlayer();
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
       });
-      const { sound } = await Audio.Sound.createAsync({ uri });
-      soundRef.current = sound;
+      const player = createAudioPlayer({ uri });
+      playerRef.current = player;
       setPlaying(true);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
           setPlaying(false);
-          void sound.unloadAsync();
-          soundRef.current = null;
+          releasePlayer();
         }
       });
-      await sound.playAsync();
+      player.play();
     } catch {
       setPlaying(false);
     }

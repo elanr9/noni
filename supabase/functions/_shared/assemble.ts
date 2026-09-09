@@ -172,20 +172,33 @@ async function stitchAndEditPass(params: {
   });
 }
 
-// Chroma key the cutout (creator on solid green) over the screenshot, full
-// frame. Audio maps from the raw clip: the matting output is video only.
+// Chroma key the cutout (creator on solid green) over the screenshot or
+// screen recording, full frame. A still loops as an image; a recording loops
+// as a stream so a short capture covers the whole clip. Audio maps from the
+// raw clip: the matting output is video only.
 async function greenScreenComposite(params: {
   admin: AdminClient;
   apiKey: string;
   backgroundUrl: string;
+  backgroundIsVideo: boolean;
   greenUrl: string;
   clipUrl: string;
   outputPath: string;
 }): Promise<void> {
-  const { admin, apiKey, backgroundUrl, greenUrl, clipUrl, outputPath } =
-    params;
+  const {
+    admin,
+    apiKey,
+    backgroundUrl,
+    backgroundIsVideo,
+    greenUrl,
+    clipUrl,
+    outputPath,
+  } = params;
+  const backgroundInput = backgroundIsVideo
+    ? '-stream_loop -1 -i {input0}'
+    : '-loop 1 -i {input0}';
   const fullCommand =
-    `ffmpeg -y -hide_banner -loop 1 -i {input0} -i {input1} -i {input2} ` +
+    `ffmpeg -y -hide_banner ${backgroundInput} -i {input1} -i {input2} ` +
     `-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
     `crop=1080:1920,setsar=1[bg];` +
     `[1:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
@@ -419,6 +432,8 @@ async function runAssembly(params: {
 
   let briefSegments: BriefSegmentRow[] = [];
   let textOverlay: TimelineTextOverlay = DEFAULT_TEXT_OVERLAY;
+  let subtitles = false;
+  let subtitlesY: number | undefined;
   if (briefId) {
     const { data: segmentRows } = await admin
       .from('brief_segments')
@@ -432,9 +447,13 @@ async function runAssembly(params: {
 
     const { data: briefRow } = await admin
       .from('briefs')
-      .select('text_overlay')
+      .select('text_overlay, subtitles, subtitles_y')
       .eq('id', briefId)
       .maybeSingle();
+    subtitles = briefRow?.subtitles === true;
+    if (typeof briefRow?.subtitles_y === 'number') {
+      subtitlesY = briefRow.subtitles_y;
+    }
     const raw = briefRow?.text_overlay as Partial<TimelineTextOverlay> | null;
     if (raw && typeof raw === 'object') {
       textOverlay = {
@@ -490,6 +509,7 @@ async function runAssembly(params: {
             admin,
             apiKey,
             backgroundUrl: signedImg.signedUrl,
+            backgroundIsVideo: isVideoFile(segment.screenshot_url!),
             greenUrl,
             clipUrl,
             outputPath: compositePath,
@@ -540,16 +560,28 @@ async function runAssembly(params: {
     .update({ video_path: videoPath })
     .eq('id', submission.id);
 
-  // On-screen text and screenshots from brief_segments, rendered through
-  // the adapter. Overlay timing needs every clip's duration; legacy
-  // submissions without them go through un-overlaid with a warning instead
-  // of guessing.
-  if (briefSegments.length > 0) {
-    if (!durationsMs) {
+  // On-screen text and screenshots from brief_segments, plus subtitles when
+  // the campaign manager turned them on, rendered through the adapter.
+  // Overlay timing needs every clip's duration; legacy submissions without
+  // them go through un-overlaid with a warning instead of guessing.
+  // Subtitles are transcribed from the stitched audio so they never need
+  // per-clip durations.
+  if (briefSegments.length > 0 || subtitles) {
+    if (!durationsMs && !subtitles) {
       overlayWarning =
         'overlays skipped: this submission has no per-clip durations';
     } else {
-      const timeline = buildRenderTimeline({ briefSegments, durationsMs, textOverlay });
+      if (!durationsMs && briefSegments.length > 0) {
+        overlayWarning =
+          'overlays skipped: this submission has no per-clip durations, subtitles still applied';
+      }
+      const timeline = buildRenderTimeline({
+        briefSegments: durationsMs ? briefSegments : [],
+        durationsMs: durationsMs ?? [],
+        textOverlay,
+        subtitles,
+        subtitlesY,
+      });
       await admin
         .from('submissions')
         .update({ render_timeline: timeline })
@@ -559,7 +591,7 @@ async function runAssembly(params: {
         const renderKey = Deno.env.get('CREATOMATE_API_KEY');
         if (!renderKey) {
           throw new Error(
-            'This post has on-screen text or screenshots but CREATOMATE_API_KEY is not set in the edge function env.',
+            'This post has on-screen text, screenshots or subtitles but CREATOMATE_API_KEY is not set in the edge function env.',
           );
         }
         const [videoUrl] = await signVideoUrls(admin, [videoPath]);

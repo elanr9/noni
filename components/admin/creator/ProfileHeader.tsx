@@ -1,8 +1,25 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { color, type } from '../../../theme/tokens';
 import { CreatorAvatar } from '../shared';
 import { Icon } from '../../ui/Icon';
+
+type SocialPlatform = 'tiktok' | 'instagram';
+
+/**
+ * Instagram exposes a username deep link, so try the app first. TikTok's scheme
+ * only takes numeric ids, so its https profile URL (a universal link) opens the app.
+ */
+async function openSocialProfile(platform: SocialPlatform, handle: string): Promise<void> {
+  const clean = handle.replace(/^@/, '');
+  if (platform === 'tiktok') {
+    await Linking.openURL(`https://www.tiktok.com/@${clean}`);
+    return;
+  }
+  const appUrl = `instagram://user?username=${clean}`;
+  const canOpenApp = await Linking.canOpenURL(appUrl).catch(() => false);
+  await Linking.openURL(canOpenApp ? appUrl : `https://www.instagram.com/${clean}/`);
+}
 
 export interface ProfileHeaderProps {
   name: string;
@@ -45,8 +62,8 @@ export function ProfileHeader({
       )}
 
       <View style={styles.handles}>
-        <Handle icon="music-2" handle={tiktokHandle} />
-        <Handle icon="at-sign" handle={instagramHandle} />
+        <Handle platform="tiktok" handle={tiktokHandle} />
+        <Handle platform="instagram" handle={instagramHandle} />
       </View>
     </View>
   );
@@ -63,20 +80,27 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function Handle({
-  icon,
-  handle,
-}: {
-  icon: 'music-2' | 'at-sign';
-  handle: string | null;
-}) {
+function Handle({ platform, handle }: { platform: SocialPlatform; handle: string | null }) {
+  const label = platform === 'tiktok' ? 'TikTok' : 'Instagram';
   return (
-    <View style={styles.handleRow}>
-      <Icon name={icon} size={13} color={handle !== null ? color.blue600 : color.slate300} />
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={handle !== null ? `Open @${handle} on ${label}` : `${label} not linked yet`}
+      disabled={handle === null}
+      onPress={() => {
+        if (handle !== null) void openSocialProfile(platform, handle);
+      }}
+      style={({ pressed }) => [styles.handleRow, pressed && styles.handlePressed]}
+    >
+      <Icon
+        name={platform === 'tiktok' ? 'music-2' : 'instagram'}
+        size={13}
+        color={handle !== null ? color.blue600 : color.slate300}
+      />
       <Text style={[styles.handleText, handle === null && styles.handleMissing]}>
         {handle !== null ? `@${handle}` : 'Not linked yet'}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -126,6 +150,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+  },
+  handlePressed: {
+    opacity: 0.6,
   },
   handleText: {
     fontSize: type.size.chip,

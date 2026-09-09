@@ -189,6 +189,8 @@ export default function AccountSetupScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
       showsVerticalScrollIndicator={false}
     >
       {loading ? (

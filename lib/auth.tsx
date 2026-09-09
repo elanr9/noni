@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { router } from 'expo-router';
+import { router, useSegments } from 'expo-router';
 
 import {
   getStoredAccount,
@@ -336,10 +336,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (userId) void registerPushToken(userId);
   }, [session?.user?.id]);
 
+  // Wait until the auth redirects have landed inside a mode group, otherwise
+  // the initial <Redirect> to the home tab replaces the notification route.
+  const segments = useSegments();
+  const inModeGroup = segments[0] === '(admin)' || segments[0] === '(creator)';
+
   useEffect(() => {
-    if (loading || !session?.user) return;
+    if (loading || !session?.user || !inModeGroup) return;
     return attachNotificationRouting(() => activeMode);
-  }, [loading, session?.user?.id, activeMode]);
+  }, [loading, session?.user?.id, activeMode, inModeGroup]);
 
   const setActiveMode = useCallback(
     async (mode: AppMode) => {

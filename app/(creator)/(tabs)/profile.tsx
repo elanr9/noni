@@ -394,7 +394,7 @@ export default function ProfileScreen() {
           <GroupCard>
             {(
               [
-                { icon: 'at-sign' as IconName, label: 'Instagram', info: instagram },
+                { icon: 'instagram' as IconName, label: 'Instagram', info: instagram },
                 { icon: 'music-2' as IconName, label: 'TikTok', info: tiktok },
               ] satisfies { icon: IconName; label: string; info: SocialAccountInfo }[]
             ).map((row) => (
@@ -810,7 +810,7 @@ const styles = StyleSheet.create({
     marginTop: -space[2],
   },
   popScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   popover: {
     position: 'absolute',

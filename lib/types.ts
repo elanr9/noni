@@ -14,6 +14,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_learnings: {
+        Row: {
+          active: boolean
+          category: string
+          company_id: string | null
+          confidence: number
+          created_at: string
+          evidence_count: number
+          examples: Json
+          id: string
+          insight: string
+          source_diff_ids: string[]
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          category: string
+          company_id?: string | null
+          confidence?: number
+          created_at?: string
+          evidence_count?: number
+          examples?: Json
+          id?: string
+          insight: string
+          source_diff_ids?: string[]
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          category?: string
+          company_id?: string | null
+          confidence?: number
+          created_at?: string
+          evidence_count?: number
+          examples?: Json
+          id?: string
+          insight?: string
+          source_diff_ids?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_learnings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assignments: {
         Row: {
           bounty_amount_cents: number | null
@@ -411,6 +461,147 @@ export type Database = {
           },
         ]
       }
+      brief_ai_snapshots: {
+        Row: {
+          brief_id: string
+          company_id: string
+          created_at: string
+          created_by: string | null
+          generation_id: string | null
+          id: string
+          post_type_key: string | null
+          snapshot: Json
+          source_kind: string
+        }
+        Insert: {
+          brief_id: string
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          generation_id?: string | null
+          id?: string
+          post_type_key?: string | null
+          snapshot: Json
+          source_kind: string
+        }
+        Update: {
+          brief_id?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          generation_id?: string | null
+          id?: string
+          post_type_key?: string | null
+          snapshot?: Json
+          source_kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brief_ai_snapshots_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: true
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_ai_snapshots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_ai_snapshots_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      brief_edit_diffs: {
+        Row: {
+          brief_id: string
+          campaign_id: string | null
+          changed_fields: string[]
+          company_id: string
+          created_at: string
+          diff: Json
+          edit_ratio: number
+          final_snapshot: Json
+          global_learned_at: string | null
+          id: string
+          learned_at: string | null
+          post_type_key: string | null
+          published_at: string
+          snapshot_id: string
+          source_kind: string
+        }
+        Insert: {
+          brief_id: string
+          campaign_id?: string | null
+          changed_fields?: string[]
+          company_id: string
+          created_at?: string
+          diff: Json
+          edit_ratio?: number
+          final_snapshot: Json
+          global_learned_at?: string | null
+          id?: string
+          learned_at?: string | null
+          post_type_key?: string | null
+          published_at?: string
+          snapshot_id: string
+          source_kind: string
+        }
+        Update: {
+          brief_id?: string
+          campaign_id?: string | null
+          changed_fields?: string[]
+          company_id?: string
+          created_at?: string
+          diff?: Json
+          edit_ratio?: number
+          final_snapshot?: Json
+          global_learned_at?: string | null
+          id?: string
+          learned_at?: string | null
+          post_type_key?: string | null
+          published_at?: string
+          snapshot_id?: string
+          source_kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brief_edit_diffs_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: true
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_edit_diffs_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_edit_diffs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brief_edit_diffs_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "brief_ai_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brief_review_events: {
         Row: {
           author_id: string | null
@@ -678,6 +869,8 @@ export type Database = {
           reviewed_at: string | null
           script: string | null
           search_phrase: string | null
+          subtitles: boolean
+          subtitles_y: number
           talking_points: Json
           target_words: number
           text_overlay: Json
@@ -706,6 +899,8 @@ export type Database = {
           reviewed_at?: string | null
           script?: string | null
           search_phrase?: string | null
+          subtitles?: boolean
+          subtitles_y?: number
           talking_points?: Json
           target_words?: number
           text_overlay?: Json
@@ -734,6 +929,8 @@ export type Database = {
           reviewed_at?: string | null
           script?: string | null
           search_phrase?: string | null
+          subtitles?: boolean
+          subtitles_y?: number
           talking_points?: Json
           target_words?: number
           text_overlay?: Json
@@ -868,6 +1065,7 @@ export type Database = {
           status: string
           type_split: Json
           video_target: number
+          week_started_at: string | null
         }
         Insert: {
           company_id: string
@@ -885,6 +1083,7 @@ export type Database = {
           status?: string
           type_split?: Json
           video_target?: number
+          week_started_at?: string | null
         }
         Update: {
           company_id?: string
@@ -902,6 +1101,7 @@ export type Database = {
           status?: string
           type_split?: Json
           video_target?: number
+          week_started_at?: string | null
         }
         Relationships: [
           {
@@ -2128,6 +2328,7 @@ export type Database = {
           created_by: string | null
           creator_id: string | null
           id: string
+          last_brief_id: string | null
           last_used_at: string | null
           post_id: string | null
           post_type_id: string | null
@@ -2143,6 +2344,7 @@ export type Database = {
           created_by?: string | null
           creator_id?: string | null
           id?: string
+          last_brief_id?: string | null
           last_used_at?: string | null
           post_id?: string | null
           post_type_id?: string | null
@@ -2158,6 +2360,7 @@ export type Database = {
           created_by?: string | null
           creator_id?: string | null
           id?: string
+          last_brief_id?: string | null
           last_used_at?: string | null
           post_id?: string | null
           post_type_id?: string | null
@@ -2187,6 +2390,13 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_items_last_brief_id_fkey"
+            columns: ["last_brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
             referencedColumns: ["id"]
           },
           {
@@ -2420,6 +2630,63 @@ export type Database = {
             columns: ["reply_to_id"]
             isOneToOne: false
             referencedRelation: "manager_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_library: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          duration_ms: number | null
+          height: number | null
+          id: string
+          kind: string
+          path: string
+          thumb_path: string | null
+          title: string | null
+          width: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          duration_ms?: number | null
+          height?: number | null
+          id?: string
+          kind: string
+          path: string
+          thumb_path?: string | null
+          title?: string | null
+          width?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          duration_ms?: number | null
+          height?: number | null
+          id?: string
+          kind?: string
+          path?: string
+          thumb_path?: string | null
+          title?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_library_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "media_library_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -2983,6 +3250,7 @@ export type Database = {
           assignment_id: string
           company_id: string
           creator_id: string
+          edits: Json
           id: string
           segments: Json
           updated_at: string
@@ -2991,6 +3259,7 @@ export type Database = {
           assignment_id: string
           company_id: string
           creator_id: string
+          edits?: Json
           id?: string
           segments?: Json
           updated_at?: string
@@ -2999,6 +3268,7 @@ export type Database = {
           assignment_id?: string
           company_id?: string
           creator_id?: string
+          edits?: Json
           id?: string
           segments?: Json
           updated_at?: string
@@ -3732,6 +4002,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      brief_snapshot_json: { Args: { p_brief_id: string }; Returns: Json }
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
       can_create: { Args: never; Returns: boolean }
       claim_pending_invite: {
@@ -3774,6 +4045,21 @@ export type Database = {
         Args: { p_post_id: string; p_threshold: number }
         Returns: boolean
       }
+      creator_place_segment: {
+        Args: {
+          p_box_id?: string
+          p_box_x?: number
+          p_box_y?: number
+          p_screenshot_x?: number
+          p_screenshot_y?: number
+          p_segment_id: string
+        }
+        Returns: undefined
+      }
+      creator_place_subtitles: {
+        Args: { p_brief_id: string; p_y: number }
+        Returns: undefined
+      }
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       default_member_permissions: { Args: never; Returns: Json }
@@ -3804,6 +4090,7 @@ export type Database = {
           creator_name: string
           family: string
           hook: string
+          library_item_id: string
           likes: number
           metrics_fetched_at: string
           platform: string
@@ -3814,7 +4101,9 @@ export type Database = {
           post_url: string
           posted_at: string
           saves: number
+          thumbnail_url: string
           title: string
+          used_count: number
           views: number
         }[]
       }
@@ -3830,6 +4119,10 @@ export type Database = {
       seed_company_post_types: {
         Args: { p_company_id: string }
         Returns: undefined
+      }
+      snapshot_ai_brief: {
+        Args: { p_brief_id: string; p_source_kind: string }
+        Returns: string
       }
       spend_company_credits_for_earning: {
         Args: {
@@ -3904,12 +4197,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3933,11 +4226,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3958,11 +4251,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3983,11 +4276,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4000,11 +4293,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

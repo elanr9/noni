@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     color: color.amber,
   },
   centre: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,

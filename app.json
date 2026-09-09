@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "noni",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.fieldvision.noni",
@@ -15,7 +14,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Noni uses the camera so you can record content for your assigned tasks.",
         "NSMicrophoneUsageDescription": "Noni uses the mic so your recorded takes include audio.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["instagram"]
       }
     },
     "android": {
@@ -54,7 +54,10 @@
           "savePhotosPermission": "Noni saves the account template profile picture to your photos so you can set it on TikTok and Instagram."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-status-bar",
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

@@ -9,7 +9,7 @@ export function QueueSkeletonRow(): React.JSX.Element {
   return (
     <View style={styles.card}>
       <View style={styles.thumb}>
-        <SkeletonLine radius={radius.sm} style={StyleSheet.absoluteFillObject} />
+        <SkeletonLine radius={radius.sm} style={StyleSheet.absoluteFill} />
       </View>
       <View style={styles.lines}>
         <SkeletonLine width="52%" height={12} radius={6} />

@@ -1,0 +1,26 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.clipjoiner'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.clipjoiner"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Keep in sync with the media3 version used by expo-video / expo-audio.
+  def androidxMedia3Version = "1.9.0"
+  implementation "androidx.media3:media3-common:${androidxMedia3Version}"
+  implementation "androidx.media3:media3-effect:${androidxMedia3Version}"
+  implementation "androidx.media3:media3-transformer:${androidxMedia3Version}"
+}

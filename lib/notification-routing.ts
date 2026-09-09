@@ -1,4 +1,4 @@
-import type { Router } from 'expo-router';
+import type { ImperativeRouter as Router } from 'expo-router';
 
 import type { AppMode } from './active-mode';
 

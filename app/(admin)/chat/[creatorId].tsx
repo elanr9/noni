@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useHeaderHeight } from '@react-navigation/elements';
-
 import {
   AdminChatThread,
   type PendingPostRef,
@@ -22,7 +20,6 @@ export default function AdminCreatorChat() {
     assignment?: string;
   }>();
   const { profile } = useAuth();
-  const headerHeight = useHeaderHeight();
   const [creatorName, setCreatorName] = useState('Chat');
   const [initialRef, setInitialRef] = useState<PendingPostRef | null>(null);
   const [ready, setReady] = useState(false);
@@ -77,7 +74,6 @@ export default function AdminCreatorChat() {
           meId={profile.id}
           initialRef={initialRef}
           scrollToAssignmentId={assignment}
-          keyboardOffset={headerHeight}
           onOpenPostRef={(ref) => {
             if (ref.assignmentId !== null) {
               router.push({

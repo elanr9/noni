@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   playWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

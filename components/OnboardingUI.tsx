@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 
+import { useKeyboardPadding } from '../lib/keyboard';
 import { colors } from './Screen';
 
 export function ProgressBar({ step, total }: { step: number; total: number }) {
@@ -46,11 +45,9 @@ export function StepShell({
   onPrimary: () => void;
   primaryDisabled?: boolean;
 }) {
+  const keyboardPadding = useKeyboardPadding();
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={[styles.flex, { paddingBottom: keyboardPadding }]}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={12} disabled={!onBack}>
           <Text style={[styles.back, !onBack && styles.backHidden]}>Back</Text>
@@ -75,7 +72,7 @@ export function StepShell({
       >
         <Text style={styles.primaryText}>{primaryLabel}</Text>
       </Pressable>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -156,12 +153,10 @@ export function CalShell({
   /** Rendered above the pill button, for skip links and legal text. */
   footer?: ReactNode;
 }) {
+  const keyboardPadding = useKeyboardPadding();
   return (
     <SafeAreaView style={calStyles.safe}>
-      <KeyboardAvoidingView
-        style={calStyles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={[calStyles.flex, { paddingBottom: keyboardPadding }]}>
         <View style={calStyles.header}>
           <Pressable
             onPress={onBack}
@@ -200,7 +195,7 @@ export function CalShell({
             </Pressable>
           ) : null}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

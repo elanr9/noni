@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   pagerCentre: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 44,

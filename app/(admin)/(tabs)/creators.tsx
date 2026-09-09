@@ -7,7 +7,7 @@ import {
   CreatorCard,
 } from '../../../components/admin/creator/CreatorCard';
 import { SortChips } from '../../../components/admin/creator/SortChips';
-import { AdminHeader, AdminScreen, SkeletonCard } from '../../../components/admin/shared';
+import { AdminScreen, PushHeader, SkeletonCard } from '../../../components/admin/shared';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { useAuth } from '../../../lib/auth';
 import {
@@ -137,7 +137,7 @@ export default function CreatorsScreen() {
         />
       }
     >
-      <AdminHeader title="Creators" />
+      <PushHeader title="Creators" onBack={() => router.back()} />
 
       <SortChips options={sorts} value={activeSort} onChange={setSortKey} />
 

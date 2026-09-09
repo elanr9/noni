@@ -26,6 +26,9 @@ const TEXT_BASE = {
   line_height: '128%',
 } as const;
 
+/** Outline thickness as a fraction of the font size, same as the app preview. */
+const CLASSIC_OUTLINE_RATIO = 0.06;
+
 /**
  * Creatomate text properties for the admin's overlay config. Every mode is
  * ONE auto-wrapping element, exactly like a TikTok text box.
@@ -102,14 +105,18 @@ function boxTextProps(box: {
 }): Record<string, string> {
   const sizeVmin = `${(box.size * 100).toFixed(2)} vmin`;
   if (!box.bg) {
+    // TikTok classic: white letters with a thin black outline plus a soft
+    // shadow. Stroke scales with the font (OUTLINE_RATIO in OutlinedText.tsx).
     return {
       ...TEXT_BASE,
       x: `${box.x * 100}%`,
       width: '86%',
       font_size: sizeVmin,
       fill_color: box.color,
-      shadow_color: 'rgba(0,0,0,0.6)',
-      shadow_blur: '1.2 vmin',
+      stroke_color: '#000000',
+      stroke_width: `${(box.size * 100 * CLASSIC_OUTLINE_RATIO).toFixed(2)} vmin`,
+      shadow_color: 'rgba(0,0,0,0.35)',
+      shadow_blur: '0.8 vmin',
     };
   }
   return {
@@ -159,14 +166,87 @@ function textProps(overlay: TimelineTextOverlay): Record<string, string> {
   };
 }
 
-type CreatomateElement = Record<string, string | number | boolean>;
+type CreatomateElement = {
+  [key: string]: string | number | boolean | CreatomateElement[];
+};
+
+/** Name Creatomate uses to link the subtitle element to the stitched video. */
+const STITCHED_VIDEO_NAME = 'stitched';
+
+// Instagram Reels caption geometry, measured from native reels on a 9:16
+// frame: block centered at 78% of the height, about 62% of the width, 4.8
+// vmin semibold white with a soft dark shadow and no stroke. Short chunks
+// (about 40 characters) wrap to exactly two lines at that width, and the
+// fixed two-line height pins the block in place whether a chunk fills one
+// line or two; a rare third line is clipped instead of moving the block.
+const SUBTITLE_FONT_SIZE_VMIN = 4.8;
+const SUBTITLE_LINE_HEIGHT = 1.25;
+const SUBTITLE_MAX_CHARS = 40;
+const SUBTITLE_WIDTH = 0.62;
+const SUBTITLE_Y = 0.78;
+
+/**
+ * Talking-head subtitles: auto-transcribed by Creatomate from the stitched
+ * video's audio, styled and placed like native Reels captions. No word
+ * highlight: the effect color matches the fill so every word reads the same.
+ */
+function subtitleElement(y: number = SUBTITLE_Y): CreatomateElement {
+  const fill = '#FFFFFF';
+  return {
+    type: 'text',
+    transcript_source: STITCHED_VIDEO_NAME,
+    transcript_effect: 'color',
+    transcript_color: fill,
+    transcript_split: 'line',
+    transcript_placement: 'static',
+    transcript_maximum_length: SUBTITLE_MAX_CHARS,
+    ...TEXT_BASE,
+    font_weight: '600',
+    y: `${y * 100}%`,
+    width: `${SUBTITLE_WIDTH * 100}%`,
+    height: `${(SUBTITLE_FONT_SIZE_VMIN * SUBTITLE_LINE_HEIGHT * 2).toFixed(2)} vmin`,
+    text_clip: true,
+    line_height: `${SUBTITLE_LINE_HEIGHT * 100}%`,
+    font_size: `${SUBTITLE_FONT_SIZE_VMIN} vmin`,
+    fill_color: fill,
+    shadow_color: 'rgba(0,0,0,0.75)',
+    shadow_blur: '1.2 vmin',
+    shadow_x: '0 vmin',
+    shadow_y: '0.15 vmin',
+  };
+}
 
 type CreatomateRender = {
   id?: string;
   status?: string;
   url?: string;
   error_message?: string;
+  width?: number;
+  height?: number;
 };
+
+/**
+ * Creatomate's free plan silently clamps output to 480px. A clamped file
+ * would be stored and posted as the final, so treat it as a failed render.
+ */
+function assertFullResolution(
+  render: CreatomateRender,
+  source: Record<string, unknown>,
+): void {
+  const wantW = source.width;
+  const wantH = source.height;
+  if (typeof wantW !== 'number' || typeof wantH !== 'number') return;
+  if (typeof render.width !== 'number' || typeof render.height !== 'number') return;
+  if (render.width >= wantW && render.height >= wantH) return;
+  throw new Error(
+    `render came back at ${render.width}x${render.height}, expected ${wantW}x${wantH}. ` +
+      'Creatomate clamps free plan renders to 480px; the account needs a paid plan.',
+  );
+}
+
+export function isVideoSource(path: string): boolean {
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(path);
+}
 
 function toElements(params: {
   videoUrl: string;
@@ -175,8 +255,12 @@ function toElements(params: {
 }): CreatomateElement[] {
   const { videoUrl, timeline, imageUrls } = params;
   const elements: CreatomateElement[] = [
-    { type: 'video', track: 1, source: videoUrl },
+    { type: 'video', track: 1, name: STITCHED_VIDEO_NAME, source: videoUrl },
   ];
+
+  if (timeline.subtitles) {
+    elements.push(subtitleElement(timeline.subtitles_y ?? SUBTITLE_Y));
+  }
 
   const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
   const legacyStyle = textProps(overlay);
@@ -202,11 +286,10 @@ function toElements(params: {
   for (const img of timeline.images) {
     const source = imageUrls[img.screenshot_path];
     if (!source) continue;
-    elements.push({
-      type: 'image',
+    const time = img.start_ms / 1000;
+    const duration = img.duration_ms / 1000;
+    const placement = {
       source,
-      time: img.start_ms / 1000,
-      duration: img.duration_ms / 1000,
       x: `${img.x * 100}%`,
       y: `${img.y * 100}%`,
       width: `${img.width * 100}%`,
@@ -214,7 +297,27 @@ function toElements(params: {
       border_radius: '2.5 vmin',
       shadow_color: 'rgba(0,0,0,0.4)',
       shadow_blur: '4 vmin',
-    });
+    };
+    // Screen recordings play muted once from the clip's start and vanish at
+    // their natural end (no duration = source length). The wrapping
+    // composition owns the clip window, so a recording longer than the clip
+    // is cut where the clip ends; the creator's audio stays.
+    elements.push(
+      isVideoSource(img.screenshot_path)
+        ? {
+            type: 'composition',
+            time,
+            duration,
+            x: '50%',
+            y: '50%',
+            width: '100%',
+            height: '100%',
+            elements: [
+              { type: 'video', ...placement, time: 0, loop: false, volume: '0%' },
+            ],
+          }
+        : { type: 'image', ...placement, time, duration },
+    );
   }
 
   return elements;
@@ -254,7 +357,7 @@ export async function renderGreenScreenClip(params: {
     duration: durationSec,
     elements: [
       {
-        type: 'image',
+        type: isVideoSource(imageUrl) ? 'video' : 'image',
         source: imageUrl,
         track: 1,
         duration: durationSec,
@@ -263,6 +366,7 @@ export async function renderGreenScreenClip(params: {
         width: '100%',
         height: '100%',
         fit: 'cover',
+        ...(isVideoSource(imageUrl) ? { loop: true, volume: '0%' } : {}),
       },
       {
         type: 'video',
@@ -357,11 +461,36 @@ export async function renderOverlays(params: {
   });
 }
 
+// Creatomate allows about 30 requests per 10 seconds per key and answers
+// 429 with plain text. A slideshow bakes every slide in parallel, so back off
+// and retry instead of failing the whole post.
+const RATE_LIMIT_RETRY_MS = 4000;
+const RATE_LIMIT_ATTEMPTS = 8;
+
+async function creatomateFetch(
+  url: string,
+  init: RequestInit,
+): Promise<{ ok: boolean; body: unknown }> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if (res.status === 429 && attempt < RATE_LIMIT_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS * (attempt + 1)));
+      continue;
+    }
+    const text = await res.text();
+    try {
+      return { ok: res.ok, body: JSON.parse(text) as unknown };
+    } catch {
+      throw new Error(`Creatomate ${res.status}: ${text.slice(0, 200)}`);
+    }
+  }
+}
+
 async function runRender(
   apiKey: string,
   source: Record<string, unknown>,
 ): Promise<Uint8Array> {
-  const createRes = await fetch(RENDERS_URL, {
+  const createRes = await creatomateFetch(RENDERS_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -369,7 +498,7 @@ async function runRender(
     },
     body: JSON.stringify({ source }),
   });
-  const created = (await createRes.json()) as CreatomateRender[] | CreatomateRender;
+  const created = createRes.body as CreatomateRender[] | CreatomateRender;
   const first = Array.isArray(created) ? created[0] : created;
   if (!createRes.ok || !first?.id) {
     const detail = first?.error_message ?? JSON.stringify(created);
@@ -379,11 +508,12 @@ async function runRender(
   let url: string | null = null;
   for (let i = 0; i < POLL_ATTEMPTS; i++) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    const statusRes = await fetch(`${RENDERS_URL}/${first.id}`, {
+    const statusRes = await creatomateFetch(`${RENDERS_URL}/${first.id}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const render = (await statusRes.json()) as CreatomateRender;
+    const render = statusRes.body as CreatomateRender;
     if (render.status === 'succeeded' && render.url) {
+      assertFullResolution(render, source);
       url = render.url;
       break;
     }

@@ -147,7 +147,8 @@ export default function CreatorKitchenSink() {
         <View style={styles.prompterFrame}>
           <TeleprompterOverlay
             text="We tagged 400 goal kicks from one U16 season."
-            durationMs={9000}
+            speed={1}
+            running
           />
         </View>
       </Section>

@@ -66,7 +66,7 @@ export function ReviewMetaOverlay({
         )}
         {hashtags.length > 0 && (
           <Text numberOfLines={2} style={styles.hashtags}>
-            {hashtags.map((tag) => `#${tag}`).join(' ')}
+            {hashtags.map((tag) => (tag.startsWith('#') ? tag : `#${tag}`)).join(' ')}
           </Text>
         )}
       </View>

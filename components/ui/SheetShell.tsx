@@ -8,7 +8,9 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardHeight } from '../../lib/keyboard';
 import { color, motion, radius, shadow } from '../../theme/tokens';
 
 export interface SheetShellProps {
@@ -30,6 +32,8 @@ export function SheetShell({
   footer,
 }: SheetShellProps) {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const [shown, setShown] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current;
 
@@ -59,6 +63,13 @@ export function SheetShell({
     outputRange: [height, 0],
   });
 
+  // The panel sits above the keyboard and never grows past the top safe area.
+  const available = height - keyboardHeight - insets.top;
+  const panelSize =
+    pinnedTop !== undefined
+      ? { height: Math.min(height - pinnedTop, available) }
+      : { maxHeight: Math.min(height * 0.9, available) };
+
   return (
     <Modal visible={shown} transparent statusBarTranslucent animationType="none">
       <View style={styles.root}>
@@ -74,10 +85,8 @@ export function SheetShell({
           style={[
             styles.panel,
             shadow.shadowRaised,
-            pinnedTop !== undefined
-              ? { height: height - pinnedTop }
-              : { maxHeight: height * 0.9 },
-            { transform: [{ translateY }] },
+            panelSize,
+            { marginBottom: keyboardHeight, transform: [{ translateY }] },
           ]}
         >
           <View style={styles.grabberWrap}>
@@ -85,6 +94,7 @@ export function SheetShell({
           </View>
           <ScrollView
             contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
             {children}
@@ -102,7 +112,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: color.sheetScrim,
   },
   panel: {

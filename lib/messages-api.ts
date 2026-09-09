@@ -75,6 +75,62 @@ export async function listThread(
   }));
 }
 
+export type CreatorInboxRow = {
+  creatorId: string;
+  name: string;
+  preview: string;
+  lastMessageAt: string | null;
+};
+
+/**
+ * One row per creator on the roster, newest conversation first, creators
+ * with no messages yet after that by name.
+ */
+export async function listCreatorInbox(companyId: string): Promise<CreatorInboxRow[]> {
+  const [{ data: creators, error: creatorsError }, { data: recent, error: recentError }] =
+    await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('company_id', companyId)
+        .or('role.eq.creator,can_create.eq.true'),
+      supabase
+        .from('messages')
+        .select('creator_id, body, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(500),
+    ]);
+  if (creatorsError) throw creatorsError;
+  if (recentError) throw recentError;
+
+  const latest = new Map<string, { body: string; createdAt: string }>();
+  for (const row of recent ?? []) {
+    if (!latest.has(row.creator_id)) {
+      latest.set(row.creator_id, { body: row.body, createdAt: row.created_at });
+    }
+  }
+
+  const rows = (creators ?? []).map((c): CreatorInboxRow => {
+    const last = latest.get(c.id);
+    const { media, text } = last ? parseMessageMedia(last.body) : { media: null, text: '' };
+    const preview = text.trim() || (media ? (media.media === 'video' ? 'Video' : 'Photo') : '');
+    return {
+      creatorId: c.id,
+      name: c.full_name?.trim() || 'Creator',
+      preview,
+      lastMessageAt: last?.createdAt ?? null,
+    };
+  });
+
+  return rows.sort((a, b) => {
+    if (a.lastMessageAt && b.lastMessageAt) return a.lastMessageAt < b.lastMessageAt ? 1 : -1;
+    if (a.lastMessageAt) return -1;
+    if (b.lastMessageAt) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // Media messages (design handoff, chat attachments). The messages table has
 // no media columns, so the payload rides in body as a one-line JSON header:
 // "[[media]]{json}\ncaption". Encode and decode both live here.

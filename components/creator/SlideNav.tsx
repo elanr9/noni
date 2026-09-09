@@ -39,6 +39,10 @@ export interface SlideNavProps {
   slides: SlideNavSlide[];
   variant?: 'dark' | 'light';
   style?: StyleProp<ViewStyle>;
+  /** When set, the creator can hold and drag text boxes on the current slide. */
+  onMoveBox?: (slideIndex: number, boxId: string, x: number, y: number) => void;
+  /** When set, the creator can hold and drag the inset on the current slide. */
+  onMoveInset?: (slideIndex: number, x: number, y: number) => void;
 }
 
 const DARK_TINTS = ['#16324A', '#242C3B', '#2E2838', '#1E3A30'];
@@ -54,10 +58,14 @@ function SlideLayer({
   slide,
   tint,
   dark,
+  onMoveBox,
+  onMoveInset,
 }: {
   slide: SlideNavSlide;
   tint: string;
   dark: boolean;
+  onMoveBox?: (boxId: string, x: number, y: number) => void;
+  onMoveInset?: (x: number, y: number) => void;
 }) {
   // Slides with admin-placed boxes render exactly as they will publish.
   if ((slide.boxes?.length ?? 0) > 0 || slide.inset !== undefined) {
@@ -68,6 +76,8 @@ function SlideLayer({
         inset={slide.inset}
         tint={tint}
         style={StyleSheet.absoluteFill}
+        onMoveBox={onMoveBox}
+        onMoveInset={onMoveInset}
       />
     );
   }
@@ -91,7 +101,13 @@ function SlideLayer({
   );
 }
 
-export function SlideNav({ slides, variant = 'dark', style }: SlideNavProps) {
+export function SlideNav({
+  slides,
+  variant = 'dark',
+  style,
+  onMoveBox,
+  onMoveInset,
+}: SlideNavProps) {
   const dark = variant === 'dark';
   const [index, setIndex] = useState(0);
   const prevIndexRef = useRef(0);
@@ -133,6 +149,14 @@ export function SlideNav({ slides, variant = 'dark', style }: SlideNavProps) {
           slide={current}
           tint={tintFor(current, safeIndex, dark)}
           dark={dark}
+          onMoveBox={
+            onMoveBox
+              ? (boxId, x, y) => onMoveBox(safeIndex, boxId, x, y)
+              : undefined
+          }
+          onMoveInset={
+            onMoveInset ? (x, y) => onMoveInset(safeIndex, x, y) : undefined
+          }
         />
       </Animated.View>
 
@@ -202,7 +226,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   textWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 26,

@@ -6,7 +6,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatVoiceDuration } from '../../../lib/manager-messages-api';
@@ -49,7 +54,7 @@ export function Composer({
   onSendVoice: (localUri: string, durationMs: number) => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const startedAt = useRef(0);
   const [recording, setRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -62,30 +67,17 @@ export function Composer({
     return () => clearInterval(timer);
   }, [recording]);
 
-  useEffect(() => {
-    return () => {
-      const active = recordingRef.current;
-      if (active) {
-        void active.stopAndUnloadAsync().catch(() => undefined);
-        recordingRef.current = null;
-      }
-    };
-  }, []);
-
   const toggleMic = async () => {
     if (sending) return;
     if (recording) {
-      const active = recordingRef.current;
-      recordingRef.current = null;
       setRecording(false);
-      if (!active) return;
       try {
-        await active.stopAndUnloadAsync();
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
+        await recorder.stop();
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
         });
-        const uri = active.getURI();
+        const uri = recorder.uri;
         const durationMs = Date.now() - startedAt.current;
         if (uri) await onSendVoice(uri, durationMs);
       } catch (e) {
@@ -97,7 +89,7 @@ export function Composer({
       return;
     }
 
-    const permission = await Audio.requestPermissionsAsync();
+    const permission = await requestRecordingPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         'Microphone needed',
@@ -106,14 +98,12 @@ export function Composer({
       return;
     }
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
-      const created = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
-      recordingRef.current = created.recording;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       startedAt.current = Date.now();
       setElapsedMs(0);
       setRecording(true);

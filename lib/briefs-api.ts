@@ -8,6 +8,11 @@ import {
   type ReviewCheck,
   type TalkingPoint,
 } from '../supabase/functions/_shared/validateBrief';
+import {
+  parseOverlayBoxes,
+  parseOverlayThemeColor,
+  serializeOverlayBoxes,
+} from './overlay-boxes';
 import { supabase } from './supabase';
 import type { Database, Json } from './types';
 
@@ -67,11 +72,34 @@ export function parseTextOverlay(value: Json | null | undefined): TextOverlay {
   };
 }
 
+/** Feature screenshot the AI tied to a talking point, index aligned with talking_points. */
+export type PointMedia = {
+  feature_id: string;
+  screenshot_url: string | null;
+  shape: 'phone' | 'laptop' | null;
+};
+
+/** Reads point_media off any generator response; older responses omit it. */
+export function parsePointMedia(value: unknown): (PointMedia | null)[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry): PointMedia | null => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.feature_id !== 'string') return null;
+    return {
+      feature_id: raw.feature_id,
+      screenshot_url: typeof raw.screenshot_url === 'string' ? raw.screenshot_url : null,
+      shape: raw.shape === 'phone' || raw.shape === 'laptop' ? raw.shape : null,
+    };
+  });
+}
+
 export type BriefDraft = {
   title: string;
   format: BriefFormat;
   hook_options: string[];
   talking_points: TalkingPoint[];
+  point_media: (PointMedia | null)[];
   hashtags: string[];
   search_phrase: string | null;
   point_count: number | null;
@@ -108,6 +136,8 @@ export type BriefInput = {
   example_url: string | null;
   example_transcript: string | null;
   text_overlay?: TextOverlay;
+  /** Burn auto-transcribed two-line captions onto the rendered reel. */
+  subtitles?: boolean;
 };
 
 export type BriefWithType = Brief & { post_types: PostType | null };
@@ -126,6 +156,7 @@ export function parseTalkingPoints(value: Json): TalkingPoint[] {
       is_product: raw.is_product === true,
       edited_by_admin: raw.edited_by_admin === true,
       claim_id: typeof raw.claim_id === 'string' ? raw.claim_id : null,
+      script: raw.script === true,
     });
   }
   return points;
@@ -143,26 +174,29 @@ export type GeneratePostResult =
   | { kind: 'draft'; draft: BriefDraft }
   | { kind: 'kill'; kill_reason: string; generation_id: string | null };
 
-type RawDraftResponse = Partial<BriefDraft> & {
+type RawDraftResponse = Partial<Omit<BriefDraft, 'point_media'>> & {
+  point_media?: unknown;
   error?: string;
   kill_reason?: string;
 };
 
 /**
  * Fill a post through the deployed ingest-brief function. Exactly one of
- * query or url. A kill is a first-class outcome, never an exception: the
- * caller persists kill_reason on the brief so the slot renders empty with
- * the reason. Nothing is saved here.
+ * query, url or featureId. A kill is a first-class outcome, never an
+ * exception: the caller persists kill_reason on the brief so the slot
+ * renders empty with the reason. Nothing is saved here.
  */
 export async function generatePost(params: {
   query?: string;
   url?: string;
+  featureId?: string;
   postTypeKey?: string;
   context?: string;
 }): Promise<GeneratePostResult> {
   const body: Record<string, string> = {};
   if (params.query?.trim()) body.query = params.query.trim();
   if (params.url?.trim()) body.url = params.url.trim();
+  if (params.featureId) body.feature_id = params.featureId;
   if (params.postTypeKey) body.post_type = params.postTypeKey;
   if (params.context?.trim()) body.context = params.context.trim();
   const { data, error } = await supabase.functions.invoke('ingest-brief', {
@@ -195,6 +229,7 @@ function toDraftResult(
       format,
       hook_options: raw.hook_options ?? [],
       talking_points: raw.talking_points ?? [],
+      point_media: parsePointMedia(raw.point_media),
       hashtags: raw.hashtags ?? [],
       search_phrase: raw.search_phrase ?? null,
       point_count: raw.point_count ?? null,
@@ -265,6 +300,7 @@ export type RegenResult =
   | {
       kind: 'talking_points';
       talking_points: TalkingPoint[];
+      point_media: (PointMedia | null)[];
       cta: string | null;
       point_count: number | null;
       script: string | null;
@@ -276,6 +312,8 @@ export type RegenResult =
   | {
       kind: 'talking_point';
       talking_point: TalkingPoint;
+      /** Media for the regenerated point alone, or null. */
+      point_media: PointMedia | null;
       overlay_label: string | null;
       index: number;
       hook_may_be_stale: boolean;
@@ -320,6 +358,7 @@ export async function assistRegenerateField(params: {
       return {
         kind: 'talking_points',
         talking_points: parseTalkingPoints(raw.talking_points as Json),
+        point_media: parsePointMedia(raw.point_media),
         cta: typeof raw.cta === 'string' ? raw.cta : null,
         point_count:
           typeof raw.point_count === 'number' ? raw.point_count : null,
@@ -338,6 +377,7 @@ export async function assistRegenerateField(params: {
       return {
         kind: 'talking_point',
         talking_point: point,
+        point_media: parsePointMedia(raw.point_media)[0] ?? null,
         overlay_label:
           typeof raw.overlay_label === 'string' ? raw.overlay_label : null,
         index: typeof raw.index === 'number' ? raw.index : params.index ?? 0,
@@ -402,6 +442,38 @@ export async function listBriefSegments(
   return data ?? [];
 }
 
+/** Company wide on-screen text color, null until a manager picks one. */
+export async function getOverlayThemeColor(): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('settings')
+    .maybeSingle();
+  if (error) throw error;
+  return parseOverlayThemeColor(data?.settings);
+}
+
+export async function saveOverlayThemeColor(
+  companyId: string,
+  hex: string | null,
+): Promise<void> {
+  const { data, error: readError } = await supabase
+    .from('companies')
+    .select('settings')
+    .eq('id', companyId)
+    .single();
+  if (readError) throw readError;
+  const current =
+    data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)
+      ? data.settings
+      : {};
+  const settings: Json = { ...current, overlay_theme: { color: hex } };
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings })
+    .eq('id', companyId);
+  if (error) throw error;
+}
+
 /**
  * Overlay toggles and screenshots are direct row updates, never the RPC.
  * The RPC preserves these fields on surviving rows across re-derives.
@@ -425,6 +497,56 @@ export async function updateBriefSegment(
     .update(patch)
     .eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Creator side: nudge where a text box or the screenshot sits on a clip or
+ * slide. Position only; the RPC refuses everything else.
+ */
+export async function creatorPlaceSegment(params: {
+  segmentId: string;
+  box?: { id: string; x: number; y: number };
+  screenshot?: { x: number; y: number };
+}): Promise<void> {
+  const { error } = await supabase.rpc('creator_place_segment', {
+    p_segment_id: params.segmentId,
+    p_box_id: params.box?.id,
+    p_box_x: params.box?.x,
+    p_box_y: params.box?.y,
+    p_screenshot_x: params.screenshot?.x,
+    p_screenshot_y: params.screenshot?.y,
+  });
+  if (error) throw error;
+}
+
+/** Default centre of the burned-in subtitle block, as a fraction of frame height. */
+export const DEFAULT_SUBTITLES_Y = 0.78;
+
+/** Creator side: move the subtitle block up or down. Position only. */
+export async function creatorPlaceSubtitles(params: {
+  briefId: string;
+  y: number;
+}): Promise<void> {
+  const { error } = await supabase.rpc('creator_place_subtitles', {
+    p_brief_id: params.briefId,
+    p_y: params.y,
+  });
+  if (error) throw error;
+}
+
+/** The same segment with one text box moved; text, look and size untouched. */
+export function segmentWithBoxMoved(
+  segment: BriefSegment,
+  boxId: string,
+  x: number,
+  y: number,
+): BriefSegment {
+  const boxes = parseOverlayBoxes(segment.overlay_style, {
+    text: segment.overlay_text,
+    textY: segment.text_y,
+  }).map((b) => (b.id === boxId ? { ...b, x, y } : b));
+  const next = serializeOverlayBoxes(boxes);
+  return { ...segment, overlay_style: next.overlay_style, text_y: next.text_y };
 }
 
 /** Uploads to the private brief-assets bucket; returns the storage path. */
@@ -460,13 +582,17 @@ export async function signedScreenshotUrl(path: string): Promise<string> {
 export type NoniLibraryGroup = {
   featureId: string;
   name: string;
-  shots: Array<{
+  /** One line plain-English description of the feature. */
+  sentence: string | null;
+  /** AI virality rank, 1 is strongest. */
+  rank: number | null;
+  shots: {
     id: string;
     /** Public URL in the product-features bucket; uploadable as-is. */
     url: string;
     shape: 'phone' | 'laptop';
     source: 'upload' | 'noni';
-  }>;
+  }[];
 };
 
 /**
@@ -478,7 +604,7 @@ export async function listNoniLibrary(companyId: string): Promise<NoniLibraryGro
   const [featuresRes, shotsRes] = await Promise.all([
     supabase
       .from('brain_features')
-      .select('id, name, rank')
+      .select('id, name, sentence, rank')
       .eq('company_id', companyId)
       .order('rank', { ascending: true }),
     supabase
@@ -495,6 +621,8 @@ export async function listNoniLibrary(companyId: string): Promise<NoniLibraryGro
     groups.set(feature.id, {
       featureId: feature.id,
       name: feature.name?.trim() || 'New feature',
+      sentence: feature.sentence?.trim() || null,
+      rank: feature.rank,
       shots: [],
     });
   }
@@ -511,6 +639,9 @@ export async function listNoniLibrary(companyId: string): Promise<NoniLibraryGro
   }
   return [...groups.values()].filter((g) => g.shots.length > 0);
 }
+
+/** Features a manager can start a post from: those with screenshots, by rank. */
+export const listFeatureOptions = listNoniLibrary;
 
 // ---------------------------------------------------------------------------
 // post types and row states
@@ -543,7 +674,8 @@ export function briefRowState(
   if (brief.reviewed_at) return 'complete';
   const points = parseTalkingPoints(brief.talking_points);
   // Slideshows carry no spoken script, so hook and CTA never gate them.
-  const isSlideshow = postType?.family === 'photo_carousel';
+  const isSlideshow =
+    (postType?.family ?? brief.format) === 'photo_carousel';
   const hasHook = Boolean(brief.hook?.trim());
   const hasCta = Boolean(brief.cta?.trim());
   const hasCaption = Boolean(brief.caption?.trim());
@@ -666,6 +798,42 @@ export async function updateBrief(
   if (error) throw error;
 }
 
+/**
+ * "Delete" from the editor: the row stays in its week slot but drops every
+ * field back to a blank, unreviewed post, and its clips go with it.
+ */
+export async function clearBrief(id: string): Promise<void> {
+  const { error: segError } = await supabase
+    .from('brief_segments')
+    .delete()
+    .eq('brief_id', id);
+  if (segError) throw segError;
+  const { error } = await supabase
+    .from('briefs')
+    .update({
+      title: 'Untitled post',
+      hook: null,
+      hook_options: [],
+      talking_points: [],
+      hashtags: [],
+      search_phrase: null,
+      point_count: null,
+      script: null,
+      caption: null,
+      why_it_works: null,
+      cta: null,
+      subtitles: false,
+      subtitles_y: DEFAULT_SUBTITLES_Y,
+      kill_reason: null,
+      generation_id: null,
+      example_url: null,
+      example_transcript: null,
+      reviewed_at: null,
+    })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 /** Briefs are never deleted; the backlog is the moat. */
 export async function archiveBrief(id: string): Promise<void> {
   const { error } = await supabase
@@ -694,19 +862,7 @@ export async function createCampaign(params: {
   return data;
 }
 
-/**
- * Week setup output: the campaign with its targets and pool, plus one
- * pre-stamped brief per slot (videos first, then slideshows, types in
- * sort order). Each row gets a post type and a suggested search phrase
- * from the bank — lowest used_count first, deduped against phrases used
- * in campaigns from the last four weeks and within this batch. The stamp
- * is not a use; used_count bumps when a fill succeeds. The phrase doubles
- * as the provisional title (briefs.title is NOT NULL) until a fill
- * replaces it.
- */
-/** Campaigns that already have typed brief rows. Nested PostgREST filters
- *  on `briefs.post_type_id` return empty, which hid real weeks and made
- *  Start week try to delete them. */
+/** Campaigns that already carry stamped rows. */
 async function stampedCampaignIds(
   campaignIds: string[],
 ): Promise<Set<string>> {
@@ -714,26 +870,29 @@ async function stampedCampaignIds(
   if (campaignIds.length === 0) return stamped;
   const { data, error } = await supabase
     .from('campaign_briefs')
-    .select('campaign_id, briefs(post_type_id)')
+    .select('campaign_id')
     .in('campaign_id', campaignIds);
   if (error) throw error;
-  for (const row of data ?? []) {
-    const brief = Array.isArray(row.briefs) ? row.briefs[0] : row.briefs;
-    if (brief?.post_type_id) stamped.add(row.campaign_id);
-  }
+  for (const row of data ?? []) stamped.add(row.campaign_id);
   return stamped;
 }
 
+/**
+ * Week setup output: the campaign with its lane targets plus one stamped
+ * brief per slot, videos first, then slideshows. Rows carry a format and
+ * nothing else; the kind of post is chosen in the editor, so no
+ * post_type_id or search phrase is written here.
+ */
 export async function createWeek(params: {
   companyId: string;
   createdBy: string;
   name: string;
   dropDate: string;
-  videoTarget: number;
-  slideshowTarget: number;
-  typeSplit: Record<string, number>;
-  postTypes: PostType[];
+  videosPerDay: number;
+  slideshowsPerDay: number;
 }): Promise<Campaign> {
+  const videoTarget = params.videosPerDay * BRIEF_WEEK_DAYS;
+  const slideshowTarget = params.slideshowsPerDay * BRIEF_WEEK_DAYS;
   const { data: existing, error: existingError } = await supabase
     .from('campaigns')
     .select('*')
@@ -772,38 +931,6 @@ export async function createWeek(params: {
     if (deleteError) throw deleteError;
   }
 
-  const since = new Date(
-    new Date(`${params.dropDate}T00:00:00`).getTime() - 28 * 86400000,
-  )
-    .toISOString()
-    .slice(0, 10);
-  const [{ data: recent, error: recentError }, queries] = await Promise.all([
-    supabase.from('campaigns').select('id').gte('drop_date', since),
-    listSearchQueries(),
-  ]);
-  if (recentError) throw recentError;
-
-  const usedPhrases = new Set<string>();
-  const recentIds = (recent ?? []).map((c) => c.id);
-  if (recentIds.length > 0) {
-    const { data: links, error: linksError } = await supabase
-      .from('campaign_briefs')
-      .select('briefs(search_phrase)')
-      .in('campaign_id', recentIds);
-    if (linksError) throw linksError;
-    for (const link of links ?? []) {
-      const brief = Array.isArray(link.briefs) ? link.briefs[0] : link.briefs;
-      if (brief?.search_phrase) usedPhrases.add(brief.search_phrase);
-    }
-  }
-  // Fresh phrases first; recently used ones only when the bank runs short
-  // (12 seeded queries, 30 slots). Repeats within the batch come last.
-  const fresh = queries.filter((q) => !usedPhrases.has(q.query));
-  const stale = queries.filter((q) => usedPhrases.has(q.query));
-  const pool = [...fresh, ...stale];
-  const phraseFor = (slot: number): string | null =>
-    pool.length > 0 ? pool[slot % pool.length].query : null;
-
   const { data: campaign, error: campaignError } = await supabase
     .from('campaigns')
     .insert({
@@ -811,36 +938,27 @@ export async function createWeek(params: {
       name: params.name,
       drop_date: params.dropDate,
       status: 'draft',
-      video_target: params.videoTarget,
-      slideshow_target: params.slideshowTarget,
-      type_split: params.typeSplit,
+      video_target: videoTarget,
+      slideshow_target: slideshowTarget,
+      type_split: {},
     })
     .select('*')
     .single();
   if (campaignError) throw campaignError;
 
-  const orderedTypes = [
-    ...params.postTypes.filter((t) => t.family === 'video'),
-    ...params.postTypes.filter((t) => t.family === 'photo_carousel'),
+  const formats: BriefFormat[] = [
+    ...Array.from({ length: videoTarget }, (): BriefFormat => 'video'),
+    ...Array.from({ length: slideshowTarget }, (): BriefFormat => 'photo_carousel'),
   ];
-  const slots: { postType: PostType; phrase: string | null }[] = [];
-  for (const postType of orderedTypes) {
-    const count = params.typeSplit[postType.key] ?? 0;
-    for (let i = 0; i < count; i += 1) {
-      slots.push({ postType, phrase: phraseFor(slots.length) });
-    }
-  }
 
   const { data: briefs, error: briefsError } = await supabase
     .from('briefs')
     .insert(
-      slots.map((slot) => ({
+      formats.map((format) => ({
         company_id: params.companyId,
         created_by: params.createdBy,
-        title: slot.phrase ?? slot.postType.label,
-        format: slot.postType.family,
-        post_type_id: slot.postType.id,
-        search_phrase: slot.phrase,
+        title: 'Untitled post',
+        format,
       })),
     )
     .select('id');
@@ -1297,11 +1415,11 @@ export async function confirmBriefReview(
 
 export type BriefWeekStatus = 'next' | 'current' | 'done';
 
-function briefWeekMonday(dropDate: string): Date {
-  const d = new Date(`${dropDate}T00:00:00`);
-  const day = d.getDay();
-  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-  return d;
+/** Every brief runs seven days from its chosen start day. */
+export const BRIEF_WEEK_DAYS = 7;
+
+function briefWeekStart(dropDate: string): Date {
+  return new Date(`${dropDate}T00:00:00`);
 }
 
 function briefWeekAddDays(d: Date, n: number): Date {
@@ -1319,20 +1437,22 @@ function briefWeekIso(d: Date): string {
 
 /** "Aug 17 to 23", or "Jul 27 to Aug 2" across a month boundary. */
 export function briefWeekRangeLabel(dropDate: string): string {
-  const mon = briefWeekMonday(dropDate);
-  const sun = briefWeekAddDays(mon, 6);
-  const monMonth = mon.toLocaleDateString(undefined, { month: 'short' });
-  if (mon.getMonth() === sun.getMonth()) {
-    return `${monMonth} ${mon.getDate()} to ${sun.getDate()}`;
+  const start = briefWeekStart(dropDate);
+  const end = briefWeekAddDays(start, BRIEF_WEEK_DAYS - 1);
+  const startMonth = start.toLocaleDateString(undefined, { month: 'short' });
+  if (start.getMonth() === end.getMonth()) {
+    return `${startMonth} ${start.getDate()} to ${end.getDate()}`;
   }
-  const sunMonth = sun.toLocaleDateString(undefined, { month: 'short' });
-  return `${monMonth} ${mon.getDate()} to ${sunMonth} ${sun.getDate()}`;
+  const endMonth = end.toLocaleDateString(undefined, { month: 'short' });
+  return `${startMonth} ${start.getDate()} to ${endMonth} ${end.getDate()}`;
 }
 
-/** Drop date (Monday) of the week after the one containing today. */
-export function upcomingWeekDropDate(): string {
-  const thisMonday = briefWeekMonday(briefWeekIso(new Date()));
-  return briefWeekIso(briefWeekAddDays(thisMonday, 7));
+/** "opens Monday", from the brief's chosen start day. */
+export function briefWeekOpensLabel(dropDate: string): string {
+  const weekday = briefWeekStart(dropDate).toLocaleDateString(undefined, {
+    weekday: 'long',
+  });
+  return `opens ${weekday}`;
 }
 
 /**
@@ -1346,12 +1466,12 @@ export function briefWeekStatus(
   if (campaign.status !== 'published' || campaign.drop_date === null) {
     return { status: 'next', dayOfWeek: null };
   }
-  const monday = briefWeekMonday(campaign.drop_date);
+  const start = briefWeekStart(campaign.drop_date);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const diff = Math.round((today.getTime() - monday.getTime()) / 86400000);
+  const diff = Math.round((today.getTime() - start.getTime()) / 86400000);
   if (diff < 0) return { status: 'next', dayOfWeek: null };
-  if (diff <= 6) return { status: 'current', dayOfWeek: diff + 1 };
+  if (diff < BRIEF_WEEK_DAYS) return { status: 'current', dayOfWeek: diff + 1 };
   return { status: 'done', dayOfWeek: null };
 }
 
@@ -1379,6 +1499,8 @@ export type BriefWeekSummary = {
   videoTarget: number;
   slideshowDone: number;
   slideshowTarget: number;
+  /** Stamped rows in the week; zero means week setup never ran. */
+  rowCount: number;
   /** Present on every non-next week, zeros until data lands. */
   stats: BriefWeekStats | null;
 };
@@ -1418,12 +1540,12 @@ async function fetchBriefWeekStats(
   const result = new Map<string, BriefWeekStats>();
   const ranges = campaigns.flatMap((c) => {
     if (c.drop_date === null) return [];
-    const monday = briefWeekMonday(c.drop_date);
+    const start = briefWeekStart(c.drop_date);
     return [
       {
         id: c.id,
-        start: briefWeekIso(monday),
-        end: briefWeekIso(briefWeekAddDays(monday, 6)),
+        start: briefWeekIso(start),
+        end: briefWeekIso(briefWeekAddDays(start, BRIEF_WEEK_DAYS - 1)),
       },
     ];
   });
@@ -1555,7 +1677,9 @@ export async function listBriefWeeks(): Promise<BriefWeekSummary[]> {
     } | null;
   };
   const laneDone = new Map<string, { video: number; slideshow: number }>();
+  const rowCounts = new Map<string, number>();
   for (const link of (laneLinks ?? []) as unknown as LaneLink[]) {
+    rowCounts.set(link.campaign_id, (rowCounts.get(link.campaign_id) ?? 0) + 1);
     const b = link.briefs;
     if (!b || (b.reviewed_at === null && b.kill_reason === null)) continue;
     const family = b.post_types?.family ?? b.format;
@@ -1588,6 +1712,7 @@ export async function listBriefWeeks(): Promise<BriefWeekSummary[]> {
       videoTarget: campaign.video_target ?? 20,
       slideshowDone: done.slideshow,
       slideshowTarget: campaign.slideshow_target ?? 10,
+      rowCount: rowCounts.get(campaign.id) ?? 0,
       stats:
         where.status === 'next'
           ? null

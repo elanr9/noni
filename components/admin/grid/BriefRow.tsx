@@ -1,4 +1,4 @@
-// Admin handoff §6 — one stamped row per post, five states. Format is
+// Admin handoff §6: one stamped row per post, five states. Format is
 // never repeated on the row; the lane states it.
 import { Search } from 'lucide-react-native';
 import { StyleSheet, Text, View } from 'react-native';
@@ -27,17 +27,29 @@ function aiScore(brief: BriefWithType): number | null {
 /** e.g. "Hook and 3 of 5 points" for a partial row. */
 function progressLine(brief: BriefWithType): string {
   const points = parseTalkingPoints(brief.talking_points);
-  const total =
-    brief.point_count ?? brief.post_types?.min_points ?? points.length;
+  const max = brief.post_types?.max_points ?? points.length;
   const hasHook = Boolean(brief.hook?.trim());
-  if (hasHook && total > 0) return `Hook and ${points.length} of ${total} points`;
-  if (total > 0 && points.length > 0) return `${points.length} of ${total} points`;
-  if (hasHook) return 'Hook saved';
-  return 'In progress';
+  const isSlideshow =
+    (brief.post_types?.family ?? brief.format) === 'photo_carousel';
+  if (isSlideshow) {
+    return points.length === 0 ? 'Started' : `${points.length} of ${max} slides`;
+  }
+  if (!hasHook && points.length === 0) return 'Started';
+  return `${hasHook ? 'Hook and ' : ''}${points.length} of ${max} points`;
 }
 
-const WORKED_HEIGHT = 100;
-const EMPTY_HEIGHT = 84;
+const PLACEHOLDER_TITLE = 'Untitled post';
+
+/** Stamped rows carry the placeholder title, so fall through to the phrase or hook. */
+function titleOf(brief: BriefWithType): string {
+  const title = brief.title.trim();
+  return (
+    (title !== PLACEHOLDER_TITLE ? title : '') ||
+    brief.search_phrase?.trim() ||
+    brief.hook?.trim() ||
+    PLACEHOLDER_TITLE
+  );
+}
 
 export interface BriefRowProps {
   /** 1-based position inside the lane, rendered "01". */
@@ -49,8 +61,7 @@ export interface BriefRowProps {
 }
 
 export function BriefRow({ index, brief, state, disabled = false, onPress }: BriefRowProps) {
-  const typeKey = brief.post_types?.key ?? '';
-  const typeLabel = brief.post_types?.label ?? 'Post';
+  const postType = brief.post_types;
   const indexLabel = String(index).padStart(2, '0');
 
   if (state === 'killed') {
@@ -59,11 +70,12 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
         <Text style={styles.index}>{indexLabel}</Text>
         <View style={styles.body}>
           <Text style={styles.killedTitle}>Left empty on purpose</Text>
-          <Text style={styles.killedReason} numberOfLines={2}>
-            {brief.kill_reason ?? ''}
-          </Text>
+          {brief.kill_reason ? (
+            <Text style={styles.killedReason} numberOfLines={2}>
+              {brief.kill_reason}
+            </Text>
+          ) : null}
         </View>
-        <PostTypeChip typeKey={typeKey} label={typeLabel} />
       </View>
     );
   }
@@ -72,24 +84,21 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
     return (
       <PressableScale
         accessibilityRole="button"
-        accessibilityLabel={`${typeLabel}, empty`}
+        accessibilityLabel="Empty post, add a search phrase"
         disabled={disabled}
         onPress={onPress}
         style={[styles.row, styles.rowEmpty]}
       >
         <Text style={styles.index}>{indexLabel}</Text>
-        <View style={styles.body}>
-          <PostTypeChip typeKey={typeKey} label={typeLabel} />
-          <View style={styles.phraseRow}>
-            <Search size={13} color={color.slate400} strokeWidth={2} />
-            <Text style={styles.phrase} numberOfLines={1}>
-              {brief.search_phrase
-                ? `"${brief.search_phrase}"`
-                : 'Add a search phrase'}
-            </Text>
-          </View>
+        <View style={styles.phraseRow}>
+          <Search size={16} color={color.slate400} strokeWidth={2} />
+          <Text style={styles.phrase} numberOfLines={1}>
+            {brief.search_phrase?.trim()
+              ? `"${brief.search_phrase.trim()}"`
+              : 'Add a search phrase'}
+          </Text>
         </View>
-        <Icon name="plus" size={18} color={color.slate400} />
+        <Icon name="plus" size={16} color={color.slate400} />
       </PressableScale>
     );
   }
@@ -102,12 +111,13 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
         ? 'Needs review'
         : score !== null
           ? `AI score ${score}`
-          : 'Reviewed';
+          : 'Complete';
+  const title = titleOf(brief);
 
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={`${typeLabel}, ${statusLine}`}
+      accessibilityLabel={`${title}, ${statusLine}`}
       disabled={disabled}
       onPress={onPress}
       style={[styles.row, styles.rowWorked, shadow.shadowCard]}
@@ -115,10 +125,12 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
       <Text style={styles.index}>{indexLabel}</Text>
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
-          {brief.title}
+          {title}
         </Text>
         <View style={styles.metaRow}>
-          <PostTypeChip typeKey={typeKey} label={typeLabel} />
+          {postType ? (
+            <PostTypeChip typeKey={postType.key} label={postType.label} />
+          ) : null}
           <Text
             style={[
               styles.status,
@@ -150,18 +162,15 @@ const styles = StyleSheet.create({
     borderRadius: radiusAdmin.lg,
   },
   rowWorked: {
-    height: WORKED_HEIGHT,
     backgroundColor: color.white,
   },
   rowEmpty: {
-    height: EMPTY_HEIGHT,
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: color.lineStrong,
   },
   rowKilled: {
-    height: WORKED_HEIGHT,
     backgroundColor: color.fillQuiet,
   },
   index: {
@@ -205,25 +214,26 @@ const styles = StyleSheet.create({
     color: color.green,
   },
   phraseRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   phrase: {
     flexShrink: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: color.slate500,
+    fontSize: 16,
+    fontWeight: '700',
+    color: color.slate400,
   },
   killedTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    color: color.slate500,
+    color: color.ink,
   },
   killedReason: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '400',
-    lineHeight: 12 * 1.45,
-    color: color.slate400,
+    lineHeight: 13 * 1.45,
+    color: color.slate500,
   },
 });

@@ -19,7 +19,11 @@ const API = 'https://api.supabase.com';
 async function api<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'supabase-cli/2.75.0',
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();

@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,12 +11,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ContentFormat } from '../../../lib/admin-review-types';
+import { useKeyboardPadding } from '../../../lib/keyboard';
 import { borderWidth, color, motion, radiusAdmin, type } from '../../../theme/tokens';
 import { ActionBar, Card, PushHeader, SectionLabel, Segmented } from '../shared';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { RequestChangesSheet } from '../RequestChangesSheet';
 import { SectionNoteCard } from './SectionNoteCard';
+import type { SlideshowSurfaceSlide } from './SlideshowSurface';
 
 export interface RevisionSection {
   key: string;
@@ -26,6 +26,10 @@ export interface RevisionSection {
    * from the brief and are placed automatically, so they are never here. */
   label: string;
   text: string;
+  /** Signed URL of the creator's raw clip for this section (Reels only). */
+  clipUri?: string | null;
+  /** The composed slide for this section (Slideshows only). */
+  slide?: SlideshowSurfaceSlide;
 }
 
 export interface RevisionModeProps {
@@ -55,6 +59,7 @@ export function RevisionMode({
   onSend,
 }: RevisionModeProps) {
   const insets = useSafeAreaInsets();
+  const keyboardPadding = useKeyboardPadding();
   const slide = useRef(new Animated.Value(0)).current;
 
   const [mode, setMode] = useState(0);
@@ -104,10 +109,7 @@ export function RevisionMode({
         },
       ]}
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.fill}
-      >
+      <View style={[styles.fill, { paddingBottom: keyboardPadding }]}>
         <ScrollView
           style={styles.fill}
           contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 6 }]}
@@ -140,6 +142,7 @@ export function RevisionMode({
                     label={section.label}
                     text={section.text}
                     format={format}
+                    thumbUri={section.slide?.photoUri ?? null}
                     note={notes[section.key] ?? null}
                     open={openKey === section.key}
                     onWatch={() => setWatchKey(section.key)}
@@ -237,13 +240,15 @@ export function RevisionMode({
               : `Send back \u00b7 ${count} ${count === 1 ? 'note' : 'notes'}`}
           </Button>
         </ActionBar>
-      </KeyboardAvoidingView>
+      </View>
 
       <RequestChangesSheet
         visible={watch !== null}
         label={watch?.label ?? ''}
         text={watch?.text ?? ''}
         format={format}
+        clipUri={watch?.clipUri ?? null}
+        slide={watch?.slide}
         creatorShort={creatorShort}
         initialNote={watch !== null ? notes[watch.key] ?? '' : ''}
         onClose={() => setWatchKey(null)}
@@ -260,7 +265,7 @@ export function RevisionMode({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: color.offWhite,
   },
   fill: {

@@ -3,7 +3,8 @@
 // pinches that box, anywhere else drags or pinches the screenshot. The
 // Instagram-style slider on the left resizes the active text box, a still
 // tap on a box opens the keyboard, "Add text" starts another box, and Done
-// saves the whole arrangement at once.
+// saves the whole arrangement at once. Each box has exactly two looks:
+// Classic (TikTok white with a black outline) or Theme (the company color).
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Dimensions,
@@ -20,22 +21,27 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Crypto from 'expo-crypto';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isVideoPath } from '../../../lib/media-library-api';
 import {
-  DEFAULT_BOX_SIZE,
-  DEFAULT_OVERLAY_FILL,
-  DEFAULT_TEXT_Y,
   MAX_BOX_SIZE,
   MIN_BOX_SIZE,
+  newOverlayBox,
   overlayBoxFill,
+  overlayBoxStyle,
   overlayTextContrast,
   serializeOverlayBoxes,
+  styleColors,
   type OverlayBox,
+  type OverlayTextStyle,
 } from '../../../lib/overlay-boxes';
 import type { Json } from '../../../lib/types';
 import { color, radiusAdmin } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
+import { posterForVideo } from '../../ui/MediaThumb';
+import { OutlinedText } from '../../ui/OutlinedText';
 import { PressableScale } from '../../ui/PressableScale';
 
 const SCREEN_BG = '#10161D';
@@ -47,7 +53,34 @@ const HIT_SLOP = 26;
 
 export type OverlayEditorMode = 'text' | 'media';
 
+/** A recording plays muted on loop in its slot, the way the render will show it. */
+function RecordingPreview({ uri }: { uri: string }): JSX.Element {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={styles.mediaImg}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+}
+
+/** How a clip's media shows: an inset card the admin places, or the media as
+ * the full background with the creator cut out in front (TikTok green screen). */
+export type SegmentLayout = 'standard' | 'green_screen';
+
+const LAYOUTS: Array<{ value: SegmentLayout; label: string }> = [
+  { value: 'standard', label: 'Inset' },
+  { value: 'green_screen', label: 'Green screen' },
+];
+
 export type OverlaySavePatch = {
+  layout?: SegmentLayout;
   overlay_text?: string;
   show_on_screen?: boolean;
   overlay_style?: { [key: string]: Json | undefined };
@@ -85,37 +118,13 @@ function snapAxis(
   return best === null ? { value, guide: null } : { value: best, guide: best };
 }
 
-const SWATCHES = [
-  '#FFFFFF',
-  '#000000',
-  '#EA403F',
-  '#FF933D',
-  '#F2CD46',
-  '#78C25E',
-  '#3496F0',
-  '#5756D4',
-  '#F7D7E9',
-  '#EB4C89',
-] as const;
-
-function hexEq(a: string, b: string): boolean {
-  return a.replace('#', '').toLowerCase() === b.replace('#', '').toLowerCase();
-}
+const STYLES: Array<{ value: OverlayTextStyle; label: string }> = [
+  { value: 'classic', label: 'Classic' },
+  { value: 'theme', label: 'Theme' },
+];
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
-}
-
-function newBox(fill: string): OverlayBox {
-  return {
-    id: Crypto.randomUUID(),
-    text: '',
-    color: fill,
-    bg: true,
-    size: DEFAULT_BOX_SIZE,
-    x: 0.5,
-    y: DEFAULT_TEXT_Y,
-  };
 }
 
 type ShotPos = { x: number; y: number; w: number };
@@ -152,8 +161,14 @@ export function OverlayEditor(props: {
   /** Changes when a different point opens so local draft state resets. */
   resetKey: string;
   screenshotUrl?: string;
+  /** Saved layout for this segment; the toggle starts here. */
+  layout: SegmentLayout;
+  /** Slides have no creator clip to cut out, so they hide the layout toggle. */
+  layoutSelectable?: boolean;
   /** Parsed boxes for this segment (parseOverlayBoxes on the caller). */
   boxes: OverlayBox[];
+  /** Company theme color from settings; null falls back to TikTok pink. */
+  themeColor: string | null;
   screenshotX: number | null;
   screenshotY: number | null;
   screenshotWidth: number | null;
@@ -168,7 +183,10 @@ export function OverlayEditor(props: {
     mode,
     resetKey,
     screenshotUrl,
+    layout: initialLayout,
+    layoutSelectable = true,
     boxes: initialBoxes,
+    themeColor,
     screenshotX,
     screenshotY,
     screenshotWidth,
@@ -204,6 +222,11 @@ export function OverlayEditor(props: {
   const hasShot = Boolean(screenshotUrl) && !shotRemoved;
   const hasShotRef = useRef(hasShot);
   hasShotRef.current = hasShot;
+  const [layout, setLayout] = useState<SegmentLayout>(initialLayout);
+  const greenScreen = hasShot && layout === 'green_screen';
+  /** Green screen media fills the frame, so there is nothing to drag or trash. */
+  const shotDraggableRef = useRef(false);
+  shotDraggableRef.current = hasShot && !greenScreen;
 
   /** Instagram-style drag-to-delete: trash shows while something drags. */
   const [draggingTarget, setDraggingTarget] = useState<'box' | 'shot' | null>(
@@ -230,9 +253,23 @@ export function OverlayEditor(props: {
     setBoxes(next);
   }
 
-  function startNewBox() {
+  function freshBox(): OverlayBox {
     const last = boxesRef.current[boxesRef.current.length - 1];
-    const box = newBox(last?.color ?? DEFAULT_OVERLAY_FILL);
+    return newOverlayBox({
+      id: Crypto.randomUUID(),
+      text: '',
+      style: last ? overlayBoxStyle(last) : 'classic',
+      themeColor,
+      index: boxesRef.current.length,
+    });
+  }
+
+  function setBoxStyle(id: string, style: OverlayTextStyle) {
+    patchBox(id, styleColors(style, themeColor));
+  }
+
+  function startNewBox() {
+    const box = freshBox();
     const next = [...boxesRef.current, box];
     boxesRef.current = next;
     setBoxes(next);
@@ -249,6 +286,7 @@ export function OverlayEditor(props: {
     setActiveId(initialBoxes[0]?.id ?? null);
     setEditing(false);
     setShotRemoved(false);
+    setLayout(initialLayout);
     setDraggingTarget(null);
     setOverTrash(false);
     const nextShot = {
@@ -259,7 +297,7 @@ export function OverlayEditor(props: {
     shotRef.current = nextShot;
     setShot(nextShot);
     if (mode === 'text' && initialBoxes.length === 0) {
-      const box = newBox(DEFAULT_OVERLAY_FILL);
+      const box = freshBox();
       boxesRef.current = [box];
       setBoxes([box]);
       setActiveId(box.id);
@@ -275,15 +313,30 @@ export function OverlayEditor(props: {
     return () => clearTimeout(t);
   }, [visible, editing, resetKey]);
 
+  const shotIsVideo = screenshotUrl !== undefined && isVideoPath(screenshotUrl);
+
   useEffect(() => {
     if (!screenshotUrl) return;
-    Image.getSize(
-      screenshotUrl,
-      (w, h) => {
-        if (w > 0 && h > 0) setAspect(w / h);
-      },
-      () => undefined,
-    );
+    let live = true;
+    const measure = (uri: string) =>
+      Image.getSize(
+        uri,
+        (w, h) => {
+          if (live && w > 0 && h > 0) setAspect(w / h);
+        },
+        () => undefined,
+      );
+    if (isVideoPath(screenshotUrl)) {
+      // A recording's frame size comes off its poster; the player reports none until it loads.
+      void posterForVideo(screenshotUrl).then((poster) => {
+        if (poster) measure(poster);
+      });
+    } else {
+      measure(screenshotUrl);
+    }
+    return () => {
+      live = false;
+    };
   }, [screenshotUrl]);
 
   const gesture = useRef<GestureTrack>({ ...IDLE_GESTURE });
@@ -340,7 +393,7 @@ export function OverlayEditor(props: {
       xs.push(b.x);
       ys.push(b.y);
     }
-    if (target === 'box' && hasShotRef.current) {
+    if (target === 'box' && shotDraggableRef.current) {
       xs.push(shotRef.current.x);
       ys.push(shotRef.current.y);
     }
@@ -363,16 +416,16 @@ export function OverlayEditor(props: {
       PanResponder.create({
         onStartShouldSetPanResponder: (evt) =>
           boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null ||
-          hasShotRef.current,
+          shotDraggableRef.current,
         onMoveShouldSetPanResponder: (evt) =>
           boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null ||
-          hasShotRef.current,
+          shotDraggableRef.current,
         onPanResponderGrant: (evt) => {
           const { pageX, pageY } = evt.nativeEvent;
           const hit = boxAtPoint(pageX, pageY);
           if (hit) setActiveId(hit.id);
           gesture.current = {
-            target: hit ? 'box' : hasShotRef.current ? 'shot' : null,
+            target: hit ? 'box' : shotDraggableRef.current ? 'shot' : null,
             boxId: hit?.id ?? '',
             prevX: pageX,
             prevY: pageY,
@@ -543,7 +596,8 @@ export function OverlayEditor(props: {
   /** Top-right Done: save every box and the screenshot placement together. */
   function handleSaveAll() {
     const patch: OverlaySavePatch = serializeOverlayBoxes(boxesRef.current);
-    if (hasShotRef.current) {
+    if (hasShotRef.current) patch.layout = layout;
+    if (shotDraggableRef.current) {
       patch.screenshot_x = shotRef.current.x;
       patch.screenshot_y = shotRef.current.y;
       patch.screenshot_width = shotRef.current.w;
@@ -556,42 +610,72 @@ export function OverlayEditor(props: {
 
   function pillFor(box: OverlayBox, forInput: boolean): JSX.Element {
     const fontSize = clamp(box.size * stage.w, 10, 96);
-    const contrast = overlayTextContrast(box.color);
-    const textStyle = {
-      color: box.bg ? contrast : box.color,
-      fontSize,
-      lineHeight: fontSize * 1.22,
-      textShadowColor: box.bg ? 'transparent' : 'rgba(0,0,0,0.6)',
-      textShadowOffset: box.bg
-        ? { width: 0, height: 0 }
-        : { width: 0, height: 1 },
-      textShadowRadius: box.bg ? 0 : 10,
-    };
+    const textColor = box.bg ? overlayTextContrast(box.color) : box.color;
+    const textStyle = { color: textColor, fontSize, lineHeight: fontSize * 1.22 };
+    const input = forInput ? (
+      <TextInput
+        ref={inputRef}
+        multiline
+        scrollEnabled={false}
+        value={box.text}
+        onChangeText={(t) => patchBox(box.id, { text: t })}
+        placeholder=""
+        placeholderTextColor={color.whiteA45}
+        selectionColor={color.blue300}
+        underlineColorAndroid="transparent"
+        style={[styles.inputText, textStyle]}
+      />
+    ) : null;
+    if (!box.bg) {
+      return (
+        <View style={[styles.pill, styles.pillClear]}>
+          <OutlinedText
+            text={box.text}
+            fontSize={fontSize}
+            color={textColor}
+            style={[styles.inputText, { lineHeight: fontSize * 1.22 }]}
+          >
+            {input}
+          </OutlinedText>
+        </View>
+      );
+    }
     return (
-      <View
-        style={[
-          styles.pill,
-          box.bg
-            ? { backgroundColor: overlayBoxFill(box.color) }
-            : styles.pillClear,
-        ]}
-      >
-        {forInput ? (
-          <TextInput
-            ref={inputRef}
-            multiline
-            scrollEnabled={false}
-            value={box.text}
-            onChangeText={(t) => patchBox(box.id, { text: t })}
-            placeholder=""
-            placeholderTextColor={color.whiteA45}
-            selectionColor={color.blue300}
-            underlineColorAndroid="transparent"
-            style={[styles.inputText, textStyle]}
-          />
-        ) : (
-          <Text style={[styles.inputText, textStyle]}>{box.text}</Text>
-        )}
+      <View style={[styles.pill, { backgroundColor: overlayBoxFill(box.color) }]}>
+        {input ?? <Text style={[styles.inputText, textStyle]}>{box.text}</Text>}
+      </View>
+    );
+  }
+
+  function styleToggle(box: OverlayBox): JSX.Element {
+    const current = overlayBoxStyle(box);
+    return (
+      <View style={styles.styleRow}>
+        {STYLES.map((s) => {
+          const isOn = s.value === current;
+          return (
+            <PressableScale
+              key={s.value}
+              accessibilityRole="button"
+              accessibilityLabel={`${s.label} text style`}
+              accessibilityState={{ selected: isOn }}
+              onPress={() => setBoxStyle(box.id, s.value)}
+              style={[styles.styleBtn, isOn && styles.styleBtnOn]}
+            >
+              <View
+                style={[
+                  styles.styleDot,
+                  s.value === 'theme'
+                    ? { backgroundColor: overlayBoxFill(styleColors('theme', themeColor).color) }
+                    : styles.styleDotClassic,
+                ]}
+              />
+              <Text style={[styles.styleLabel, isOn && styles.styleLabelOn]}>
+                {s.label}
+              </Text>
+            </PressableScale>
+          );
+        })}
       </View>
     );
   }
@@ -618,7 +702,24 @@ export function OverlayEditor(props: {
           }}
           pointerEvents="none"
         />
-        {hasShot ? (
+        {greenScreen ? (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, editing && styles.dimmed]}>
+            {shotIsVideo && screenshotUrl ? (
+              <RecordingPreview uri={screenshotUrl} />
+            ) : (
+              <Image
+                source={{ uri: screenshotUrl }}
+                style={styles.mediaImg}
+                resizeMode="cover"
+              />
+            )}
+            <View style={styles.creatorHint}>
+              <View style={styles.creatorHead} />
+              <View style={styles.creatorBody} />
+              <Text style={styles.creatorHintText}>Creator is cut out in front</Text>
+            </View>
+          </View>
+        ) : hasShot ? (
           <View pointerEvents="none" style={editing && styles.dimmed}>
             <View
               style={[
@@ -631,11 +732,15 @@ export function OverlayEditor(props: {
                 },
               ]}
             >
-              <Image
-                source={{ uri: screenshotUrl }}
-                style={styles.mediaImg}
-                resizeMode="cover"
-              />
+              {shotIsVideo && screenshotUrl ? (
+                <RecordingPreview uri={screenshotUrl} />
+              ) : (
+                <Image
+                  source={{ uri: screenshotUrl }}
+                  style={styles.mediaImg}
+                  resizeMode="cover"
+                />
+              )}
             </View>
           </View>
         ) : null}
@@ -726,23 +831,6 @@ export function OverlayEditor(props: {
           )}
         </View>
 
-        {active ? (
-          <View style={[styles.rail, { top: Math.max(insets.top, 12) + 64 }]}>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Background behind text"
-              accessibilityState={{ selected: active.bg }}
-              hitSlop={TOOL_HIT}
-              onPress={() => patchBox(active.id, { bg: !active.bg })}
-              style={[styles.tool, active.bg && styles.toolOn]}
-            >
-              <View style={[styles.aChip, active.bg && styles.aChipOn]}>
-                <Text style={styles.aChipText}>A</Text>
-              </View>
-            </PressableScale>
-          </View>
-        ) : null}
-
         {active && !editing ? (
           <View
             style={[
@@ -799,33 +887,33 @@ export function OverlayEditor(props: {
               { paddingBottom: Math.max(insets.bottom, 12) + 22 },
             ]}
           >
-            {editing && active !== null ? (
-              <View style={styles.bottomRow}>
-                {SWATCHES.map((c) => {
-                  const isOn = hexEq(c, active.color);
+            {hasShot && layoutSelectable && !editing ? (
+              <View style={styles.layoutRow}>
+                {LAYOUTS.map((l) => {
+                  const isOn = l.value === layout;
                   return (
                     <PressableScale
-                      key={c}
+                      key={l.value}
                       accessibilityRole="button"
-                      accessibilityLabel={c}
+                      accessibilityLabel={`${l.label} layout`}
                       accessibilityState={{ selected: isOn }}
-                      hitSlop={7}
-                      onPress={() => patchBox(active.id, { color: c })}
-                      style={[styles.swatchRing, isOn && styles.swatchRingOn]}
+                      disabled={blocked}
+                      onPress={() => setLayout(l.value)}
+                      style={[styles.styleBtn, isOn && styles.styleBtnOn]}
                     >
-                      <View
-                        style={[
-                          styles.swatch,
-                          { backgroundColor: c },
-                          !isOn && styles.swatchIdle,
-                        ]}
-                      />
+                      <Text style={[styles.styleLabel, isOn && styles.styleLabelOn]}>
+                        {l.label}
+                      </Text>
                     </PressableScale>
                   );
                 })}
               </View>
+            ) : null}
+            {editing && active !== null ? (
+              <View style={styles.bottomRow}>{styleToggle(active)}</View>
             ) : (
               <View style={styles.addTextRow}>
+                {active !== null ? styleToggle(active) : <View style={styles.flex} />}
                 <PressableScale
                   accessibilityRole="button"
                   accessibilityLabel="Add another text box"
@@ -898,13 +986,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
   },
-  rail: {
-    position: 'absolute',
-    right: 14,
-    zIndex: 3,
-    gap: 12,
-    alignItems: 'center',
-  },
   tool: {
     width: 42,
     height: 42,
@@ -912,28 +993,6 @@ const styles = StyleSheet.create({
     backgroundColor: RAIL_BG,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  toolOn: {
-    backgroundColor: color.white,
-  },
-  aChip: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  aChipOn: {
-    borderWidth: 0,
-    backgroundColor: color.ink,
-  },
-  aChipText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: color.white,
   },
   done: {
     minHeight: 44,
@@ -1015,7 +1074,87 @@ const styles = StyleSheet.create({
   addTextRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  styleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 4,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: RAIL_BG,
+  },
+  layoutRow: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 4,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: RAIL_BG,
+  },
+  creatorHint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: '14%',
+    alignItems: 'center',
+  },
+  creatorHead: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: color.whiteA45,
+  },
+  creatorBody: {
+    marginTop: 6,
+    width: 150,
+    height: 110,
+    borderTopLeftRadius: 75,
+    borderTopRightRadius: 75,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    borderStyle: 'dashed',
+    borderColor: color.whiteA45,
+  },
+  creatorHintText: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '800',
+    color: color.white,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 6,
+  },
+  styleBtn: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    borderRadius: radiusAdmin.pill,
+  },
+  styleBtnOn: {
+    backgroundColor: color.white,
+  },
+  styleDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+  },
+  styleDotClassic: {
+    backgroundColor: color.white,
+    borderWidth: 2,
+    borderColor: color.ink,
+  },
+  styleLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: color.white,
+  },
+  styleLabelOn: {
+    color: color.ink,
   },
   addTextBtn: {
     minHeight: 48,
@@ -1036,29 +1175,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  swatchRing: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  swatchRingOn: {
-    borderColor: color.white,
-  },
-  swatch: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  swatchIdle: {
-    borderWidth: 1.5,
-    borderColor: color.whiteA45,
   },
   trashWrap: {
     position: 'absolute',

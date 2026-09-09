@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import {
   Stack,
   useFocusEffect,
@@ -18,6 +18,7 @@ import {
   usePostTypeMeta,
 } from '../../../components/creator/PostCard';
 import { SlideNav } from '../../../components/creator/SlideNav';
+import { DetailSkeleton } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -215,10 +216,10 @@ export default function AssignmentDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loading}>
+      <>
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={color.accent} />
-      </View>
+        <DetailSkeleton />
+      </>
     );
   }
 
@@ -326,12 +327,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.white,
   },
-  loading: {
-    flex: 1,
-    backgroundColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   missing: {
     paddingHorizontal: 24,
     paddingTop: 12,
@@ -399,7 +394,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.ink900,
   },
   playCenter: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -76,7 +76,7 @@ export function ScoreDial({ score, label, size = 76 }: ScoreDialProps) {
 
 const styles = StyleSheet.create({
   center: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

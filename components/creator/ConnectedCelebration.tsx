@@ -260,7 +260,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   confettiLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   confetti: {
     position: 'absolute',

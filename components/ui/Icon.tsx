@@ -2,6 +2,15 @@ import {
   ArrowLeftRight,
   ArrowRight,
   AtSign,
+  Captions,
+  Crop,
+  Gauge,
+  Redo2,
+  Repeat,
+  Scissors,
+  Undo2,
+  Volume2,
+  VolumeX,
   Bell,
   CalendarDays,
   Camera,
@@ -11,6 +20,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  ChevronsUpDown,
+  ClipboardPaste,
   CircleAlert,
   CircleCheckBig,
   CircleUserRound,
@@ -22,6 +33,8 @@ import {
   GripVertical,
   Heart,
   House,
+  Image as ImageFrame,
+  ImagePlus,
   Images,
   Inbox,
   KeyRound,
@@ -32,14 +45,17 @@ import {
   MessageCircle,
   Mic,
   Music2,
+  Palette,
   Pause,
   Pencil,
   Play,
   Plus,
   RotateCcw,
   Send,
+  Search,
   Settings,
   Share2,
+  SlidersHorizontal,
   Shuffle,
   Sparkles,
   SwitchCamera,
@@ -51,7 +67,35 @@ import {
   Video,
   X,
   Zap,
+  ZapOff,
 } from 'lucide-react-native';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
+
+interface GlyphProps {
+  size: number;
+  color: string;
+  strokeWidth: number;
+}
+
+/** Lucide dropped brand marks in 1.x, so the Instagram glyph is drawn in the same stroke style. */
+function InstagramGlyph({ size, color, strokeWidth }: GlyphProps) {
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <Rect x={2} y={2} width={20} height={20} rx={5} ry={5} />
+      <Path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <Circle cx={17.5} cy={6.5} r={0.5} fill={color} />
+    </Svg>
+  );
+}
 
 const ICONS = {
   house: House,
@@ -62,7 +106,12 @@ const ICONS = {
   play: Play,
   pause: Pause,
   video: Video,
+  image: ImageFrame,
+  'image-plus': ImagePlus,
   images: Images,
+  'clipboard-paste': ClipboardPaste,
+  search: Search,
+  'sliders-horizontal': SlidersHorizontal,
   mic: Mic,
   clock: Clock,
   'calendar-days': CalendarDays,
@@ -77,6 +126,7 @@ const ICONS = {
   'chevron-left': ChevronLeft,
   'chevron-right': ChevronRight,
   'chevron-up': ChevronUp,
+  'chevrons-up-down': ChevronsUpDown,
   x: X,
   eye: Eye,
   flame: Flame,
@@ -84,6 +134,7 @@ const ICONS = {
   megaphone: Megaphone,
   heart: Heart,
   zap: Zap,
+  'zap-off': ZapOff,
   users: Users,
   inbox: Inbox,
   'key-round': KeyRound,
@@ -97,6 +148,7 @@ const ICONS = {
   'dollar-sign': DollarSign,
   download: Download,
   pencil: Pencil,
+  palette: Palette,
   send: Send,
   'switch-camera': SwitchCamera,
   'circle-check-big': CircleCheckBig,
@@ -104,10 +156,19 @@ const ICONS = {
   'trash-2': Trash2,
   'log-out': LogOut,
   settings: Settings,
-  /** Instagram stand-in */
   'at-sign': AtSign,
+  instagram: InstagramGlyph,
   /** TikTok stand-in */
   'music-2': Music2,
+  captions: Captions,
+  crop: Crop,
+  gauge: Gauge,
+  'redo-2': Redo2,
+  repeat: Repeat,
+  scissors: Scissors,
+  'undo-2': Undo2,
+  'volume-2': Volume2,
+  'volume-x': VolumeX,
 } as const;
 
 export type IconName = keyof typeof ICONS;

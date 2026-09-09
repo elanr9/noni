@@ -12,7 +12,13 @@ import { router, Stack } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 
 import { CopyChip } from '../../components/admin/approval/CopyChip';
-import { AdminScreen, PushHeader, SectionLabel } from '../../components/admin/shared';
+import {
+  AdminScreen,
+  PushHeader,
+  SectionLabel,
+  SkeletonCard,
+  SkeletonLine,
+} from '../../components/admin/shared';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -145,7 +151,12 @@ export default function AccountTemplateScreen() {
       />
 
       {loading ? (
-        <Text style={styles.loading}>Loading template…</Text>
+        <View style={styles.skeletons}>
+          <SkeletonLine width="88%" height={14} radius={6} />
+          <SkeletonLine width="64%" height={14} radius={6} />
+          <SkeletonCard height={140} />
+          <SkeletonCard height={140} />
+        </View>
       ) : (
         <>
           <Text style={styles.body}>
@@ -270,10 +281,8 @@ export default function AccountTemplateScreen() {
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
-    color: color.slate500,
+  skeletons: {
+    gap: 12,
   },
   body: {
     fontSize: type.size.chip,
