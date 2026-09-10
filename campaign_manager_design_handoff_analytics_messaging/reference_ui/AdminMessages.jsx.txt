@@ -1,0 +1,364 @@
+/* Messages, Slack-style. One inbox: the review queue on top (every post
+   waiting on you), then direct messages with creators and the team, then
+   channels. Every conversation is left-aligned with name and time, and posts
+   travel through it as cards: submitted, sent back with notes, take 2,
+   approved, live. Each post has its own thread. Creators moved out of the
+   tab bar: the Analytics header opens the list as a pushed screen. */
+
+const MSG_DATA = () => {
+  const A = window.NONI_ADMIN;
+  const c = (id) => A.creators.find((x) => x.id === id);
+  const s = (id) => A.submissions.find((x) => x.id === id);
+  return {
+    dms: [
+      { id: 'd-c2', kind: 'creator', who: c('c2'), last: 'Both up. Take 2 on the winger one, the rail was buzzing on take 1.', time: '18:03', unread: 2, online: true },
+      { id: 'd-c1', kind: 'creator', who: c('c1'), last: 'You: Approved. Posting Wednesday 5pm.', time: '07:41', unread: 0, online: true },
+      { id: 'd-m1', kind: 'member', who: window.TEAM_PEOPLE[1], last: 'Fabri’s tripod reel just crossed 400k. Pinning it to the library.', time: '09:02', unread: 1 },
+      { id: 'd-c3', kind: 'creator', who: c('c3'), last: 'Sent the slideshow, four slides like the brief said.', time: 'Mon', unread: 0 },
+      { id: 'd-m0', kind: 'member', who: window.TEAM_PEOPLE[0], last: 'Invoice for August is in the console.', time: 'Sat', unread: 0 },
+    ],
+    channels: window.SEED_CHANNELS.map((ch) => ({ ...ch, last: ch.last.replace(' — ', ', ').replace(' 🎉', '') })),
+    /* Mara's thread. Posts ride through it as cards. */
+    thread: [
+      { day: 'Monday' },
+      { from: c('c2'), time: '09:14', body: 'Field is booked till 6 today, I will shoot both after.' },
+      { from: 'me', time: '09:20', body: 'Works. The contrast one needs daylight, keep that first.' },
+      { from: 'me', time: '09:21', post: s('s4'), event: 'assigned', label: 'Assigned for Wednesday' },
+      { from: c('c2'), time: '18:02', body: 'Both up. Take 2 on the winger one, the rail was buzzing on take 1.' },
+      { from: c('c2'), time: '18:02', post: s('s3'), event: 'submitted', label: 'Submitted take 2 · 7 clips · 0:52', review: true },
+      { from: c('c2'), time: '18:03', media: 'image', body: 'Setup from today.' },
+      { day: 'Today' },
+      { from: 'me', time: '07:41', post: s('s4'), event: 'approved', label: 'Approved · posts Wed 5:00 PM' },
+    ],
+    /* One post's own thread: everything that happened to it. */
+    postThread: [
+      { from: 'me', time: 'Sun 21:10', event: 'assigned', label: 'Assigned to Mara for Tuesday' },
+      { from: c('c2'), time: 'Mon 14:30', event: 'submitted', label: 'Submitted take 1 · 7 clips · 0:55' },
+      { from: 'me', time: 'Mon 15:02', event: 'sent_back', label: 'Sent back · 2 notes', notes: [['Point 3', 'Audio clips at 0:04. Same setup, just move the phone off the fence rail.'], ['Outro', 'Say the plug slower.']] },
+      { from: c('c2'), time: 'Mon 15:10', body: 'Rail was buzzing. Reshooting Point 3 and the outro on the tripod.' },
+      { from: c('c2'), time: 'Mon 18:02', event: 'submitted', label: 'Submitted take 2 · 2 clips re-recorded', review: true },
+    ],
+  };
+};
+
+/* Left-aligned message row. Slack rhythm: avatar, name and time on one line,
+   body under it. Consecutive messages from one sender collapse the header. */
+function MsgRow({ m, prev, children }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const mine = m.from === 'me';
+  const name = mine ? 'You' : m.from.name;
+  const same = prev && !prev.day && prev.from === m.from;
+  return (
+    <div style={{ display: 'flex', gap: 10, padding: same ? '2px 0 0 0' : '10px 0 0 0' }}>
+      <span style={{ width: 34, flex: '0 0 auto' }}>{!same ? <Avatar name={mine ? 'You' : m.from.name} size={34} tone={mine || m.from.role ? 'quiet' : 'brand'} /> : null}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {!same ? <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}><span style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{name}</span><span style={{ font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{m.time}</span></div> : null}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const EVENT_TONE = { assigned: ['layout-list', 'var(--fill-quiet)', 'var(--slate-500)'], submitted: ['inbox', 'var(--blue-100)', 'var(--blue-700)'], sent_back: ['rotate-ccw', 'var(--amber-soft)', 'var(--amber)'], approved: ['check', 'var(--green-soft)', 'var(--green)'], live: ['trending-up', 'var(--green-soft)', 'var(--green)'] };
+
+/* A post inside a conversation. Tap opens its thread; Review jumps straight
+   into the review screen for that submission. */
+function PostCard({ post, event, label, notes, review, onReview, onOpen, compact = false }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const [icon, bg, fg] = EVENT_TONE[event] || EVENT_TONE.assigned;
+  return (
+    <div style={{ marginTop: 6, border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--white)', boxShadow: 'var(--shadow-card)', overflow: 'hidden', maxWidth: 320 }}>
+      <button type="button" onClick={onOpen} style={{ display: 'flex', gap: 10, alignItems: 'center', width: '100%', padding: 10, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+        <Thumb format={post.format} w={40} h={54} radius={8} cover={post.cover} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: '700 13.5px/1.3 var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{post.title}</div>
+          <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px 3px 6px', borderRadius: 999, background: bg, color: fg, font: '700 11px var(--font-ui)', whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}><Icon name={icon} size={11} strokeWidth={2.5} />{label}</div>
+        </div>
+        <Icon name="chevron-right" size={16} color="var(--slate-300)" />
+      </button>
+      {notes ? (
+        <div style={{ margin: '0 10px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {notes.map(([k, v]) => <div key={k} style={{ display: 'flex', gap: 8, padding: '7px 9px', borderRadius: 8, background: 'var(--off-white)' }}><span style={{ flex: '0 0 auto', minWidth: 46, font: '700 11px var(--font-ui)', color: 'var(--blue-700)', marginTop: 1 }}>{k}</span><span style={{ font: '500 12.5px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{v}</span></div>)}
+        </div>
+      ) : null}
+      {review && !compact ? <div style={{ padding: '0 10px 10px' }}><Button size="sm" variant="primary" icon="eye" block onClick={onReview}>Review now</Button></div> : null}
+    </div>
+  );
+}
+
+function Composer({ placeholder, onAttach }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ flex: '0 0 auto', padding: `10px ${window.GUT}px 26px`, borderTop: '1px solid var(--line)', background: 'var(--white)', display: 'flex', gap: 9, alignItems: 'center' }}>
+      <button type="button" onClick={onAttach} aria-label="Attach a post or photo" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={20} color="var(--slate-500)" /></button>
+      <div style={{ flex: 1, padding: '12px 15px', borderRadius: 999, background: 'var(--fill-quiet)', font: '400 15px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{placeholder}</div>
+      <button type="button" aria-label="Send" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-500)', boxShadow: 'var(--shadow-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={18} color="var(--white)" /></button>
+    </div>
+  );
+}
+
+function DayDivider({ label }) {
+  return <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 0 2px' }}><span style={{ flex: 1, height: 1, background: 'var(--line)' }} /><span style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--slate-400)' }}>{label}</span><span style={{ flex: 1, height: 1, background: 'var(--line)' }} /></div>;
+}
+
+/* Inbox */
+function AdminMessagesScreen({ state = 'default', filter: filter0 = 'All', onOpenChat, onOpenChannel, onReview, onOpenPost, onNew }) {
+  const { Icon, EmptyState } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const D = MSG_DATA();
+  const [filter, setFilter] = React.useState(filter0);
+  const [q, setQ] = React.useState('');
+  const [open, setOpen] = React.useState({ review: true, dms: true, channels: true });
+  const [channelsX, setChannelsX] = React.useState([]);
+  const [creating, setCreating] = React.useState(state === 'newChannel');
+  const [chName, setChName] = React.useState(state === 'newChannel' ? 'slideshows' : '');
+  const [chWho, setChWho] = React.useState(new Set(['cm2', 'ad1']));
+  const [chCreators, setChCreators] = React.useState(false);
+  const addChannel = () => {
+    const n = chName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    if (!n) return;
+    setChannelsX([{ id: 'chx' + Date.now(), name: n, last: 'You created this channel.', unread: 0, members: chWho.size + 1 }, ...channelsX]);
+    setChName(''); setCreating(false); setChCreators(false);
+  };
+  const loading = state === 'loading';
+  const empty = state === 'empty';
+  const queue = empty ? [] : A.submissions;
+  const dms = empty ? [] : D.dms.filter((d) => filter === 'All' || (filter === 'Unread' ? d.unread : filter === 'Creators' ? d.kind === 'creator' : d.kind === 'member')).filter((d) => !q || d.who.name.toLowerCase().includes(q.toLowerCase()));
+  const channels = empty ? [] : channelsX.concat(D.channels).filter((ch) => (filter === 'All' || filter === 'Channels' || (filter === 'Unread' && ch.unread)) && (!q || ch.name.includes(q.toLowerCase())));
+  const unread = D.dms.reduce((n, d) => n + d.unread, 0) + D.channels.reduce((n, c) => n + c.unread, 0);
+  const cr = (id) => A.creators.find((x) => x.id === id);
+  const Head = ({ k, label, count, right }) => (
+    <button type="button" onClick={() => setOpen({ ...open, [k]: !open[k] })} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '14px 2px 6px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+      <Icon name="chevron-down" size={14} color="var(--slate-400)" style={{ transform: open[k] ? 'none' : 'rotate(-90deg)', transition: 'transform var(--dur-fast) var(--ease-out)' }} />
+      <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{label}</span>
+      {count ? <span style={{ font: '700 12px var(--font-ui)', color: 'var(--blue-700)' }}>{count}</span> : null}{right}
+    </button>
+  );
+  const Row = ({ lead, title, sub, time, unread, onClick, last }) => (
+    <button type="button" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '10px 12px', border: 'none', borderBottom: last ? 'none' : '1px solid var(--line)', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+      {lead}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}><span style={{ flex: 1, minWidth: 0, font: `700 14.5px var(--font-display)`, letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span><span style={{ flex: '0 0 auto', font: '600 11.5px var(--font-ui)', color: unread ? 'var(--blue-700)' : 'var(--slate-400)' }}>{time}</span></div>
+        <div style={{ marginTop: 2, font: `${unread ? 600 : 500} 13px var(--font-ui)`, color: unread ? 'var(--ink)' : 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>
+      </div>
+      {unread ? <span style={{ flex: '0 0 auto', minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'var(--blue-500)', color: 'var(--white)', font: '700 11px/20px var(--font-ui)', textAlign: 'center' }}>{unread}</span> : null}
+    </button>
+  );
+
+  return (
+    <AdminScreen gap={0}>
+      <AdminHeader title="Messages" subtitle={loading ? null : unread ? `${unread} unread · ${queue.length} to review` : 'All caught up'}
+        right={<button type="button" onClick={onNew} aria-label="New message" style={{ width: 38, height: 38, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={18} color="var(--ink)" /></button>} />
+      {!loading && !empty ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 10 }}>
+          <label style={{ height: 40, display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderRadius: 999, background: 'var(--fill-quiet)' }}>
+            <Icon name="search" size={15} color="var(--slate-400)" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people, posts, channels" style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', font: '500 14px var(--font-ui)', color: 'var(--ink)', padding: 0 }} />
+          </label>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+            {['All', 'Unread', 'Creators', 'Team', 'Channels'].map((l) => { const on = filter === l; return <button key={l} type="button" onClick={() => setFilter(l)} aria-pressed={on} style={{ flex: '0 0 auto', height: 32, padding: '0 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: on ? 'var(--blue-500)' : 'var(--fill-quiet)', color: on ? 'var(--white)' : 'var(--slate-500)', font: '700 12.5px var(--font-ui)', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>{l}</button>; })}
+          </div>
+        </div>
+      ) : null}
+      {loading ? <div style={{ paddingTop: 12 }}><SkeletonRows n={6} height={66} gap={8} /></div> : null}
+      {!loading && empty ? <EmptyState icon="message-circle" title="No messages yet" body="Threads with creators open the moment a brief is assigned. Posts waiting on your review show up here first." style={{ marginTop: 40 }} /> : null}
+
+      {!loading && !empty && (filter === 'All' || filter === 'Unread') && queue.length ? (
+        <>
+          <Head k="review" label="Waiting on you" count={queue.length} />
+          {open.review ? (
+            <Card pad={0} style={{ overflow: 'hidden' }}>
+              {queue.map((s, i) => (
+                <Row key={s.id} last={i === queue.length - 1} onClick={() => onReview && onReview(s)} unread={0} time={s.age} title={s.title}
+                  lead={<Thumb format={s.format} w={36} h={48} radius={8} cover={s.cover} />}
+                  sub={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ color: 'var(--ink)', fontWeight: 600 }}>{cr(s.creator).short}</span>· {s.typeLabel} · {s.duration}{s.attempt > 1 ? <span style={{ padding: '1px 6px', borderRadius: 999, background: 'var(--amber-soft)', color: 'var(--amber)', font: '700 10px var(--font-ui)' }}>Take {s.attempt}</span> : null}</span>} />
+              ))}
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+
+      {!loading && !empty && filter !== 'Channels' && dms.length ? (
+        <>
+          <Head k="dms" label="Direct messages" />
+          {open.dms ? (
+            <Card pad={0} style={{ overflow: 'hidden' }}>
+              {dms.map((d, i) => (
+                <Row key={d.id} last={i === dms.length - 1} onClick={() => onOpenChat && onOpenChat(d.who)} unread={d.unread} time={d.time} sub={d.last}
+                  title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{d.who.name}{d.kind === 'member' ? <span style={{ font: '700 10.5px var(--font-ui)', color: 'var(--slate-400)' }}>{d.who.role}</span> : null}</span>}
+                  lead={<span style={{ position: 'relative', display: 'inline-flex' }}><Avatar name={d.who.name} size={40} tone={d.kind === 'creator' ? 'brand' : 'quiet'} />{d.online ? <span style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: 999, background: 'var(--green)', boxShadow: '0 0 0 2px var(--white)' }} /> : null}</span>} />
+              ))}
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+
+      {!loading && !empty && filter !== 'Creators' && filter !== 'Team' && channels.length ? (
+        <>
+          <Head k="channels" label="Channels" right={<span role="button" aria-label="New channel" onClick={(e) => { e.stopPropagation(); setCreating(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', margin: '-4px 0', borderRadius: 999, background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 11.5px var(--font-ui)' }}><Icon name="plus" size={12} strokeWidth={2.5} />New</span>} />
+          {open.channels ? (
+            <Card pad={0} style={{ overflow: 'hidden' }}>
+              {channels.map((ch, i) => (
+                <Row key={ch.id} last={i === channels.length - 1} onClick={() => onOpenChannel && onOpenChannel(ch)} unread={ch.unread} time={ch.id.startsWith('chx') ? 'Now' : ch.id === 'ch1' ? '08:44' : ch.id === 'ch2' ? 'Yesterday' : 'Sun'} title={`#${ch.name}`} sub={ch.last}
+                  lead={<span style={{ width: 40, height: 40, flex: '0 0 auto', borderRadius: 12, background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '700 18px var(--font-display)', color: 'var(--slate-500)' }}>#</span>} />
+              ))}
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+      {!loading && !empty && !dms.length && !channels.length && !((filter === 'All' || filter === 'Unread') && queue.length) ? <p style={{ margin: '40px 0', textAlign: 'center', font: '500 14px var(--font-ui)', color: 'var(--slate-400)' }}>Nothing here</p> : null}
+
+      {creating ? (
+        <Sheet title="New channel" subtitle="Pick who is in it. You can add creators too." onClose={() => setCreating(false)} maxHeight="78%"
+          footer={<window.NoniDesignSystem_710e43.Button variant="primary" size="lg" block disabled={!chName.trim()} onClick={addChannel}>Create #{chName.trim().toLowerCase().replace(/\s+/g, '-') || 'channel'}</window.NoniDesignSystem_710e43.Button>}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${chName ? 'var(--blue-500)' : 'var(--border-strong)'}` }}>
+            <span style={{ font: '700 16px var(--font-display)', color: 'var(--slate-400)' }}>#</span>
+            <input autoFocus value={chName} onChange={(e) => setChName(e.target.value)} placeholder="channel-name" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', font: '600 15px var(--font-ui)', color: 'var(--ink)' }} />
+          </div>
+          <SectionLabel style={{ padding: '16px 2px 8px' }}>Team</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {window.TEAM_PEOPLE.filter((p) => !p.you).map((p) => { const on = chWho.has(p.id); return (
+              <button key={p.id} type="button" onClick={() => { const n = new Set(chWho); on ? n.delete(p.id) : n.add(p.id); setChWho(n); }} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 48, padding: '0 12px', border: 'none', borderRadius: 10, background: on ? 'var(--blue-100)' : 'var(--fill-quiet)', color: on ? 'var(--blue-700)' : 'var(--ink)', cursor: 'pointer', textAlign: 'left', font: '700 14px var(--font-ui)' }}>
+                <span style={{ width: 18, height: 18, borderRadius: 5, flex: '0 0 auto', background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--border-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={12} color="var(--white)" strokeWidth={3} /> : null}</span>
+                <span style={{ flex: 1 }}>{p.name}</span><span style={{ font: '600 12px var(--font-ui)', color: on ? 'var(--blue-700)' : 'var(--slate-400)' }}>{p.role}</span>
+              </button>); })}
+          </div>
+          <SectionLabel style={{ padding: '16px 2px 8px' }}>Creators</SectionLabel>
+          <button type="button" onClick={() => setChCreators(!chCreators)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 48, padding: '0 12px', border: 'none', borderRadius: 10, background: chCreators ? 'var(--blue-100)' : 'var(--fill-quiet)', color: chCreators ? 'var(--blue-700)' : 'var(--ink)', cursor: 'pointer', textAlign: 'left', font: '700 14px var(--font-ui)', marginBottom: 8 }}>
+            <span style={{ width: 18, height: 18, borderRadius: 5, flex: '0 0 auto', background: chCreators ? 'var(--blue-500)' : 'var(--white)', border: chCreators ? 'none' : '1.5px solid var(--border-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{chCreators ? <Icon name="check" size={12} color="var(--white)" strokeWidth={3} /> : null}</span>
+            <span style={{ flex: 1 }}>Let all approved creators in</span><span style={{ font: '600 12px var(--font-ui)', color: chCreators ? 'var(--blue-700)' : 'var(--slate-400)' }}>{A.creators.filter((c) => c.status === 'approved').length}</span>
+          </button>
+        </Sheet>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* A creator's thread. Slack rows, posts as cards, day dividers. The header
+   carries the creator's live state so you never leave to check it. */
+function ThreadScreen({ creator, onBack, onReview, onOpenPost, onProfile }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const D = MSG_DATA();
+  const isMember = !!creator.role;
+  const msgs = isMember ? [{ day: 'Today' }, { from: creator, time: '08:44', body: D.dms.find((d) => d.who === creator).last }, { from: 'me', time: '08:51', body: 'On it. Two posts and a song check left in the queue.' }] : D.thread;
+  const [attach, setAttach] = React.useState(false);
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--white)' }}>
+      <div style={{ flex: '0 0 auto', paddingTop: 4, borderBottom: '1px solid var(--line)', background: 'var(--white)' }}>
+        <PushHeader title={creator.name} meta={isMember ? creator.role : `@${creator.tiktok} · 2 posts in review · 3 live this week`} onBack={onBack} style={{ background: 'transparent' }}
+          right={!isMember ? <button type="button" onClick={onProfile} aria-label="Profile" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', display: 'inline-flex' }}><Avatar name={creator.name} size={34} /></button> : null} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `4px ${window.GUT}px 16px` }}>
+        {msgs.map((m, i) => {
+          if (m.day) return <DayDivider key={i} label={m.day} />;
+          return (
+            <MsgRow key={i} m={m} prev={msgs[i - 1]}>
+              {m.body ? <p style={{ margin: '2px 0 0', font: '400 14.5px/1.45 var(--font-ui)', color: 'var(--ink)' }}>{m.body}</p> : null}
+              {m.post ? <PostCard post={m.post} event={m.event} label={m.label} review={m.review} onReview={() => onReview && onReview(m.post)} onOpen={() => onOpenPost && onOpenPost(m.post)} /> : null}
+              {m.media ? <div style={{ marginTop: 6, width: 168, height: 118, borderRadius: 12, background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="images" size={22} color="var(--blue-300)" /></div> : null}
+            </MsgRow>
+          );
+        })}
+      </div>
+      {attach ? (
+        <div style={{ display: 'flex', gap: 8, padding: `10px ${window.GUT}px 0`, borderTop: '1px solid var(--line)', background: 'var(--white)' }}>
+          {[['layout-list', 'A post'], ['images', 'Photo'], ['camera', 'Camera']].map(([icon, label]) => <button key={label} type="button" onClick={() => setAttach(false)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '11px 0', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', background: 'var(--blue-50)', font: '700 12px var(--font-ui)', color: 'var(--blue-700)' }}><Icon name={icon} size={18} color="var(--blue-600)" />{label}</button>)}
+        </div>
+      ) : null}
+      <Composer placeholder={`Message ${creator.short || creator.name.split(' ')[0]}`} onAttach={() => setAttach(!attach)} />
+    </div>
+  );
+}
+
+/* One post, its whole life. Header is the post; body is every event and
+   message about it; Review is one tap when a take is waiting. */
+function PostThreadScreen({ post, creator, onBack, onReview }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const D = MSG_DATA();
+  const msgs = D.postThread;
+  const waiting = msgs.some((m) => m.review);
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--white)' }}>
+      <div style={{ flex: '0 0 auto', paddingTop: 4, borderBottom: '1px solid var(--line)', background: 'var(--white)' }}>
+        <PushHeader title={post.title} meta={`${creator.name} · ${post.typeLabel} · ${window.formatLabel(post.format)}`} onBack={onBack} style={{ background: 'transparent' }} right={<Thumb format={post.format} w={34} h={46} radius={8} cover={post.cover} />} />
+      </div>
+      {waiting ? (
+        <div style={{ flex: '0 0 auto', margin: `10px ${window.GUT}px 0`, padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="inbox" size={16} color="var(--blue-600)" />
+          <span style={{ flex: 1, font: '600 13px var(--font-ui)', color: 'var(--ink)' }}>Take {post.attempt} is waiting on you</span>
+          <Button size="sm" variant="primary" onClick={() => onReview && onReview(post)}>Review</Button>
+        </div>
+      ) : null}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `4px ${window.GUT}px 16px` }}>
+        {msgs.map((m, i) => (
+          <MsgRow key={i} m={m} prev={msgs[i - 1]}>
+            {m.body ? <p style={{ margin: '2px 0 0', font: '400 14.5px/1.45 var(--font-ui)', color: 'var(--ink)' }}>{m.body}</p> : null}
+            {m.event ? (() => { const [icon, bg, fg] = EVENT_TONE[m.event]; return (
+              <div style={{ marginTop: 4 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px 4px 7px', borderRadius: 999, background: bg, color: fg, font: '700 12px var(--font-ui)' }}><Icon name={icon} size={12} strokeWidth={2.5} />{m.label}</span>
+                {m.notes ? <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>{m.notes.map(([k, v]) => <div key={k} style={{ display: 'flex', gap: 8, padding: '8px 10px', borderRadius: 10, background: 'var(--off-white)', borderLeft: '3px solid var(--blue-300)' }}><span style={{ flex: '0 0 auto', minWidth: 46, font: '700 11px var(--font-ui)', color: 'var(--blue-700)', marginTop: 1 }}>{k}</span><span style={{ font: '500 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{v}</span></div>)}</div> : null}
+              </div>); })() : null}
+          </MsgRow>
+        ))}
+      </div>
+      <Composer placeholder={`Reply about this post`} />
+    </div>
+  );
+}
+
+/* Pushed from the Analytics header. */
+function CreatorsList({ state = 'default', onBack, onOpen }) {
+  const { Icon, EmptyState } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [sort, setSort] = React.useState(0);
+  const loading = state === 'loading';
+  const list = state === 'empty' ? [] : A.creators.filter((c) => c.status === 'approved');
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--off-white)' }}>
+      <PushHeader title="Creators" meta={loading ? null : `${list.length} approved`} onBack={onBack} />
+      <AdminScreen gap={12} style={{ flex: 1 }}>
+        {loading ? <SkeletonRows n={3} height={112} /> : null}
+        {!loading && !list.length ? <EmptyState icon="users" title="No creators yet" body="Invite from Settings. They upload warm-up proof, you approve, then briefs start landing." style={{ marginTop: 40 }} /> : null}
+        {!loading && list.length ? (
+          <>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['Earnings', 'Views', 'Posts'].map((s, i) => <button key={s} type="button" onClick={() => setSort(i)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: sort === i ? 'var(--blue-100)' : 'var(--white)', boxShadow: sort === i ? 'none' : 'var(--shadow-card)', color: sort === i ? 'var(--blue-700)' : 'var(--slate-500)', font: '700 12px var(--font-ui)' }}>{sort === i ? <Icon name="trending-up" size={12} /> : null}{s}</button>)}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {list.map((c) => (
+                <Card key={c.id} pad={14} onClick={() => onOpen && onOpen(c)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Avatar name={c.name} size={44} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{c.name}</div>
+                      <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{c.tiktok}</div>
+                    </div>
+                    <Icon name="chevron-right" size={18} color="var(--slate-300)" />
+                  </div>
+                  <div style={{ marginTop: 13, display: 'flex', gap: 8 }}>
+                    {[[c.earned, 'earned'], [c.posts, 'posts'], [c.views, 'views']].map(([v, l]) => <div key={l} style={{ flex: 1, padding: '10px 11px', borderRadius: 'var(--radius-sm)', background: 'var(--off-white)' }}><div style={{ font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: l === 'earned' ? 'var(--green)' : 'var(--ink)' }}>{v}</div><div style={{ marginTop: 1, font: '600 11px var(--font-ui)', color: 'var(--slate-400)' }}>{l}</div></div>)}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </AdminScreen>
+    </div>
+  );
+}
+
+function CreatorsButton({ onClick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const list = window.NONI_ADMIN.creators.filter((c) => c.status === 'approved');
+  return (
+    <button type="button" onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 38, padding: '0 12px 0 6px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--white)', boxShadow: 'var(--shadow-card)', font: '700 13px var(--font-ui)', color: 'var(--ink)' }}>
+      <span style={{ display: 'inline-flex' }}>{list.slice(0, 3).map((c, i) => <span key={c.id} style={{ marginLeft: i ? -8 : 0, borderRadius: 999, boxShadow: '0 0 0 2px var(--white)', display: 'inline-flex' }}><Avatar name={c.name} size={26} /></span>)}</span>
+      {list.length} creators<Icon name="chevron-right" size={14} color="var(--slate-400)" />
+    </button>
+  );
+}
+
+const MSG_THREADS = () => MSG_DATA().dms.map((d) => ({ unread: d.unread })).concat(MSG_DATA().channels.map((c) => ({ unread: c.unread })));
+
+Object.assign(window, { AdminMessagesScreen, ThreadScreen, PostThreadScreen, PostCard, CreatorsList, CreatorsButton, MSG_THREADS, MSG_DATA });

@@ -1,0 +1,193 @@
+/* The four sheets the post editor opens, plus the Library picker it shares
+   with the Library tab. */
+
+function FillSheet({ onClose, animate, state = 'default' }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const [mode, setMode] = React.useState(0);
+  const working = state === 'working';
+  return (
+    <Sheet title="Fill this post" subtitle="Claim, then search phrase, then points. The hook is written last, against the finished body." onClose={onClose} animate={animate} maxHeight="76%"
+      footer={<Button variant="primary" size="lg" block icon="sparkles" disabled={working}>{working ? 'Writing the brief…' : 'Fill all fields'}</Button>}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Segmented items={['From a phrase', 'From a link']} active={mode} onSelect={setMode} />
+        {mode === 0 ? (
+          <div style={{ padding: 14, borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '400 15px/1.4 var(--font-ui)', color: 'var(--ink)' }}>why my winger fades after 70 minutes</div>
+        ) : (
+          <div style={{ padding: 14, borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '400 15px/1.4 var(--font-ui)', color: 'var(--slate-300)' }}>Paste a TikTok or Instagram link</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {[['Claim', 'Off-ball run tagging', true], ['Search phrase', 'why my winger fades after 70 minutes', true], ['Talking points', 'Five, set by the type', working], ['Hook', '8 to 10 options, best first', false], ['Caption and hashtags', 'Phrase in the first sentence', false]].map(([label, hint, on], i) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--off-white)' }}>
+              <span style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 999, background: on ? 'var(--blue-500)' : 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                {on ? <Icon name="check" size={12} color="var(--white)" /> : <span style={{ font: '700 10px var(--font-ui)', color: 'var(--slate-400)' }}>{i + 1}</span>}
+              </span>
+              <span style={{ flex: 1, font: '600 14px var(--font-ui)', color: 'var(--ink)' }}>{label}</span>
+              <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)', maxWidth: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hint}</span>
+            </div>
+          ))}
+        </div>
+        <p style={{ margin: '0 2px 4px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>
+          If a field cannot be filled with something concrete, the slot stays empty with the reason. Padding a post is worse than missing one.
+        </p>
+      </div>
+    </Sheet>
+  );
+}
+
+/* Camera roll. The admin picks the screenshot that pops up on a clip — a
+   real photo, never a generated graphic. */
+function ShotPickerSheet({ post, onClose, animate }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const [pick, setPick] = React.useState(2);
+  const shots = ['Today', 'Today', 'Yesterday', 'Yesterday', 'Aug 3', 'Aug 3', 'Aug 1', 'Jul 29', 'Jul 29'];
+  return (
+    <Sheet title="Camera roll" subtitle="Pick the screenshot or screen recording that pops up on this clip." onClose={onClose} animate={animate} maxHeight="78%"
+      footer={<Button variant="primary" size="lg" block onClick={onClose}>Use this screenshot</Button>}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {shots.map((when, i) => (
+          <button key={i} type="button" onClick={() => setPick(i)}
+            style={{ position: 'relative', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+            <Thumb format={post && !window.isReel(post.format) ? 'photo_carousel' : 'video'} w="100%" h={124} radius="var(--radius-md)"
+              style={{ outline: i === pick ? '2.5px solid var(--blue-500)' : 'none', outlineOffset: 2 }} />
+            <span style={{ position: 'absolute', left: 6, bottom: 6, padding: '2px 7px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 10px var(--font-ui)' }}>{when}</span>
+            {i === pick ? (
+              <span style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 999, background: 'var(--blue-500)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="check" size={12} color="var(--white)" />
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+/* Move — which clip or slide the screenshot pops up on. The slot list comes
+   from the type, so there is nothing to type in. */
+function MoveSheet({ post, onClose, animate }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const slots = (post && post.clipSlots) || window.NONI_ADMIN.post.clipSlots;
+  const [pick, setPick] = React.useState(3);
+  const slide = post && !window.isReel(post.format);
+  return (
+    <Sheet title={slide ? 'Move to slide' : 'Move to clip'} subtitle="Slots come from the post type. Count is never a field." onClose={onClose} animate={animate} maxHeight="70%"
+      footer={<Button variant="primary" size="lg" block onClick={onClose}>Move it here</Button>}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {slots.map((s, i) => {
+          const on = i === pick;
+          return (
+            <button key={s} type="button" onClick={() => setPick(i)}
+              style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 13, borderRadius: 'var(--radius-md)', cursor: 'pointer', border: `1.5px solid ${on ? 'var(--blue-500)' : 'transparent'}`, background: on ? 'var(--blue-50)' : 'var(--off-white)', textAlign: 'left' }}>
+              <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{s}</span>
+              {on ? <Icon name="check" size={17} color="var(--blue-600)" /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </Sheet>
+  );
+}
+
+/* Opens from inside a post, filtered to that post's type. Using an item marks
+   it used, never removes it. */
+function LibraryPickerSheet({ onClose, animate }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const L = window.NONI_ADMIN.library;
+  const [chip, setChip] = React.useState(0);
+  const items = chip === 0 ? L.refs : L.ours.filter((o) => window.isReel(o.format));
+  return (
+    <Sheet title="Pick an example" subtitle="Filtered to numbered list videos." onClose={onClose} animate={animate} maxHeight="80%"
+      footer={<Button variant="primary" size="lg" block onClick={onClose}>Attach to post</Button>}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Segmented items={['References', 'Our posts']} active={chip} onSelect={setChip} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {items.map((it, i) => (
+            <Card key={it.id} pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center', borderColor: i === 0 ? 'var(--blue-500)' : 'var(--border)' }}>
+              <Thumb format={it.format} w={44} h={58} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 14px/1.3 var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{it.title}</div>
+                <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <FormatChip format={it.format} size="sm" />
+                  <span style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{it.handle ? `@${it.handle}` : it.creator} · {it.views}</span>
+                </div>
+              </div>
+              {i === 0 ? <Icon name="check" size={18} color="var(--blue-600)" /> : null}
+            </Card>
+          ))}
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/* Story-style overlay editor — opens full screen on the clip or slide, like
+   composing a reel. Text mode drops you straight into a live textbox; media
+   mode places the screenshot or recording. Tools sit on the right rail. */
+function OverlayEditor({ post, mode = 'text', onClose }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const [color, setColor] = React.useState('var(--white)');
+  const [bg, setBg] = React.useState(true);
+  const [pick, setPick] = React.useState(1);
+  const text = mode === 'text';
+  const colors = ['var(--white)', 'var(--ink)', 'var(--blue-500)', 'var(--green)', 'var(--amber)'];
+  const contrast = color === 'var(--white)' || color === 'var(--amber)' ? 'var(--ink)' : 'var(--white)';
+  const positions = ['Full', 'Top left', 'Top right', 'Center'];
+  const mediaStyle = pick === 0 ? { inset: 0 }
+    : pick === 1 ? { top: 16, left: 16, width: '46%', height: '38%', borderRadius: 12 }
+    : pick === 2 ? { top: 16, right: 16, width: '46%', height: '38%', borderRadius: 12 }
+    : { top: '26%', left: '17%', width: '66%', height: '40%', borderRadius: 12 };
+  const rail = { width: 42, height: 42, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(16,22,29,0.45)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)' };
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: '#10161D', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <span style={{ position: 'absolute', overflow: 'hidden', opacity: text ? 0.4 : 1, ...(text ? { inset: 0 } : mediaStyle) }}>
+        <Thumb format={(post && post.format) || 'video'} w="100%" h="100%" radius={0} />
+      </span>
+      <span style={{ position: 'absolute', bottom: -34, left: '50%', transform: 'translateX(-50%)', opacity: text ? 0.25 : 0.55, pointerEvents: 'none' }}>
+        <Icon name="circle-user-round" size={130} color="var(--white)" />
+      </span>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', padding: '58px 16px 0' }}>
+        <button type="button" onClick={onClose} aria-label="Close" style={rail}><Icon name="x" size={18} color="var(--white)" /></button>
+        <span style={{ flex: 1 }}></span>
+        <button type="button" onClick={onClose} style={{ border: 'none', cursor: 'pointer', padding: '8px 14px', borderRadius: 999, background: 'rgba(16,22,29,0.45)', backdropFilter: 'blur(6px)', font: '800 15px var(--font-ui)', color: 'var(--white)' }}>Done</button>
+      </div>
+      <div style={{ position: 'absolute', right: 14, top: 122, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+        {text ? (
+          <>
+            <button type="button" aria-label="Text size" style={rail}><span style={{ font: '800 15px var(--font-ui)', color: 'var(--white)' }}>Aa</span></button>
+            <button type="button" onClick={() => setBg(!bg)} aria-label="Background behind text" aria-pressed={bg} style={{ ...rail, background: bg ? 'var(--white)' : 'rgba(16,22,29,0.45)' }}>
+              <span style={{ width: 20, height: 20, borderRadius: 5, border: bg ? 'none' : '1.5px solid var(--white)', background: bg ? 'var(--ink)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '800 12px var(--font-ui)', color: 'var(--white)' }}>A</span>
+            </button>
+            <button type="button" aria-label="Rewrite with AI" style={rail}><Icon name="sparkles" size={17} color="var(--white)" /></button>
+            <button type="button" aria-label="Delete text" style={rail}><Icon name="trash-2" size={17} color="var(--white)" /></button>
+          </>
+        ) : (
+          <>
+            <button type="button" aria-label="Swap media" style={rail}><Icon name="images" size={17} color="var(--white)" /></button>
+            <button type="button" aria-label="Green screen" style={{ ...rail, background: 'var(--green)' }}><Icon name="switch-camera" size={17} color="var(--white)" /></button>
+            <button type="button" aria-label="Add text" style={rail}><span style={{ font: '800 15px var(--font-ui)', color: 'var(--white)' }}>Aa</span></button>
+            <button type="button" aria-label="Remove media" style={rail}><Icon name="trash-2" size={17} color="var(--white)" /></button>
+          </>
+        )}
+      </div>
+      {text ? (
+        <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 56px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '9px 14px', borderRadius: 10, background: bg ? color : 'transparent', textShadow: bg ? 'none' : '0 1px 10px rgba(0,0,0,0.6)' }}>
+            <span style={{ font: '800 22px/1.25 var(--font-ui)', color: bg ? contrast : color, whiteSpace: 'nowrap' }}>Runs nobody plays</span>
+            <span style={{ width: 2.5, height: 24, borderRadius: 2, background: 'var(--blue-300)' }}></span>
+          </span>
+        </div>
+      ) : <div style={{ flex: 1 }}></div>}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 16px 34px' }}>
+        {text ? colors.map((c) => (
+          <button key={c} type="button" onClick={() => setColor(c)} aria-label={c} aria-pressed={color === c}
+            style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 9, cursor: 'pointer', background: c, border: 'none', boxShadow: color === c ? '0 0 0 2.5px var(--white)' : '0 0 0 1.5px rgba(255,255,255,0.45)' }}></button>
+        )) : positions.map((o, i) => (
+          <button key={o} type="button" onClick={() => setPick(i)} aria-pressed={pick === i}
+            style={{ flex: '0 0 auto', padding: '9px 13px', borderRadius: 999, border: 'none', cursor: 'pointer', background: pick === i ? 'var(--white)' : 'rgba(16,22,29,0.45)', color: pick === i ? 'var(--ink)' : 'var(--white)', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', backdropFilter: 'blur(6px)' }}>{o}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { FillSheet, ShotPickerSheet, MoveSheet, LibraryPickerSheet, OverlayEditor });

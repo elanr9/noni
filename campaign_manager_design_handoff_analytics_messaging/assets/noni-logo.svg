@@ -1,0 +1,12 @@
+<svg viewBox="0 0 160 160" width="160" height="160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Noni">
+<g transform="rotate(45 80 80) translate(20 2)">
+<path fill-rule="evenodd" fill="#8EC9F5" d="M60 8C78 28 85 54 85 80L85 104 35 104 35 80C35 54 42 28 60 8ZM74 58a14 14 0 1 1-28 0a14 14 0 1 1 28 0Z"></path>
+<path d="M35 76C22 86 17 100 17 114L37 102Z" fill="#8EC9F5"></path>
+<path d="M85 76C98 86 103 100 103 114L83 102Z" fill="#8EC9F5"></path>
+<g stroke="#8EC9F5" stroke-width="11" stroke-linecap="round" fill="none">
+<path d="M60 122L60 144"></path>
+<path d="M42 118L38 132"></path>
+<path d="M78 118L82 132"></path>
+</g>
+</g>
+</svg>

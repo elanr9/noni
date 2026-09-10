@@ -1,0 +1,467 @@
+/* Post editor, one form. Everything on one scroll: type, title, search
+   phrase, hook, clips (or slides), caption, song. Rows that need room open a
+   clean full screen for just that thing (a clip, the hook) and come back. */
+
+function Toggle({ on, onChange }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)} style={{ width: 44, height: 26, flex: '0 0 auto', borderRadius: 999, border: 'none', padding: 2, cursor: 'pointer', background: on ? 'var(--blue-500)' : 'var(--line-strong)', transition: 'background var(--dur-fast) var(--ease-out)', display: 'flex', alignItems: 'center' }}>
+      <span style={{ width: 22, height: 22, borderRadius: 999, background: 'var(--white)', boxShadow: '0 1px 3px rgba(15,23,32,0.25)', transform: on ? 'translateX(18px)' : 'translateX(0)', transition: 'transform var(--dur-fast) var(--ease-out)' }} />
+    </button>
+  );
+}
+
+function Spinner({ size = 14, color = 'var(--slate-500)' }) {
+  return <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 999, border: `2px solid ${color}`, borderRightColor: 'transparent', display: 'inline-block', animation: 'noni-spin 700ms linear infinite' }} />;
+}
+/* While the AI writes a field: a label pulse in the group row and shimmer
+   lines where the text will land. Text fades in on arrival. */
+function Writing() {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 11.5px var(--font-ui)', color: 'var(--blue-700)', animation: 'noni-pulse 1200ms ease-in-out infinite' }}><Icon name="sparkles" size={12} />Writing</span>;
+}
+function ShimmerLines({ lines = 1, w = '78%', big = false, inline = false }) {
+  const h = big ? 16 : 11;
+  const sh = { borderRadius: 999, background: 'linear-gradient(100deg,var(--blue-100) 30%,var(--blue-50) 50%,var(--blue-100) 70%)', backgroundSize: '220% 100%', animation: 'noni-shimmer 1400ms linear infinite' };
+  if (inline) return <span style={{ display: 'inline-block', width: w, height: 9, verticalAlign: 'middle', ...sh }} />;
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: big ? '17px 14px' : '16px 14px' }}>{Array.from({ length: lines }).map((_, i) => <span key={i} style={{ display: 'block', height: h, width: i === lines - 1 ? w : '92%', ...sh }} />)}</div>;
+}
+
+/* Field group: label row, then children in a white card. */
+function FormGroup({ label, right, children }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 2px 7px' }}>
+        <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)', whiteSpace: 'nowrap' }}>{label}</span>{right}
+      </div>
+      <Card pad={0} style={{ overflow: 'hidden' }}>{children}</Card>
+    </div>
+  );
+}
+
+function FormText({ value, onChange, placeholder, big = false, rows = 1 }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => { const el = ref.current; if (!el) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }, [value]);
+  return (
+    <textarea key={value ? 'v' : 'e'} ref={ref} value={value} onChange={(e) => onChange(e.target.value)} rows={rows} placeholder={placeholder}
+      style={{ display: 'block', animation: value ? 'noni-fade 320ms var(--ease-out) both' : 'none', width: '100%', boxSizing: 'border-box', border: 'none', outline: 'none', resize: 'none', background: 'transparent', padding: '13px 14px', overflow: 'hidden', font: big ? '700 19px/1.3 var(--font-display)' : '500 15px/1.45 var(--font-ui)', letterSpacing: big ? '-0.4px' : 0, color: 'var(--ink)' }} />
+  );
+}
+
+function FormRow({ icon, label, value, chip, onClick, last, right }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <button type="button" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 54, padding: '10px 14px', border: 'none', borderBottom: last ? 'none' : '1px solid var(--line)', background: 'transparent', cursor: onClick ? 'pointer' : 'default', textAlign: 'left' }}>
+      {icon ? <Icon name={icon} size={18} color="var(--slate-500)" /> : null}
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{label}</span>
+        {value ? <span style={{ display: 'block', marginTop: 2, font: '500 13px/1.35 var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span> : null}
+      </span>
+      {chip}{right}
+      {onClick ? <Icon name="chevron-right" size={17} color="var(--slate-300)" /> : null}
+    </button>
+  );
+}
+
+function PostEditor2({ format: format0 = 'video', screen: screen0 = null, song: song0 = false, state = 'empty', onBack, onDone }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const [kind, setKind] = React.useState(format0 === 'text7' ? 'text7' : window.isReel(format0) ? 'video' : 'slide');
+  const text7 = kind === 'text7';
+  const slide = kind === 'slide';
+  const format = slide ? 'photo_carousel' : 'video';
+  const P = slide ? window.NONI_ADMIN.slidePost : text7 ? { ...window.NONI_ADMIN.post, n: 5, type: 'text7', typeLabel: '7 second text', title: 'Juggling until the ball drops', hook: 'Bet you cannot read this before the ball drops', points: [], hookOptions: window.NONI_ADMIN.post.hookOptions } : window.NONI_ADMIN.post;
+  const [explain, setExplain] = React.useState(state === 'filled' && format0 === 'text7' ? 'Record yourself juggling a soccer ball for 7 seconds. Keep the ball in frame the whole time.' : '');
+  const [showExplain, setShowExplain] = React.useState(state === 'filled' && format0 === 'text7');
+  const blank = state !== 'filled';
+  const demoFill = state === 'filling';
+  const [title, setTitle] = React.useState(blank && !demoFill ? '' : P.title);
+  const [phrase, setPhrase] = React.useState(blank && !demoFill ? '' : P.phrase);
+  const [hook, setHook] = React.useState(blank && !demoFill ? '' : P.hook);
+  const [caption, setCaption] = React.useState(blank ? '' : P.caption);
+  const [tags, setTags] = React.useState(P.hashtags); /* the one thing that is filled on open */
+  const [song, setSong] = React.useState(song0);
+  const [fullGreen, setFullGreen] = React.useState(false);
+  const [hookShot, setHookShot] = React.useState(null);
+  const [links, setLinks] = React.useState({ tt: song0 ? 'tiktok.com/music/sunkissed-sped-up-7218' : '', ig: '' });
+  const [pasting, setPasting] = React.useState(null);
+  const [points, setPoints] = React.useState(demoFill ? P.points.map((pt, i) => i === 0 ? pt : { ...pt, text: '', shot: null, plug: false }) : blank ? (slide || (screen0 && screen0.key === 'new') ? [{ n: 1, text: '', shot: null, plug: false }] : []) : P.points);
+  const addClip = () => setPoints([...points, { n: Date.now(), text: '', shot: null, plug: false }]);
+  const removeClip = (i) => setPoints(points.filter((_, j) => j !== i));
+  const setPlug = (i, on) => setPoints(points.map((p, j) => ({ ...p, plug: j === i ? on : (on ? false : p.plug) })));
+  const hasPlug = points.some((p) => p.plug);
+  const [screen, setScreen] = React.useState(screen0 || (blank && state !== 'filling' ? { kind: 'type', first: true } : null));
+  const [filling, setFilling] = React.useState(state === 'filling' ? { stage: 'clip', i: 2, n: 5, pending: ['clip', 'caption'], done: ['title', 'phrase', 'hook'] } : null);
+  const fillTimer = React.useRef([]);
+  const stopFill = () => { fillTimer.current.forEach(clearTimeout); fillTimer.current = []; setFilling(null); };
+  const unit = slide ? 'Slide' : 'Clip';
+  const clips = slide ? points.map((p, i) => ({ key: 'p' + p.n, label: `Slide ${i + 1}`, short: String(i + 1), text: p.text, shot: p.shot, plug: p.plug, idx: i })) : text7 ? [
+    { key: 'hook', label: 'The clip', short: 'Clip', text: hook, shot: hookShot, idx: -1 },
+  ] : [
+    { key: 'hook', label: 'Hook', short: 'Hook', text: hook, shot: hookShot, idx: -1 },
+    ...points.map((p, i) => ({ key: 'p' + p.n, label: `Clip ${i + 1}`, short: 'C' + (i + 1), text: p.text, shot: p.shot, plug: p.plug, idx: i })),
+  ];
+  const filled = clips.filter((c) => c.text).length;
+  const paste = async (k) => {
+    setPasting(k);
+    let v = ''; try { v = (await navigator.clipboard.readText()) || ''; } catch (e) { v = ''; }
+    if (!/tiktok\.com|instagram\.com/i.test(v)) v = k === 'tt' ? 'tiktok.com/music/sunkissed-sped-up-7218' : 'instagram.com/reels/audio/9912';
+    setTimeout(() => { setLinks((l) => ({ ...l, [k]: v.replace(/^https?:\/\/(www\.)?/, '') })); setPasting(null); }, 400);
+  };
+  const written = [title && 'title', phrase && 'search phrase', hook && 'hook', caption && 'caption', points.some((p) => p.text) && 'clips'].filter(Boolean);
+  /* Progressive fill: fields land one at a time, in reading order, each with
+     its own shimmer while pending. Typed fields are skipped. Stop keeps what
+     has landed. */
+  const fill = (source) => {
+    setScreen(null);
+    const targetPoints = text7 ? [] : (points.length ? points : P.points.map((pt) => ({ ...pt, text: '' })));
+    if (!points.length && !text7) setPoints(targetPoints);
+    const steps = [];
+    if (!title) steps.push({ stage: 'title', run: () => setTitle(source && source.lane === 'ideas' && source.body ? source.body.replace(/\.$/, '') : P.title) });
+    if (!phrase) steps.push({ stage: 'phrase', run: () => setPhrase(P.phrase) });
+    if (!hook) steps.push({ stage: 'hook', run: () => setHook(P.hook) });
+    targetPoints.forEach((pt, i) => { if (!pt.text) steps.push({ stage: 'clip', i: i + 1, n: targetPoints.length, run: () => setPoints((ps) => ps.map((x, j) => j === i ? { ...x, text: (P.points[i] || {}).text || '', plug: (P.points[i] || {}).plug || false, shot: (P.points[i] || {}).shot || null } : x)) }); });
+    if (!caption) steps.push({ stage: 'caption', run: () => setCaption(P.caption) });
+    if (!steps.length) return;
+    const pendingOf = (k) => [...new Set(steps.slice(k).map((st) => st.stage))];
+    setFilling({ ...steps[0], pending: pendingOf(0), done: [] });
+    steps.forEach((st, k) => {
+      const t = setTimeout(() => {
+        st.run();
+        const next = steps[k + 1];
+        if (next) setFilling({ ...next, pending: pendingOf(k + 1), done: [...new Set(steps.slice(0, k + 1).map((x) => x.stage))] });
+        else { setFilling({ stage: 'done', pending: [], done: [] }); fillTimer.current.push(setTimeout(() => setFilling(null), 1200)); }
+      }, 700 + k * 650);
+      fillTimer.current.push(t);
+    });
+  };
+  const pend = (k) => filling && filling.stage !== 'done' && filling.pending.includes(k);
+  const fillLabel = !filling ? '' : filling.stage === 'done' ? 'Done' : filling.stage === 'title' ? 'Writing the title' : filling.stage === 'phrase' ? 'Finding the search phrase' : filling.stage === 'hook' ? 'Writing the hook' : filling.stage === 'clip' ? `Writing clip ${filling.i} of ${filling.n}` : 'Writing the caption';
+  const fillPct = !filling ? 0 : filling.stage === 'done' ? 100 : Math.round((filling.done.length / (filling.done.length + filling.pending.length)) * 100);
+
+  if (screen && screen.kind === 'clip') {
+    const c = clips.find((x) => x.key === screen.key) || clips[clips.length - 1];
+    return <Trans k={'clip' + c.key}><ClipScreen clip={c} unit={unit} slide={slide} post={P} onBack={() => setScreen(null)} onOptions={() => setScreen({ kind: 'hook' })}
+      onChange={(text) => { if (c.idx >= 0) setPoints(points.map((p, i) => i === c.idx ? { ...p, text } : p)); else if (c.idx === -1) setHook(text); }}
+      onShot={(shot) => { if (c.idx >= 0) setPoints(points.map((p, i) => i === c.idx ? { ...p, shot } : p)); else setHookShot(shot); }}
+      plugTaken={hasPlug && !c.plug} onPlug={(on) => { if (c.idx >= 0) setPlug(c.idx, on); }} fullGreen={fullGreen}
+      onRemove={c.idx >= 0 && (slide ? points.length > 1 : true) ? () => { removeClip(c.idx); setScreen(null); } : null}
+      onPrev={c.key !== clips[0].key ? () => setScreen({ kind: 'clip', key: clips[clips.findIndex((x) => x.key === c.key) - 1].key }) : null}
+      onNext={c.key !== clips[clips.length - 1].key ? () => setScreen({ kind: 'clip', key: clips[clips.findIndex((x) => x.key === c.key) + 1].key }) : null} text7={text7} explain={explain} /></Trans>;
+  }
+  if (screen && screen.kind === 'hook') return <Trans k="hook"><HookScreen post={P} value={hook} onPick={(h) => { setHook(h); setScreen({ kind: 'clip', key: 'hook' }); }} onBack={() => setScreen({ kind: 'clip', key: 'hook' })} /></Trans>;
+
+  return (
+    <Trans k="form"><AdminScreen bottom={110} pad={false} footer={
+      <ActionBar>
+        {filling ? <>
+          <Button variant="ghost" size="md" onClick={stopFill} style={{ flex: '0 0 30%' }}>{filling.stage === 'done' ? 'Close' : 'Stop'}</Button>
+          <div style={{ flex: 1, position: 'relative', height: 48, borderRadius: 999, overflow: 'hidden', background: 'var(--blue-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, font: '700 15px var(--font-ui)', color: 'var(--blue-700)' }}>
+            <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: fillPct + '%', background: 'var(--blue-200)', transition: 'width 500ms var(--ease-out)' }} />
+            <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }}>{filling.stage === 'done' ? <Icon name="check" size={17} strokeWidth={2.5} /> : <Spinner size={15} color="var(--blue-700)" />}{fillLabel}</span>
+          </div>
+        </> : <>
+        <Button variant="outline" size="md" icon="sparkles" onClick={() => setScreen({ kind: 'fill' })} style={{ flex: '0 0 44%', whiteSpace: 'nowrap' }}>{written.length ? 'Finish with AI' : 'Fill with AI'}</Button>
+        <Button variant="primary" size="md" icon="check" block onClick={onDone} style={{ flex: 1 }}>Save post</Button>
+        </>}
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18, padding: '0 0 110px' }}>
+        <PushHeader title={`Post ${String(P.n).padStart(2, '0')}`} meta={`${P.typeLabel} · ${text7 ? '7 seconds' : window.formatLabel(format)} · Week 1, slot ${P.n}`} onBack={onBack}
+          right={<button type="button" onClick={() => setScreen({ kind: 'type' })} style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}><PostTypeChip type={P.type}>{P.typeLabel}</PostTypeChip></button>} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          <FormGroup label="Title" right={pend('title') ? <Writing /> : null}>
+            {pend('title') ? <ShimmerLines big /> : <FormText big value={title} onChange={setTitle} placeholder="Untitled post" />}
+          </FormGroup>
+
+          {showExplain || explain ? (
+            <FormGroup label="What to record" right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ font: '700 11.5px var(--font-ui)', color: 'var(--slate-400)' }}>Optional</span><button type="button" onClick={() => { setExplain(''); setShowExplain(false); }} aria-label="Remove" style={{ display: 'inline-flex', padding: 2, border: 'none', background: 'transparent', cursor: 'pointer' }}><Icon name="x" size={14} color="var(--slate-400)" /></button></span>}>
+              <FormText value={explain} onChange={setExplain} rows={2} placeholder={text7 ? 'e.g. Record yourself juggling a soccer ball for 7 seconds' : 'What the creator needs to understand before they record'} />
+            </FormGroup>
+          ) : (
+            <button type="button" onClick={() => setShowExplain(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', whiteSpace: 'nowrap', marginTop: -8, padding: '6px 2px', border: 'none', background: 'transparent', cursor: 'pointer', font: '700 13px var(--font-ui)', color: 'var(--blue-700)' }}><Icon name="plus" size={14} strokeWidth={2.5} />Add what to record</button>
+          )}
+
+          <FormGroup label="Search phrase" right={pend('phrase') ? <Writing /> : null}>
+            {pend('phrase') ? <ShimmerLines w="58%" /> : <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 14 }}>
+              <Icon name="search" size={16} color="var(--slate-400)" />
+              <input value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="What people type into TikTok" style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', padding: '14px 14px 14px 6px', font: '500 15px var(--font-ui)', color: 'var(--ink)' }} />
+            </div>}
+          </FormGroup>
+
+          <FormGroup label={slide ? 'Slides' : text7 ? 'Clip' : 'Clips'} right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+            {text7 ? <span style={{ font: '700 11.5px var(--font-ui)', whiteSpace: 'nowrap', color: 'var(--slate-400)' }}>7 seconds, one take</span> : null}
+            {!slide ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 11px var(--font-ui)', whiteSpace: 'nowrap', color: fullGreen ? 'var(--green)' : 'var(--slate-400)' }}>Full green screen<button type="button" role="switch" aria-checked={fullGreen} aria-label="Full green screen" onClick={() => setFullGreen(!fullGreen)} style={{ width: 30, height: 18, flex: '0 0 auto', borderRadius: 999, border: 'none', padding: 2, cursor: 'pointer', background: fullGreen ? 'var(--green)' : 'var(--line-strong)', transition: 'background var(--dur-fast) var(--ease-out)', display: 'flex', alignItems: 'center' }}><span style={{ width: 14, height: 14, borderRadius: 999, background: 'var(--white)', boxShadow: '0 1px 2px rgba(15,23,32,0.25)', transform: fullGreen ? 'translateX(12px)' : 'translateX(0)', transition: 'transform var(--dur-fast) var(--ease-out)' }} /></button></span> : null}
+          </span>}>
+            {clips.map((c, i) => (
+              <FormRow key={c.key} onClick={() => setScreen({ kind: 'clip', key: c.key })}
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{c.label}{c.plug ? <TypeChip tone="brand">Plug</TypeChip> : null}{c.shot ? <Icon name="images" size={13} color="var(--slate-400)" /> : null}</span>}
+                value={c.text ? c.text : (pend('hook') && c.idx === -1) || (pend('clip') && c.idx >= 0) ? <ShimmerLines inline w={c.idx === filling.i - 1 || c.idx === -1 ? '82%' : '60%'} /> : (slide ? 'Empty slide' : text7 ? 'The one line on screen' : c.idx === -1 ? 'Nine words that stop the scroll' : 'Nothing written yet')}
+                chip={filling && filling.stage === 'clip' && c.idx === filling.i - 1 && !c.text ? <Spinner size={12} color="var(--blue-500)" /> : <span style={{ width: 8, height: 8, borderRadius: 999, flex: '0 0 auto', background: c.text ? 'var(--green)' : 'var(--line-strong)', transition: 'background var(--dur-base) var(--ease-out)' }} />}
+                right={c.idx >= 0 && (slide ? points.length > 1 : true) ? <span role="button" aria-label={`Remove ${c.label}`} onClick={(e) => { e.stopPropagation(); removeClip(c.idx); }} style={{ width: 32, height: 32, margin: '-6px -4px -6px 0', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Icon name="x" size={15} color="var(--slate-300)" /></span> : null} />
+            ))}
+            {!text7 ? <button type="button" onClick={addClip} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 50, padding: '0 14px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', font: '700 14px var(--font-ui)', color: 'var(--blue-700)' }}>
+              <span style={{ width: 24, height: 24, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={14} color="var(--blue-700)" strokeWidth={2.5} /></span>{slide ? 'Add slide' : 'Add clip'}
+            </button> : null}
+          </FormGroup>
+
+          <FormGroup label="Caption" right={pend('caption') ? <Writing /> : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, font: '700 11.5px var(--font-ui)', color: 'var(--slate-400)' }}><Icon name="sparkles" size={11} />{tags.length} hashtags, auto</span>}>
+            {pend('caption') ? <ShimmerLines lines={2} /> : <FormText value={caption} onChange={setCaption} placeholder="First sentence carries the search phrase" rows={2} />}
+            {tags.length ? <div style={{ padding: '0 14px 12px', font: '600 13px/1.5 var(--font-ui)', color: 'var(--blue-700)' }}>{tags.join(' ')}</div> : null}
+          </FormGroup>
+
+          {!text7 ? <FormGroup label="Song">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 54, padding: '10px 14px', borderBottom: song ? '1px solid var(--line)' : 'none' }}>
+              <Icon name="music-2" size={18} color="var(--slate-500)" />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>Add a song after posting</span>
+                <span style={{ display: 'block', marginTop: 2, font: '500 13px var(--font-ui)', color: 'var(--slate-500)' }}>{song ? 'The creator gets both links once it is live' : 'Slideshows only. Videos keep their own sound.'}</span>
+              </span>
+              <Toggle on={song} onChange={setSong} />
+            </div>
+            {song ? [['tt', 'music-2', 'TikTok sound'], ['ig', 'at-sign', 'Instagram audio']].map(([k, ic, label], i) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 54, padding: '8px 10px 8px 14px', borderBottom: i === 0 ? '1px solid var(--line)' : 'none', animation: 'noni-fade 200ms var(--ease-out) both' }}>
+                <Icon name={ic} size={18} color="var(--slate-500)" />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{label}</span>
+                  <span style={{ display: 'block', marginTop: 2, font: '500 13px var(--font-ui)', color: links[k] ? 'var(--blue-700)' : 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{links[k] || 'No link yet'}</span>
+                </span>
+                {links[k] ? <button type="button" onClick={() => setLinks({ ...links, [k]: '' })} aria-label="Remove link" style={{ width: 36, height: 36, borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={15} color="var(--slate-500)" /></button>
+                  : <Button size="sm" variant="tint" icon={pasting === k ? undefined : 'copy'} disabled={pasting === k} onClick={() => paste(k)}>{pasting === k ? 'Pasting' : 'Paste'}</Button>}
+              </div>
+            )) : null}
+          </FormGroup> : null}
+        </div>
+      </div>
+      {screen && screen.kind === 'fill' ? <FillSheet2 written={written} onFill={fill} onClose={() => setScreen(null)} /> : null}
+      {screen && screen.kind === 'type' ? (
+        <Sheet title="Kind of post" onClose={screen.first ? undefined : () => setScreen(null)}>
+          <Card pad={0} style={{ overflow: 'hidden', marginBottom: 8 }}>
+            {[...window.VIDEO_TYPES.map((t) => ({ ...t, k: 'video' })), { key: 'text7', label: '7 second text', hint: 'One clip, one line of text, seven seconds', k: 'text7' }, ...window.SLIDE_TYPES.map((t) => ({ ...t, k: 'slide' }))].map((t, i, arr) => <FormRow key={t.key} last={i === arr.length - 1} onClick={() => { setKind(t.k); setScreen(null); }} label={<PostTypeChip type={t.key}>{t.label}</PostTypeChip>} value={t.hint} chip={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ font: '700 11px var(--font-ui)', color: 'var(--slate-400)' }}>{t.k === 'slide' ? 'Slideshow' : t.k === 'text7' ? '7 sec' : 'Reel'}</span>{t.key === P.type ? <Icon name="check" size={18} color="var(--blue-600)" /> : null}</span>} />)}
+          </Card>
+        </Sheet>
+      ) : null}
+    </AdminScreen></Trans>
+  );
+}
+
+/* Screen-to-screen motion: every change of screen slides and fades in. */
+function Trans({ k, children }) {
+  return <div key={k} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', animation: 'noni-push 320ms cubic-bezier(0.2,0.8,0.2,1) both' }}>{children}</div>;
+}
+
+/* One clip (or slide). Plug toggle on top, tiny. Talking point with a
+   Hint | Script switch. On screen: a live 9:16 canvas of what the viewer sees,
+   green screen toggle beside the label; media and text open the story-style
+   editor. Nothing else. */
+function ClipScreen({ clip, unit, slide, post, onBack, onChange, onShot, onPrev, onNext, plugTaken = false, onPlug, onRemove, fullGreen = false, onOptions, text7 = false, explain = '' }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const seg = (post.segments || []).find((s) => s.slot === clip.label.replace(/^Clip (\d+)$/, 'Point $1')) || {};
+  const [script, setScript] = React.useState(true);
+  const [greenOwn, setGreenOwn] = React.useState(false);
+  const green = fullGreen || greenOwn;
+  const setGreen = setGreenOwn;
+  const [texts, setTexts] = React.useState(text7 && clip.text ? [clip.text] : clip.text && seg.overlay ? [seg.overlay] : []);
+  const [picker, setPicker] = React.useState(false);
+  const [overlay, setOverlay] = React.useState(null); /* 'text' | 'media' */
+  const media = (window.LIB2 || { media: [] }).media;
+  const covers = (window.NONI_ADMIN || {}).covers || [];
+  const cover = covers[clip.idx >= 0 ? clip.idx % 5 : 0];
+  const shotItem = media.find((m) => m.name === clip.shot) || (clip.shot ? { name: clip.shot, tone: 2, kind: 'image' } : null);
+  const SmallToggle = ({ on, onChange, disabled }) => (
+    <button type="button" role="switch" aria-checked={on} disabled={disabled} onClick={() => onChange(!on)} style={{ width: 36, height: 22, flex: '0 0 auto', borderRadius: 999, border: 'none', padding: 2, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.4 : 1, background: on ? 'var(--blue-500)' : 'var(--line-strong)', transition: 'background var(--dur-fast) var(--ease-out)', display: 'flex', alignItems: 'center' }}>
+      <span style={{ width: 18, height: 18, borderRadius: 999, background: 'var(--white)', boxShadow: '0 1px 3px rgba(15,23,32,0.25)', transform: on ? 'translateX(14px)' : 'translateX(0)', transition: 'transform var(--dur-fast) var(--ease-out)' }} />
+    </button>
+  );
+  const isHook = clip.idx === -1;
+  return (
+    <AdminScreen bottom={96} pad={false} footer={<ActionBar>{onRemove ? <Button variant="ghost" size="md" onClick={onRemove} style={{ flex: '0 0 30%', color: 'var(--danger)' }}>Remove</Button> : null}<Button variant="primary" size="md" icon="check" block onClick={onBack} style={{ flex: 1 }}>Done</Button></ActionBar>}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, padding: '0 0 96px' }}>
+        <PushHeader title={clip.label} meta={text7 ? 'Seven seconds, one take, one line on screen' : isHook ? 'The first thing they hear' : clip.plug ? 'Carries the plug' : slide ? 'One screen' : 'One thought per clip'} onBack={onBack}
+          right={<div style={{ display: 'flex', gap: 6 }}>{[['chevron-left', onPrev, 'Previous'], ['chevron-right', onNext, 'Next']].map(([ic, fn, l]) => <button key={l} type="button" disabled={!fn} onClick={fn} aria-label={l} style={{ width: 36, height: 36, borderRadius: 999, border: 'none', cursor: fn ? 'pointer' : 'default', background: 'var(--white)', boxShadow: 'var(--shadow-card)', opacity: fn ? 1 : 0.35, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={ic} size={18} color="var(--ink)" /></button>)}</div>} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {!isHook && !slide ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 2px' }}>
+              <Icon name="zap" size={14} color={clip.plug ? 'var(--blue-600)' : 'var(--slate-400)'} />
+              <span style={{ flex: 1, font: '700 13px var(--font-ui)', color: plugTaken ? 'var(--slate-400)' : 'var(--ink)' }}>Plug{plugTaken ? ' · another clip has it' : clip.plug ? ' · this clip mentions Inkbound' : ''}</span>
+              <SmallToggle on={!!clip.plug} onChange={onPlug} disabled={plugTaken} />
+            </div>
+          ) : null}
+
+          {text7 && explain ? <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)' }}><Icon name="video" size={15} color="var(--blue-600)" style={{ flex: '0 0 auto', marginTop: 2 }} /><span style={{ flex: 1, font: '600 13px/1.45 var(--font-ui)', color: 'var(--ink)' }}>{explain}</span></div> : null}
+          <FormGroup label={slide ? 'Text on the slide' : text7 ? 'Text on screen' : isHook ? 'Hook' : 'Talking point'} right={text7 ? null : isHook ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ font: '700 11.5px var(--font-ui)', color: clip.text.split(' ').filter(Boolean).length > 9 ? 'var(--danger)' : 'var(--slate-400)' }}>{clip.text ? `${clip.text.split(' ').filter(Boolean).length} of 9 words` : ''}</span>
+              <button type="button" onClick={onOptions} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 26, padding: '0 10px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 11.5px var(--font-ui)' }}><Icon name="sparkles" size={12} />{post.hookOptions.length} options</button>
+            </span>) : !slide ? (
+            <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+              {[['Hint', false], ['Script', true]].map(([l, v]) => <button key={l} type="button" onClick={() => setScript(v)} aria-pressed={script === v} style={{ height: 24, padding: '0 10px', borderRadius: 999, border: 'none', cursor: 'pointer', background: script === v ? 'var(--white)' : 'transparent', boxShadow: script === v ? 'var(--shadow-card)' : 'none', color: script === v ? 'var(--ink)' : 'var(--slate-500)', font: '700 11.5px var(--font-ui)' }}>{l}</button>)}
+            </div>) : null}>
+            <FormText value={clip.text} onChange={(v) => { onChange(v); if (text7) setTexts(v ? [v] : []); }} rows={isHook ? 2 : 3} placeholder={slide ? 'One line the reader can take in at a glance' : text7 ? 'The line that sits on the clip for seven seconds' : isHook ? 'Nine words maximum' : script ? 'Read word for word from the teleprompter' : 'A cue. The creator says it their way.'} />
+          </FormGroup>
+
+          <FormGroup label="On screen" right={!slide ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, font: '700 12px var(--font-ui)', color: green ? 'var(--green)' : 'var(--slate-400)' }}>{fullGreen ? 'Green screen · whole post' : 'Green screen'}<SmallToggle on={green} onChange={setGreen} disabled={fullGreen} /></span>) : null}>
+            {/* Full-width canvas: exactly what the clip looks like. Two buttons under it. */}
+            <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button type="button" onClick={() => setOverlay(shotItem || texts.length ? (shotItem ? 'media' : 'text') : 'text')} aria-label="Edit on screen" style={{ position: 'relative', width: '100%', aspectRatio: '9 / 13', padding: 0, border: 'none', borderRadius: 14, overflow: 'hidden', cursor: 'pointer', background: green && shotItem ? covers[shotItem.tone % 5] : green ? 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)' : cover, boxShadow: 'var(--shadow-media)' }}>
+                {!green && shotItem ? <span style={{ position: 'absolute', top: 14, right: 14, width: '50%', height: '32%', borderRadius: 10, background: covers[shotItem.tone % 5], boxShadow: '0 2px 10px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{shotItem.kind === 'video' ? <span style={{ width: 28, height: 28, borderRadius: 999, background: 'rgba(255,255,255,0.85)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={12} color="var(--ink)" /></span> : null}</span> : null}
+                {texts.map((t, i) => <span key={i} style={{ position: 'absolute', left: 20, right: 20, top: green ? '12%' : '44%', textAlign: 'center', font: '800 22px/1.2 var(--font-display)', letterSpacing: '-0.3px', color: 'var(--white)', textShadow: '0 2px 10px rgba(0,0,0,0.6)' }}>{t}</span>)}
+                {!shotItem && !texts.length ? <span style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, font: '700 13px var(--font-ui)', color: green ? 'var(--slate-500)' : 'rgba(255,255,255,0.75)' }}><Icon name={green ? 'images' : 'video'} size={22} color={green ? 'var(--blue-300)' : 'rgba(255,255,255,0.75)'} />{green ? 'Pick a background' : 'Just the creator talking'}</span> : null}
+                {shotItem || texts.length ? <span style={{ position: 'absolute', right: 10, bottom: 10, padding: '5px 10px', borderRadius: 999, background: 'rgba(16,22,29,0.55)', backdropFilter: 'blur(6px)', color: 'var(--white)', font: '700 11px var(--font-ui)' }}>Tap to edit</span> : null}
+              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {green ? (
+                  <button type="button" onClick={() => setPicker(true)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, padding: '0 12px', borderRadius: 999, border: 'none', background: shotItem ? 'var(--green-soft)' : 'var(--fill-quiet)', color: shotItem ? 'var(--green)' : 'var(--ink)', cursor: 'pointer', font: '700 13.5px var(--font-ui)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    <Icon name="images" size={16} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{shotItem ? shotItem.name : 'Background'}</span>
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => shotItem ? setOverlay('media') : setPicker(true)} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, padding: '0 12px', borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', color: 'var(--ink)', cursor: 'pointer', font: '700 13.5px var(--font-ui)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    <Icon name={shotItem && shotItem.kind === 'video' ? 'video' : 'images'} size={16} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{shotItem ? shotItem.name : 'Add media'}</span>
+                  </button>
+                )}
+                <button type="button" onClick={() => setOverlay('text')} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, padding: '0 12px', borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', color: 'var(--ink)', cursor: 'pointer', font: '700 13.5px var(--font-ui)', whiteSpace: 'nowrap' }}>
+                  <span style={{ font: '800 14px var(--font-ui)' }}>Aa</span>{texts.length ? `${texts.length} text${texts.length > 1 ? 's' : ''}` : 'Add text'}
+                </button>
+                {shotItem || texts.length ? <button type="button" onClick={() => { onShot(null); setTexts([]); }} aria-label="Clear screen" style={{ width: 44, height: 44, flex: '0 0 auto', borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="trash-2" size={16} color="var(--danger)" /></button> : null}
+              </div>
+            </div>
+          </FormGroup>
+        </div>
+      </div>
+      {picker ? <MediaPickSheet media={media} onPick={(m) => { onShot(m.name); setPicker(false); }} onClose={() => setPicker(false)} /> : null}
+      {overlay && window.OverlayEditor ? <OverlayEditor post={post} mode={overlay} onClose={() => { if (overlay === 'text' && !texts.length) setTexts(['Runs nobody plays']); setOverlay(null); }} /> : null}
+    </AdminScreen>
+  );
+}
+
+/* Media picker: company Media (with titles) or the camera roll. */
+function MediaPickSheet({ media, onPick, onClose }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const [src, setSrc] = React.useState('media');
+  const covers = (window.NONI_ADMIN || {}).covers || [];
+  return (
+    <Sheet title="Add to screen" onClose={onClose} maxHeight="80%">
+      <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)', marginBottom: 12 }}>
+        {[['media', 'Media'], ['roll', 'Camera roll']].map(([k, l]) => <button key={k} type="button" onClick={() => setSrc(k)} aria-pressed={src === k} style={{ flex: 1, height: 34, border: 'none', cursor: 'pointer', borderRadius: 999, background: src === k ? 'var(--white)' : 'transparent', boxShadow: src === k ? 'var(--shadow-card)' : 'none', color: src === k ? 'var(--ink)' : 'var(--slate-500)', font: '700 13px var(--font-ui)' }}>{l}</button>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, paddingBottom: 8 }}>
+        {(src === 'media' ? media : Array.from({ length: 9 }).map((_, i) => ({ id: 'roll' + i, name: '', tone: (i * 2) % 5, kind: i % 4 === 3 ? 'video' : 'image', dur: '0:0' + (i + 3) }))).map((m) => (
+          <button key={m.id} type="button" onClick={() => onPick(m.name ? m : { ...m, name: 'Camera roll ' + (m.kind === 'video' ? 'video' : 'photo') })} style={{ border: 'none', padding: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ position: 'relative', aspectRatio: '3 / 4', borderRadius: 10, background: covers[m.tone % 5], display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {m.kind === 'video' ? <><span style={{ width: 26, height: 26, borderRadius: 999, background: 'rgba(255,255,255,0.85)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={11} color="var(--ink)" /></span><span style={{ position: 'absolute', right: 5, bottom: 5, padding: '1px 5px', borderRadius: 999, background: 'rgba(11,15,20,0.6)', color: 'var(--white)', font: '700 9px var(--font-ui)' }}>{m.dur}</span></> : null}
+            </div>
+            {m.name ? <div style={{ marginTop: 6, font: '700 12px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div> : null}
+          </button>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+/* Hook options, best first, plus write your own. Fits one screen, no
+   scrolling. Tap an option and you are back. */
+function HookScreen({ post, value, onPick, onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const options = post.hookOptions.slice(0, 5);
+  const [own, setOwn] = React.useState(post.hookOptions.includes(value) || !value ? '' : value);
+  const n = own.split(' ').filter(Boolean).length;
+  return (
+    <AdminScreen pad={false} bottom={0} footer={own.trim() ? <ActionBar><Button variant="primary" size="md" icon="check" block disabled={n > 9} onClick={() => onPick(own.trim())}>Use this hook</Button></ActionBar> : null}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, padding: '0 0 16px' }}>
+        <PushHeader title="Hook options" meta="Best scored first. Tap one and you are back in the clip." onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+          <Card pad={0} style={{ overflow: 'hidden' }}>
+            {options.map((h, i) => {
+              const on = !own && value === h;
+              return <button key={h} type="button" onClick={() => onPick(h)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 52, padding: '10px 14px', border: 'none', borderBottom: i < options.length - 1 ? '1px solid var(--line)' : 'none', background: on ? 'var(--blue-50)' : 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ flex: 1, minWidth: 0 }}><span style={{ display: 'block', font: '600 14.5px/1.3 var(--font-ui)', color: 'var(--ink)' }}>{h}</span><span style={{ display: 'block', marginTop: 2, font: '700 11px var(--font-ui)', color: 'var(--slate-400)' }}>{h.split(' ').length} words{i === 0 ? ' · best scored' : ''}</span></span>
+                <span style={{ width: 22, height: 22, flex: '0 0 auto', borderRadius: 999, background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--line-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color="var(--white)" strokeWidth={3} /> : null}</span>
+              </button>;
+            })}
+          </Card>
+          <FormGroup label="Or write your own" right={own ? <span style={{ font: '700 11.5px var(--font-ui)', color: n > 9 ? 'var(--danger)' : 'var(--slate-400)' }}>{n} of 9 words</span> : null}>
+            <FormText value={own} onChange={setOwn} placeholder="Your hook" />
+          </FormGroup>
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+/* Fill with AI. Pick what to build from: the Library (an idea, a reference,
+   one of our posts) or just what is already typed. Anything the manager
+   wrote stays and steers the fill. */
+function FillSheet2({ written, onFill, onClose, onOpenSource }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const L = window.LIB2 || { ideas: [], refs: [], ours: [] };
+  const [lane, setLane] = React.useState('ideas');
+  const [pick, setPick] = React.useState(null);
+  const [expanded, setExpanded] = React.useState(null);
+  const [own, setOwn] = React.useState('');
+  const [extraRefs, setExtraRefs] = React.useState([]);
+  const [pasting, setPasting] = React.useState(false);
+  const lanes = [['ideas', 'Ideas', L.ideas.filter((i) => !i.made)], ['refs', 'References', extraRefs.concat(L.refs.filter((r) => !r.made))], ['ours', 'Our posts', L.ours]];
+  const pasteRef = async () => { setPasting(true); let v = ''; try { v = (await navigator.clipboard.readText()) || ''; } catch (e) { v = ''; } if (!/tiktok\.com|instagram\.com/i.test(v)) v = 'https://www.tiktok.com/@queryqueen/video/73' + String(Date.now()).slice(-6); const ig = /instagram/i.test(v); const item = { id: 'rx' + Date.now(), title: v.replace(/^https?:\/\/(www\.)?/, ''), handle: ig ? 'draft.two' : 'queryqueen', platform: ig ? 'Instagram' : 'TikTok', format: 'video', tone: 1, made: 0, resolving: true }; setTimeout(() => { setPasting(false); setExtraRefs((r) => [item, ...r]); setPick({ ...item, lane: 'refs' }); setTimeout(() => setExtraRefs((r) => r.map((x) => x.id === item.id ? { ...x, resolving: false, title: 'Why your query gets a form rejection' } : x)), 1500); }, 450); };
+  const detail = (it) => lane === 'ideas' ? { lines: ['Saved as an idea. The fill turns it into a title, a hook and the clips.'], link: null }
+    : lane === 'refs' ? { lines: ['The fill reads its transcript and caption and writes a fresh post in the same shape.'], link: `Open on ${it.platform}` }
+    : { lines: [`${it.creator} · ${(window.LIB2.types.find((t) => t.key === it.type) || {}).label} · ${window.formatLabel(it.format)} · ${it.when}`, 'The fill ports this brief: same structure, new phrasing and new hook.'], link: 'Open the live post' };
+  const items = lanes.find((l) => l[0] === lane)[2];
+  return (
+    <Sheet title="Fill with AI" onClose={onClose} maxHeight="94%"
+      footer={<div style={{ display: 'flex', gap: 8 }}>
+        <Button variant="outline" size="md" onClick={() => onFill(null)} style={{ flex: '0 0 44%', whiteSpace: 'nowrap' }}>{written.length ? 'From what I wrote' : 'From scratch'}</Button>
+        <Button variant="primary" size="md" icon="sparkles" block disabled={!pick && !own.trim()} onClick={() => onFill(pick || { lane: 'ideas', body: own.trim(), id: 'own' })} style={{ flex: 1 }}>Fill from this</Button>
+      </div>}>
+      <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)', marginBottom: 10 }}>
+        {lanes.map(([k, label, list]) => <button key={k} type="button" onClick={() => { setLane(k); setPick(null); }} aria-pressed={lane === k} style={{ flex: 1, height: 34, border: 'none', cursor: 'pointer', borderRadius: 999, background: lane === k ? 'var(--white)' : 'transparent', boxShadow: lane === k ? 'var(--shadow-card)' : 'none', color: lane === k ? 'var(--ink)' : 'var(--slate-500)', font: '700 13px var(--font-ui)', whiteSpace: 'nowrap' }}>{label} <span style={{ opacity: 0.55 }}>{list.length}</span></button>)}
+      </div>
+      {lane === 'ideas' ? (
+        <div style={{ marginBottom: 10, padding: '4px 8px 4px 14px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: `1.5px solid ${own ? 'var(--blue-500)' : 'var(--border-strong)'}`, boxShadow: own ? '0 0 0 3px rgba(27,166,238,0.18)' : 'var(--shadow-card)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon name="zap" size={16} color={own ? 'var(--blue-600)' : 'var(--slate-400)'} />
+          <textarea value={own} onChange={(e) => { setOwn(e.target.value); if (e.target.value) setPick(null); }} rows={1} placeholder="Or type your own idea" style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', resize: 'none', background: 'transparent', padding: '10px 0', font: '500 15px/1.4 var(--font-ui)', color: 'var(--ink)' }} />
+          {own ? <button type="button" onClick={() => setOwn('')} aria-label="Clear" style={{ width: 32, height: 32, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={15} color="var(--slate-400)" /></button> : null}
+        </div>
+      ) : null}
+      {lane === 'refs' ? (
+        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 8px 8px 14px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1.5px solid var(--border-strong)', boxShadow: 'var(--shadow-card)' }}>
+          <Icon name="link" size={16} color="var(--slate-400)" />
+          <span style={{ flex: 1, minWidth: 0 }}><span style={{ display: 'block', font: '600 14.5px var(--font-ui)', color: 'var(--ink)' }}>Paste a new link</span><span style={{ display: 'block', font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>Saves to References too</span></span>
+          <Button size="sm" variant="primary" icon={pasting ? undefined : 'copy'} disabled={pasting} onClick={pasteRef} style={{ minWidth: 88 }}>{pasting ? 'Pasting' : 'Paste'}</Button>
+        </div>
+      ) : null}
+      <Card pad={0} style={{ overflow: 'hidden', marginBottom: 8 }}>
+        {items.map((it, i) => {
+          const on = pick && pick.id === it.id;
+          const title = it.body || it.title;
+          const sub = it.resolving ? 'Fetching title' : lane === 'refs' ? `@${it.handle} · ${it.platform}` : lane === 'ours' ? `${it.creator} · ${it.views} views` : 'Unused idea';
+          const open = expanded === it.id;
+          const d = detail(it);
+          return (
+            <div key={it.id} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--line)' : 'none', background: on ? 'var(--blue-50)' : 'transparent', transition: 'background var(--dur-fast) var(--ease-out)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11, minHeight: 54, padding: '10px 14px' }}>
+                <button type="button" onClick={() => setExpanded(open ? null : it.id)} aria-expanded={open} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 11, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                  {lane !== 'ideas' ? <Thumb format={it.format} w={open ? 54 : 32} h={open ? 72 : 42} radius={7} cover={{ tone: it.tone, text: title }} style={{ transition: 'width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out)' }} /> : <Icon name="zap" size={16} color="var(--blue-600)" />}
+                  <span style={{ flex: 1, minWidth: 0 }}><span style={{ display: 'block', font: '600 14px/1.3 var(--font-ui)', color: 'var(--ink)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: open ? 6 : 2, WebkitBoxOrient: 'vertical' }}>{title}</span><span style={{ display: 'block', marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{sub}</span></span>
+                  <Icon name="chevron-down" size={16} color="var(--slate-300)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform var(--dur-fast) var(--ease-out)' }} />
+                </button>
+                <button type="button" onClick={() => { setOwn(''); setPick(on ? null : { ...it, lane }); }} aria-label={on ? 'Unselect' : 'Select'} style={{ width: 22, height: 22, flex: '0 0 auto', padding: 0, borderRadius: 999, background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--line-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{on ? <Icon name="check" size={13} color="var(--white)" strokeWidth={3} /> : null}</button>
+              </div>
+              {open ? (
+                <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 8, animation: 'noni-fade 160ms var(--ease-out) both' }}>
+                  {d.lines.map((l) => <p key={l} style={{ margin: 0, font: '500 13px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>{l}</p>)}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {d.link ? <Button size="sm" variant="tint" iconRight="arrow-right" onClick={() => onOpenSource && onOpenSource(it)}>{d.link}</Button> : null}
+                    <Button size="sm" variant={on ? 'outline' : 'secondary'} onClick={() => setPick(on ? null : { ...it, lane })}>{on ? 'Selected' : 'Use this'}</Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </Card>
+    </Sheet>
+  );
+}
+
+Object.assign(window, { PostEditor2, ClipScreen, HookScreen, FillSheet2, MediaPickSheet, Toggle });

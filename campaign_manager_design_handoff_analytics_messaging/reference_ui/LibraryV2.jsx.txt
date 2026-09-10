@@ -1,0 +1,473 @@
+/* Library, redesigned for Inkbound. Four lanes: Ideas, References, Media,
+   Our posts. Each lane has its own entry point at the top: type an idea,
+   paste a link, add a screenshot or recording. Ideas and references keep
+   Unused and Used completely apart so the unused list is always the one you
+   can pull from. Media is split into screenshots and recordings, every file
+   has a title so it is recognisable inside the post editor. */
+
+const LIB2 = {
+  week: { label: 'Week 1', slot: 1, slots: 7 },
+  types: [
+    { key: 'talking_head', label: 'Talking head', format: 'video' },
+    { key: 'explainer', label: 'Explainer', format: 'video' },
+    { key: 'contrast', label: 'Contrast', format: 'video' },
+    { key: 'replay_bait', label: 'Replay bait', format: 'video' },
+    { key: 'numbered_list', label: 'Numbered list', format: 'photo_carousel' },
+    { key: 'how_to', label: 'How to', format: 'photo_carousel' },
+    { key: 'getting_started', label: 'Getting started', format: 'photo_carousel' },
+  ],
+  ideas: [
+    { id: 'i1', body: 'Your first chapter is 40% too long and the reader can feel it.', made: 2, madeOn: 'Sep 4', post: 'Week 1 · slot 1' },
+    { id: 'i2', body: 'The one note editors leave on every debut manuscript.', made: 0 },
+    { id: 'i3', body: 'What a query letter looks like after Inkbound rewrites it.', made: 0 },
+    { id: 'i4', body: 'Stop opening with weather.', made: 1, madeOn: 'Aug 28', post: 'Week 1 · slot 2' },
+    { id: 'i5', body: 'Three synonyms for said that are not worse than said.', made: 0 },
+    { id: 'i6', body: 'Why your villain sounds like your hero. Voice drift, and how to catch it.', made: 0 },
+    { id: 'i7', body: 'Read your dialogue out loud. Then cut every third line.', made: 0 },
+  ],
+  refs: [
+    { id: 'r1', title: 'I read 200 first pages so you do not have to', handle: 'slushpilediaries', platform: 'TikTok', format: 'video', tone: 0, made: 1, madeOn: 'Sep 2', post: 'Week 1 · slot 3' },
+    { id: 'r2', title: 'Nobody talks about chapter breaks', handle: 'draft.two', platform: 'Instagram', format: 'photo_carousel', tone: 1, made: 0 },
+    { id: 'r3', title: 'POV: your editor opens the manuscript', handle: 'inkandcoffee', platform: 'TikTok', format: 'video', tone: 2, made: 0 },
+    { id: 'r4', title: 'The 3 words agents skim past', handle: 'queryqueen', platform: 'TikTok', format: 'video', tone: 4, made: 0 },
+  ],
+  ours: [
+    { id: 'o1', title: 'Half your dialogue tags are doing nothing', creator: 'Fabri', type: 'talking_head', format: 'video', views: '412K', viewsN: 412000, when: 'Sep 1', tone: 3 },
+    { id: 'o2', title: '4 openings agents skip', creator: 'Mara', type: 'numbered_list', format: 'photo_carousel', views: '128K', viewsN: 128000, when: 'Aug 29', tone: 1 },
+    { id: 'o3', title: 'Reading a query letter in 20 seconds', creator: 'Deniz', type: 'explainer', format: 'video', views: '96K', viewsN: 96000, when: 'Aug 22', tone: 0 },
+    { id: 'o4', title: 'Draft one vs draft two, same paragraph', creator: 'Fabri', type: 'contrast', format: 'video', views: '81K', viewsN: 81000, when: 'Aug 14', tone: 2 },
+    { id: 'o5', title: 'How to cut a chapter in half', creator: 'Mara', type: 'how_to', format: 'photo_carousel', views: '64K', viewsN: 64000, when: 'Aug 9', tone: 4 },
+    { id: 'o6', title: 'Your synopsis is a summary. Stop that.', creator: 'Deniz', type: 'talking_head', format: 'video', views: '41K', viewsN: 41000, when: 'Aug 3', tone: 1 },
+    { id: 'o7', title: 'Getting your first chapter scored', creator: 'Fabri', type: 'getting_started', format: 'photo_carousel', views: '22K', viewsN: 22000, when: 'Jul 30', tone: 3 },
+  ],
+  media: [
+    { id: 'm1', kind: 'image', tone: 0, name: 'Chapter view, editor' },
+    { id: 'm2', kind: 'video', dur: '0:14', tone: 1, name: 'Highlight video' },
+    { id: 'm3', kind: 'image', tone: 2, name: 'Query letter score' },
+    { id: 'm4', kind: 'image', tone: 3, name: 'Voice drift alert' },
+    { id: 'm5', kind: 'video', dur: '0:31', tone: 4, name: 'Onboarding, full run' },
+    { id: 'm6', kind: 'image', tone: 1, name: 'Word count graph' },
+    { id: 'm7', kind: 'image', tone: 0, name: 'Suggestion sidebar' },
+    { id: 'm8', kind: 'video', dur: '0:08', tone: 2, name: 'Paste and clean' },
+    { id: 'm9', kind: 'image', tone: 4, name: 'Highlight video, still' },
+  ],
+};
+
+const lib2IsLink = (s) => /(tiktok\.com|instagram\.com)\//i.test(s.trim());
+const lib2Lines = (s) => s.split('\n').map((l) => l.trim()).filter(Boolean);
+const lib2Cover = (tone) => ((window.NONI_ADMIN || {}).covers || [])[tone % 5] || 'linear-gradient(160deg,#E7F4FD,#DCE7F0)';
+
+function longPress(fn, ms = 480) {
+  let t = null;
+  const start = () => { clearTimeout(t); t = setTimeout(fn, ms); };
+  const stop = () => clearTimeout(t);
+  return { onPointerDown: start, onPointerUp: stop, onPointerLeave: stop, onPointerCancel: stop, onContextMenu: (e) => { e.preventDefault(); stop(); fn(); } };
+}
+
+function Spinner({ size = 14, color = 'var(--slate-500)' }) {
+  return <span style={{ width: size, height: size, flex: '0 0 auto', borderRadius: 999, border: `2px solid ${color}`, borderRightColor: 'transparent', display: 'inline-block', animation: 'noni-spin 700ms linear infinite' }} />;
+}
+
+/* Used items link to the post they produced. */
+function MadeMeta({ item, onOpenPost }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  if (!item.made) return <span style={{ font: '700 12px var(--font-ui)', color: 'var(--slate-400)' }}>Unused</span>;
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onOpenPost && onOpenPost(item); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', font: '700 12px var(--font-ui)', color: 'var(--blue-700)' }}>
+      <span>{`Used ${item.made}x · ${item.madeOn} · ${item.post}`}</span><Icon name="chevron-right" size={12} />
+    </button>
+  );
+}
+
+function MakeButton({ label = 'Make', busy = false, onClick }) {
+  return (
+    <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
+      style={{ flex: '0 0 auto', minWidth: 62, height: 34, padding: '0 12px', margin: '-5px 0', borderRadius: 999, border: 'none', cursor: busy ? 'default' : 'pointer', background: busy ? 'var(--blue-100)' : 'var(--fill-quiet)', color: busy ? 'var(--blue-700)' : 'var(--ink)', font: '700 13px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'background var(--dur-fast) var(--ease-out)' }}>
+      {busy ? <><Spinner size={12} color="var(--blue-700)" />Making</> : label}
+    </button>
+  );
+}
+
+function KillNote({ reason, onClose }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 10px', borderRadius: 10, background: 'var(--amber-soft)' }}>
+      <Icon name="circle-alert" size={14} color="var(--amber)" style={{ flex: '0 0 auto', marginTop: 1 }} />
+      <span style={{ flex: 1, font: '600 12.5px/1.4 var(--font-ui)', color: 'var(--ink)' }}>Not made. {reason}</span>
+      <button type="button" onClick={onClose} aria-label="Dismiss" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', display: 'inline-flex' }}><Icon name="x" size={14} color="var(--slate-400)" /></button>
+    </div>
+  );
+}
+
+function LibSearch({ value, onChange, placeholder }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <label style={{ flex: 1, minWidth: 0, height: 38, display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderRadius: 999, background: 'var(--fill-quiet)' }}>
+      <Icon name="search" size={15} color="var(--slate-400)" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', font: '500 14px var(--font-ui)', color: 'var(--ink)', padding: 0 }} />
+      {value ? <button type="button" onClick={() => onChange('')} aria-label="Clear" style={{ border: 'none', background: 'transparent', padding: 0, display: 'inline-flex', cursor: 'pointer' }}><Icon name="x" size={14} color="var(--slate-400)" /></button> : null}
+    </label>
+  );
+}
+
+/* Two-way switch with counts. Unused and Used never mix. */
+function SubTabs({ items, active, onSelect }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+      {items.map(([k, label, n]) => {
+        const on = active === k;
+        return <button key={k} type="button" onClick={() => onSelect(k)} aria-pressed={on} style={{ flex: 1, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '0 8px', border: 'none', cursor: 'pointer', borderRadius: 999, background: on ? 'var(--white)' : 'transparent', boxShadow: on ? 'var(--shadow-card)' : 'none', color: on ? 'var(--ink)' : 'var(--slate-500)', font: '700 13px var(--font-ui)', whiteSpace: 'nowrap', transition: 'background var(--dur-fast) var(--ease-out)' }}>{label}{n != null ? <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '700 11px var(--font-ui)', background: on ? 'var(--blue-100)' : 'var(--white)', color: on ? 'var(--blue-700)' : 'var(--slate-500)' }}>{n}</span> : null}</button>;
+      })}
+    </div>
+  );
+}
+
+function LaneEmpty({ lane, sub, onAdd }) {
+  const { EmptyState } = window.NoniDesignSystem_710e43;
+  const copy = {
+    ideas: sub === 'used' ? ['zap', 'Nothing used yet', 'Ideas move here the moment you make a post from them.'] : ['zap', 'No ideas yet', 'Type one line above and save. Paste a whole doc to save one idea per line.'],
+    refs: sub === 'used' ? ['link', 'Nothing used yet', 'References move here the moment you make a post from them.'] : ['link', 'No references yet', 'Copy a TikTok or Instagram link, come back, tap Paste. It saves with a thumbnail and title.'],
+    ours: ['play', 'No posts yet', 'Every post Inkbound publishes lands here the day it goes live.'],
+    media: sub === 'video' ? ['video', 'No recordings yet', 'Add screen recordings of the product. Give each one a title so it is easy to find in the editor. Up to 200 MB.'] : ['images', 'No screenshots yet', 'Add screenshots of the product. Give each one a title so it is easy to find in the editor.'],
+  }[lane];
+  return <EmptyState icon={copy[0]} title={copy[1]} body={copy[2]} actionLabel={lane === 'media' ? (sub === 'video' ? 'Add recording' : 'Add screenshot') : undefined} onAction={onAdd} style={{ marginTop: 24 }} />;
+}
+
+function LaneSkeleton({ lane }) {
+  if (lane === 'media') return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>{Array.from({ length: 6 }).map((_, i) => <div key={i}><SkeletonCard height={150} radius={12} /><SkeletonLine w="60%" h={10} style={{ marginTop: 8 }} /></div>)}</div>;
+  if (lane === 'ideas') return <Card pad={0} style={{ overflow: 'hidden' }}>{Array.from({ length: 6 }).map((_, i) => <div key={i} style={{ padding: '14px 14px', borderBottom: i < 5 ? '1px solid var(--line)' : 'none', display: 'flex', flexDirection: 'column', gap: 8 }}><SkeletonLine w={i % 2 ? '72%' : '88%'} h={12} /><SkeletonLine w={64} h={9} /></div>)}</Card>;
+  if (lane === 'ours') return <Card pad={0} style={{ overflow: 'hidden' }}>{Array.from({ length: 7 }).map((_, i) => <div key={i} style={{ padding: '10px 12px', borderBottom: i < 6 ? '1px solid var(--line)' : 'none', display: 'flex', gap: 10, alignItems: 'center' }}><SkeletonLine w={34} h={45} r={8} /><div style={{ flex: 1 }}><SkeletonLine w="70%" h={11} /><SkeletonLine w="45%" h={9} style={{ marginTop: 7 }} /></div></div>)}</Card>;
+  return <SkeletonRows n={5} height={78} gap={8} />;
+}
+
+function TypeSheet({ source, onPick, onClose, animate, busyKey }) {
+  const src = source.kind === 'idea' ? `“${source.item.body}”` : source.kind === 'ref' ? `@${source.item.handle} · ${source.item.platform}` : source.item.title;
+  return (
+    <Sheet title="Make a post" subtitle={`From ${src}. Goes into ${LIB2.week.label}, slot ${LIB2.week.slot} of ${LIB2.week.slots}.`} onClose={onClose} animate={animate}>
+      <Card pad={0} style={{ overflow: 'hidden', marginBottom: 8 }}>
+        {LIB2.types.map((t, i) => {
+          const busy = busyKey === t.key;
+          return (
+            <button key={t.key} type="button" disabled={!!busyKey} onClick={() => onPick(t)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 54, padding: '0 14px', border: 'none', borderBottom: i < LIB2.types.length - 1 ? '1px solid var(--line)' : 'none', background: busy ? 'var(--blue-50)' : 'transparent', cursor: busyKey ? 'default' : 'pointer', textAlign: 'left', opacity: busyKey && !busy ? 0.45 : 1 }}>
+              <PostTypeChip type={t.key}>{t.label}</PostTypeChip>
+              <span style={{ flex: 1 }} />
+              <FormatChip format={t.format} size="sm" />
+              {busy ? <Spinner size={14} color="var(--blue-600)" /> : null}
+            </button>
+          );
+        })}
+      </Card>
+    </Sheet>
+  );
+}
+
+function FilterSheet({ creators, types, sel, onChange, onClose, animate, count }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const Row = ({ k, label, chip }) => {
+    const on = sel.has(k);
+    return (
+      <button type="button" onClick={() => { const n = new Set(sel); on ? n.delete(k) : n.add(k); onChange(n); }} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 48, padding: '0 12px', border: 'none', borderRadius: 10, background: on ? 'var(--blue-100)' : 'var(--fill-quiet)', color: on ? 'var(--blue-700)' : 'var(--ink)', cursor: 'pointer', textAlign: 'left', font: '700 14px var(--font-ui)' }}>
+        <span style={{ width: 18, height: 18, borderRadius: 5, flex: '0 0 auto', background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--border-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={12} color="var(--white)" strokeWidth={3} /> : null}</span>
+        <span style={{ flex: 1 }}>{label}</span>{chip}
+      </button>
+    );
+  };
+  return (
+    <Sheet title="Filter posts" onClose={onClose} animate={animate} footer={<div style={{ display: 'flex', gap: 10 }}><Button variant="outline" size="md" style={{ flex: '0 0 38%' }} onClick={() => onChange(new Set())}>Clear</Button><Button size="md" block onClick={onClose}>Show {count} {count === 1 ? 'post' : 'posts'}</Button></div>}>
+      <SectionLabel style={{ padding: '0 2px 8px' }}>Creator</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{creators.map((c) => <Row key={c} k={'c:' + c} label={c} />)}</div>
+      <SectionLabel style={{ padding: '16px 2px 8px' }}>Post type</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8 }}>{types.map((t) => <Row key={t.key} k={'t:' + t.key} label={t.label} chip={<FormatChip format={t.format} size="sm" />} />)}</div>
+    </Sheet>
+  );
+}
+
+function DeleteSheet({ what, note, onDelete, onClose, animate }) {
+  const { Button } = window.NoniDesignSystem_710e43;
+  return (
+    <Sheet title={`Delete this ${what}?`} subtitle={note} onClose={onClose} animate={animate} footer={<div style={{ display: 'flex', gap: 10 }}><Button variant="outline" size="md" style={{ flex: '0 0 38%' }} onClick={onClose}>Keep</Button><Button variant="danger" size="md" block onClick={onDelete}>Delete</Button></div>}>
+      <div />
+    </Sheet>
+  );
+}
+
+/* Name a file right after picking it. The title is what the editor shows. */
+function NameSheet({ kind, value, onChange, onSave, onClose, animate }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const video = kind === 'video';
+  return (
+    <Sheet title={video ? 'Name this recording' : 'Name this screenshot'} subtitle="This is the label you will see when adding it to a post." onClose={onClose} animate={animate} maxHeight="60%"
+      footer={<Button size="lg" block disabled={!value.trim()} onClick={onSave}>Save to media</Button>}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ position: 'relative', width: 72, height: 96, flex: '0 0 auto', borderRadius: 10, background: lib2Cover(3), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {video ? <><span style={{ width: 26, height: 26, borderRadius: 999, background: 'rgba(255,255,255,0.85)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={12} color="var(--ink)" /></span><span style={{ position: 'absolute', right: 5, bottom: 5, padding: '1px 5px', borderRadius: 999, background: 'rgba(11,15,20,0.6)', color: 'var(--white)', font: '700 9px var(--font-ui)' }}>0:12</span></> : null}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={video ? 'e.g. Highlight video' : 'e.g. Chapter view, editor'} style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${value ? 'var(--blue-500)' : 'var(--border-strong)'}`, outline: 'none', font: '600 15px var(--font-ui)', color: 'var(--ink)' }} />
+          <div style={{ marginTop: 6, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{video ? 'mov · 0:12 · 38 MB' : 'png · 1170 × 2532'}</div>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function MediaPreview({ item, onClose, onRename }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const [editing, setEditing] = React.useState(false);
+  const [name, setName] = React.useState(item.name);
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--ink-900)', display: 'flex', flexDirection: 'column', animation: 'noni-fade 200ms var(--ease-out) both' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '58px 20px 10px' }}>
+        <button type="button" onClick={onClose} aria-label="Close" style={{ width: 36, height: 36, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.16)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Icon name="x" size={18} color="var(--white)" /></button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {editing ? <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { setEditing(false); onRename && onRename(name.trim() || item.name); }} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', borderRadius: 8, border: 'none', outline: 'none', background: 'rgba(255,255,255,0.14)', font: '700 15px var(--font-display)', color: 'var(--white)' }} />
+            : <button type="button" onClick={() => setEditing(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', padding: 0, cursor: 'text', font: '700 15px var(--font-display)', color: 'var(--white)', maxWidth: '100%' }}><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span><Icon name="pencil" size={13} color="rgba(255,255,255,0.6)" /></button>}
+          <div style={{ font: '600 12px var(--font-ui)', color: 'rgba(255,255,255,0.6)' }}>{item.kind === 'video' ? `Recording · ${item.dur} · mov` : 'Screenshot · png'}</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, margin: '8px 20px 40px', borderRadius: 18, background: lib2Cover(item.tone), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {item.kind === 'video' ? <span style={{ width: 62, height: 62, borderRadius: 999, background: 'rgba(255,255,255,0.9)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={28} color="var(--ink)" /></span> : null}
+      </div>
+    </div>
+  );
+}
+
+function Toast({ text }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <div style={{ position: 'absolute', left: 20, right: 20, bottom: 118, zIndex: 60, display: 'flex', justifyContent: 'center', pointerEvents: 'none', animation: 'noni-fade 200ms var(--ease-out) both' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '11px 16px', borderRadius: 999, background: 'var(--ink)', color: 'var(--white)', font: '700 14px var(--font-ui)', boxShadow: 'var(--shadow-raised)', whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="check" size={15} color="var(--blue-300)" />{text}</span>
+    </div>
+  );
+}
+
+/* props exist for the states board; the screen runs on its own otherwise. */
+function LibraryScreen2({ lane: lane0 = 'ideas', sub: sub0 = null, state = 'default', capture = '', toast: toast0 = null, sheet: sheet0 = null, busyId = null, killedId = null, filter: filter0 = null, animate = true, onOpenPost, onOpenLink }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const [lane, setLane] = React.useState(lane0);
+  const [sub, setSub] = React.useState(sub0 || (lane0 === 'media' ? 'image' : 'unused'));
+  const [text, setText] = React.useState(capture);
+  const [q, setQ] = React.useState('');
+  const [sort, setSort] = React.useState('Top 60d');
+  const [sel, setSel] = React.useState(filter0 ? new Set(filter0) : new Set());
+  const [ideas, setIdeas] = React.useState(state === 'empty' ? [] : LIB2.ideas);
+  const [refs, setRefs] = React.useState(state === 'empty' ? [] : LIB2.refs);
+  const [ours, setOurs] = React.useState(state === 'empty' ? [] : LIB2.ours);
+  const [media, setMedia] = React.useState(state === 'empty' ? [] : LIB2.media);
+  const [toast, setToast] = React.useState(toast0);
+  const [sheet, setSheet] = React.useState(sheet0 ? (sheet0.kind ? sheet0 : { kind: sheet0 }) : null);
+  const [busy, setBusy] = React.useState(busyId);
+  const [busyType, setBusyType] = React.useState(null);
+  const [pasting, setPasting] = React.useState(state === 'pasting');
+  const [nameDraft, setNameDraft] = React.useState(sheet0 && sheet0.kind === 'name' ? (sheet0.value || '') : '');
+  const [killed, setKilled] = React.useState(killedId ? { id: killedId, reason: 'Claims a feature Inkbound has not shipped: automatic agent matching.' } : null);
+  const [editing, setEditing] = React.useState(null);
+  const loading = state === 'loading';
+  const refreshing = state === 'refresh';
+  const more = state === 'more';
+
+  const flash = (t) => { setToast(t); setTimeout(() => setToast(null), 1800); };
+  const switchLane = (k) => { setLane(k); setQ(''); setSub(k === 'media' ? 'image' : 'unused'); };
+
+  const saveIdeas = () => {
+    const lines = lib2Lines(text);
+    if (!lines.length) return;
+    setIdeas([...lines.map((b, i) => ({ id: 'i' + Date.now() + i, body: b, made: 0 })), ...ideas]);
+    setSub('unused'); setText(''); flash(lines.length === 1 ? 'Idea saved' : `${lines.length} ideas saved`);
+  };
+  const pasteLink = async () => {
+    setPasting(true);
+    let url = '';
+    try { url = (await navigator.clipboard.readText()) || ''; } catch (e) { url = ''; }
+    if (!lib2IsLink(url)) url = 'https://www.tiktok.com/@queryqueen/video/73' + String(Date.now()).slice(-6);
+    const ig = /instagram/i.test(url);
+    const item = { id: 'r' + Date.now(), title: url.replace(/^https?:\/\/(www\.)?/, ''), handle: ig ? 'instagram' : 'tiktok', platform: ig ? 'Instagram' : 'TikTok', format: 'video', tone: 1, made: 0, resolving: true };
+    setTimeout(() => {
+      setPasting(false); setRefs((r) => [item, ...r]); setSub('unused'); flash('Reference saved');
+      setTimeout(() => setRefs((r) => r.map((x) => x.id === item.id ? { ...x, resolving: false, title: 'Why your query gets a form rejection', handle: ig ? 'draft.two' : 'queryqueen' } : x)), 1600);
+    }, 500);
+  };
+  const addMedia = (kind) => { setNameDraft(''); setSheet({ kind: 'name', mediaKind: kind }); };
+  const saveMedia = () => { setMedia([{ id: 'm' + Date.now(), kind: sheet.mediaKind, dur: sheet.mediaKind === 'video' ? '0:12' : undefined, tone: 3, name: nameDraft.trim() }, ...media]); setSub(sheet.mediaKind); setSheet(null); flash(sheet.mediaKind === 'video' ? 'Recording added' : 'Screenshot added'); };
+
+  const bump = (list, set, id) => set(list.map((x) => x.id === id ? { ...x, made: x.made + 1, madeOn: 'Today', post: `${LIB2.week.label} · slot ${LIB2.week.slot}` } : x));
+  const make = (kind, item, type) => {
+    setBusy(item.id);
+    setTimeout(() => {
+      setBusy(null); setBusyType(null); setSheet(null);
+      if (kind === 'idea') bump(ideas, setIdeas, item.id);
+      if (kind === 'ref') bump(refs, setRefs, item.id);
+      if (kind === 'post') bump(ours, setOurs, item.id);
+      onOpenPost && onOpenPost({ kind, item, type });
+    }, 1400);
+  };
+  const pickType = (t) => { setBusyType(t.key); make(sheet.source.kind, sheet.source.item, t); };
+
+  const lines = lib2Lines(text);
+  const creators = [...new Set(LIB2.ours.map((o) => o.creator))];
+  const oursShown = ours
+    .filter((o) => ![...sel].some((k) => k.startsWith('c:')) || sel.has('c:' + o.creator))
+    .filter((o) => ![...sel].some((k) => k.startsWith('t:')) || sel.has('t:' + o.type))
+    .filter((o) => !q || o.title.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => sort === 'Top 60d' ? b.viewsN - a.viewsN : a.id < b.id ? 1 : -1);
+  const ideasSub = ideas.filter((i) => sub === 'used' ? i.made : !i.made);
+  const ideasShown = ideasSub.filter((i) => !q || i.body.toLowerCase().includes(q.toLowerCase()));
+  const refsSub = refs.filter((r) => sub === 'used' ? r.made : !r.made);
+  const refsShown = refsSub.filter((r) => !q || r.title.toLowerCase().includes(q.toLowerCase()) || r.handle.includes(q.toLowerCase()));
+  const mediaSub = media.filter((m) => m.kind === sub);
+  const lanes = [['ideas', 'Ideas'], ['refs', 'References'], ['media', 'Media'], ['ours', 'Our posts']];
+
+  const rowIdea = (it, i, last) => {
+    const lp = longPress(() => setSheet({ kind: 'delete', what: 'idea', id: it.id }));
+    const isEditing = editing === it.id;
+    return (
+      <div key={it.id} {...lp} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '12px 14px', borderBottom: last ? 'none' : '1px solid var(--line)', animation: i === 0 ? 'noni-fade 240ms var(--ease-out) both' : 'none' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {isEditing ? (
+            <textarea autoFocus defaultValue={it.body} rows={2} onBlur={(e) => { const v = e.target.value.trim(); setIdeas(ideas.map((x) => x.id === it.id ? { ...x, body: v || x.body } : x)); setEditing(null); }}
+              style={{ width: '100%', boxSizing: 'border-box', border: 'none', outline: 'none', resize: 'none', background: 'var(--blue-50)', borderRadius: 8, padding: '4px 6px', margin: '-4px -6px', font: '500 15px/1.4 var(--font-ui)', color: 'var(--ink)' }} />
+          ) : <p onClick={() => setEditing(it.id)} style={{ margin: 0, font: '500 15px/1.4 var(--font-ui)', color: 'var(--ink)', cursor: 'text' }}>{it.body}</p>}
+          {it.made ? <div style={{ marginTop: 5 }}><MadeMeta item={it} onOpenPost={() => onOpenPost && onOpenPost({ kind: 'idea', item: it })} /></div> : null}
+          {killed && killed.id === it.id ? <KillNote reason={killed.reason} onClose={() => setKilled(null)} /> : null}
+        </div>
+        <MakeButton label={it.made ? 'Again' : 'Make'} busy={busy === it.id} onClick={() => setSheet({ kind: 'types', source: { kind: 'idea', item: it } })} />
+      </div>
+    );
+  };
+  const cardRef = (it) => {
+    const lp = longPress(() => setSheet({ kind: 'delete', what: 'reference', id: it.id }));
+    return (
+      <Card key={it.id} pad={10} onClick={() => onOpenLink && onOpenLink(it)} {...lp} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+        {it.resolving ? <div style={{ width: 46, height: 62, borderRadius: 9, flex: '0 0 auto', background: 'var(--fill-quiet)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={14} color="var(--slate-300)" /></div> : <Thumb format={it.format} w={46} h={62} radius={9} cover={{ tone: it.tone, text: it.title }} />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ font: '700 14px/1.3 var(--font-display)', letterSpacing: '-0.2px', color: it.resolving ? 'var(--slate-400)' : 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.resolving ? 'Fetching title' : it.title}</div>
+          <div style={{ marginTop: 3, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{it.handle} · {it.platform}</div>
+          {it.made ? <div style={{ marginTop: 5 }}><MadeMeta item={it} onOpenPost={() => onOpenPost && onOpenPost({ kind: 'ref', item: it })} /></div> : null}
+          {killed && killed.id === it.id ? <KillNote reason={killed.reason} onClose={() => setKilled(null)} /> : null}
+        </div>
+        <MakeButton label={it.made ? 'Again' : 'Make'} busy={busy === it.id} onClick={() => setSheet({ kind: 'types', source: { kind: 'ref', item: it } })} />
+      </Card>
+    );
+  };
+  /* Our posts: one dense card, small thumbs, one line of meta. */
+  const rowOurs = (it, i, last) => (
+    <div key={it.id} onClick={() => onOpenLink && onOpenLink(it)} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 12px', borderBottom: last ? 'none' : '1px solid var(--line)', cursor: 'pointer' }}>
+      <Thumb format={it.format} w={34} h={45} radius={8} cover={{ tone: it.tone, text: it.title }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
+        <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 5, font: '600 11.5px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <span style={{ color: 'var(--ink)' }}>{it.creator}</span>·<span>{LIB2.types.find((t) => t.key === it.type).label}</span>·<span>{window.formatLabel(it.format)}</span>·<span>{it.when}</span>
+        </div>
+        {killed && killed.id === it.id ? <KillNote reason={killed.reason} onClose={() => setKilled(null)} /> : null}
+      </div>
+      <div style={{ textAlign: 'right', flex: '0 0 auto' }}><div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--green)' }}>{it.views}</div><div style={{ font: '600 10px var(--font-ui)', color: 'var(--slate-400)' }}>views</div></div>
+      <MakeButton label="Remake" busy={busy === it.id} onClick={() => make('post', it, LIB2.types.find((t) => t.key === it.type))} />
+    </div>
+  );
+  /* Media: two columns, title under every tile. */
+  const tileMedia = (it) => {
+    const lp = longPress(() => setSheet({ kind: 'delete', what: 'media', id: it.id }));
+    return (
+      <button key={it.id} type="button" {...lp} onClick={() => setSheet({ kind: 'preview', item: it })} style={{ border: 'none', padding: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
+        <div style={{ position: 'relative', aspectRatio: '4 / 5', borderRadius: 12, overflow: 'hidden', background: lib2Cover(it.tone), boxShadow: 'var(--shadow-media)' }}>
+          {it.kind === 'video' ? <>
+            <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: 36, height: 36, borderRadius: 999, background: 'rgba(255,255,255,0.88)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={16} color="var(--ink)" /></span></span>
+            <span style={{ position: 'absolute', right: 8, bottom: 8, padding: '2px 7px', borderRadius: 999, background: 'rgba(11,15,20,0.6)', color: 'var(--white)', font: '700 10.5px var(--font-ui)' }}>{it.dur}</span>
+          </> : null}
+        </div>
+        <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 5, padding: '0 2px' }}>
+          <Icon name={it.kind === 'video' ? 'video' : 'images'} size={12} color="var(--slate-400)" />
+          <span style={{ flex: 1, minWidth: 0, font: '700 13px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</span>
+        </div>
+      </button>
+    );
+  };
+
+  const filterCount = sel.size;
+  const laneEmpty = lane === 'ideas' ? !ideas.length : lane === 'refs' ? !refs.length : lane === 'ours' ? !ours.length : !media.length;
+  return (
+    <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', background: 'var(--off-white)' }}>
+      {/* Pinned: title, lanes, the lane's entry point, its toolbar */}
+      <div style={{ flex: '0 0 auto', padding: `6px ${GUT}px 10px`, display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--off-white)', boxShadow: '0 8px 12px -10px rgba(15,23,32,0.08)', zIndex: 2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h1 style={{ margin: 0, flex: 1, font: '700 30px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Library</h1>
+          {refreshing ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}><Spinner size={13} color="var(--slate-400)" />Refreshing</span> : null}
+        </div>
+        <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+          {lanes.map(([k, label]) => {
+            const on = lane === k;
+            return <button key={k} type="button" onClick={() => switchLane(k)} aria-pressed={on} style={{ flex: 1, height: 36, padding: '0 4px', border: 'none', cursor: 'pointer', borderRadius: 999, background: on ? 'var(--white)' : 'transparent', boxShadow: on ? 'var(--shadow-card)' : 'none', color: on ? 'var(--ink)' : 'var(--slate-500)', font: '700 13px var(--font-ui)', letterSpacing: '-0.1px', whiteSpace: 'nowrap', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>{label}</button>;
+          })}
+        </div>
+
+        {lane === 'ideas' ? (
+          <div style={{ padding: '10px 10px 10px 14px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: `1.5px solid ${text ? 'var(--blue-500)' : 'var(--border-strong)'}`, boxShadow: text ? '0 0 0 3px rgba(27,166,238,0.18)' : 'var(--shadow-card)', transition: 'box-shadow var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={text ? Math.min(4, Math.max(1, lines.length)) : 1} placeholder="Type an idea"
+                style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', resize: 'none', background: 'transparent', font: '500 15px/1.4 var(--font-ui)', color: 'var(--ink)', padding: '4px 0' }} />
+              <button type="button" disabled={!lines.length} onClick={saveIdeas} aria-label="Save" style={{ width: 36, height: 36, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: lines.length ? 'pointer' : 'default', background: lines.length ? 'var(--blue-500)' : 'var(--fill-quiet)', color: lines.length ? 'var(--white)' : 'var(--slate-300)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out)', transform: lines.length ? 'scale(1.04)' : 'scale(1)' }}><Icon name="arrow-right" size={18} /></button>
+            </div>
+            {lines.length > 1 ? <div style={{ marginTop: 6, font: '700 12px var(--font-ui)', color: 'var(--blue-700)', animation: 'noni-fade 160ms var(--ease-out) both' }}>Saves as {lines.length} ideas, one per line</div> : null}
+          </div>
+        ) : null}
+
+        {lane === 'refs' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 8px 8px 14px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1.5px solid var(--border-strong)', boxShadow: 'var(--shadow-card)' }}>
+            <Icon name="link" size={17} color="var(--slate-400)" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>Paste a link</div>
+              <div style={{ font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>TikTok or Instagram, copied from the app</div>
+            </div>
+            <Button size="sm" variant="primary" icon={pasting ? undefined : 'copy'} disabled={pasting} onClick={pasteLink} style={{ minWidth: 92 }}>{pasting ? 'Pasting' : 'Paste'}</Button>
+          </div>
+        ) : null}
+
+        {lane === 'ideas' || lane === 'refs' ? <SubTabs active={sub} onSelect={setSub} items={lane === 'ideas' ? [['unused', 'Unused', ideas.filter((i) => !i.made).length], ['used', 'Used', ideas.filter((i) => i.made).length]] : [['unused', 'Unused', refs.filter((r) => !r.made).length], ['used', 'Used', refs.filter((r) => r.made).length]]} /> : null}
+        {lane === 'media' ? <SubTabs active={sub} onSelect={setSub} items={[['image', 'Screenshots', media.filter((m) => m.kind === 'image').length], ['video', 'Recordings', media.filter((m) => m.kind === 'video').length]]} /> : null}
+
+        {!loading && !laneEmpty ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {lane === 'ideas' ? <LibSearch value={q} onChange={setQ} placeholder={sub === 'used' ? 'Search used ideas' : 'Search unused ideas'} /> : null}
+            {lane === 'refs' ? <LibSearch value={q} onChange={setQ} placeholder={sub === 'used' ? 'Search used references' : 'Search unused references'} /> : null}
+            {lane === 'ours' ? <>
+              <LibSearch value={q} onChange={setQ} placeholder="Search posts" />
+              <button type="button" onClick={() => setSort(sort === 'Top 60d' ? 'Recent' : 'Top 60d')} style={{ height: 38, padding: '0 11px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--slate-500)', font: '700 13px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>{sort}<Icon name="chevrons-up-down" size={13} /></button>
+              <button type="button" onClick={() => setSheet({ kind: 'filter' })} aria-label="Filter" style={{ position: 'relative', width: 38, height: 38, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', background: filterCount ? 'var(--blue-100)' : 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="layout-list" size={16} color={filterCount ? 'var(--blue-700)' : 'var(--slate-500)'} />
+                {filterCount ? <span style={{ position: 'absolute', top: -3, right: -3, minWidth: 17, height: 17, padding: '0 4px', borderRadius: 999, background: 'var(--blue-500)', color: 'var(--white)', font: '700 10.5px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 2px var(--off-white)' }}>{filterCount}</span> : null}
+              </button>
+            </> : null}
+            {lane === 'media' ? <><span style={{ flex: 1, font: '600 13px var(--font-ui)', color: 'var(--slate-500)', padding: '0 2px' }}>{mediaSub.length} {sub === 'video' ? (mediaSub.length === 1 ? 'recording' : 'recordings') : (mediaSub.length === 1 ? 'screenshot' : 'screenshots')}</span><Button size="sm" variant="primary" icon="plus" onClick={() => addMedia(sub)}>{sub === 'video' ? 'Add recording' : 'Add screenshot'}</Button></> : null}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Scrolling lane */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `4px ${GUT}px 118px` }}>
+        {loading ? <LaneSkeleton lane={lane} /> : null}
+        {!loading && lane === 'ideas' ? (ideas.length ? (ideasShown.length ? <Card pad={0} style={{ overflow: 'hidden' }}>{ideasShown.map((it, i) => rowIdea(it, i, i === ideasShown.length - 1))}</Card> : (ideasSub.length ? <p style={{ margin: '32px 0', textAlign: 'center', font: '500 14px var(--font-ui)', color: 'var(--slate-400)' }}>No ideas match</p> : <LaneEmpty lane="ideas" sub={sub} />)) : <LaneEmpty lane="ideas" sub={sub} />) : null}
+        {!loading && lane === 'refs' ? (refs.length ? (refsShown.length ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{refsShown.map(cardRef)}</div> : (refsSub.length ? <p style={{ margin: '32px 0', textAlign: 'center', font: '500 14px var(--font-ui)', color: 'var(--slate-400)' }}>No references match</p> : <LaneEmpty lane="refs" sub={sub} />)) : <LaneEmpty lane="refs" sub={sub} />) : null}
+        {!loading && lane === 'ours' ? (ours.length ? (oursShown.length ? <Card pad={0} style={{ overflow: 'hidden' }}>{oursShown.map((it, i) => rowOurs(it, i, i === oursShown.length - 1))}</Card> : <p style={{ margin: '32px 0', textAlign: 'center', font: '500 14px var(--font-ui)', color: 'var(--slate-400)' }}>No posts match these filters</p>) : <LaneEmpty lane="ours" />) : null}
+        {!loading && lane === 'media' ? (mediaSub.length ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12 }}>
+            {mediaSub.map(tileMedia)}
+            <button type="button" onClick={() => addMedia(sub)} style={{ border: 'none', padding: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+              <div style={{ aspectRatio: '4 / 5', borderRadius: 12, border: '1.5px dashed var(--border-strong)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--slate-500)', font: '700 13px var(--font-ui)' }}><Icon name={sub === 'video' ? 'video' : 'image-plus'} size={24} color="var(--blue-500)" />{sub === 'video' ? 'Add recording' : 'Add screenshot'}</div>
+            </button>
+          </div>
+        ) : <LaneEmpty lane="media" sub={sub} onAdd={() => addMedia(sub)} />) : null}
+        {!loading && more && lane !== 'media' ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '18px 0 6px', font: '600 13px var(--font-ui)', color: 'var(--slate-400)' }}><Spinner size={14} color="var(--slate-300)" />Loading more</div> : null}
+      </div>
+
+      {toast ? <Toast text={toast} /> : null}
+      {sheet && sheet.kind === 'types' ? <TypeSheet source={sheet.source} busyKey={busyType} onPick={pickType} onClose={() => !busyType && setSheet(null)} animate={animate} /> : null}
+      {sheet && sheet.kind === 'filter' ? <FilterSheet creators={creators} types={LIB2.types} sel={sel} onChange={setSel} count={oursShown.length} onClose={() => setSheet(null)} animate={animate} /> : null}
+      {sheet && sheet.kind === 'preview' ? <MediaPreview item={sheet.item} onClose={() => setSheet(null)} onRename={(n) => setMedia(media.map((m) => m.id === sheet.item.id ? { ...m, name: n } : m))} /> : null}
+      {sheet && sheet.kind === 'name' ? <NameSheet kind={sheet.mediaKind} value={nameDraft} onChange={setNameDraft} onSave={saveMedia} onClose={() => setSheet(null)} animate={animate} /> : null}
+      {sheet && sheet.kind === 'delete' ? <DeleteSheet what={sheet.what} animate={animate} note={sheet.what === 'media' ? 'Posts already using it keep their copy.' : 'Posts made from it are not affected.'} onClose={() => setSheet(null)}
+        onDelete={() => { if (sheet.what === 'idea') setIdeas(ideas.filter((x) => x.id !== sheet.id)); if (sheet.what === 'reference') setRefs(refs.filter((x) => x.id !== sheet.id)); if (sheet.what === 'media') setMedia(media.filter((x) => x.id !== sheet.id)); setSheet(null); }} /> : null}
+    </div>
+  );
+}
+
+Object.assign(window, { LibraryScreen2, LIB2 });

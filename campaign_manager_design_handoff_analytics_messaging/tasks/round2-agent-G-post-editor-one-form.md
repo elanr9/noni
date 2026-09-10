@@ -1,0 +1,89 @@
+# Agent G: Post editor, one form (replaces the seven-step wizard)
+
+Reference: reference_ui/PostEditorV2.jsx.txt (PostEditor2, ClipScreen, HookScreen, Toggle, FormGroup, FormRow, FormText). Live design: ui_kits/admin-app/post-editor.html.
+Touch: app/(admin)/post/[id].tsx (rewrite), components/admin/editor/ (new: FormGroup, FormRow, FormText, Toggle, ClipScreen, HookScreen), lib/briefs-api.ts (song fields), post editor media sheet (Agent E's Media library source). Delete the step components and StepDots once wired.
+
+## Shape
+One scrolling form. Nothing is a step. The post opens COMPLETELY EMPTY: every box shows its placeholder, every clip row reads "Nothing written yet". The manager types whatever they know (a title, a phrase, one clip) and then taps Fill with AI, which writes the rest around what they typed. Anything that needs room (a clip, the hook, the kind of post) opens a clean screen or sheet for just that and comes straight back. Nothing generates on open.
+
+Header: PushHeader "Post {nn}", meta "{Type} · Reel|Slideshow · Week 1, slot {n}", trailing PostTypeChip (tap opens the Kind of post sheet).
+Footer ActionBar: left outline sparkles button (44%) reads "Fill with AI" when the post is fully empty and "Finish with AI" once anything has been typed; "Filling" while busy. Right: "Save post" (primary, check).
+
+## Fill with AI sheet
+Tapping Fill with AI opens a sheet, never fills directly.
+Title "Fill with AI", no subtitle. The sheet opens tall (94% of the screen) so it reads like the Library itself: browse, pick, come back.
+Segmented row: Ideas {n} / References {n} / Our posts {n} (unused ideas and references only; all of our posts).
+Above the list, per lane:
+- Ideas: a text box "Or type your own idea" (zap icon, blue ring when typing, x to clear). Typing clears any picked row; Fill from this then uses the typed idea as the source and also saves it to Library Ideas as Used.
+- References: a "Paste a new link" row with a primary Paste button (same clipboard flow and validation as the Library References lane). The pasted link appears at the top of the list, selected, resolving its title, and is saved to Library References as well. One card of rows: for ideas a zap icon and the idea text (2-line clamp) with sub "Unused idea"; for references a 32x42 thumb, title, sub "@handle · TikTok|Instagram"; for our posts the thumb, title, sub "{creator} · {views} views". A chevron-down and a 22px radio on the right; one pick at a time.
+Rows expand: tapping the row (not the radio) opens it in place with a 160ms fade: the thumb grows to 54x72, the title unclamps to 6 lines, then a short line about what the fill does with this source ("The fill reads its transcript and caption and writes a fresh post in the same shape." for references; "The fill ports this brief: same structure, new phrasing and new hook." plus creator, type, format and date for our posts; "Saved as an idea. The fill turns it into a title, a hook and the clips." for ideas), then two sm buttons: "Open on TikTok|Instagram" / "Open the live post" (tint, arrow-right; opens the source in the browser; none for ideas) and "Use this" (secondary; reads "Selected" outline once picked). Only one row is expanded at a time; expanding does not select.
+Footer: left outline button reads "From scratch" when nothing is written or "From what I wrote" when something is; right primary "Fill from this" (sparkles) disabled until a source is picked or an own idea is typed.
+Fill rule: every field the manager typed is kept verbatim and passed to the generator as constraints; only empty fields are written. Source = the idea text, the reference URL (fetched transcript and caption), or the existing post's brief. The sheet closes, the footer button reads "Filling", and all fields populate together. Making from an idea or reference marks it Used in the Library (agent-F flow) once the post is saved.
+
+Full green screen (reels only) lives in the CLIPS group label row, on the right after the "{filled} of {total} written" meta: the words "Full green screen" (700 11px, green when on) and a tiny 30x18 toggle (green fill when on). Nothing else, no row of its own. When on, every clip's segment.layout is green_screen, the per-clip Green screen toggle reads "Green screen · whole post" and is locked on, and each clip's On screen canvas asks for a background. Maps to brief.full_green_screen (new boolean); turning it off restores each clip's own layout.
+
+Groups, in order (label 700 12px uppercase slate-500 with an optional right meta, then one white card):
+1. TITLE: big auto-growing text box (700 19px display), placeholder "Untitled post".
+2. SEARCH PHRASE: single line with a search icon, placeholder "What people type into TikTok".
+3. CLIPS (reels) or SLIDES (slideshows). Reels open with ONE row, "Hook", and no clips; the Hook row opens ClipScreen in its hook variant (see below), which has the same On screen tools as every clip; slideshows open with one empty "Slide 1". Clips are named "Clip 1", "Clip 2", ... in order (never Point n). Row: label with a "Plug" brand chip on the plug clip and a small images icon when a screenshot is attached, sub line = the text or "Nothing written yet" ("Nine words that stop the scroll" on an empty hook, "Empty slide" for slides), an 8px dot (green written, line-strong empty), a 32px x on every clip row (not the hook; not the last remaining slide) that removes it, chevron. Last row: "+ Add clip" / "+ Add slide" (700 14px blue-700 with a 24px blue-100 plus disc) appends an empty one. No written count in the label row. Renumber on add and remove. The note format sent to creators still uses Hook / Point n / Outro labels: map Clip n to Point n and the last clip to Outro when serialising, so the creator app keeps parsing (see round2-agent-C Data contract). Fill with AI adds clips when the list is empty (count from the post type) and fills empty ones otherwise.
+4. CAPTION: auto-growing text box (placeholder "First sentence carries the search phrase"). Hashtags are ALWAYS automatic and are the ONE thing filled in the moment a post opens (from the company hashtag bank plus the post type), before the manager types anything: no chips, no add or remove. Under the caption a single line of the tags in blue-700 (600 13px), read only. Right meta with a sparkles icon: "{n} hashtags, auto". Fill with AI may refresh them against the finished caption.
+5. SONG: row with music icon, "Add a song after posting", sub "Slideshows only. Videos keep their own sound." and a 44x26 Toggle. When on, sub reads "The creator gets both links once it is live" and two rows appear (fade in): "TikTok sound" and "Instagram audio", each with a sub line showing the pasted link (blue-700) or "No link yet", and a sm tint "Paste" button that reads the clipboard (expo-clipboard). Accept only tiktok.com or instagram.com URLs; otherwise toast "Copy a TikTok or Instagram link first". Once pasted the button becomes a 36px x button to clear. These two links are what the creator gets after the post goes live (see agent-3 music flow). The toggle is off and hidden for reels unless product decides otherwise; default off for slideshows.
+
+## Post families
+Three families, one editor. The Kind of post sheet lists every type with its family on the right:
+- Reel (video): Hook plus clips. All types in VIDEO_TYPES.
+- 7 second text (new type key text7, family video, label "7 second text", hint "One clip, one line of text, seven seconds"): ONE clip only. The Clips group is labelled CLIP with the meta "7 seconds, one take", the single row is "The clip" (sub "The one line on screen"), no Add clip, no remove, no Full green screen toggle, no Song group. The clip's text IS the on-screen text: ClipScreen shows a TEXT ON SCREEN group (placeholder "The line that sits on the clip for seven seconds") and the canvas mirrors it live as the burned-in text; no Hint | Script switch, no plug. The creator records one 7 second take with the text shown; Inkbound burns the text in. Header meta reads "{Type} · 7 seconds · Week 1, slot {n}".
+- Slideshow (photo_carousel): slides. All types in SLIDE_TYPES.
+
+## What to record (optional, every family)
+Directly under TITLE. Collapsed by default as a blue-700 text button "+ Add what to record". Tapping it opens a group WHAT TO RECORD with right meta "Optional" and an x that removes it; auto-growing text box, placeholder for 7 second text "e.g. Record yourself juggling a soccer ball for 7 seconds", otherwise "What the creator needs to understand before they record". This is plain instruction copy for the creator: it is shown at the top of the post in the creator app before they record, and inside the ClipScreen of a 7 second text post as a blue-50 note (video icon) above the text box. Maps to brief.record_instructions (new nullable text). Not spoken, not on screen, not part of the script sent to the teleprompter.
+
+## Filling: the loading experience (build this exactly)
+Filling must never feel stuck. The generator streams field by field and the form shows each field arriving in reading order. Never show a full-screen spinner or block the form.
+1. Tap Fill from this. The sheet closes (240ms). Clip rows appear immediately if the list was empty (count from the type), all reading "Nothing written yet".
+2. The footer's left button becomes "Stop" (ghost, 30%). The right button becomes a progress pill (48px, blue-100 track, blue-200 fill that widens as fields land, 500ms ease-out) with a spinner and the current stage label in blue-700: "Writing the title", "Finding the search phrase", "Writing the hook", "Writing clip {i} of {n}", "Writing the caption". When done the pill reads "Done" with a check for 1.2s, then the normal footer returns.
+3. Every field that is still pending shows, in its group label row, a pulsing blue "Writing" tag (sparkles icon, 1.2s opacity pulse), and in place of its text a shimmer: 1 to 2 rounded lines in blue-100 to blue-50 with a 1.4s sweep (title 16px tall, others 11px). Clip rows show a shimmer line as their sub text and the clip currently being written swaps its dot for a small spinner.
+4. When a field arrives its text fades in over 320ms and the shimmer disappears. The dot on a clip row turns green with a 240ms transition. Fields the manager typed never shimmer and never change.
+5. Order is fixed: title, search phrase, hook, clips in order, caption. Hashtags are already present.
+6. Stop cancels the stream and keeps everything that has landed; nothing is rolled back. Errors surface as a toast "Could not finish. What landed is saved." and the footer returns to Finish with AI.
+7. Timing: use real streaming from the generator (SSE or chunked function response, one event per field). If the backend cannot stream yet, fake the cadence client side from the single response (700ms first field, then 650ms apart) so the experience is identical; swap to real events without changing the UI.
+8. The form stays fully scrollable and editable while filling. Typing into a pending field claims it: it stops shimmering and the generator's value for that field is discarded when it arrives.
+
+## Kind of post sheet
+Opening an EMPTY post shows this sheet first, before anything else; it cannot be dismissed without a pick (no close button, scrim does nothing) and the pick is written to the brief right away. Later it opens from the type chip in the header and can be closed. Title "Kind of post", no subtitle. One card of rows: PostTypeChip label, hint as sub line, blue check on the current one. Picking re-derives the clip rows (keep written text where slots still exist).
+
+## ClipScreen (one clip or slide)
+PushHeader title = clip label ("Clip 3" or "Hook"), meta "The first thing they hear" on the hook, "Carries the plug" on the plug clip, "One screen" for slides, else "One thought per clip". Trailing: two 36px white round buttons, chevron-left and chevron-right, to step to the previous or next clip (disabled at the ends).
+Body, top to bottom, gap 16:
+1. Plug row (clips only, not slides): one line, no card. zap icon (blue-600 when on, slate-400 off), "Plug" (700 13px) with a suffix " · this clip mentions Inkbound" when on or " · another clip has it" (slate-400) when another clip holds it, and a SMALL 36x22 toggle on the right. One plug per post: when another clip has it the toggle is disabled at 40% opacity; turn that one off first. Maps to requires_plug / the plug point.
+2. TALKING POINT group. On the hook this group is labelled HOOK, the text box placeholder is "Nine words maximum", the right side shows "{n} of 9 words" (danger above 9) and a small blue-100 pill "{n} options" (sparkles) that pushes HookScreen; picking an option there writes the hook and returns to this clip screen. There is no Hint | Script switch on the hook. On every other clip: right of the label a tiny segmented pair "Hint | Script" (24px tall, white selected with card shadow). Script = the creator reads it word for word from the teleprompter; Hint = a cue they say their way (maps to point.script boolean as today). Auto-growing text box, 3 rows min. Placeholder Script: "Read word for word from the teleprompter"; Hint: "A cue. The creator says it their way."; slides: label "TEXT ON THE SLIDE", placeholder "One line the reader can take in at a glance".
+3. ON SCREEN group. Right of the label: "Green screen" (700 12px, green when on) with a small 36x22 toggle (clips only). Maps to segment.layout = 'green_screen' | 'standard'.
+   Card content (padding 10): a FULL-WIDTH canvas, aspect 9:13, radius 14, media shadow, showing exactly what the clip looks like (no creator silhouette or person icon), then one row of two pill buttons under it (44px tall, fill-quiet, 700 13.5px, equal width) plus a 44px trash button when anything is on screen.
+   - Canvas, standard: the clip's first frame when a take exists, otherwise the post's cover tone; an attached screenshot or recording as an inset (default top right, 50% wide, 32% tall, radius 10, play disc on recordings) at the position set in the editor; text boxes at their positions (800 22px display, white, shadow). Empty: centered video icon + "Just the creator talking" in white 75%. Tapping the canvas opens the OverlayEditor (media mode when media exists, else text mode). A small "Tap to edit" glass pill sits bottom right when anything is on screen.
+   - Canvas, green screen: the picked image fills the frame, text on top. Empty: light blue placeholder with images icon + "Pick a background".
+   - Buttons: standard "Add media" (images icon; once attached shows the media title with a video icon for recordings and opens the OverlayEditor in media mode) + "Add text" (Aa; once texts exist reads "{n} texts"). Green screen: "Background" (green-soft with the title once picked) + "Add text". Trash clears media and texts.
+   - OverlayEditor is the existing story-style full-screen editor (components/admin/editor/OverlayEditor.tsx): drag to move, pinch to resize, text with color and background pill, position presets for media, green screen button on the rail. Keep it; only its entry points change.
+4. No helper paragraph.
+Footer: "Remove" (ghost, danger red, 30%; hidden on the hook and on the last remaining slide) + "Done" (primary). Remove deletes the clip and returns to the form.
+
+## MediaPickSheet
+Title "Add to screen". Segmented "Media | Camera roll". Media = the company library (Agent E) with titles under each tile, screenshots and recordings together, recordings with a play disc and duration. Camera roll = expo-image-picker grid. Tap picks and closes.
+
+## HookScreen (reached from the hook's ClipScreen)
+Must fit one screen with NO scrolling on an iPhone SE. PushHeader "Hook options", meta "Best scored first. Tap one and you are back in the clip." One card with at most FIVE option rows (best scored first; the generator returns more but only five show): hook text (600 14.5px), sub "{n} words" plus " · best scored" on the first, a 22px radio. Tapping an option picks it and returns immediately, no confirm. Below: group "OR WRITE YOUR OWN" with a single auto-growing text box (placeholder "Your hook") and right meta "{n} of 9 words" (danger above 9). The footer "Use this hook" appears only while own text exists (disabled above 9 words).
+
+## Data
+Same brief fields as today: title, search_phrase, hook, script (points), cta, caption, hashtags[], post_type_id, brief_segments (overlay_text, show_on_screen, screenshot fields, layout). New on the brief: song_enabled boolean, tiktok_sound_url, instagram_audio_url, full_green_screen boolean, record_instructions text, and a post_types row for text7 (family video, one segment). Point rows carry script boolean (Hint | Script) and is_plug (one true per brief, enforced in the API). Save writes everything in one call; the row in Briefs stays "partial" until every clip has text.
+
+## Transitions
+Every screen change animates: the form, ClipScreen, HookScreen and the return trip slide up 20px and fade in over 320ms with an ease-out curve (the same "push" motion the rest of the admin app uses); sheets rise 240ms with the scrim fading. Toggles and segmented switches animate 160ms. Nothing ever snaps.
+
+## States
+Open: always empty (see Shape). Filling: see "Filling: the loading experience". Saved: return to Briefs.
+
+## Acceptance
+- No step indicator, no Next/Back. The whole post is visible on one scroll.
+- Clip rows open ClipScreen; prev/next work; edits persist when returning.
+- Song toggle reveals two paste rows; Paste reads the clipboard and validates; links persist to the brief and reach the creator after posting.
+- Screenshot picker uses Media library titles.
+- The editor opens empty every time; Fill with AI opens the source sheet; filling keeps every typed field and writes only the empty ones; HookScreen never scrolls; copy verbatim; no em or en dashes.

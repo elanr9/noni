@@ -1,0 +1,327 @@
+/* The two gates that are not post review: music on a live slideshow, and the
+   one-time creator account approval (which is also the account-linking
+   moment). Plus the account template both sides read from. */
+
+/* Music check on a live slideshow. The creator already posted and added
+   the song from the link Noni gave them. Here: the post, the song we asked
+   for, four buttons (open the live post on each platform, open the sound on
+   each platform), then Fix or Approve. Approve unlocks the creator's earnings. */
+function MusicApproval({ item, creator, state = 'default', onBack, onApproved }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const [done, setDone] = React.useState(state === 'approved');
+  const [fix, setFix] = React.useState(state === 'fix');
+  const [reasons, setReasons] = React.useState([]);
+  const [note, setNote] = React.useState('');
+  const [sent, setSent] = React.useState(false);
+  const canSend = reasons.length > 0 || note.trim().length > 0;
+  const toggleReason = (r) => setReasons(reasons.includes(r) ? reasons.filter((x) => x !== r) : [...reasons, r]);
+  const closeFix = () => { setFix(false); setReasons([]); setNote(''); };
+  const open = (url) => window.open && window.open('https://' + url, '_blank');
+  const cover = { text: item.title, tone: 1 };
+  const links = [
+    { icon: 'music-2', label: 'View on TikTok', sub: '@' + creator.tiktok, url: 'tiktok.com/@' + creator.tiktok },
+    { icon: 'at-sign', label: 'View on Instagram', sub: '@' + creator.instagram, url: 'instagram.com/' + creator.instagram },
+    { icon: 'music-2', label: 'Sound on TikTok', sub: item.song, url: 'tiktok.com/music/' + item.song.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+    { icon: 'at-sign', label: 'Sound on Instagram', sub: item.song, url: 'instagram.com/reels/audio/' + item.song.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+  ];
+
+  return (
+    <AdminScreen bottom={96} pad={false} footer={
+      <ActionBar>
+        <Button variant="outline" size="md" block onClick={() => setFix(true)} style={{ flex: '0 0 40%' }}>Fix song</Button>
+        <Button variant="approve" size="md" icon="check" block onClick={() => { setDone(true); onApproved && onApproved(); }} style={{ flex: 1 }}>Approve</Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 96px' }}>
+        <PushHeader title="Music check" meta={`${item.posted} · ${item.marked}`} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <Thumb format={item.format} w={54} h={72} radius={10} cover={cover} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 17px/1.25 var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{item.title}</div>
+              <div style={{ marginTop: 4, font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>{creator.name} · {item.slides} slides</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)' }}>
+            <span style={{ width: 40, height: 40, flex: '0 0 auto', borderRadius: 12, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="music-2" size={18} color="var(--blue-700)" /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 11px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--blue-700)' }}>Sound</div>
+              <div style={{ marginTop: 2, font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.song}</div>
+            </div>
+          </div>
+
+          {/* Two platform cards. Each: platform header, then two clean rows: the post, the sound. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[['TikTok', 'music-2', '@' + creator.tiktok, links[0].url, links[2].url], ['Instagram', 'at-sign', '@' + creator.instagram, links[1].url, links[3].url]].map(([name, icon, handle, postUrl, soundUrl]) => (
+              <Card key={name} pad={0} style={{ overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px 10px' }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--ink)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={15} color="var(--white)" /></span>
+                  <span style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{name}</span>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-400)' }}>{handle}</span>
+                </div>
+                {[['View post', 'The live post', 'eye', postUrl], ['Open sound', item.song, 'music-2', soundUrl]].map(([label, sub, ic, url], i) => (
+                  <button key={label} type="button" onClick={() => open(url)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 54, padding: '0 14px', border: 'none', borderTop: '1px solid var(--line)', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                    <Icon name={ic} size={18} color="var(--slate-500)" />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>{label}</span>
+                      <span style={{ display: 'block', marginTop: 1, font: '600 12px var(--font-ui)', color: 'var(--slate-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</span>
+                    </span>
+                    <span style={{ width: 30, height: 30, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="arrow-right" size={14} color="var(--blue-700)" /></span>
+                  </button>
+                ))}
+              </Card>
+            ))}
+          </div>
+
+          <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Check the song is on both posts. Approve unlocks {creator.short}'s earnings for this post.</p>
+        </div>
+      </div>
+
+      {fix ? (
+        <Sheet title="Fix the song" subtitle={`${creator.short} gets this and re-adds it on the live post`} onClose={closeFix} maxHeight="80%"
+          footer={<div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" size="lg" block onClick={closeFix} style={{ flex: '0 0 28%' }}>Cancel</Button>
+            <Button variant="primary" size="lg" icon="send" block disabled={!canSend} onClick={() => { setFix(false); setSent(true); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Send</Button>
+          </div>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {['Song is missing on TikTok', 'Song is missing on Instagram', 'Wrong song'].map((r) => {
+              const on = reasons.includes(r);
+              return (
+                <button key={r} type="button" onClick={() => toggleReason(r)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 13px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', textAlign: 'left', border: 'none', background: on ? 'var(--blue-100)' : 'var(--fill-quiet)', font: '600 14px var(--font-ui)', color: on ? 'var(--blue-700)' : 'var(--ink)', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 6, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--blue-500)' : 'var(--white)', border: on ? 'none' : '1.5px solid var(--line-strong)' }}>{on ? <Icon name="check" size={12} color="var(--white)" /> : null}</span>
+                  {r}
+                </button>
+              );
+            })}
+          </div>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Anything else, in your words"
+            style={{ marginTop: 11, width: '100%', boxSizing: 'border-box', resize: 'none', padding: 13, borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-strong)', font: '400 14px/1.5 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+        </Sheet>
+      ) : null}
+      {sent ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: `0 ${window.GUT}px`, textAlign: 'center' }}>
+          <button type="button" onClick={() => setSent(false)} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={20} color="var(--ink)" /></button>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={28} color="var(--blue-600)" /></span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Sent to {creator.short}</h2>
+          <p style={{ margin: 0, maxWidth: 290, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>They get the song link again and fix it on the live post. It lands back here when they mark it added.</p>
+          <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+        </div>
+      ) : null}
+      {done ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: `0 ${window.GUT}px`, textAlign: 'center' }}>
+          <button type="button" onClick={() => setDone(false)} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={20} color="var(--ink)" /></button>
+          <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--green-soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={32} color="var(--green)" /></span>
+          <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Song approved</h2>
+          <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{creator.short} starts earning on this post now.</p>
+          <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+        </div>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Once per creator. Four things to check, nothing else: the TikTok profile,
+   the Instagram profile (each opens the live account), and the two scroll
+   recordings. Tap a recording to watch it. Request changes on any part;
+   the rest counts as approved. */
+function AccountApproval({ item, creator, state = 'default', onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const sentBack = item.state === 'needs_changes';
+  const [notes, setNotes] = React.useState(state === 'reject' ? { tt_scroll: 'For You is mostly gym content. Rewarm it on college soccer before resubmitting.' } : {});
+  const [phase, setPhase] = React.useState(null);
+  const [open, setOpen] = React.useState(null);
+  const [draft, setDraft] = React.useState('');
+  const [playing, setPlaying] = React.useState(true);
+  const count = Object.keys(notes).length;
+  const close = () => { setOpen(null); setDraft(''); };
+  const cover = ((window.NONI_ADMIN || {}).covers || [])[1];
+
+  const profiles = [
+    { key: 'tt', icon: 'music-2', label: 'TikTok', handle: item.tiktok, url: 'tiktok.com/@' + item.tiktok },
+    { key: 'ig', icon: 'at-sign', label: 'Instagram', handle: item.instagram, url: 'instagram.com/' + item.instagram },
+  ];
+  const clips = [
+    { key: 'tt_scroll', label: 'TikTok For You scroll', need: item.tt.need, len: item.tt.got, tone: 1 },
+    { key: 'ig_scroll', label: 'Instagram scroll', need: item.ig.need, len: item.ig.got, tone: 3 },
+  ];
+
+  if (phase) return (
+    <AdminScreen pad={false}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 32px', textAlign: 'center' }}>
+        <span style={{ width: 68, height: 68, borderRadius: 999, background: phase === 'approved' ? 'var(--green-soft)' : 'var(--amber-soft)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={phase === 'approved' ? 'check' : 'circle-alert'} size={30} color={phase === 'approved' ? 'var(--green)' : 'var(--amber)'} />
+        </span>
+        <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>{phase === 'approved' ? `${creator.short} is approved` : `Sent back to ${creator.short}`}</h2>
+        <p style={{ margin: 0, maxWidth: 280, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{phase === 'approved' ? `@${item.tiktok} and @${item.instagram} are linked. Their first brief lands tomorrow morning.` : 'They see your notes on their setup screen and resubmit. It lands back in this queue.'}</p>
+        <Button variant="primary" size="lg" block onClick={onBack} style={{ marginTop: 8 }}>Back to Review</Button>
+      </div>
+    </AdminScreen>
+  );
+
+  const NoteTag = ({ k }) => notes[k] != null
+    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 999, background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 11px var(--font-ui)', whiteSpace: 'nowrap' }}><Icon name="pencil" size={11} />Changes</span>
+    : <Icon name="circle-check-big" size={18} color="var(--green)" />;
+  const NoteBlock = ({ k }) => notes[k] != null ? (
+    <div style={{ margin: '0 14px 12px', padding: '9px 11px', borderRadius: 10, background: 'var(--blue-50)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+      <Icon name="message-circle" size={14} color="var(--blue-600)" style={{ flex: '0 0 auto', marginTop: 2 }} />
+      <span style={{ flex: 1, font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{notes[k]}</span>
+      <button type="button" onClick={() => { const n = { ...notes }; delete n[k]; setNotes(n); }} aria-label="Remove note" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex' }}><Icon name="x" size={14} color="var(--slate-400)" /></button>
+    </div>
+  ) : null;
+  const NoteBtn = ({ k, label }) => (
+    <button type="button" onClick={() => { setOpen({ key: k, label }); setDraft(notes[k] || ''); }} aria-label={notes[k] != null ? 'Edit note' : 'Request changes'} style={{ width: 40, height: 40, borderRadius: 999, border: 'none', cursor: 'pointer', background: notes[k] != null ? 'var(--blue-100)' : 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="pencil" size={16} color={notes[k] != null ? 'var(--blue-700)' : 'var(--slate-500)'} /></button>
+  );
+
+  return (
+    <AdminScreen bottom={100} pad={false} footer={
+      <ActionBar>
+        <Button variant="outline" size="md" block disabled={count === 0} onClick={() => setPhase('sent')} style={{ flex: '0 0 47%', whiteSpace: 'nowrap' }}>{count === 0 ? 'Send back' : `Send back · ${count}`}</Button>
+        <Button variant="primary" size="md" icon="check" block onClick={() => setPhase('approved')} style={{ flex: 1 }}>Approve and link</Button>
+      </ActionBar>
+    }>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 100px' }}>
+        <PushHeader title="Account approval" meta={item.submitted} onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <Avatar name={creator.name} size={48} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: '700 18px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{creator.name}</div>
+              <div style={{ marginTop: 2, font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>{creator.credential}</div>
+            </div>
+            <TypeChip tone={sentBack ? 'warn' : 'quiet'}>{sentBack ? 'Needs changes' : 'Pending'}</TypeChip>
+          </div>
+
+          {sentBack ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--amber-soft)' }}>
+              <Icon name="circle-alert" size={16} color="var(--amber)" style={{ flex: '0 0 auto', marginTop: 1 }} />
+              <div><div style={{ font: '700 13px var(--font-ui)', color: '#8A5A0E' }}>{item.reason}</div><p style={{ margin: '3px 0 0', font: '400 13px/1.45 var(--font-ui)', color: '#8A5A0E' }}>{item.note}</p></div>
+            </div>
+          ) : null}
+
+          <div>
+            <SectionLabel style={{ padding: '0 2px 8px' }}>Profiles</SectionLabel>
+            <Card pad={0} style={{ overflow: 'hidden' }}>
+              {profiles.map((pr, i) => (
+                <div key={pr.key} style={{ borderBottom: i < profiles.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
+                    <span style={{ width: 40, height: 40, flex: '0 0 auto', borderRadius: 12, background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={pr.icon} size={18} color="var(--ink)" /></span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{pr.label}</span><NoteTag k={pr.key} /></div>
+                      <div style={{ marginTop: 2, font: '600 13px var(--font-ui)', color: 'var(--slate-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>@{pr.handle}</div>
+                    </div>
+                    <Button size="sm" variant="tint" iconRight="arrow-right" onClick={() => window.open && window.open('https://' + pr.url, '_blank')} style={{ whiteSpace: 'nowrap', padding: '0 12px' }}>Open</Button>
+                    <NoteBtn k={pr.key} label={pr.label + ' profile'} />
+                  </div>
+                  <NoteBlock k={pr.key} />
+                </div>
+              ))}
+            </Card>
+          </div>
+
+          <div>
+            <SectionLabel style={{ padding: '0 2px 8px' }}>Screen recordings</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {clips.map((c) => (
+                <Card key={c.key} pad={0} style={{ overflow: 'hidden' }}>
+                  <button type="button" onClick={() => { setOpen({ key: c.key, label: c.label, clip: c }); setDraft(notes[c.key] || ''); setPlaying(true); }} style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                    <div style={{ position: 'relative', aspectRatio: '9 / 12', background: cover, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ width: 40, height: 40, borderRadius: 999, background: 'rgba(255,255,255,0.88)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play" size={16} color="var(--ink)" /></span>
+                      <span style={{ position: 'absolute', right: 8, bottom: 8, padding: '2px 7px', borderRadius: 999, background: 'rgba(11,15,20,0.6)', color: 'var(--white)', font: '700 10.5px var(--font-ui)' }}>{c.len}</span>
+                      <span style={{ position: 'absolute', left: 8, top: 8 }}><NoteTag k={c.key} /></span>
+                    </div>
+                    <div style={{ padding: '10px 12px 4px' }}>
+                      <div style={{ font: '700 13.5px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{c.label}</div>
+                      <div style={{ marginTop: 2, font: '600 11.5px/1.35 var(--font-ui)', color: 'var(--slate-500)' }}>{c.need}</div>
+                    </div>
+                  </button>
+                  <div style={{ padding: '4px 12px 12px', display: 'flex', justifyContent: 'flex-end' }}><NoteBtn k={c.key} label={c.label} /></div>
+                </Card>
+              ))}
+            </div>
+          </div>
+          <p style={{ margin: '0 2px', font: '400 13px/1.45 var(--font-ui)', color: 'var(--slate-400)' }}>Tap the pencil to request changes on a part. Approve links both handles; anything with a note goes back.</p>
+        </div>
+      </div>
+
+      {open ? (
+        <Sheet title={open.label} subtitle={open.clip ? `${open.clip.len} · ${open.clip.need}` : `What should ${creator.short} change`} onClose={close} maxHeight="86%"
+          footer={<div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" size="lg" block onClick={close} style={{ flex: '0 0 28%' }}>Cancel</Button>
+            <Button variant="primary" size="lg" block disabled={!draft.trim()} onClick={() => { setNotes({ ...notes, [open.key]: draft.trim() }); close(); }} style={{ flex: 1, whiteSpace: 'nowrap' }}>Save note</Button>
+          </div>}>
+          {open.clip ? (
+            <div style={{ position: 'relative', width: 'min(100%, 200px)', aspectRatio: '9 / 16', margin: '0 auto 12px', borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: cover, boxShadow: 'var(--shadow-media)' }}>
+              <button type="button" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'} style={{ position: 'absolute', bottom: 12, left: 12, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: playing ? 'var(--blue-500)' : 'rgba(255,255,255,0.88)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={playing ? 'pause' : 'play'} size={15} color={playing ? 'var(--white)' : 'var(--ink)'} /></button>
+              <span style={{ position: 'absolute', bottom: 22, right: 14, padding: '2px 8px', borderRadius: 999, background: 'rgba(11,15,20,0.55)', color: 'var(--white)', font: '700 11px var(--font-ui)' }}>{open.clip.len}</span>
+              {playing ? <span style={{ position: 'absolute', left: 0, bottom: 0, height: 3, background: 'var(--blue-500)', animation: 'noni-progress 6s linear infinite' }} /> : null}
+            </div>
+          ) : null}
+          <div style={{ padding: 11, borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)' }}>
+            <textarea autoFocus={!open.clip} value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} placeholder={`What should ${creator.short} change here`}
+              style={{ width: '100%', boxSizing: 'border-box', resize: 'none', padding: 11, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--blue-300)', background: 'var(--white)', font: '400 14px/1.45 var(--font-ui)', color: 'var(--ink)', outline: 'none' }}></textarea>
+          </div>
+        </Sheet>
+      ) : null}
+    </AdminScreen>
+  );
+}
+
+/* Company-scoped. Creators see the same values on their setup screen, so the
+   standard is visible before they submit rather than after they fail. */
+function AccountTemplate({ onBack }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const bio = 'D1 soccer film + recruiting\nEvery match tagged with FieldVision AI\nComment D1 for the breakdown';
+  return (
+    <AdminScreen bottom={40} pad={false}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '0 0 40px' }}>
+        <PushHeader title="Account template" meta="FieldVision AI" onBack={onBack} />
+        <div style={{ padding: `0 ${window.GUT}px`, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ margin: 0, font: '400 14px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>
+            What a creator account should look like. They copy it, they do not retype it.
+          </p>
+          <Card pad={14}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Bio</span>
+              <Button size="sm" variant="tint" icon="copy">Copy</Button>
+            </div>
+            <p style={{ margin: '10px 0 0', whiteSpace: 'pre-line', font: '400 15px/1.5 var(--font-ui)', color: 'var(--ink)' }}>{bio}</p>
+          </Card>
+          <Card pad={14}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ width: 56, height: 56, borderRadius: 999, flex: '0 0 auto', background: 'linear-gradient(160deg,#E7F4FD 0%,#DCE7F0 100%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="circle-user-round" size={24} color="var(--blue-300)" />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 15px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>Profile picture</div>
+                <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-500)' }}>1080 × 1080 PNG</div>
+              </div>
+              <Button size="sm" variant="tint" icon="download">Download</Button>
+            </div>
+          </Card>
+          <Card pad={14}>
+            <div style={{ font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>Link in bio</div>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 13px', borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+              <Icon name="link" size={16} color="var(--slate-400)" />
+              <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--ink)' }}>fieldvisionai.com</span>
+              <Icon name="copy" size={16} color="var(--slate-400)" />
+            </div>
+          </Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SectionLabel>Example account</SectionLabel>
+            <Card pad={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
+              <Thumb format="photo_carousel" w={54} h={72} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>@fabri.d1soccer</div>
+                <div style={{ marginTop: 3, font: '400 13px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>This is the bar. Same bio shape, same grid, no gym content.</div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </AdminScreen>
+  );
+}
+
+Object.assign(window, { MusicApproval, AccountApproval, AccountTemplate });

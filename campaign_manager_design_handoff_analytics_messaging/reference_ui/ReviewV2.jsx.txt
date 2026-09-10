@@ -1,0 +1,191 @@
+/* Review, one screen. The post plays on top. A strip of its sections sits
+   under it: tap one and the preview jumps there. Request changes does not
+   leave the screen: the bottom panel becomes a note box for the selected
+   section (or the whole post), quick reasons fill it in one tap, and notes
+   pile up as dots on the strip. Send back when done. */
+
+const RV_REASONS = {
+  video: ['Audio clips', 'Off script', 'Too long', 'Framing', 'Reshoot outside', 'Say the plug clearer'],
+  slide: ['Wrong screenshot', 'Text unreadable', 'Off script', 'Crop tighter', 'Swap the order'],
+  all: ['Energy is low', 'Wrong location', 'Lighting', 'Start over, same script'],
+};
+
+function ReviewDetail2({ item, creator, state = 'default', section: section0 = 0, position = '1 of 5', animateSheet = true, onBack, onChat, onApproved, onOpenThread }) {
+  const { Button, Icon } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const reel = window.isReel(item.format);
+  const secs = (l) => { const [m, ss] = l.split(':').map(Number); return m * 60 + ss; };
+  let acc = 0;
+  const sections = reel
+    ? A.segments.map((s, i) => { const start = acc; acc += secs(s.len); return { key: s.slot, label: s.slot, text: s.text, len: s.len, i, start }; })
+    : A.slides.map((s, i) => ({ key: `Slide ${s.n}`, label: `Slide ${s.n}`, text: s.overlay, i }));
+  const seeded = state === 'noted' ? { 'Point 3': 'Audio clips at 0:04. Same setup, just move the phone off the fence rail.', 'Outro': 'Say the plug slower.' } : state === 'whole' ? { __all: 'Great energy, wrong room. Shoot the whole thing outside at the pitch, the echo is killing every line.' } : {};
+  const [sel, setSel] = React.useState(state === 'whole' ? '__all' : sections[Math.min(section0, sections.length - 1)].key);
+  const [noting, setNoting] = React.useState(state === 'noting' || state === 'noted' || state === 'whole' || state === 'typing');
+  const [notes, setNotes] = React.useState(seeded);
+  const [draft, setDraft] = React.useState(state === 'typing' ? 'Audio clips at 0:04. Same setup, just move' : '');
+  const [done, setDone] = React.useState(state === 'approved' ? 'approved' : state === 'sent' ? 'sent' : null);
+  const [ghost, setGhost] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [full, setFull] = React.useState(false);
+  const count = Object.keys(notes).length;
+  const cur = sel === '__all' ? null : sections.find((s) => s.key === sel);
+  const reasons = sel === '__all' ? RV_REASONS.all : reel ? RV_REASONS.video : RV_REASONS.slide;
+
+  const pick = (key) => { setSel(key); setDraft(notes[key] || ''); };
+  const addReason = (r) => setDraft((d) => (d.trim() ? d.replace(/\.?\s*$/, '. ') + r + '.' : r + '.'));
+  const saveNote = () => { if (!draft.trim()) return; setNotes({ ...notes, [sel]: draft.trim() }); setDraft(''); const nxt = sel === '__all' ? null : sections[(cur.i + 1) % sections.length]; if (nxt && !notes[nxt.key]) setSel(nxt.key); };
+  const removeNote = (k) => { const n = { ...notes }; delete n[k]; setNotes(n); if (k === sel) setDraft(''); };
+  const sendBack = () => { setBusy(true); setTimeout(() => { setBusy(false); setDone('sent'); }, 900); };
+  const approve = () => { setBusy(true); setTimeout(() => { setBusy(false); setDone('approved'); onApproved && onApproved(); }, 700); };
+
+  const caption = reel ? 'Why my winger fades after 70 minutes: he runs the wrong runs, not too few. Full breakdown below.' : 'Three numbers decide most Sunday matches. Save this before the weekend. Comment D1 for the template.';
+  const tags = reel ? '#collegesoccer #soccerrecruiting #matchfilm' : '#collegesoccer #matchfilm #u17';
+  const GlassBtn = ({ label, icon, onClick, on }) => (
+    <button type="button" onClick={onClick} aria-label={label} aria-pressed={on} style={{ width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: on ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)', backdropFilter: 'blur(18px)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <Icon name={icon} size={18} color={on ? 'var(--ink)' : 'var(--white)'} />
+    </button>
+  );
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--white)', position: 'relative' }}>
+      {/* Media, capped so the strip and panel always fit */}
+      {!noting ? (
+        <>
+          {/* TikTok Preview header: back, "Preview", fullscreen */}
+          <div style={{ flex: '0 0 auto', height: 44, display: full ? 'none' : 'flex', alignItems: 'center', padding: '0 12px', background: 'var(--ink-900)' }}>
+            <button type="button" onClick={onBack} aria-label="Back" style={{ width: 40, height: 40, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={24} color="var(--white)" /></button>
+            <span style={{ flex: 1, textAlign: 'center', font: '700 17px var(--font-ui)', color: 'var(--white)' }}>Preview</span>
+            <button type="button" onClick={() => setFull(true)} aria-label="Fullscreen" style={{ width: 40, height: 40, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--white)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg></button>
+          </div>
+          {/* The post, full bleed, platform chrome at full opacity */}
+          <div onClick={() => full && setFull(false)} style={{ flex: 1, minHeight: 0, background: 'var(--ink-900)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <div style={{ height: '100%', maxWidth: '100%', aspectRatio: '9 / 16', position: 'relative' }}>
+              <PlatformPreview key={sel} item={item} creator={creator} caption={caption} tags={tags} ghost={true} solid={true} initialSlide={cur ? cur.i : 0}
+                top={item.attempt > 1 ? <><span style={{ flex: 1 }} /><span style={{ padding: '5px 10px', borderRadius: 999, background: 'rgba(224,138,22,0.92)', color: 'var(--white)', font: '700 11.5px var(--font-ui)', whiteSpace: 'nowrap' }}>Take {item.attempt}</span></> : null} />
+            </div>
+          </div>
+          {/* Two pills, like Edit cover / Post */}
+          <div style={{ flex: '0 0 auto', display: full ? 'none' : 'flex', gap: 10, padding: '12px 16px 30px', background: 'var(--ink-900)' }}>
+            <button type="button" onClick={() => { setNoting(true); setDraft(notes[sel] || ''); }} style={{ flex: '0 0 46%', height: 52, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.14)', color: 'var(--white)', font: '700 16px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, whiteSpace: 'nowrap' }}><Icon name="pencil" size={17} />Request changes</button>
+            <button type="button" disabled={busy} onClick={approve} style={{ flex: 1, height: 52, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-500)', color: 'var(--white)', font: '700 16px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.6 : 1 }}><Icon name="check" size={18} strokeWidth={2.5} />{busy ? 'Approving' : 'Approve'}</button>
+          </div>
+        </>
+      ) : (
+      <div style={{ flex: 1, minHeight: 0, background: 'var(--ink-900)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px 8px' }}>
+          <GlassBtn label="Back" icon="chevron-left" onClick={onBack} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: '700 14px var(--font-display)', letterSpacing: '-0.2px', color: 'var(--white)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</div>
+            <div style={{ font: '600 11.5px var(--font-ui)', color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap' }}>{creator.name} · {item.typeLabel} · {position}{item.attempt > 1 ? ` · Take ${item.attempt}` : ''}</div>
+          </div>
+          {!noting ? <GlassBtn label={ghost ? 'Hide TikTok layout' : 'Show TikTok layout'} icon="eye" on={ghost} onClick={() => setGhost(!ghost)} /> : null}
+          <GlassBtn label={`Message ${creator.short}`} icon="message-circle" onClick={onChat} />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', justifyContent: 'center', padding: '0 0 10px' }}>
+        <div style={{ height: '100%', maxWidth: '100%', aspectRatio: '9 / 16', borderRadius: 12, overflow: 'hidden' }}>
+          <PlatformPreview key={sel} item={item} creator={creator} caption={caption} tags={tags} ghost={false} initialSlide={cur ? cur.i : 0} seekTo={cur && reel ? cur.start : null} autoplay={!!cur && reel} top={null} />
+        </div>
+        </div>
+      </div>
+      )}
+
+      {/* Section strip (noting state): one segmented row, everything fits */}
+      {noting ? (
+      <div style={{ flex: '0 0 auto', display: 'flex', gap: 2, padding: 3, margin: '8px 16px 0', borderRadius: 999, background: 'var(--fill-quiet)' }}>
+        {[{ key: '__all', short: 'All' }, ...sections.map((x) => ({ key: x.key, short: reel ? (x.label === 'Hook' ? 'Hook' : x.label === 'Outro' ? 'Outro' : x.label.replace(/^Point\s+/, 'P')) : String(x.i + 1) }))].map((x) => {
+          const on = sel === x.key;
+          const noted = !!notes[x.key];
+          return (
+            <button key={x.key} type="button" onClick={() => pick(x.key)} aria-label={x.key === '__all' ? 'Whole post' : x.key} style={{ flex: 1, minWidth: 0, position: 'relative', height: 30, padding: 0, borderRadius: 999, border: 'none', cursor: 'pointer', background: on ? 'var(--ink)' : noted ? 'var(--blue-100)' : 'transparent', color: on ? 'var(--white)' : noted ? 'var(--blue-700)' : 'var(--slate-500)', font: '700 12px var(--font-ui)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>
+              {x.short}
+              {noted ? <span style={{ position: 'absolute', top: 3, right: 5, width: 6, height: 6, borderRadius: 999, background: on ? 'var(--blue-300)' : 'var(--blue-500)' }} /> : null}
+            </button>
+          );
+        })}
+      </div>
+      ) : null}
+
+      {/* Panel */}
+      <div style={{ flex: '0 0 auto', maxHeight: '38%', overflowY: 'auto', display: noting ? 'flex' : 'none', flexDirection: 'column', padding: '8px 16px 0' }}>
+        {cur ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ flex: '0 0 auto', marginTop: 2, font: '700 11px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-400)', whiteSpace: 'nowrap' }}>{cur.label}{cur.len ? ` · ${cur.len}` : ''}</span>
+            <p style={{ flex: 1, margin: 0, font: '500 13.5px/1.45 var(--font-ui)', color: 'var(--ink)', display: '-webkit-box', WebkitLineClamp: noting ? 2 : 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{cur.text}</p>
+          </div>
+        ) : <p style={{ margin: 0, font: '500 13.5px/1.45 var(--font-ui)', color: 'var(--slate-500)' }}>One note for the whole post. {creator.short} re-records everything.</p>}
+
+        {noting ? (
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, animation: 'noni-fade 200ms var(--ease-out) both' }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {reasons.map((r) => <button key={r} type="button" onClick={() => addReason(r)} style={{ height: 30, padding: '0 11px', borderRadius: 999, border: '1px solid var(--line-strong)', background: 'var(--white)', color: 'var(--ink)', font: '600 12px var(--font-ui)', cursor: 'pointer', whiteSpace: 'nowrap' }}>{r}</button>)}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '8px 8px 8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1.5px solid var(--blue-300)' }}>
+              <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} placeholder={cur ? `What should ${creator.short} change in ${cur.label}` : `What should ${creator.short} change`}
+                style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', resize: 'none', background: 'transparent', font: '500 14px/1.4 var(--font-ui)', color: 'var(--ink)', padding: '3px 0' }} />
+              <button type="button" disabled={!draft.trim()} onClick={saveNote} aria-label="Add note" style={{ width: 36, height: 36, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: draft.trim() ? 'pointer' : 'default', background: draft.trim() ? 'var(--blue-500)' : 'var(--white)', color: draft.trim() ? 'var(--white)' : 'var(--slate-300)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transition: 'background var(--dur-fast) var(--ease-out)' }}><Icon name="check" size={18} strokeWidth={2.5} /></button>
+            </div>
+            {count ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {Object.entries(notes).map(([k, v]) => (
+                  <button key={k} type="button" onClick={() => pick(k)} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', width: '100%', padding: '8px 10px', borderRadius: 10, border: 'none', background: sel === k ? 'var(--blue-100)' : 'var(--fill-quiet)', cursor: 'pointer', textAlign: 'left' }}>
+                    <span style={{ flex: '0 0 auto', font: '700 11px var(--font-ui)', color: 'var(--blue-700)', marginTop: 2, minWidth: 52 }}>{k === '__all' ? 'Whole post' : k}</span>
+                    <span style={{ flex: 1, font: '500 13px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{v}</span>
+                    <span role="button" aria-label="Remove note" onClick={(e) => { e.stopPropagation(); removeNote(k); }} style={{ display: 'inline-flex', padding: 2, margin: -2 }}><Icon name="x" size={14} color="var(--slate-400)" /></span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Actions */}
+      {noting ? <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px 26px', background: 'var(--white)', boxShadow: '0 -8px 16px -12px rgba(15,23,32,0.18)' }}>
+        {noting ? (
+          <>
+            <Button variant="ghost" size="md" onClick={() => { setNoting(false); setDraft(''); }} style={{ flex: '0 0 30%' }}>Cancel</Button>
+            <Button variant="primary" size="md" icon={busy ? undefined : 'send'} block disabled={count === 0 || busy} onClick={sendBack} style={{ flex: 1, whiteSpace: 'nowrap' }}>{busy ? 'Sending' : count ? `Send back · ${count} ${count === 1 ? 'note' : 'notes'}` : 'Send back'}</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="outline" size="md" onClick={() => { setNoting(true); setDraft(notes[sel] || ''); }} style={{ flex: '0 0 46%', whiteSpace: 'nowrap' }}>Request changes</Button>
+            <Button variant="primary" size="md" icon="check" block disabled={busy} onClick={approve} style={{ flex: 1 }}>{busy ? 'Approving' : 'Approve'}</Button>
+          </>
+        )}
+      </div> : null}
+
+      {done === 'approved' ? <ApprovedOverlay item={item} creator={creator} onBack={onBack} /> : null}
+      {done === 'sent' ? <SentOverlay item={item} creator={creator} notes={notes} onBack={onBack} onOpenThread={onOpenThread} /> : null}
+    </div>
+  );
+}
+
+function SentOverlay({ item, creator, notes, onBack, onOpenThread }) {
+  const { Icon, Button } = window.NoniDesignSystem_710e43;
+  const list = Object.entries(notes);
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'var(--white)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 20, padding: `0 ${window.GUT}px` }}>
+      <button type="button" onClick={onBack} aria-label="Back" style={{ position: 'absolute', top: 10, left: 16, width: 36, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--fill-quiet)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={20} color="var(--ink)" /></button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}>
+        <span style={{ width: 68, height: 68, borderRadius: 999, background: 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={28} color="var(--blue-600)" /></span>
+        <h2 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: 'var(--tracking-title)', color: 'var(--ink)' }}>Sent back to {creator.short}</h2>
+        <p style={{ margin: 0, maxWidth: 290, font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>Your notes are in the post thread. {creator.short} re-records only what you marked and take {item.attempt + 1} lands back in Review.</p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {list.map(([k, v]) => (
+          <div key={k} style={{ display: 'flex', gap: 10, padding: '11px 13px', borderRadius: 'var(--radius-md)', background: 'var(--off-white)' }}>
+            <span style={{ flex: '0 0 auto', font: '700 11px var(--font-ui)', color: 'var(--blue-700)', marginTop: 2, minWidth: 52 }}>{k === '__all' ? 'Whole post' : k}</span>
+            <span style={{ font: '500 13.5px/1.4 var(--font-ui)', color: 'var(--ink)' }}>{v}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <Button variant="outline" size="lg" onClick={onOpenThread} style={{ flex: '0 0 44%', whiteSpace: 'nowrap' }}>Open thread</Button>
+        <Button variant="primary" size="lg" block onClick={onBack} style={{ flex: 1 }}>Next in queue</Button>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ReviewDetail2, SentOverlay });

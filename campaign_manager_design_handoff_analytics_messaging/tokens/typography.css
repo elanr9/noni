@@ -1,0 +1,31 @@
+:root{
+  /* sizes lifted from the app source — do not snap to a scale */
+  --text-hero:44px;
+  --text-title-xl:34px;
+  --text-title:30px;
+  --text-title-sm:26px;
+  --text-card-lg:20px;
+  --text-card:18px;
+  --text-action:17px;
+  --text-body:16px;
+  --text-body-sm:15px;
+  --text-meta:14px;
+  --text-chip:13px;
+  --text-label:12px;
+
+  --leading-tight:1.05;
+  --leading-title:1.12;
+  --leading-snug:1.35;
+  --leading-body:1.5;
+
+  --tracking-hero:-1.2px;
+  --tracking-title:-0.5px;
+  --tracking-flat:0;
+  --tracking-label:0.7px;
+
+  --weight-regular:400;
+  --weight-medium:500;
+  --weight-semibold:600;
+  --weight-bold:700;
+  --weight-heavy:800;
+}

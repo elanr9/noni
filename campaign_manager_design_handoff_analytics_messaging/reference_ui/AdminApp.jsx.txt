@@ -1,0 +1,54 @@
+/* The admin shell. Five tabs: Review, Briefs, Library, Messages, Analytics,
+   plus the pushed screens. Creators is a pushed list from the Analytics header,
+   Calendar is a toggle inside Briefs, Settings is the gear on Analytics. */
+
+function AdminKit() {
+  const { TabBar } = window.NoniDesignSystem_710e43;
+  const A = window.NONI_ADMIN;
+  const [tab, setTab] = React.useState(0);
+  const [push, setPush] = React.useState(null);
+  const creatorOf = (id) => A.creators.find((c) => c.id === id);
+  const back = () => setPush(null);
+
+  const screen = () => {
+    if (push) {
+      switch (push.kind) {
+        case 'review': return <ReviewDetail2 item={push.item} creator={creatorOf(push.item.creator)} onBack={back} onChat={() => setPush({ kind: 'chat', creator: creatorOf(push.item.creator) })} onOpenThread={() => setPush({ kind: 'postThread', post: push.item, creator: creatorOf(push.item.creator) })} />;
+        case 'postThread': return <PostThreadScreen post={push.post} creator={push.creator} onBack={back} onReview={(s) => setPush({ kind: 'review', item: s })} />;
+        case 'music': return <MusicApproval item={push.item} creator={creatorOf(push.item.creator)} onBack={back} />;
+        case 'account': return <AccountApproval item={push.item} creator={creatorOf(push.item.creator)} onBack={back} />;
+        case 'post': return <PostEditor onBack={back} onDone={back} sheet={push.sheet} format={push.format || 'video'} />;
+        case 'week': return <WeekSetup onBack={back} onDone={back} />;
+        case 'creator': return <CreatorProfile creator={push.creator} onBack={back} onChat={() => setPush({ kind: 'chat', creator: push.creator })} onOpenPost={(p) => setPush({ kind: 'creatorPost', post: p, creator: push.creator })} />;
+        case 'creatorPost': return <CreatorPost post={push.post} creator={push.creator} onBack={() => setPush({ kind: 'creator', creator: push.creator })} />;
+        case 'chat': return <ThreadScreen creator={push.creator} onBack={back} onReview={(s) => setPush({ kind: 'review', item: s })} onOpenPost={(s) => setPush({ kind: 'postThread', post: s, creator: push.creator })} onProfile={() => setPush({ kind: 'creator', creator: push.creator })} />;
+        case 'settings': return <SettingsScreen onBack={back} />;
+        case 'creators': return <CreatorsList onBack={back} onOpen={(creator) => setPush({ kind: 'creator', creator })} />;
+        case 'channel': return <ChannelScreen channel={push.channel} onBack={back} />;
+        default: return null;
+      }
+    }
+    switch (tab) {
+      case 0: return <ReviewScreen onOpen={(item) => setPush({ kind: 'review', item })} onOpenMusic={(item) => setPush({ kind: 'music', item })} onOpenAccount={(item) => setPush({ kind: 'account', item })} />;
+      case 1: return <BriefsScreen onOpenPost={(r) => setPush({ kind: 'post', format: r && r.format })} onNewWeek={() => setPush({ kind: 'week' })} />;
+      case 2: return window.LibraryScreen2 ? <LibraryScreen2 onOpenPost={() => setPush({ kind: 'post' })} /> : <LibraryScreen />;
+      case 3: return <AdminMessagesScreen onOpenChat={(p) => setPush({ kind: 'chat', creator: p })} onOpenChannel={(ch) => setPush({ kind: 'channel', channel: ch })} onReview={(s) => setPush({ kind: 'review', item: s })} />;
+      default: return <AnalyticsScreen onSettings={() => setPush({ kind: 'settings' })} onOpenCreators={() => setPush({ kind: 'creators' })} onOpenCreator={(id) => { const c = A.creators.find((x) => x.id === id); if (c) setPush({ kind: 'creator', creator: c }); }} />;
+    }
+  };
+
+  const tabs = window.ADMIN_TABS.map((t, i) => (i === 0 ? { ...t, badge: A.submissions.length + A.music.length + A.accounts.filter((a) => a.state === 'pending').length } : i === 3 ? { ...t, badge: window.MSG_THREADS().reduce((n, x) => n + x.unread, 0) } : t));
+
+  const pushKey = push ? push.kind + ((push.item && push.item.id) || (push.creator && push.creator.id) || (push.channel && push.channel.id) || (push.post && push.post.id) || '') : 'tab' + tab;
+
+  return (
+    <Phone>
+      <div key={pushKey} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', animation: push ? 'noni-push 420ms cubic-bezier(0.34,1.56,0.64,1) both' : 'noni-fade 240ms var(--ease-out, ease-out) both' }}>
+        {screen()}
+      </div>
+      {push ? null : <TabBar items={tabs} active={tab} onSelect={(i) => { setTab(i); setPush(null); }} />}
+    </Phone>
+  );
+}
+
+Object.assign(window, { AdminKit });
