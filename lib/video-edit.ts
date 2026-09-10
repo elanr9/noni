@@ -178,6 +178,8 @@ export function clampTrim(
     outMs = Math.min(piece.sourceDurationMs, inMs + MIN_PIECE_MS);
     inMs = outMs - MIN_PIECE_MS;
   }
+  inMs = Math.max(0, inMs);
+  outMs = Math.max(inMs, Math.min(piece.sourceDurationMs, outMs));
   return { inMs: Math.round(inMs), outMs: Math.round(outMs) };
 }
 

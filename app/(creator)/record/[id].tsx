@@ -5,6 +5,7 @@ import {
   Animated,
   Easing,
   Image,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -388,6 +389,7 @@ export default function RecordScreen() {
   // as parts that get joined into a single file when the creator stops.
   const partsRef = useRef<PendingClip[]>([]);
   const switchingRef = useRef(false);
+  const recordSessionRef = useRef(0);
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
   const saveTokenRef = useRef(0);
@@ -465,11 +467,12 @@ export default function RecordScreen() {
 
   useEffect(() => {
     if (!id || !profile) return;
+    const companyId = profile.company_id;
     let cancelled = false;
     async function load() {
       try {
         if (isAssignment) {
-          const a = await getAssignment(id);
+          const a = await getAssignment(companyId, id);
           if (cancelled) return;
           if (
             a &&
@@ -527,6 +530,12 @@ export default function RecordScreen() {
           if (cancelled) return;
           setTask(t);
         }
+      } catch (e) {
+        if (!cancelled) {
+          setErrorToast(
+            e instanceof Error ? e.message : 'Could not load this post. Try again.',
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -536,7 +545,7 @@ export default function RecordScreen() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isAssignment, profile?.id]);
+  }, [id, isAssignment, profile?.id, profile?.company_id]);
 
   useEffect(() => {
     if (loading || initialized || plan.length === 0) return;
@@ -713,6 +722,7 @@ export default function RecordScreen() {
       return;
     }
     recordingRef.current = true;
+    const session = ++recordSessionRef.current;
     discardClipRef.current = false;
     recordStartedRef.current = false;
     switchingRef.current = false;
@@ -742,6 +752,7 @@ export default function RecordScreen() {
       while (keepGoing) {
         const partStartedAt = Date.now();
         const part = await recordPart(cam);
+        if (recordSessionRef.current !== session) return;
         if (part?.uri) {
           partsRef.current.push({
             uri: part.uri,
@@ -763,7 +774,6 @@ export default function RecordScreen() {
       partsRef.current = [];
       if (discardClipRef.current) {
         discardClipRef.current = false;
-        setPhase('idle');
       } else if (parts.length > 0) {
         const uri =
           parts.length === 1
@@ -787,18 +797,21 @@ export default function RecordScreen() {
         Alert.alert('Clip not saved', 'That take did not save. Record it again.');
       }
     } catch (e) {
+      if (recordSessionRef.current !== session) return;
       setPhase('idle');
       Alert.alert(
         'Recording failed',
         e instanceof Error ? e.message : 'Try again',
       );
     } finally {
-      recordingRef.current = false;
-      if (stopWatchdogRef.current) {
-        clearTimeout(stopWatchdogRef.current);
-        stopWatchdogRef.current = null;
+      if (recordSessionRef.current === session) {
+        recordingRef.current = false;
+        if (stopWatchdogRef.current) {
+          clearTimeout(stopWatchdogRef.current);
+          stopWatchdogRef.current = null;
+        }
+        void restoreBrightness();
       }
-      void restoreBrightness();
     }
   }
 
@@ -889,6 +902,7 @@ export default function RecordScreen() {
           activeClip.slotIndex,
         );
         await uploadClip(captured.uri, storagePath);
+        if (saveTokenRef.current !== token) return;
         const segment: DraftSegment = {
           slot_index: activeClip.slotIndex,
           kind: activeClip.kind,
@@ -1588,7 +1602,17 @@ export default function RecordScreen() {
                 </Text>
                 <Pressable
                   style={styles.permissionBtn}
-                  onPress={() => void ensurePermissions()}
+                  onPress={() => {
+                    const blocked =
+                      (cameraPermission !== null &&
+                        !cameraPermission.granted &&
+                        !cameraPermission.canAskAgain) ||
+                      (micPermission !== null &&
+                        !micPermission.granted &&
+                        !micPermission.canAskAgain);
+                    if (blocked) void Linking.openSettings();
+                    else void ensurePermissions();
+                  }}
                 >
                   <Text style={styles.permissionBtnText}>Allow access</Text>
                 </Pressable>

@@ -2,7 +2,7 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { fetch as expoFetch } from 'expo/fetch';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import type { Database } from './types';
 
@@ -43,3 +43,13 @@ export const supabase = createClient<Database>(
     },
   },
 );
+
+if (Platform.OS !== 'web') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      void supabase.auth.startAutoRefresh();
+    } else {
+      void supabase.auth.stopAutoRefresh();
+    }
+  });
+}

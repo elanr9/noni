@@ -111,10 +111,18 @@ export default function CreatorChat() {
   const companyId = profile?.company_id ?? null;
   const creatorId = profile?.id ?? null;
 
+  const threadSeq = useRef(0);
+
   const load = useCallback(async () => {
     if (companyId === null || creatorId === null) return;
+    const seq = ++threadSeq.current;
     try {
-      setMessages(await listThread(companyId, creatorId));
+      const fresh = await listThread(companyId, creatorId);
+      if (seq !== threadSeq.current) return;
+      setMessages((prev) => [
+        ...fresh,
+        ...prev.filter((m) => m.id.startsWith('local-')),
+      ]);
     } catch {
       // Poll retries; keep what is on screen.
     } finally {
@@ -180,6 +188,7 @@ export default function CreatorChat() {
     setSending(true);
     const optimistic: ThreadMessage = {
       id: `local-${Date.now()}`,
+      creatorId: profile.id,
       authorId: profile.id,
       authorName: profile.full_name?.trim() || 'You',
       fromCreator: true,
@@ -197,7 +206,8 @@ export default function CreatorChat() {
         authorId: profile.id,
         body,
       });
-      await load();
+      threadSeq.current += 1;
+      setMessages(await listThread(profile.company_id, profile.id));
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setDraft(body);

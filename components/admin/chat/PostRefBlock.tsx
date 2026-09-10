@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { MessagePostRef } from '../../../lib/messages-api';
 import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { useAssignmentMediaPath, usePostThumb } from '../creator/useVideoThumb';
 import { PostThumb } from '../shared';
 import { PressableScale } from '../../ui/PressableScale';
 
@@ -18,6 +19,8 @@ export interface PostRefBlockProps {
  */
 export function PostRefBlock({ postRef, onBlue, onPress }: PostRefBlockProps) {
   const format = postRef.format === 'photo_carousel' ? 'photo_carousel' : 'video';
+  const mediaPath = useAssignmentMediaPath(postRef.assignmentId);
+  const thumbUri = usePostThumb(mediaPath, format);
 
   return (
     <PressableScale
@@ -27,7 +30,7 @@ export function PostRefBlock({ postRef, onBlue, onPress }: PostRefBlockProps) {
       onPress={onPress}
       style={[styles.block, onBlue ? styles.blockOnBlue : styles.blockOnQuiet]}
     >
-      <PostThumb uri={null} format={format} width={34} height={46} />
+      <PostThumb uri={thumbUri} format={format} width={34} height={46} />
       <View style={styles.body}>
         <Text
           style={[styles.title, onBlue ? styles.titleOnBlue : styles.titleOnQuiet]}

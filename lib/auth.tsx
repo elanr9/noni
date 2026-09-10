@@ -20,6 +20,8 @@ import {
 import {
   defaultMode,
   modesForProfile,
+  profileIsCampaignManager,
+  profileIsPlatformAdmin,
   resolveMode,
   setStoredMode,
   type AppMode,
@@ -115,7 +117,7 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-async function fetchProfile(userId: string): Promise<Profile | null> {
+async function selectProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
@@ -129,6 +131,14 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
 
   // company_id is null only for pre-join creators; see the Profile type note.
   return data as Profile | null;
+}
+
+async function fetchProfile(userId: string): Promise<Profile | null> {
+  const existing = await selectProfile(userId);
+  if (existing) return existing;
+  const { error } = await supabase.rpc('claim_pending_invite');
+  if (error) return null;
+  return selectProfile(userId);
 }
 
 // The platform admin and the company admin implicitly hold every permission;
@@ -333,8 +343,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const userId = session?.user?.id;
-    if (userId) void registerPushToken(userId);
-  }, [session?.user?.id]);
+    if (!userId || !profile) return;
+    const ask =
+      profile.onboarded === true &&
+      (profileIsCampaignManager(profile) || profileIsPlatformAdmin(profile));
+    void registerPushToken(userId, { ask });
+  }, [session?.user?.id, profile?.id, profile?.onboarded, profile?.role]);
 
   // Wait until the auth redirects have landed inside a mode group, otherwise
   // the initial <Redirect> to the home tab replaces the notification route.

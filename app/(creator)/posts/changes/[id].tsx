@@ -65,9 +65,13 @@ export default function ChangesDetailScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!id || !profile?.id || !profile.company_id) return;
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    if (!profile?.id || !profile.company_id) return;
     try {
-      const row = await getAssignment(id);
+      const row = await getAssignment(profile.company_id, id);
       setAssignment(row);
       if (row === null) return;
 

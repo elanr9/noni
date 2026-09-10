@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { MockQueueItem } from '../../lib/admin-review-types';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
+import { usePostThumb } from './creator/useVideoThumb';
 import { CreatorAvatar, PostThumb } from './shared';
 import { FormatPill } from '../ui/FormatPill';
 import { PressableScale } from '../ui/PressableScale';
@@ -15,8 +16,8 @@ export interface SubmissionRowProps {
   item: MockQueueItem;
   /** submissions.version — a re-record creates a new submission with attempt + 1. */
   attempt: number;
-  /** Reel first frame or slide 1. Gradient fallback when missing. */
-  thumbUri: string | null;
+  /** Latest submission's first media path (Reel or slide 1). Gradient fallback when missing. */
+  mediaPath: string | null;
   /** Clip/slide count derived from the brief (hook + points + outro). */
   unitCount: number | null;
   onPress: () => void;
@@ -27,8 +28,9 @@ export interface SubmissionRowProps {
  * padding). Conditional content (retakes, duration, slide count) lives on
  * the media so the body never grows a wrapping chip.
  */
-export function SubmissionRow({ item, attempt, thumbUri, unitCount, onPress }: SubmissionRowProps) {
+export function SubmissionRow({ item, attempt, mediaPath, unitCount, onPress }: SubmissionRowProps) {
   const isReel = item.format === 'video';
+  const thumbUri = usePostThumb(mediaPath, item.format);
   const mediaBadge = isReel
     ? item.lengthLabel.includes(':')
       ? item.lengthLabel

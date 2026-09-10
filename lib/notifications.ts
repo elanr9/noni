@@ -66,7 +66,11 @@ function easProjectId(): string | undefined {
 
 // No-ops on simulators, Android Expo Go (push removed in SDK 53+),
 // and until an EAS projectId exists (npx eas init).
-export async function registerPushToken(userId: string): Promise<void> {
+export async function registerPushToken(
+  userId: string,
+  options: { ask?: boolean } = {},
+): Promise<void> {
+  const ask = options.ask ?? true;
   try {
     if (!Device.isDevice) return;
     if (Platform.OS === 'android' && Constants.appOwnership === 'expo') return;
@@ -83,7 +87,7 @@ export async function registerPushToken(userId: string): Promise<void> {
 
     const { status: existing } = await Notifications.getPermissionsAsync();
     let status = existing;
-    if (status !== 'granted') {
+    if (status !== 'granted' && ask) {
       ({ status } = await Notifications.requestPermissionsAsync());
     }
     if (status !== 'granted') return;

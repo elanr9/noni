@@ -4,10 +4,12 @@ export interface SentConfirmationProps {
   /** Creator first name, e.g. "Fabri". */
   creatorShort: string;
   onNext: () => void;
+  /** Lands on the post's own thread. */
+  onOpenThread?: () => void;
 }
 
 /** Admin handoff §3 sent back takeover — only the noted sections go back. */
-export function SentConfirmation({ creatorShort, onNext }: SentConfirmationProps) {
+export function SentConfirmation({ creatorShort, onNext, onOpenThread }: SentConfirmationProps) {
   return (
     <ConfirmationTakeover
       icon="send"
@@ -17,6 +19,8 @@ export function SentConfirmation({ creatorShort, onNext }: SentConfirmationProps
       actionLabel="Next in queue"
       onAction={onNext}
       onBack={onNext}
+      secondaryLabel={onOpenThread ? 'Open thread' : undefined}
+      onSecondary={onOpenThread}
     />
   );
 }

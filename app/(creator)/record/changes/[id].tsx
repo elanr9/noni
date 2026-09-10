@@ -73,7 +73,7 @@ export default function ChangesRequestedScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  useAuth();
+  const { profile } = useAuth();
 
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [segments, setSegments] = useState<BriefSegment[]>([]);
@@ -81,9 +81,10 @@ export default function ChangesRequestedScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !profile?.company_id) return;
+    const companyId = profile.company_id;
     try {
-      const a = await getAssignment(id);
+      const a = await getAssignment(companyId, id);
       setAssignment(a);
       if (a) {
         const [segs, ev] = await Promise.all([
@@ -96,11 +97,11 @@ export default function ChangesRequestedScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, profile?.company_id]);
 
   useFocusEffect(
     useCallback(() => {
-      void load();
+      void load().catch(() => undefined);
     }, [load]),
   );
 

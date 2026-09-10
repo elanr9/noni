@@ -54,7 +54,7 @@ export default function LoginScreen() {
   const reveal = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.sequence([
+    const intro = Animated.sequence([
       Animated.delay(120),
       Animated.spring(pop, {
         toValue: 1,
@@ -78,7 +78,11 @@ export default function LoginScreen() {
           useNativeDriver: true,
         }),
       ]),
-    ]).start(() => setIntroDone(true));
+    ]);
+    intro.start(({ finished }) => {
+      if (finished) setIntroDone(true);
+    });
+    return () => intro.stop();
   }, [flight, pop, reveal]);
 
   const flightX = flight.interpolate({

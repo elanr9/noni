@@ -40,12 +40,14 @@ export async function getOrCreateWallet(
 }
 
 export async function listLedger(
+  companyId: string,
   creatorId: string,
   limit = 50,
 ): Promise<WalletLedgerRow[]> {
   const { data, error } = await supabase
     .from('wallet_ledger')
     .select('*')
+    .eq('company_id', companyId)
     .eq('creator_id', creatorId)
     .order('created_at', { ascending: false })
     .limit(limit);

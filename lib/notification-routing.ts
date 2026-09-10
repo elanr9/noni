@@ -33,6 +33,17 @@ export function routeNotificationTap(
       router.push(`/(admin)/chat/${creatorId}`);
       return;
     }
+    if (event === 'manager_message') {
+      const chatId = str(data, 'chat_id');
+      if (chatId) {
+        router.push(`/(admin)/messages/${chatId}`);
+        return;
+      }
+    }
+    if (event === 'creator_behind' && creatorId) {
+      router.push(`/(admin)/chat/${creatorId}`);
+      return;
+    }
     if (event === 'account_submitted') {
       const accountId = str(data, 'account_id');
       if (accountId) {
@@ -45,7 +56,7 @@ export function routeNotificationTap(
       }
     }
     if (event === 'music_pending' && assignmentId) {
-      router.push(`/(admin)/review/${assignmentId}`);
+      router.push(`/(admin)/music/${assignmentId}`);
       return;
     }
     if (event === 'submitted' || event === 'comment') {
@@ -69,8 +80,15 @@ export function routeNotificationTap(
   }
 
   // Creator mode
-  if (event === 'message') {
+  if (event === 'message' || event === 'manager_message') {
     router.push('/(creator)/chat');
+    return;
+  }
+  if (
+    (event === 'music_approved' || event === 'music_changes') &&
+    assignmentId
+  ) {
+    router.push(`/(creator)/posts/${assignmentId}`);
     return;
   }
   if (event === 'account_decided' || event === 'account_submitted') {
@@ -97,8 +115,7 @@ export function routeNotificationTap(
     event === 'approved' ||
     event === 'changes_requested' ||
     event === 'comment' ||
-    event === 'bounty_earned' ||
-    event === 'music_approved'
+    event === 'bounty_earned'
   ) {
     if (assignmentId) {
       router.push(`/(creator)/assignment/${assignmentId}`);

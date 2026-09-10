@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Redirect, Stack, usePathname } from 'expo-router';
 
 import { LoadingScreen } from '../../components/Screen';
@@ -9,6 +10,7 @@ import {
 } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
 import { CreatorQueueProvider } from '../../lib/creator-queue';
+import { trackPresence } from '../../lib/presence';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
 import { color, motion, screenTransition } from '../../theme/tokens';
 
@@ -52,6 +54,14 @@ export default function CreatorLayout() {
   const setupFlagged =
     inCreatorMode && isSetupCompleteFlag(profile.onboarding_answers);
   const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
+
+  // Managers see a green dot on the creator's inbox row while the app is open.
+  const presenceCompanyId = inCreatorMode ? profile.company_id : null;
+  const presenceProfileId = inCreatorMode ? profile.id : null;
+  useEffect(() => {
+    if (presenceCompanyId === null || presenceProfileId === null) return;
+    return trackPresence(presenceCompanyId, presenceProfileId);
+  }, [presenceCompanyId, presenceProfileId]);
 
   if (loading) return <LoadingScreen />;
   if (!session) return <Redirect href="/(auth)/login" />;

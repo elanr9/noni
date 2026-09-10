@@ -16,6 +16,7 @@ import { Icon } from '../../../components/ui/Icon';
 import { InfoBlock } from '../../../components/ui/InfoBlock';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { StatusChip } from '../../../components/ui/StatusChip';
+import { useAuth } from '../../../lib/auth';
 import { parseTalkingPoints } from '../../../lib/briefs-api';
 import {
   getAssignment,
@@ -78,6 +79,7 @@ function isTaskStatus(value: string): value is TaskStatus {
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { profile } = useAuth();
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(
     null,
   );
@@ -85,15 +87,19 @@ export default function PostDetailScreen() {
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    if (!profile?.company_id) return;
     try {
-      setAssignment(await getAssignment(id));
+      setAssignment(await getAssignment(profile.company_id, id));
     } catch {
       setToast('Could not load this post. Try again.');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, profile?.company_id]);
 
   useFocusEffect(
     useCallback(() => {

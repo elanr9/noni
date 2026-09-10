@@ -3,12 +3,15 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { MusicApprovalItem } from '../../lib/admin-api';
 import { formatAge } from '../../lib/admin-queue-map';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
+import { usePostThumb } from './creator/useVideoThumb';
 import { PostThumb } from './shared';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 
 export interface MusicApprovalRowProps {
   item: MusicApprovalItem;
+  /** Slide 1 path from the latest submission. */
+  mediaPath: string | null;
   /** Green pill replaces the chevron once the song check is done. */
   approved?: boolean;
   onPress: () => void;
@@ -18,7 +21,13 @@ export interface MusicApprovalRowProps {
  * Admin handoff §2 music row — one slideshow waiting for its song check.
  * No inline approve: the whole card opens the approval screen.
  */
-export function MusicApprovalRow({ item, approved = false, onPress }: MusicApprovalRowProps) {
+export function MusicApprovalRow({
+  item,
+  mediaPath,
+  approved = false,
+  onPress,
+}: MusicApprovalRowProps) {
+  const thumbUri = usePostThumb(mediaPath, 'photo_carousel');
   const slideCount = item.slideCount ?? null;
   const postedAt = item.postedAt ?? null;
   const metaParts = [item.creatorName.split(' ')[0]];
@@ -32,7 +41,7 @@ export function MusicApprovalRow({ item, approved = false, onPress }: MusicAppro
       onPress={onPress}
       style={[styles.card, shadow.shadowCard]}
     >
-      <PostThumb uri={null} format="photo_carousel" width={44} height={58} />
+      <PostThumb uri={thumbUri} format="photo_carousel" width={44} height={58} />
       <View style={styles.column}>
         <Text style={styles.title}>{item.briefTitle}</Text>
         <Text numberOfLines={1} style={styles.meta}>

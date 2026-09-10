@@ -4,10 +4,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 
+import { latestSubmissionsByAssignment } from './admin-api';
 import { useAuth } from './auth';
 import { supabase } from './supabase';
 import type { Assignment, TaskStatus } from './tasks';
@@ -46,13 +48,46 @@ export function dayKey(d: Date): string {
 }
 
 /**
- * Display time for a slot. The schema has no per-slot time; these are the
- * design's canonical posting times (SCREENS §1 PostPager).
+ * Posting times in America/New_York, set by the publish cron from how many
+ * posts the creator has that day. slotIndex is the rank within the day.
  */
-const SLOT_TIMES = ['08:30', '13:00', '18:45'] as const;
+const SLOT_TIMES_BY_COUNT: Record<number, readonly string[]> = {
+  1: ['12:00 PM'],
+  2: ['12:00 PM', '6:00 PM'],
+  3: ['10:00 AM', '2:00 PM', '7:00 PM'],
+};
 
-export function slotTimeLabel(slotIndex: number): string {
-  return SLOT_TIMES[slotIndex] ?? `Post ${slotIndex + 1}`;
+export function slotTimeLabel(slotIndex: number, totalThatDay: number): string {
+  const times =
+    SLOT_TIMES_BY_COUNT[Math.min(Math.max(totalThatDay, 1), 3)] ??
+    SLOT_TIMES_BY_COUNT[3];
+  const rank = Math.min(Math.max(slotIndex, 0), times.length - 1);
+  return times[rank] ?? times[times.length - 1] ?? '12:00 PM';
+}
+
+const NY_TIME = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+/** Exact publish_at when Approve stamped it, else the slot rule above. */
+export function publishTimeLabel(
+  assignment: Pick<Assignment, 'slot_index' | 'publish_at'>,
+  totalThatDay: number,
+): string {
+  if (assignment.publish_at !== null) {
+    const d = new Date(assignment.publish_at);
+    if (!Number.isNaN(d.getTime())) return NY_TIME.format(d);
+  }
+  return slotTimeLabel(assignment.slot_index, totalThatDay);
+}
+
+export function countOnDate(
+  assignments: readonly Pick<Assignment, 'scheduled_date'>[],
+  scheduledDate: string,
+): number {
+  return assignments.filter((a) => a.scheduled_date === scheduledDate).length;
 }
 
 const OPEN_STATUSES = new Set<TaskStatus>(['assigned', 'changes_requested']);
@@ -71,6 +106,8 @@ export type CreatorQueueCounts = {
 
 export type CreatorQueueState = {
   assignments: AssignmentWithBrief[];
+  /** assignment id -> latest submission's first media path (Reel or slide 1), for thumbs. */
+  mediaPaths: Map<string, string>;
   loading: boolean;
   refetch: () => Promise<void>;
   /** Optimistic merge after a transition or swap; realtime confirms later. */
@@ -98,28 +135,40 @@ function windowBounds(): { from: string; to: string } {
 export function CreatorQueueProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const creatorId = profile?.id ?? null;
+  const companyId = profile?.company_id ?? null;
 
   const [assignments, setAssignments] = useState<AssignmentWithBrief[]>([]);
+  const [mediaPaths, setMediaPaths] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const refetchSeq = useRef(0);
 
   const refetch = useCallback(async () => {
-    if (creatorId === null) {
+    if (creatorId === null || companyId === null) {
+      refetchSeq.current += 1;
       setAssignments([]);
+      setMediaPaths(new Map());
       setLoading(false);
       return;
     }
+    const seq = ++refetchSeq.current;
     try {
-      const all = await listMyAssignments(creatorId);
+      const all = await listMyAssignments(companyId, creatorId);
+      if (seq !== refetchSeq.current) return;
       const { from, to } = windowBounds();
-      setAssignments(
-        all.filter((a) => a.scheduled_date >= from && a.scheduled_date <= to),
-      );
+      const inWindow = all.filter((a) => a.scheduled_date >= from && a.scheduled_date <= to);
+      setAssignments(inWindow);
+      void latestSubmissionsByAssignment(inWindow.map((a) => a.id))
+        .then((subs) => {
+          if (seq !== refetchSeq.current) return;
+          setMediaPaths(new Map([...subs].map(([id, sub]) => [id, sub.video_path])));
+        })
+        .catch(() => undefined);
     } catch {
       // Keep the last good list; screens surface refresh errors themselves.
     } finally {
-      setLoading(false);
+      if (seq === refetchSeq.current) setLoading(false);
     }
-  }, [creatorId]);
+  }, [creatorId, companyId]);
 
   useEffect(() => {
     setLoading(true);
@@ -199,6 +248,7 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CreatorQueueState>(
     () => ({
       assignments,
+      mediaPaths,
       loading,
       refetch,
       applyLocal,
@@ -210,6 +260,7 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
     }),
     [
       assignments,
+      mediaPaths,
       loading,
       refetch,
       applyLocal,

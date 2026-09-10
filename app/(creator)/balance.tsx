@@ -108,7 +108,7 @@ export default function CreatorBalanceScreen() {
     try {
       const [w, rows] = await Promise.all([
         getOrCreateWallet(profile.company_id, profile.id),
-        listLedger(profile.id),
+        listLedger(profile.company_id, profile.id),
       ]);
       setWallet(w);
       setLedger(rows);

@@ -56,6 +56,10 @@ export function PostGridTile({
         <View style={styles.todoPill}>
           <Text style={styles.todoText}>To do</Text>
         </View>
+      ) : status === 'approved' ? (
+        <View style={[styles.todoPill, styles.scheduledPill]}>
+          <Text style={styles.todoText}>Scheduled</Text>
+        </View>
       ) : (
         <View style={styles.viewsPill}>
           <Icon name="play" size={11} color={color.white} />
@@ -113,6 +117,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: radius.pill,
     backgroundColor: color.blue500,
+  },
+  scheduledPill: {
+    backgroundColor: color.green,
   },
   todoText: {
     fontSize: type.size.micro11,

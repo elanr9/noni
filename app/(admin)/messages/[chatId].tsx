@@ -1,54 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  ChatBubble,
-  ChatDivider,
-  PostRef,
-  UploadThumbs,
-  VoiceNote,
-} from '../../../components/admin/messages/ChatBubble';
-import {
-  Composer,
-  type AttachKind,
-} from '../../../components/admin/messages/Composer';
-import {
-  AdminScreen,
-  AvatarStack,
-  CreatorAvatar,
-  PushHeader,
-  SkeletonCard,
-} from '../../../components/admin/shared';
+import { MuteButton } from '../../../components/admin/chat/MuteButton';
+import { Composer, type AttachTile } from '../../../components/admin/messages';
+import { ManagerThread } from '../../../components/admin/messages/channel/ManagerThread';
+import { MembersSheet } from '../../../components/admin/messages/channel/MembersSheet';
+import { useVoicePlayer } from '../../../components/admin/messages/channel/useVoicePlayer';
+import { EmptyState, PushHeader } from '../../../components/admin/shared';
 import { useAuth } from '../../../lib/auth';
-import { listCampaignManagers } from '../../../lib/briefs-api';
+import { listTeam, type TeamMember } from '../../../lib/inbox-api';
 import { useKeyboardPadding } from '../../../lib/keyboard';
 import {
-  bubbleTimeLabel,
+  addChannelMembers,
   firstNameOf,
-  formatVoiceDuration,
   getManagerChat,
+  isChatMuted,
+  leaveChannel,
+  listChannelMembers,
   listManagerMessages,
-  managerChatMeta,
   markChatRead,
   sendManagerMessage,
-  signedChatUrl,
+  setChannelAllCreators,
+  setChatMuted,
   toggleReaction,
   uploadManagerChatMedia,
+  type ChannelMember,
   type ManagerChatInfo,
   type ManagerMessage,
 } from '../../../lib/manager-messages-api';
-import { color, space } from '../../../theme/tokens';
+import type { PostSummary } from '../../../lib/post-event-labels';
+import { listPostSummaries } from '../../../lib/post-events';
+import { borderWidth, color, space } from '../../../theme/tokens';
 
 const POLL_MS = 5000;
+const TILES: AttachTile[] = ['photo', 'camera'];
 
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -56,10 +45,6 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
-  'audio/mp4': 'm4a',
-  'audio/m4a': 'm4a',
-  'audio/x-m4a': 'm4a',
-  'audio/mpeg': 'mp3',
 };
 
 function param(value: string | string[] | undefined): string | undefined {
@@ -68,82 +53,136 @@ function param(value: string | string[] | undefined): string | undefined {
   return undefined;
 }
 
+function membersLabel(count: number): string {
+  return count === 1 ? '1 member' : `${count} members`;
+}
+
+function replySnippet(message: ManagerMessage): string {
+  if (message.mediaKind === 'voice') return 'Voice note';
+  const body = message.body.trim();
+  if (body.length > 0) return body;
+  if (message.forwardLabel) return message.forwardLabel;
+  if (message.mediaKind === 'image') return 'Photo';
+  if (message.mediaKind === 'video') return 'Video';
+  return '';
+}
+
 export default function ManagerChatScreen() {
   const { chatId: chatIdParam } = useLocalSearchParams<{ chatId: string }>();
   const chatId = param(chatIdParam);
   const { profile } = useAuth();
   const keyboardPadding = useKeyboardPadding();
-  const scrollRef = useRef<ScrollView>(null);
-  const playerRef = useRef<AudioPlayer | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const summaryIdsRef = useRef<Set<string>>(new Set());
+  const voice = useVoicePlayer();
+  const stopVoice = voice.stop;
 
   const [chat, setChat] = useState<ManagerChatInfo | null>(null);
-  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [members, setMembers] = useState<ChannelMember[]>([]);
   const [messages, setMessages] = useState<ManagerMessage[]>([]);
-  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  const [summaries, setSummaries] = useState<Map<string, PostSummary>>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<ManagerMessage | null>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [membersBusy, setMembersBusy] = useState(false);
 
+  useEffect(() => {
+    if (!profile || !chatId) return;
+    let cancelled = false;
+    void isChatMuted(chatId, profile.id)
+      .then((value) => {
+        if (!cancelled) setMuted(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, chatId]);
+
+  const toggleMuted = async () => {
+    if (!profile || !chatId) return;
+    const next = !muted;
+    setMuted(next);
+    try {
+      await setChatMuted({
+        chatId,
+        profileId: profile.id,
+        companyId: profile.company_id,
+        muted: next,
+      });
+    } catch (e) {
+      setMuted(!next);
+      Alert.alert('Could not update', e instanceof Error ? e.message : 'Try again');
+    }
+  };
+
+  const companyId = profile?.company_id ?? null;
+  const loadSummaries = useCallback(async (rows: ManagerMessage[]) => {
+    if (companyId === null) return;
+    const known = summaryIdsRef.current;
+    const missing = rows
+      .map((m) => m.postRef?.assignmentId ?? null)
+      .filter((id): id is string => id !== null && !known.has(id));
+    if (missing.length === 0) return;
+    missing.forEach((id) => known.add(id));
+    const fetched = await listPostSummaries(companyId, missing);
+    setSummaries((prev) => new Map([...prev, ...fetched]));
+  }, [companyId]);
+
+  const hasLoaded = useRef(false);
   const load = useCallback(async () => {
     if (!profile || !chatId) return;
     try {
       const [info, rows, people] = await Promise.all([
         getManagerChat(profile.company_id, profile.id, chatId),
         listManagerMessages(chatId),
-        listCampaignManagers(profile.company_id),
+        listTeam(profile.company_id),
       ]);
       setChat(info);
       setMessages(rows);
-      setManagers(people);
-      const paths = [
-        ...new Set(
-          rows
-            .map((m) => m.mediaPath)
-            .filter((p): p is string => typeof p === 'string' && p.length > 0),
-        ),
-      ];
-      if (paths.length > 0) {
-        const signed = await Promise.all(
-          paths.map(async (path) => {
-            try {
-              return [path, await signedChatUrl(path)] as const;
-            } catch {
-              return [path, ''] as const;
-            }
-          }),
-        );
-        setMediaUrls(Object.fromEntries(signed.filter(([, url]) => url.length > 0)));
-      }
+      setTeam(people);
+      hasLoaded.current = true;
+      await loadSummaries(rows);
+      void markChatRead(chatId, profile.id);
     } catch (e) {
-      Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
+      if (!hasLoaded.current) Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
       setLoading(false);
     }
-  }, [profile, chatId]);
+  }, [profile, chatId, loadSummaries]);
+
+  const loadMembers = useCallback(async () => {
+    if (!chatId || !chat) return;
+    try {
+      if (chat.kind === 'channel') {
+        setMembers(await listChannelMembers(chatId));
+      } else {
+        setMembers(team.map((t) => ({ id: t.id, name: t.name, role: t.role })));
+      }
+    } catch (e) {
+      Alert.alert('Could not load members', e instanceof Error ? e.message : 'Try again');
+    }
+  }, [chatId, chat, team]);
 
   useFocusEffect(
     useCallback(() => {
       void load();
-      if (chatId && profile) void markChatRead(chatId, profile.id);
       const timer = setInterval(() => void load(), POLL_MS);
       return () => {
         clearInterval(timer);
-        playerRef.current?.remove();
-        playerRef.current = null;
-        setPlayingId(null);
+        stopVoice();
       };
-    }, [load, chatId, profile]),
+    }, [load, stopVoice]),
   );
 
   useEffect(() => {
     if (loading) return;
-    const t = setTimeout(
-      () => scrollRef.current?.scrollToEnd({ animated: false }),
-      80,
-    );
+    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 80);
     return () => clearTimeout(t);
   }, [loading, messages.length]);
 
@@ -162,7 +201,6 @@ export default function ManagerChatScreen() {
       setDraft('');
       setReplyTo(null);
       await load();
-      if (chatId) void markChatRead(chatId, profile.id);
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -200,7 +238,6 @@ export default function ManagerChatScreen() {
       setReplyTo(null);
       setAttachOpen(false);
       await load();
-      void markChatRead(chatId, profile.id);
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -208,15 +245,15 @@ export default function ManagerChatScreen() {
     }
   };
 
-  const attach = async (kind: AttachKind) => {
+  const attach = async (tile: AttachTile) => {
     setAttachOpen(false);
     let result: ImagePicker.ImagePickerResult;
-    if (kind === 'photos') {
+    if (tile === 'photo') {
       result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.85,
       });
-    } else {
+    } else if (tile === 'camera') {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
         Alert.alert('Camera needed', 'Allow camera access to attach from here.');
@@ -226,12 +263,13 @@ export default function ManagerChatScreen() {
         mediaTypes: ['images'],
         quality: 0.85,
       });
+    } else {
+      return;
     }
     const asset = result.canceled ? null : result.assets[0];
     if (!asset || sending) return;
     const isVideo = asset.type === 'video';
-    const mime =
-      asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
+    const mime = asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
     const ext = MIME_EXT[mime] ?? (isVideo ? 'mp4' : 'jpg');
     await sendMedia(asset.uri, mime, ext, isVideo ? 'video' : 'image', {
       caption: draft.trim() || undefined,
@@ -242,152 +280,118 @@ export default function ManagerChatScreen() {
     await sendMedia(localUri, 'audio/mp4', 'm4a', 'voice', { durationMs });
   };
 
-  const playVoice = async (message: ManagerMessage) => {
-    if (!message.mediaPath) return;
-    if (playingId === message.id) {
-      playerRef.current?.pause();
-      playerRef.current?.remove();
-      playerRef.current = null;
-      setPlayingId(null);
-      return;
-    }
-    const uri = mediaUrls[message.mediaPath];
-    if (!uri) return;
+  const react = async (message: ManagerMessage, emoji: string) => {
+    if (!profile) return;
     try {
-      playerRef.current?.remove();
-      await setAudioModeAsync({
-        allowsRecording: false,
-        playsInSilentMode: true,
-      });
-      const player = createAudioPlayer({ uri });
-      playerRef.current = player;
-      setPlayingId(message.id);
-      player.addListener('playbackStatusUpdate', (status) => {
-        if (status.didJustFinish) {
-          setPlayingId(null);
-          player.remove();
-          playerRef.current = null;
-        }
-      });
-      player.play();
+      await toggleReaction(message.id, profile.id, emoji);
+      await load();
     } catch (e) {
-      setPlayingId(null);
-      Alert.alert('Could not play', e instanceof Error ? e.message : 'Try again');
+      Alert.alert('Could not react', e instanceof Error ? e.message : 'Try again');
     }
   };
 
-  const heart = async (message: ManagerMessage) => {
-    if (!profile) return;
+  const showActions = (message: ManagerMessage) => {
+    const body = message.body.trim();
+    Alert.alert(message.authorId === profile?.id ? 'You' : message.authorName, undefined, [
+      { text: 'Reply', onPress: () => setReplyTo(message) },
+      { text: 'React \u2764', onPress: () => void react(message, 'heart') },
+      ...(body.length > 0
+        ? [{ text: 'Copy', onPress: () => void Clipboard.setStringAsync(body) }]
+        : []),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+
+  const openMembers = () => {
+    setMembersOpen(true);
+    void loadMembers();
+  };
+
+  const runMembersChange = async (change: () => Promise<void>) => {
+    setMembersBusy(true);
     try {
-      await toggleReaction(message.id, profile.id, 'heart');
+      await change();
       await load();
+      await loadMembers();
     } catch (e) {
-      Alert.alert(
-        'Could not react',
-        e instanceof Error ? e.message : 'Try again',
-      );
+      Alert.alert('Could not update', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setMembersBusy(false);
+    }
+  };
+
+  const leave = async () => {
+    if (!profile || !chatId) return;
+    setMembersBusy(true);
+    try {
+      await leaveChannel(chatId, profile.id);
+      setMembersOpen(false);
+      router.back();
+    } catch (e) {
+      Alert.alert('Could not leave', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setMembersBusy(false);
     }
   };
 
   if (!profile || !chatId) return null;
 
-  const title = chat?.title ?? 'Messages';
-  const isBrief = chat?.kind === 'brief';
-  const otherName = chat?.otherName ?? title;
-  const placeholder = isBrief
-    ? `Message ${title}`
-    : `Message ${firstNameOf(otherName)}`;
-  const subtitle = isBrief
-    ? managerChatMeta(profile.id, managers)
-    : 'Campaign manager';
-  const trailing = isBrief ? (
-    <AvatarStack
-      people={managers.map((m) => ({
-        id: m.id,
-        name: m.name,
-        me: m.id === profile.id,
-      }))}
-      size={26}
+  if (!loading && chat === null) {
+    return (
+      <SafeAreaView edges={['top']} style={styles.screen}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <EmptyState
+          title="Chat not found"
+          body="This conversation is not available."
+          actionLabel="Back"
+          onAction={() => router.back()}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  const isDm = chat?.kind === 'dm';
+  const other = isDm ? team.find((t) => t.id === chat?.otherId) : undefined;
+  const title = isDm ? (chat?.otherName ?? 'Messages') : (chat?.title ?? 'Messages');
+  const subtitle = isDm ? (other?.roleLabel ?? 'Campaign manager') : membersLabel(chat?.memberCount ?? 0);
+  const placeholder = isDm ? `Message ${firstNameOf(title)}` : `Message ${title}`;
+  const teamIds = new Set(team.map((t) => t.id));
+
+  const header = (
+    <PushHeader
+      title={title}
+      subtitle={subtitle}
+      onBack={() => router.back()}
+      trailing={<MuteButton muted={muted} onToggle={() => void toggleMuted()} />}
     />
-  ) : (
-    <CreatorAvatar name={otherName} size={32} />
   );
 
   return (
-    <AdminScreen scroll={false} contentStyle={styles.fill}>
+    <SafeAreaView edges={['top']} style={styles.screen}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.fill, { paddingBottom: keyboardPadding }]}>
-        <View style={styles.headerPad}>
-          <PushHeader
-            title={title}
-            subtitle={subtitle}
-            onBack={() => router.back()}
-            trailing={trailing}
-          />
-        </View>
-        <ScrollView
-          ref={scrollRef}
-          style={styles.fill}
-          contentContainerStyle={styles.thread}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {loading ? (
-            <View style={styles.skeletons}>
-              <SkeletonCard height={56} radius={18} style={styles.skThem} />
-              <SkeletonCard height={56} radius={18} style={styles.skMe} />
-              <SkeletonCard height={56} radius={18} style={styles.skThem} />
-            </View>
+        <View style={styles.headerWrap}>
+          {isDm || chat === null ? (
+            header
           ) : (
-            <>
-              {isBrief ? (
-                <ChatDivider>
-                  Every manager on the account is in this chat
-                </ChatDivider>
-              ) : (
-                <ChatDivider>Today</ChatDivider>
-              )}
-              {messages.map((m) => {
-                const me = m.authorId === profile.id;
-                const who = me ? 'You' : firstNameOf(m.authorName);
-                const heartCount =
-                  m.reactions.find((r) => r.emoji === 'heart')?.count ?? 0;
-                return (
-                  <ChatBubble
-                    key={m.id}
-                    who={who}
-                    time={bubbleTimeLabel(m.createdAt)}
-                    me={me}
-                    quote={
-                      m.replyTo
-                        ? [
-                            firstNameOf(m.replyTo.authorName),
-                            m.replyTo.snippet,
-                          ]
-                        : undefined
-                    }
-                    forward={m.forwardLabel ?? undefined}
-                    reactions={
-                      heartCount > 0
-                        ? [{ icon: 'heart', count: heartCount }]
-                        : undefined
-                    }
-                    onPress={() => setReplyTo(m)}
-                    onLongPress={() => void heart(m)}
-                  >
-                    <MessageBody
-                      message={m}
-                      me={me}
-                      mediaUrls={mediaUrls}
-                      playing={playingId === m.id}
-                      onPlayVoice={() => void playVoice(m)}
-                    />
-                  </ChatBubble>
-                );
-              })}
-            </>
+            <Pressable accessibilityRole="button" accessibilityLabel="Members" onPress={openMembers}>
+              {header}
+            </Pressable>
           )}
-        </ScrollView>
+        </View>
+        <ManagerThread
+          scrollRef={scrollRef}
+          loading={loading}
+          messages={messages}
+          meId={profile.id}
+          teamIds={teamIds}
+          summaries={summaries}
+          playingId={voice.playingId}
+          onPlayVoice={(m) => void voice.toggle(m)}
+          onToggleReaction={(m, emoji) => void react(m, emoji)}
+          onLongPress={showActions}
+          onOpenPost={(assignmentId) => router.push(`/(admin)/post-thread/${assignmentId}`)}
+        />
         <Composer
           placeholder={placeholder}
           draft={draft}
@@ -396,26 +400,14 @@ export default function ManagerChatScreen() {
           sending={sending}
           attachOpen={attachOpen}
           onToggleAttach={() => setAttachOpen((open) => !open)}
-          onAttach={(kind) => void attach(kind)}
+          tiles={TILES}
+          onAttach={(tile) => void attach(tile)}
           onSend={() => void sendText()}
           reply={
             replyTo
               ? {
-                  who: firstNameOf(
-                    replyTo.authorId === profile.id
-                      ? 'You'
-                      : replyTo.authorName,
-                  ),
-                  snippet:
-                    replyTo.mediaKind === 'voice'
-                      ? 'Voice note'
-                      : replyTo.body.trim() ||
-                        replyTo.forwardLabel ||
-                        (replyTo.mediaKind === 'image'
-                          ? 'Photo'
-                          : replyTo.mediaKind === 'video'
-                            ? 'Video'
-                            : ''),
+                  who: replyTo.authorId === profile.id ? 'You' : firstNameOf(replyTo.authorName),
+                  snippet: replySnippet(replyTo),
                 }
               : null
           }
@@ -423,98 +415,37 @@ export default function ManagerChatScreen() {
           onSendVoice={sendVoice}
         />
       </View>
-    </AdminScreen>
-  );
-}
-
-function MessageBody({
-  message,
-  me,
-  mediaUrls,
-  playing,
-  onPlayVoice,
-}: {
-  message: ManagerMessage;
-  me: boolean;
-  mediaUrls: Record<string, string>;
-  playing: boolean;
-  onPlayVoice: () => void;
-}) {
-  const uri = message.mediaPath ? mediaUrls[message.mediaPath] : undefined;
-  return (
-    <View style={styles.bodyStack}>
-      {message.postRef ? (
-        <PostRef
-          me={me}
-          label={message.postRef.title}
-          onPress={
-            message.postRef.briefId
-              ? () => router.push(`/(admin)/post/${message.postRef?.briefId}`)
-              : undefined
+      {chat !== null && !isDm && (
+        <MembersSheet
+          visible={membersOpen}
+          onClose={() => setMembersOpen(false)}
+          chat={chat}
+          meId={profile.id}
+          members={members}
+          team={team}
+          busy={membersBusy}
+          onToggleAllCreators={(next) =>
+            void runMembersChange(() => setChannelAllCreators(chatId, next))
           }
+          onAddMembers={(ids) => runMembersChange(() => addChannelMembers(chatId, ids))}
+          onLeave={() => void leave()}
         />
-      ) : null}
-      {message.mediaKind === 'voice' ? (
-        <VoiceNote
-          me={me}
-          duration={formatVoiceDuration(message.voiceDurationMs ?? 0)}
-          playing={playing}
-          onPress={onPlayVoice}
-        />
-      ) : null}
-      {message.mediaKind === 'image' || message.mediaKind === 'video' ? (
-        <UploadThumbs
-          me={me}
-          uri={uri}
-          video={message.mediaKind === 'video'}
-          caption={message.body.trim() || undefined}
-        />
-      ) : null}
-      {message.mediaKind == null && message.body.trim().length > 0 ? (
-        <Text style={[styles.bodyText, me ? styles.bodyMe : styles.bodyThem]}>
-          {message.body}
-        </Text>
-      ) : null}
-    </View>
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: color.white,
+  },
   fill: {
     flex: 1,
   },
-  headerPad: {
+  headerWrap: {
     paddingHorizontal: space.gutterAdmin,
-  },
-  thread: {
-    paddingHorizontal: space.gutterAdmin,
-    paddingTop: 10,
-    paddingBottom: 100,
-    gap: 15,
-  },
-  skeletons: {
-    gap: 15,
-  },
-  skThem: {
-    width: '62%',
-    alignSelf: 'flex-start',
-  },
-  skMe: {
-    width: '62%',
-    alignSelf: 'flex-end',
-  },
-  bodyStack: {
-    gap: 8,
-  },
-  bodyText: {
-    fontSize: 14.5,
-    lineHeight: 21,
-    fontWeight: '400',
-  },
-  bodyMe: {
-    color: color.white,
-  },
-  bodyThem: {
-    color: color.ink,
+    borderBottomWidth: borderWidth.hair,
+    borderBottomColor: color.line,
   },
 });

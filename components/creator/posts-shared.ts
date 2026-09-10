@@ -15,10 +15,15 @@ import {
 export const TIKTOK_SHARE = 0.68;
 export const INSTAGRAM_SHARE = 0.32;
 
-export const POSTED_STATUSES = new Set<TaskStatus>(['posted', 'approved']);
+export const POSTED_STATUSES = new Set<TaskStatus>(['posted']);
 
 export function isPostedStatus(status: TaskStatus): boolean {
   return POSTED_STATUSES.has(status);
+}
+
+/** Approved posts wait on the publish cron; they open the post detail as scheduled. */
+export function opensPostDetail(status: TaskStatus): boolean {
+  return status === 'posted' || status === 'approved';
 }
 
 const MONTHS_SHORT = [

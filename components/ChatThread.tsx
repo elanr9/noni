@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -128,6 +129,11 @@ export function ChatThread(props: {
       setPendingRef(null);
       await load();
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (e) {
+      Alert.alert(
+        'Could not send',
+        e instanceof Error ? e.message : 'Try again',
+      );
     } finally {
       setSending(false);
     }

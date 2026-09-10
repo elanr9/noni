@@ -6,6 +6,7 @@ import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/to
 import { NoteBlock, PostThumb } from '../shared';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
+import { posterForVideo } from '../../ui/MediaThumb';
 import { PressableScale } from '../../ui/PressableScale';
 
 export interface SectionNoteCardProps {
@@ -14,6 +15,8 @@ export interface SectionNoteCardProps {
   text: string;
   format: ContentFormat;
   thumbUri?: string | null;
+  /** Signed clip URL (Reels); its first frame becomes the thumb. */
+  clipUri?: string | null;
   note: string | null;
   open: boolean;
   /** Card body tap: the watch sheet. */
@@ -35,6 +38,7 @@ export function SectionNoteCard({
   text,
   format,
   thumbUri,
+  clipUri,
   note,
   open,
   onWatch,
@@ -44,7 +48,19 @@ export function SectionNoteCard({
   onRemove,
 }: SectionNoteCardProps) {
   const [draft, setDraft] = useState('');
+  const [poster, setPoster] = useState<string | null>(null);
   const noted = note !== null;
+
+  useEffect(() => {
+    if (!clipUri) return;
+    let live = true;
+    void posterForVideo(clipUri).then((p) => {
+      if (live) setPoster(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, [clipUri]);
 
   useEffect(() => {
     if (open) setDraft(note ?? '');
@@ -59,7 +75,7 @@ export function SectionNoteCard({
         onPress={onWatch}
         style={styles.body}
       >
-        <PostThumb format={format} uri={thumbUri} width={46} height={62} radius={9} />
+        <PostThumb format={format} uri={thumbUri ?? poster} width={46} height={62} radius={9} />
         <View style={styles.main}>
           <View style={styles.labelRow}>
             <Text style={[styles.label, noted && styles.labelNoted]}>

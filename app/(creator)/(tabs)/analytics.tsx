@@ -92,11 +92,11 @@ export default function AnalyticsScreen() {
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || !profile.company_id) return;
     try {
       const [mine, rows] = await Promise.all([
-        listMyAssignments(profile.id),
-        listLedger(profile.id, 1000),
+        listMyAssignments(profile.company_id, profile.id),
+        listLedger(profile.company_id, profile.id, 1000),
       ]);
       setAssignments(mine);
       setLedger(rows);
@@ -106,7 +106,7 @@ export default function AnalyticsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.company_id]);
 
   useFocusEffect(
     useCallback(() => {

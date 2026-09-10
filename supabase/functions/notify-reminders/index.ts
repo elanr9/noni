@@ -3,10 +3,15 @@
 // concurrent runs cannot double-send. One push per creator per kind per day.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
-import { creatorPushTokens, sendExpoPush } from '../_shared/push.ts';
+import { adminPushTokens, creatorPushTokens, sendExpoPush } from '../_shared/push.ts';
 
 const INCOMPLETE = ['assigned', 'recorded', 'changes_requested'] as const;
 type ReminderKind = 'due_today' | 'overdue';
+
+function behindBody(count: number): string {
+  if (count === 1) return '1 post overdue. Check in with them.';
+  return `${count} posts overdue. Check in with them.`;
+}
 
 type AssignmentRow = {
   id: string;
@@ -41,35 +46,35 @@ function briefTitle(row: AssignmentRow): string {
 }
 
 function dueTitle(streak: number): string {
-  if (streak > 0) return `Keep your ${streak}-day streak alive`;
-  return "Come make today's video";
+  if (streak > 0) return `Keep your ${streak} day streak going`;
+  return 'Today\'s post is ready';
 }
 
 function dueBody(count: number, firstTitle: string, streak: number): string {
-  if (streak > 0) {
-    if (count === 1) {
-      return `Post today to protect your streak and keep earning: ${firstTitle}`;
-    }
-    return `${count} posts waiting — post today to protect your streak and keep earning`;
+  if (count === 1) {
+    return streak > 0
+      ? `Post ${firstTitle} today to keep your streak.`
+      : `${firstTitle} is waiting for you.`;
   }
-  if (count === 1) return `Come make today's video and keep earning: ${firstTitle}`;
-  return `${count} posts waiting — come make them and keep earning`;
+  return streak > 0
+    ? `${count} posts today. Post them to keep your streak.`
+    : `${count} posts are waiting for you today.`;
 }
 
 function overdueTitle(streak: number): string {
-  if (streak > 0) return `Keep your ${streak}-day streak alive`;
-  return 'Catch up and keep earning';
+  if (streak > 0) return `Keep your ${streak} day streak going`;
+  return 'You have a post to catch up on';
 }
 
 function overdueBody(count: number, streak: number): string {
-  if (streak > 0) {
-    if (count === 1) {
-      return 'Catch up on your overdue post to protect your streak and keep earning';
-    }
-    return `Catch up on ${count} overdue posts to protect your streak and keep earning`;
+  if (count === 1) {
+    return streak > 0
+      ? 'One post is overdue. Post it to keep your streak.'
+      : 'One post is overdue. Open it to catch up.';
   }
-  if (count === 1) return 'Catch up on your overdue post and keep earning';
-  return `Catch up on ${count} overdue posts and keep earning`;
+  return streak > 0
+    ? `${count} posts are overdue. Post them to keep your streak.`
+    : `${count} posts are overdue. Open them to catch up.`;
 }
 
 Deno.serve(async (req) => {
@@ -206,6 +211,34 @@ Deno.serve(async (req) => {
           event: kind,
           assignment_id: first.id,
         },
+      });
+
+      if (kind !== 'overdue') continue;
+      const { data: behindClaim, error: behindError } = await admin
+        .from('creator_reminders')
+        .insert({
+          company_id: companyId,
+          creator_id: creatorId,
+          kind: 'creator_behind',
+          sent_on: sentOn,
+        })
+        .select('id')
+        .maybeSingle();
+      if (behindError) {
+        if (behindError.code === '23505') continue;
+        throw new Error(behindError.message);
+      }
+      if (!behindClaim) continue;
+      const { data: creator } = await admin
+        .from('profiles')
+        .select('full_name')
+        .eq('id', creatorId)
+        .maybeSingle();
+      const name = (creator?.full_name as string | null)?.trim() || 'A creator';
+      pushes += await sendExpoPush(await adminPushTokens(admin, companyId), {
+        title: `${name} is behind`,
+        body: behindBody(list.length),
+        data: { event: 'creator_behind', creator_id: creatorId },
       });
     }
 

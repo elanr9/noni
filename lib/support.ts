@@ -30,13 +30,19 @@ export function contactSupport(
     {
       text: 'Email',
       onPress: () => {
-        void openSupportEmail(subject);
+        void openSupportEmail(subject).catch(() => {
+          Alert.alert('Email us', SUPPORT_EMAIL);
+        });
       },
     },
     {
       text: 'Text',
       onPress: () => {
-        void openSupportText(`Hi! I'm ${name}, I have a question about Noni`);
+        void openSupportText(`Hi! I'm ${name}, I have a question about Noni`).catch(
+          () => {
+            Alert.alert('Text us', SUPPORT_PHONE_E164);
+          },
+        );
       },
     },
   ]);

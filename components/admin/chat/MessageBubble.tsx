@@ -9,6 +9,7 @@ import {
   type ThreadMessage,
 } from '../../../lib/messages-api';
 import { color, type } from '../../../theme/tokens';
+import { posterForVideo } from '../../ui/MediaThumb';
 import { PostThumb } from '../shared';
 import { PostRefBlock } from './PostRefBlock';
 
@@ -35,11 +36,11 @@ export function ChatMediaBlock({ media }: { media: MessageMedia }) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (media.media !== 'image') return;
     let cancelled = false;
     void signedChatMediaUrl(media.url)
-      .then((signed) => {
-        if (!cancelled) setUrl(signed);
+      .then((signed) => (media.media === 'video' ? posterForVideo(signed) : signed))
+      .then((resolved) => {
+        if (!cancelled) setUrl(resolved);
       })
       .catch(() => undefined);
     return () => {
@@ -49,7 +50,7 @@ export function ChatMediaBlock({ media }: { media: MessageMedia }) {
 
   return (
     <PostThumb
-      uri={media.media === 'image' ? url : null}
+      uri={url}
       format={media.media === 'video' ? 'video' : 'photo_carousel'}
       badge={media.len}
       width={168}

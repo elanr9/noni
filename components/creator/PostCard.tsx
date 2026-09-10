@@ -97,6 +97,8 @@ export function usePostTypeMeta(postTypeId: string | null): PostTypeMeta | null 
 
 export interface PostCardProps {
   assignment: AssignmentWithBrief;
+  /** "12:00 PM", shown on approved posts waiting for the publish cron. */
+  publishTime: string;
   /** Swap is offered on untouched posts, today only. */
   showSwap: boolean;
   onOpen: () => void;
@@ -122,6 +124,7 @@ function StatusPill({ label, fg, bg }: { label: string; fg: string; bg: string }
  */
 export function PostCard({
   assignment,
+  publishTime,
   showSwap,
   onOpen,
   onRecord,
@@ -138,8 +141,8 @@ export function PostCard({
   const assigned = assignment.status === 'assigned';
   const pending =
     assignment.status === 'submitted' || assignment.status === 'recorded';
-  const done =
-    assignment.status === 'posted' || assignment.status === 'approved';
+  const done = assignment.status === 'posted';
+  const scheduled = assignment.status === 'approved';
   const changes = assignment.status === 'changes_requested';
 
   return (
@@ -183,6 +186,18 @@ export function PostCard({
           <StatusPill label="In review" fg={color.amber} bg={color.amberSoft} />
           <Text style={styles.footerNote} numberOfLines={1}>
             Sent for approval
+          </Text>
+          <Button variant="ghost" size="sm" onPress={onSee}>
+            See it
+          </Button>
+        </View>
+      )}
+
+      {scheduled && (
+        <View style={styles.footerRow}>
+          <StatusPill label="Scheduled" fg={color.green} bg={color.greenSoft} />
+          <Text style={styles.footerNote} numberOfLines={1}>
+            {`Posts at ${publishTime}`}
           </Text>
           <Button variant="ghost" size="sm" onPress={onSee}>
             See it

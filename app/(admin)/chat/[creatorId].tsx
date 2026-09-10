@@ -1,18 +1,26 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
-import {
-  AdminChatThread,
-  type PendingPostRef,
-} from '../../../components/admin/chat/AdminChatThread';
+import { Alert, StyleSheet, View } from 'react-native';
+import { Stack, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { CreatorThread } from '../../../components/admin/messages/thread/CreatorThread';
 import { useAuth } from '../../../lib/auth';
+import { getCreatorAccount } from '../../../lib/creator-accounts-api';
+import { isCreatorThreadMuted, setCreatorThreadMuted } from '../../../lib/messages-api';
 import { supabase } from '../../../lib/supabase';
 import { color } from '../../../theme/tokens';
 
+type CreatorHeader = { name: string; handle: string | null; muted: boolean };
+
+function cleanHandle(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim().replace(/^@/, '') ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
- * The one thread per creator. Reached from creator detail (top right) and
- * from the per-post chat button in Review, which passes ?assignment= so the
- * thread opens scrolled to that post with the reference attached.
+ * The one thread per creator. Reached from creator detail and from Review's
+ * per-post chat button, which passes ?assignment= so the thread opens scrolled
+ * to that post with it attached to the next message.
  */
 export default function AdminCreatorChat() {
   const { creatorId, assignment } = useLocalSearchParams<{
@@ -20,68 +28,67 @@ export default function AdminCreatorChat() {
     assignment?: string;
   }>();
   const { profile } = useAuth();
-  const [creatorName, setCreatorName] = useState('Chat');
-  const [initialRef, setInitialRef] = useState<PendingPostRef | null>(null);
-  const [ready, setReady] = useState(false);
+  const insets = useSafeAreaInsets();
+  const [header, setHeader] = useState<CreatorHeader | null>(null);
 
   useEffect(() => {
     if (!profile || !creatorId) return;
     let cancelled = false;
     void (async () => {
-      try {
-        const [{ data: creator }, refRow] = await Promise.all([
-          supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('company_id', profile.company_id)
-            .eq('id', creatorId)
-            .single(),
-          assignment !== undefined
-            ? supabase
-                .from('assignments')
-                .select('id, briefs:brief_id ( title )')
-                .eq('company_id', profile.company_id)
-                .eq('id', assignment)
-                .single()
-            : Promise.resolve(null),
-        ]);
-        if (cancelled) return;
-        if (creator?.full_name?.trim()) setCreatorName(creator.full_name.trim());
-        const briefTitle = (
-          refRow?.data as { briefs: { title: string } | null } | null
-        )?.briefs?.title;
-        if (assignment !== undefined && briefTitle !== undefined) {
-          setInitialRef({ assignmentId: assignment, title: briefTitle });
-        }
-      } finally {
-        if (!cancelled) setReady(true);
-      }
+      const [{ data: creator }, account, muted] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('company_id', profile.company_id)
+          .eq('id', creatorId)
+          .maybeSingle(),
+        getCreatorAccount(profile.company_id, creatorId).catch(() => null),
+        isCreatorThreadMuted(creatorId, profile.id).catch(() => false),
+      ]);
+      if (cancelled) return;
+      setHeader({
+        name: creator?.full_name?.trim() || 'Creator',
+        handle: cleanHandle(account?.tiktok_handle) ?? cleanHandle(account?.instagram_handle),
+        muted,
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [profile, creatorId, assignment]);
+  }, [profile, creatorId]);
+
+  const toggleMuted = async () => {
+    if (!profile || !creatorId || header === null) return;
+    const next = !header.muted;
+    setHeader({ ...header, muted: next });
+    try {
+      await setCreatorThreadMuted({
+        creatorId,
+        profileId: profile.id,
+        companyId: profile.company_id,
+        muted: next,
+      });
+    } catch (e) {
+      setHeader((h) => (h === null ? h : { ...h, muted: !next }));
+      Alert.alert('Could not update', e instanceof Error ? e.message : 'Try again');
+    }
+  };
 
   if (!profile || !creatorId) return null;
 
   return (
-    <View style={styles.screen}>
-      <Stack.Screen options={{ title: creatorName }} />
-      {ready && (
-        <AdminChatThread
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ headerShown: false }} />
+      {header !== null && (
+        <CreatorThread
           companyId={profile.company_id}
           creatorId={creatorId}
           meId={profile.id}
-          initialRef={initialRef}
-          scrollToAssignmentId={assignment}
-          onOpenPostRef={(ref) => {
-            if (ref.assignmentId !== null) {
-              router.push({
-                pathname: '/(admin)/creator/post/[assignmentId]',
-                params: { assignmentId: ref.assignmentId },
-              });
-            }
-          }}
+          creatorName={header.name}
+          handle={header.handle}
+          muted={header.muted}
+          onToggleMute={() => void toggleMuted()}
+          initialAssignmentId={assignment}
         />
       )}
     </View>
@@ -89,5 +96,5 @@ export default function AdminCreatorChat() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.offWhite },
+  screen: { flex: 1, backgroundColor: color.white },
 });

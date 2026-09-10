@@ -150,11 +150,12 @@ export default function UploadScreen() {
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !profile?.company_id) return;
+    const companyId = profile.company_id;
     let cancelled = false;
     async function load() {
       try {
-        const a = await getAssignment(id);
+        const a = await getAssignment(companyId, id);
         if (cancelled) return;
         setAssignment(a);
         if (a) {
@@ -176,6 +177,12 @@ export default function UploadScreen() {
               .catch(() => undefined);
           }
         }
+      } catch (e) {
+        if (!cancelled) {
+          setErrorToast(
+            e instanceof Error ? e.message : 'Could not load this post. Try again.',
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -184,7 +191,7 @@ export default function UploadScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, profile?.company_id]);
 
   useEffect(() => {
     if (phase !== 'review') {
@@ -268,6 +275,10 @@ export default function UploadScreen() {
         setPhotos(next);
         await savePhotoDraft(assignment.id, next);
       }
+    } catch (e) {
+      setErrorToast(
+        e instanceof Error ? e.message : 'Could not open your photos. Try again.',
+      );
     } finally {
       setPicking(false);
     }

@@ -22,15 +22,21 @@ import {
 import { SlideNav, type SlideNavSlide } from '../../../components/creator/SlideNav';
 import { Screen } from '../../../components/layout/Screen';
 import { DetailSkeleton } from '../../../components/states';
+import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { Segmented } from '../../../components/ui/Segmented';
 import { useAuth } from '../../../lib/auth';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
-import { slotTimeLabel, useCreatorQueue } from '../../../lib/creator-queue';
+import {
+  countOnDate,
+  publishTimeLabel,
+  useCreatorQueue,
+} from '../../../lib/creator-queue';
 import { earningsForViews, formatCount } from '../../../lib/earnings';
 import {
   getAssignment,
+  markMusicAdded,
   parseAssignmentMetrics,
   type AssignmentWithBrief,
 } from '../../../lib/tasks-api';
@@ -57,13 +63,35 @@ export default function PostDetailScreen() {
     tiktok: string | null;
     instagram: string | null;
   }>({ tiktok: null, instagram: null });
+  const [markingMusic, setMarkingMusic] = useState(false);
+
+  const onMusicAdded = useCallback(async () => {
+    if (assignment === null || markingMusic) return;
+    setMarkingMusic(true);
+    try {
+      const row = await markMusicAdded(assignment.id);
+      setAssignment((prev) =>
+        prev === null
+          ? prev
+          : { ...prev, music_marked_by_creator_at: row.music_marked_by_creator_at },
+      );
+    } catch {
+      setMarkingMusic(false);
+      return;
+    }
+    setMarkingMusic(false);
+  }, [assignment, markingMusic]);
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    if (!profile?.company_id) return;
     try {
-      const row = await getAssignment(id);
+      const row = await getAssignment(profile.company_id, id);
       setAssignment(row);
-      if (row !== null && profile?.id) {
+      if (row !== null) {
         const account = await getCreatorAccount(row.company_id, profile.id);
         setHandles({
           tiktok: cleanHandle(account?.tiktok_handle ?? null),
@@ -75,7 +103,7 @@ export default function PostDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, profile?.id]);
+  }, [id, profile?.id, profile?.company_id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -86,6 +114,7 @@ export default function PostDetailScreen() {
   const isPosted =
     assignment !== null &&
     (assignment.status === 'posted' || assignment.status === 'approved');
+  const scheduled = assignment !== null && assignment.status === 'approved';
 
   useEffect(() => {
     if (assignment !== null && !isPosted) {
@@ -137,12 +166,39 @@ export default function PostDetailScreen() {
   const showTopChip = topPercent !== undefined && topPercent <= 10;
 
   const handle = handles[platform];
+  const publishTime = publishTimeLabel(
+    assignment,
+    countOnDate(assignments, assignment.scheduled_date),
+  );
   const postedLine = [
-    `Posted ${shortDateLabel(assignment.scheduled_date)} at ${slotTimeLabel(assignment.slot_index)}`,
+    scheduled
+      ? `Scheduled ${shortDateLabel(assignment.scheduled_date)}, posts at ${publishTime}`
+      : `Posted ${shortDateLabel(assignment.scheduled_date)} at ${publishTime}`,
     handle !== null ? `@${handle}` : null,
   ]
     .filter((v) => v !== null)
     .join(' · ');
+
+  const musicCard =
+    isPhoto && assignment.status === 'posted'
+      ? assignment.music_approved_at !== null
+        ? {
+            title: 'Music approved',
+            body: 'You are earning on this post.',
+            action: false,
+          }
+        : assignment.music_marked_by_creator_at !== null
+          ? {
+              title: 'Music sent for review',
+              body: 'Your manager will check it soon.',
+              action: false,
+            }
+          : {
+              title: 'Add the music',
+              body: 'Open the post on TikTok and Instagram, add the trending sound, then come back and tap done.',
+              action: true,
+            }
+      : null;
 
   const slides: SlideNavSlide[] = (brief.script ?? '')
     .split('\n\n')
@@ -218,77 +274,115 @@ export default function PostDetailScreen() {
         </View>
       </View>
 
+      {musicCard !== null && (
+        <View style={[styles.noticeCard, shadow.shadowCard]}>
+          <View style={styles.noticeHead}>
+            <View style={styles.linkIcon}>
+              <Icon name="music-2" size={16} color={color.ink} />
+            </View>
+            <Text style={styles.noticeTitle}>{musicCard.title}</Text>
+          </View>
+          <Text style={styles.noticeBody}>{musicCard.body}</Text>
+          {musicCard.action && (
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={markingMusic}
+              onPress={() => void onMusicAdded()}
+            >
+              I added the music
+            </Button>
+          )}
+        </View>
+      )}
+
       <View style={styles.titleBlock}>
         <Text style={styles.title}>{brief.title}</Text>
         <Text style={styles.postedLine}>{postedLine}</Text>
       </View>
 
-      <Segmented
-        options={['TikTok', 'Instagram']}
-        value={platformIndex}
-        onChange={setPlatformIndex}
-      />
-
-      <View style={styles.statGrid}>
-        {(
-          [
-            { label: 'Views', value: formatCount(views), money: false },
-            { label: 'Likes', value: formatCount(likes), money: false },
-            { label: 'Saves', value: formatCount(saves), money: false },
-            { label: 'Earned', value: `$${earned.toFixed(2)}`, money: true },
-          ] as const
-        ).map((s) => (
-          <View key={s.label} style={[styles.statCard, shadow.shadowCard]}>
-            <Text style={[styles.statValue, s.money && styles.statValueMoney]}>
-              {s.value}
-            </Text>
-            <Text style={styles.statLabel}>{s.label}</Text>
+      {scheduled ? (
+        <View style={[styles.noticeCard, shadow.shadowCard]}>
+          <View style={styles.noticeHead}>
+            <View style={styles.linkIcon}>
+              <Icon name="clock" size={16} color={color.green} />
+            </View>
+            <Text style={styles.noticeTitle}>Scheduled</Text>
           </View>
-        ))}
-      </View>
-
-      <View style={[styles.tierCard, shadow.shadowCard]}>
-        <View style={styles.tierRow}>
-          <Text style={styles.tierAmount}>{`$${tier.earned.toFixed(2)}`}</Text>
-          <Text style={styles.tierToGo}>
-            {`${formatCount(tier.toGo)} views to $${tier.next}`}
+          <Text style={styles.noticeBody}>
+            {`Posts at ${publishTime}. Views and earnings show up once it is live.`}
           </Text>
         </View>
-        <View style={styles.tierTrack}>
-          <View style={[styles.tierFill, { width: `${tierFill}%` }]} />
-        </View>
-      </View>
+      ) : (
+        <>
+          <Segmented
+            options={['TikTok', 'Instagram']}
+            value={platformIndex}
+            onChange={setPlatformIndex}
+          />
 
-      <View style={styles.links}>
-        {(
-          [
-            { platform: 'tiktok', label: 'Open on TikTok', icon: 'music-2' },
-            { platform: 'instagram', label: 'Open on Instagram', icon: 'at-sign' },
-          ] as const
-        ).map((row) => {
-          const rowHandle = handles[row.platform];
-          return (
-            <PressableScale
-              key={row.platform}
-              accessibilityRole="button"
-              accessibilityLabel={row.label}
-              onPress={() => openOn(row.platform)}
-              style={[styles.linkRow, shadow.shadowCard]}
-            >
-              <View style={styles.linkIcon}>
-                <Icon name={row.icon} size={16} color={color.ink} />
+          <View style={styles.statGrid}>
+            {(
+              [
+                { label: 'Views', value: formatCount(views), money: false },
+                { label: 'Likes', value: formatCount(likes), money: false },
+                { label: 'Saves', value: formatCount(saves), money: false },
+                { label: 'Earned', value: `$${earned.toFixed(2)}`, money: true },
+              ] as const
+            ).map((s) => (
+              <View key={s.label} style={[styles.statCard, shadow.shadowCard]}>
+                <Text style={[styles.statValue, s.money && styles.statValueMoney]}>
+                  {s.value}
+                </Text>
+                <Text style={styles.statLabel}>{s.label}</Text>
               </View>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkLabel}>{row.label}</Text>
-                {rowHandle !== null && (
-                  <Text style={styles.linkHandle}>{`@${rowHandle}`}</Text>
-                )}
-              </View>
-              <Icon name="arrow-right" size={17} color={color.slate400} />
-            </PressableScale>
-          );
-        })}
-      </View>
+            ))}
+          </View>
+
+          <View style={[styles.tierCard, shadow.shadowCard]}>
+            <View style={styles.tierRow}>
+              <Text style={styles.tierAmount}>{`$${tier.earned.toFixed(2)}`}</Text>
+              <Text style={styles.tierToGo}>
+                {`${formatCount(tier.toGo)} views to $${tier.next}`}
+              </Text>
+            </View>
+            <View style={styles.tierTrack}>
+              <View style={[styles.tierFill, { width: `${tierFill}%` }]} />
+            </View>
+          </View>
+
+          <View style={styles.links}>
+            {(
+              [
+                { platform: 'tiktok', label: 'Open on TikTok', icon: 'music-2' },
+                { platform: 'instagram', label: 'Open on Instagram', icon: 'at-sign' },
+              ] as const
+            ).map((row) => {
+              const rowHandle = handles[row.platform];
+              return (
+                <PressableScale
+                  key={row.platform}
+                  accessibilityRole="button"
+                  accessibilityLabel={row.label}
+                  onPress={() => openOn(row.platform)}
+                  style={[styles.linkRow, shadow.shadowCard]}
+                >
+                  <View style={styles.linkIcon}>
+                    <Icon name={row.icon} size={16} color={color.ink} />
+                  </View>
+                  <View style={styles.linkBody}>
+                    <Text style={styles.linkLabel}>{row.label}</Text>
+                    {rowHandle !== null && (
+                      <Text style={styles.linkHandle}>{`@${rowHandle}`}</Text>
+                    )}
+                  </View>
+                  <Icon name="arrow-right" size={17} color={color.slate400} />
+                </PressableScale>
+              );
+            })}
+          </View>
+        </>
+      )}
     </Screen>
   );
 }
@@ -470,6 +564,31 @@ const styles = StyleSheet.create({
   },
   links: {
     gap: space[3],
+  },
+  noticeCard: {
+    gap: space[3],
+    paddingVertical: space[4],
+    paddingHorizontal: space[4],
+    borderRadius: radius.md,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
+  },
+  noticeHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+  },
+  noticeTitle: {
+    flex: 1,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  noticeBody: {
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * type.leading.snug,
+    color: color.slate500,
   },
   linkRow: {
     flexDirection: 'row',

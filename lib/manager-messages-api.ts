@@ -4,17 +4,23 @@ import type { Database } from './types';
 
 type MessageRow = Database['public']['Tables']['manager_messages']['Row'];
 
-export type ManagerChatKind = 'brief' | 'dm';
+export type ManagerChatKind = 'brief' | 'dm' | 'channel';
 
 export type InboxRow = {
   chatId: string;
   title: string;
   preview: string;
   timeLabel: string;
+  lastMessageAt: string | null;
   unread: number;
   kind: ManagerChatKind;
   campaignId?: string;
+  otherId?: string;
   otherName?: string;
+  /** Channels and brief chats: slug without the leading "#". */
+  name?: string;
+  memberCount?: number;
+  allCreators?: boolean;
 };
 
 export type ManagerChatInfo = {
@@ -24,6 +30,17 @@ export type ManagerChatInfo = {
   campaignId: string | null;
   otherId: string | null;
   otherName: string | null;
+  /** Channels and brief chats: slug without the leading "#". */
+  name: string | null;
+  memberCount: number;
+  allCreators: boolean;
+  createdBy: string | null;
+};
+
+export type ChannelMember = {
+  id: string;
+  name: string;
+  role: string;
 };
 
 export type ManagerMessagePostRef = {
@@ -123,7 +140,7 @@ function displayName(
 }
 
 function asKind(value: string): ManagerChatKind | null {
-  if (value === 'brief' || value === 'dm') return value;
+  if (value === 'brief' || value === 'dm' || value === 'channel') return value;
   return null;
 }
 
@@ -142,8 +159,22 @@ function weekNumbers(
   return numberById;
 }
 
+/** Brief chats render as channels: `#week-{n}-brief`. */
+export function briefChannelName(weekNumber: number): string {
+  return `week-${weekNumber}-brief`;
+}
+
 export function briefChatTitle(weekNumber: number): string {
-  return `Week ${weekNumber} brief`;
+  return `#${briefChannelName(weekNumber)}`;
+}
+
+/** Lowercase, spaces to hyphens, only a-z 0-9 and hyphens. */
+export function slugifyChannelName(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
 }
 
 export function inboxTimeLabel(iso: string, now = Date.now()): string {
@@ -186,7 +217,11 @@ function snippetOf(row: {
   return text;
 }
 
-function previewText(
+/**
+ * Inbox second line. DMs prefix only my own messages with "You:"; group chats
+ * (channels, brief chats) prefix every author's first name.
+ */
+export function previewText(
   row: {
     author_id: string;
     body: string;
@@ -195,26 +230,19 @@ function previewText(
     authorName: string;
   },
   myId: string,
+  prefixAuthor = false,
 ): string {
   const mine = row.author_id === myId;
   const name = mine ? 'You' : firstName(row.authorName);
+  const withName = (bit: string): string =>
+    mine || prefixAuthor ? `${name}: ${bit}` : bit;
   if (row.media_kind === 'voice') return `${name} sent a voice note`;
-  if (row.forward_label) {
-    return mine ? `You: ${row.forward_label}` : row.forward_label;
-  }
-  if (row.media_kind === 'image') {
-    const caption = row.body.trim();
-    const bit = caption.length > 0 ? caption : 'Sent a photo';
-    return mine ? `You: ${bit}` : bit;
-  }
-  if (row.media_kind === 'video') {
-    const caption = row.body.trim();
-    const bit = caption.length > 0 ? caption : 'Sent a video';
-    return mine ? `You: ${bit}` : bit;
-  }
+  if (row.forward_label) return withName(row.forward_label);
+  if (row.media_kind === 'image') return withName(row.body.trim() || 'Photo');
+  if (row.media_kind === 'video') return withName(row.body.trim() || 'Video');
   const body = row.body.trim();
   if (body.length === 0) return '';
-  return mine ? `You: ${body}` : body;
+  return withName(body);
 }
 
 function postRefTitle(brief: NonNullable<BriefRef>): string {
@@ -373,7 +401,10 @@ export async function getManagerChat(
   if (!kind) return null;
 
   if (kind === 'brief') {
-    const campaigns = await listCampaigns();
+    const [campaigns, managers] = await Promise.all([
+      listCampaigns(),
+      listCampaignManagers(companyId),
+    ]);
     const numbers = weekNumbers(campaigns);
     const weekNumber = data.campaign_id
       ? (numbers.get(data.campaign_id) ?? 1)
@@ -385,6 +416,26 @@ export async function getManagerChat(
       campaignId: data.campaign_id,
       otherId: null,
       otherName: null,
+      name: briefChannelName(weekNumber),
+      memberCount: managers.length,
+      allCreators: false,
+      createdBy: null,
+    };
+  }
+
+  if (kind === 'channel') {
+    const members = await listChannelMembers(chatId);
+    return {
+      id: data.id,
+      kind,
+      title: `#${data.name ?? 'channel'}`,
+      campaignId: null,
+      otherId: null,
+      otherName: null,
+      name: data.name,
+      memberCount: members.length,
+      allCreators: data.all_creators,
+      createdBy: data.created_by,
     };
   }
 
@@ -400,17 +451,42 @@ export async function getManagerChat(
     campaignId: null,
     otherId,
     otherName: other?.name ?? 'Manager',
+    name: null,
+    memberCount: 2,
+    allCreators: false,
+    createdBy: null,
   };
 }
+
+type ChannelRow = {
+  id: string;
+  name: string | null;
+  all_creators: boolean;
+  created_at: string;
+  created_by: string | null;
+  members: { profile_id: string }[] | { profile_id: string } | null;
+};
 
 export async function listManagerInbox(
   companyId: string,
   myId: string,
-): Promise<{ briefChats: InboxRow[]; dms: InboxRow[]; unread: number }> {
-  const [campaigns, managers] = await Promise.all([
+): Promise<{
+  briefChats: InboxRow[];
+  dms: InboxRow[];
+  channels: InboxRow[];
+  unread: number;
+}> {
+  const [campaigns, managers, { data: channelRows, error: channelError }] = await Promise.all([
     listCampaigns(),
     listCampaignManagers(companyId),
+    supabase
+      .from('manager_chats')
+      .select('id, name, all_creators, created_at, created_by, members:manager_chat_members ( profile_id )')
+      .eq('company_id', companyId)
+      .eq('kind', 'channel'),
   ]);
+  if (channelError) throw channelError;
+  const channelList = (channelRows ?? []) as unknown as ChannelRow[];
   const numbers = weekNumbers(campaigns);
   const others = managers.filter((m) => m.id !== myId);
 
@@ -427,9 +503,13 @@ export async function listManagerInbox(
     })),
   );
 
-  const chatIds = [...briefPairs.map((p) => p.chatId), ...dmPairs.map((p) => p.chatId)];
+  const chatIds = [
+    ...briefPairs.map((p) => p.chatId),
+    ...dmPairs.map((p) => p.chatId),
+    ...channelList.map((c) => c.id),
+  ];
   if (chatIds.length === 0) {
-    return { briefChats: [], dms: [], unread: 0 };
+    return { briefChats: [], dms: [], channels: [], unread: 0 };
   }
 
   const [{ data: messages, error: msgError }, { data: reads, error: readError }] =
@@ -468,7 +548,14 @@ export async function listManagerInbox(
     chatId: string,
     title: string,
     kind: ManagerChatKind,
-    extra: { campaignId?: string; otherName?: string },
+    extra: {
+      campaignId?: string;
+      otherId?: string;
+      otherName?: string;
+      name?: string;
+      memberCount?: number;
+      allCreators?: boolean;
+    },
   ): InboxRow => {
     const last = latest.get(chatId);
     const authorName = last ? displayName(last.author) : '';
@@ -485,9 +572,11 @@ export async function listManagerInbox(
               authorName,
             },
             myId,
+            kind !== 'dm',
           )
         : '',
       timeLabel: last ? inboxTimeLabel(last.created_at) : '',
+      lastMessageAt: last?.created_at ?? null,
       unread: unreadByChat.get(chatId) ?? 0,
       kind,
       ...extra,
@@ -495,30 +584,149 @@ export async function listManagerInbox(
   };
 
   const briefChats = briefPairs
-    .map(({ campaign, chatId }) =>
-      toRow(chatId, briefChatTitle(numbers.get(campaign.id) ?? 1), 'brief', {
+    .map(({ campaign, chatId }) => {
+      const n = numbers.get(campaign.id) ?? 1;
+      return toRow(chatId, briefChatTitle(n), 'brief', {
         campaignId: campaign.id,
-      }),
-    )
+        name: briefChannelName(n),
+        memberCount: managers.length,
+        allCreators: false,
+      });
+    })
     .sort((a, b) => {
       const na = numbers.get(a.campaignId ?? '') ?? 0;
       const nb = numbers.get(b.campaignId ?? '') ?? 0;
       return nb - na;
     });
 
+  const byRecency = (a: InboxRow, b: InboxRow): number => {
+    const ta = a.lastMessageAt ?? '';
+    const tb = b.lastMessageAt ?? '';
+    if (ta !== tb) return ta < tb ? 1 : -1;
+    return a.title.localeCompare(b.title);
+  };
+
   const dms = dmPairs
     .map(({ manager, chatId }) =>
-      toRow(chatId, manager.name, 'dm', { otherName: manager.name }),
+      toRow(chatId, manager.name, 'dm', { otherId: manager.id, otherName: manager.name }),
     )
-    .sort((a, b) => {
-      const ta = latest.get(a.chatId)?.created_at ?? '';
-      const tb = latest.get(b.chatId)?.created_at ?? '';
-      if (ta !== tb) return ta < tb ? 1 : -1;
-      return a.title.localeCompare(b.title);
-    });
+    .sort(byRecency);
+
+  const channels = channelList
+    .map((c) => {
+      const members = c.members == null ? [] : Array.isArray(c.members) ? c.members : [c.members];
+      return toRow(c.id, `#${c.name ?? 'channel'}`, 'channel', {
+        name: c.name ?? 'channel',
+        memberCount: members.length,
+        allCreators: c.all_creators,
+      });
+    })
+    .map((row) => {
+      const channel = channelList.find((c) => c.id === row.chatId);
+      if (row.lastMessageAt !== null || channel === undefined) return row;
+      const creator = others.find((m) => m.id === channel.created_by);
+      const preview =
+        channel.created_by === myId || creator === undefined
+          ? 'You created this channel.'
+          : `${firstName(creator.name)} created this channel.`;
+      return { ...row, lastMessageAt: channel.created_at, timeLabel: inboxTimeLabel(channel.created_at), preview };
+    })
+    .sort(byRecency);
 
   const unread = [...unreadByChat.values()].reduce((sum, n) => sum + n, 0);
-  return { briefChats, dms, unread };
+  return { briefChats, dms, channels, unread };
+}
+
+// --- Channels ---------------------------------------------------------------
+
+export async function createChannel(params: {
+  companyId: string;
+  myId: string;
+  name: string;
+  memberIds: string[];
+  allCreators: boolean;
+}): Promise<string> {
+  const name = slugifyChannelName(params.name);
+  if (name.length === 0) throw new Error('Give the channel a name');
+  const { data, error } = await supabase
+    .from('manager_chats')
+    .insert({
+      company_id: params.companyId,
+      kind: 'channel',
+      name,
+      all_creators: params.allCreators,
+      created_by: params.myId,
+    })
+    .select('id')
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error(`#${name} already exists`);
+    throw error;
+  }
+  const ids = [...new Set([params.myId, ...params.memberIds])];
+  const { error: memberError } = await supabase
+    .from('manager_chat_members')
+    .insert(ids.map((profile_id) => ({ chat_id: data.id, profile_id })));
+  if (memberError) throw memberError;
+  return data.id;
+}
+
+export async function listChannelMembers(chatId: string): Promise<ChannelMember[]> {
+  const { data, error } = await supabase
+    .from('manager_chat_members')
+    .select('profile_id, profiles:profile_id ( id, full_name, role )')
+    .eq('chat_id', chatId);
+  if (error) throw error;
+  type Row = {
+    profile_id: string;
+    profiles: { id: string; full_name: string | null; role: string } | { id: string; full_name: string | null; role: string }[] | null;
+  };
+  return ((data ?? []) as unknown as Row[])
+    .map((row) => {
+      const p = asOne(row.profiles);
+      return {
+        id: row.profile_id,
+        name: p?.full_name?.trim() || 'Manager',
+        role: p?.role ?? 'campaign_manager',
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function addChannelMembers(chatId: string, profileIds: string[]): Promise<void> {
+  if (profileIds.length === 0) return;
+  const { error } = await supabase
+    .from('manager_chat_members')
+    .upsert(profileIds.map((profile_id) => ({ chat_id: chatId, profile_id })), {
+      onConflict: 'chat_id,profile_id',
+      ignoreDuplicates: true,
+    });
+  if (error) throw error;
+}
+
+export async function setChannelAllCreators(chatId: string, allCreators: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('manager_chats')
+    .update({ all_creators: allCreators })
+    .eq('id', chatId)
+    .eq('kind', 'channel');
+  if (error) throw error;
+}
+
+export async function leaveChannel(chatId: string, profileId: string): Promise<void> {
+  const { error } = await supabase
+    .from('manager_chat_members')
+    .delete()
+    .eq('chat_id', chatId)
+    .eq('profile_id', profileId);
+  if (error) throw error;
+}
+
+/** Role label for a team member row: "Admin" or "Campaign manager". */
+export function roleLabel(role: string): string {
+  if (role === 'company_admin' || role === 'admin') return 'Admin';
+  if (role === 'creator') return 'Creator';
+  return 'Campaign manager';
 }
 
 export async function unreadManagerMessageCount(): Promise<number> {
@@ -621,6 +829,61 @@ export async function sendManagerMessage(
     media_path: input.mediaPath ?? null,
     voice_duration_ms: input.voiceDurationMs ?? null,
   });
+  if (error) throw error;
+
+  void supabase.functions.invoke('notify', {
+    body: {
+      event: 'manager_message',
+      chat_id: input.chatId,
+      preview: notifyPreview(input),
+    },
+  });
+}
+
+function notifyPreview(input: SendManagerMessageInput): string {
+  const body = (input.body ?? '').trim();
+  if (body.length > 0) return body.slice(0, 120);
+  if (input.mediaKind === 'image') return 'Sent a photo';
+  if (input.mediaKind === 'video') return 'Sent a video';
+  if (input.mediaKind === 'voice') return 'Sent a voice note';
+  if (input.assignmentId || input.briefId) return 'Shared a post';
+  return 'New message';
+}
+
+export async function isChatMuted(
+  chatId: string,
+  profileId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('chat_mutes')
+    .select('chat_id')
+    .eq('chat_id', chatId)
+    .eq('profile_id', profileId)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+export async function setChatMuted(params: {
+  chatId: string;
+  profileId: string;
+  companyId: string;
+  muted: boolean;
+}): Promise<void> {
+  if (params.muted) {
+    const { error } = await supabase.from('chat_mutes').insert({
+      chat_id: params.chatId,
+      profile_id: params.profileId,
+      company_id: params.companyId,
+    });
+    if (error && error.code !== '23505') throw error;
+    return;
+  }
+  const { error } = await supabase
+    .from('chat_mutes')
+    .delete()
+    .eq('chat_id', params.chatId)
+    .eq('profile_id', params.profileId);
   if (error) throw error;
 }
 

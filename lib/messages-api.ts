@@ -13,6 +13,7 @@ export type MessagePostRef = {
 
 export type ThreadMessage = {
   id: string;
+  creatorId: string;
   authorId: string;
   authorName: string;
   fromCreator: boolean;
@@ -66,6 +67,7 @@ export async function listThread(
   if (error) throw error;
   return ((data ?? []) as MessageJoinRow[]).map((row) => ({
     id: row.id,
+    creatorId: row.creator_id,
     authorId: row.author_id,
     authorName: row.author?.full_name?.trim() || 'Someone',
     fromCreator: row.author_id === row.creator_id,
@@ -80,46 +82,76 @@ export type CreatorInboxRow = {
   name: string;
   preview: string;
   lastMessageAt: string | null;
+  /** Messages from the creator after my read marker. */
+  unread: number;
 };
 
 /**
  * One row per creator on the roster, newest conversation first, creators
- * with no messages yet after that by name.
+ * with no messages yet after that by name. `meId` scopes the read marker and
+ * the "You:" preview prefix.
  */
-export async function listCreatorInbox(companyId: string): Promise<CreatorInboxRow[]> {
-  const [{ data: creators, error: creatorsError }, { data: recent, error: recentError }] =
-    await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('company_id', companyId)
-        .or('role.eq.creator,can_create.eq.true'),
-      supabase
-        .from('messages')
-        .select('creator_id, body, created_at')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
-        .limit(500),
-    ]);
+export async function listCreatorInbox(
+  companyId: string,
+  meId?: string,
+): Promise<CreatorInboxRow[]> {
+  const [
+    { data: creators, error: creatorsError },
+    { data: recent, error: recentError },
+    { data: reads, error: readsError },
+  ] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('company_id', companyId)
+      .or('role.eq.creator,can_create.eq.true'),
+    supabase
+      .from('messages')
+      .select('creator_id, author_id, body, created_at')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(1000),
+    meId !== undefined
+      ? supabase
+          .from('message_reads')
+          .select('creator_id, last_read_at')
+          .eq('company_id', companyId)
+          .eq('profile_id', meId)
+      : Promise.resolve({ data: [] as { creator_id: string; last_read_at: string }[], error: null }),
+  ]);
   if (creatorsError) throw creatorsError;
   if (recentError) throw recentError;
+  if (readsError) throw readsError;
 
-  const latest = new Map<string, { body: string; createdAt: string }>();
+  const lastRead = new Map((reads ?? []).map((r) => [r.creator_id, r.last_read_at]));
+  const latest = new Map<string, { body: string; createdAt: string; mine: boolean }>();
+  const unreadByCreator = new Map<string, number>();
   for (const row of recent ?? []) {
     if (!latest.has(row.creator_id)) {
-      latest.set(row.creator_id, { body: row.body, createdAt: row.created_at });
+      latest.set(row.creator_id, {
+        body: row.body,
+        createdAt: row.created_at,
+        mine: meId !== undefined && row.author_id === meId,
+      });
     }
+    if (meId === undefined || row.author_id === meId) continue;
+    if (row.author_id !== row.creator_id) continue;
+    const at = lastRead.get(row.creator_id);
+    if (at !== undefined && row.created_at <= at) continue;
+    unreadByCreator.set(row.creator_id, (unreadByCreator.get(row.creator_id) ?? 0) + 1);
   }
 
   const rows = (creators ?? []).map((c): CreatorInboxRow => {
     const last = latest.get(c.id);
     const { media, text } = last ? parseMessageMedia(last.body) : { media: null, text: '' };
-    const preview = text.trim() || (media ? (media.media === 'video' ? 'Video' : 'Photo') : '');
+    const bit = text.trim() || (media ? (media.media === 'video' ? 'Video' : 'Photo') : '');
+    const preview = last?.mine && bit ? `You: ${bit}` : bit;
     return {
       creatorId: c.id,
       name: c.full_name?.trim() || 'Creator',
       preview,
       lastMessageAt: last?.createdAt ?? null,
+      unread: unreadByCreator.get(c.id) ?? 0,
     };
   });
 
@@ -202,6 +234,7 @@ export async function sendMediaMessage(params: {
   contentType: string;
   durationMs?: number | null;
   caption?: string;
+  assignmentId?: string;
 }): Promise<void> {
   const response = await fetch(params.localUri);
   if (!response.ok) throw new Error('Could not read the file');
@@ -229,12 +262,21 @@ export async function sendMediaMessage(params: {
     company_id: params.companyId,
     creator_id: params.creatorId,
     author_id: params.authorId,
+    assignment_id: params.assignmentId ?? null,
     body: `${MEDIA_PREFIX}${JSON.stringify(media)}${caption ? `\n${caption}` : ''}`,
   });
   if (error) throw error;
 
   void supabase.functions.invoke('notify', {
-    body: { creator_id: params.creatorId, event: 'message' },
+    body: {
+      creator_id: params.creatorId,
+      event: 'message',
+      preview: caption
+        ? caption.slice(0, 120)
+        : params.media === 'video'
+          ? 'Sent a video'
+          : 'Sent a photo',
+    },
   });
 }
 
@@ -245,6 +287,51 @@ export async function signedChatMediaUrl(path: string): Promise<string> {
     .createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
+}
+
+/** Move my read marker for a creator thread to now. */
+export async function markCreatorThreadRead(params: {
+  companyId: string;
+  creatorId: string;
+  profileId: string;
+}): Promise<void> {
+  const { error } = await supabase.from('message_reads').upsert({
+    company_id: params.companyId,
+    creator_id: params.creatorId,
+    profile_id: params.profileId,
+    last_read_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+/** Creator-thread messages from creators after my read markers, company wide. */
+export async function unreadCreatorMessageCount(
+  companyId: string,
+  meId: string,
+): Promise<number> {
+  const rows = await listCreatorInbox(companyId, meId);
+  return rows.reduce((sum, r) => sum + r.unread, 0);
+}
+
+/** Every message about one post, oldest first. */
+export async function listPostThread(companyId: string, assignmentId: string): Promise<ThreadMessage[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select(THREAD_SELECT)
+    .eq('company_id', companyId)
+    .eq('assignment_id', assignmentId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as MessageJoinRow[]).map((row) => ({
+    id: row.id,
+    creatorId: row.creator_id,
+    authorId: row.author_id,
+    authorName: row.author?.full_name?.trim() || 'Someone',
+    fromCreator: row.author_id === row.creator_id,
+    body: row.body,
+    createdAt: row.created_at,
+    postRef: toPostRef(row),
+  }));
 }
 
 export async function sendMessage(params: {
@@ -267,6 +354,47 @@ export async function sendMessage(params: {
 
   // notify routes by caller role: creator author -> admins, admin -> creator.
   void supabase.functions.invoke('notify', {
-    body: { creator_id: params.creatorId, event: 'message' },
+    body: {
+      creator_id: params.creatorId,
+      event: 'message',
+      preview: params.body.trim().slice(0, 120) || 'Shared a post',
+    },
   });
+}
+
+export async function isCreatorThreadMuted(
+  creatorId: string,
+  profileId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('chat_mutes')
+    .select('creator_id')
+    .eq('creator_id', creatorId)
+    .eq('profile_id', profileId)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+export async function setCreatorThreadMuted(params: {
+  creatorId: string;
+  profileId: string;
+  companyId: string;
+  muted: boolean;
+}): Promise<void> {
+  if (params.muted) {
+    const { error } = await supabase.from('chat_mutes').insert({
+      creator_id: params.creatorId,
+      profile_id: params.profileId,
+      company_id: params.companyId,
+    });
+    if (error && error.code !== '23505') throw error;
+    return;
+  }
+  const { error } = await supabase
+    .from('chat_mutes')
+    .delete()
+    .eq('creator_id', params.creatorId)
+    .eq('profile_id', params.profileId);
+  if (error) throw error;
 }

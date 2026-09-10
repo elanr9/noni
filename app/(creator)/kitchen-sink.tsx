@@ -73,9 +73,9 @@ export default function CreatorKitchenSink() {
   const [selectedSlot, setSelectedSlot] = useState('1');
 
   const pagerItems: PostPagerItem[] = [
-    { key: '0', label: slotTimeLabel(0), status: 'posted' },
-    { key: '1', label: slotTimeLabel(1), status: 'changes_requested' },
-    { key: '2', label: slotTimeLabel(2), status: 'assigned' },
+    { key: '0', label: slotTimeLabel(0, 3), status: 'posted' },
+    { key: '1', label: slotTimeLabel(1, 3), status: 'changes_requested' },
+    { key: '2', label: slotTimeLabel(2, 3), status: 'assigned' },
   ];
 
   return (

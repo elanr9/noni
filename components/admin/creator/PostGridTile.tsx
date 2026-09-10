@@ -4,12 +4,12 @@ import { color, radiusAdmin, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { PostThumb } from '../shared';
-import { useVideoThumb } from './useVideoThumb';
+import { usePostThumb } from './useVideoThumb';
 
 export interface PostGridTileProps {
   title: string;
   format: 'video' | 'photo_carousel';
-  /** Latest submission recording; Reel first frame is extracted from it. */
+  /** Latest submission's first media path: the Reel, or slide 1 of a Slideshow. */
   videoPath: string | null;
   /** Tile width; height is the 9:16 box. */
   size: number;
@@ -29,7 +29,7 @@ export function PostGridTile({
   onPress,
   viewsLabel,
 }: PostGridTileProps) {
-  const thumb = useVideoThumb(format === 'video' ? videoPath : null);
+  const thumb = usePostThumb(videoPath, format);
   const height = Math.round((size * 16) / 9);
 
   return (

@@ -52,6 +52,7 @@ export function DragPlacement(props: {
     children,
   } = props;
   const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+  const liveRef = useRef<{ x: number; y: number } | null>(null);
   const scale = useRef(new Animated.Value(1)).current;
   const originRef = useRef({ x, y });
   const latest = useRef({ x, y, stageWidth, stageHeight, onMove, onDragStart, axis });
@@ -65,6 +66,7 @@ export function DragPlacement(props: {
       onPanResponderGrant: () => {
         originRef.current = { x: latest.current.x, y: latest.current.y };
         latest.current.onDragStart?.();
+        liveRef.current = { ...originRef.current };
         setLive({ ...originRef.current });
         Animated.spring(scale, {
           toValue: 1.04,
@@ -82,6 +84,7 @@ export function DragPlacement(props: {
             : clamp(originRef.current.x + gs.dx / w, EDGE, 1 - EDGE);
         const ny = clamp(originRef.current.y + gs.dy / h, EDGE, 1 - EDGE);
         if (latest.current.axis !== 'y' && Math.abs(nx - 0.5) < SNAP) nx = 0.5;
+        liveRef.current = { x: nx, y: ny };
         setLive({ x: nx, y: ny });
       },
       onPanResponderRelease: () => {
@@ -91,16 +94,17 @@ export function DragPlacement(props: {
           speed: 40,
           bounciness: 4,
         }).start();
-        setLive((pos) => {
-          const origin = originRef.current;
-          if (pos !== null && (pos.x !== origin.x || pos.y !== origin.y)) {
-            latest.current.onMove?.(pos.x, pos.y);
-          }
-          return null;
-        });
+        const pos = liveRef.current;
+        const origin = originRef.current;
+        liveRef.current = null;
+        if (pos !== null && (pos.x !== origin.x || pos.y !== origin.y)) {
+          latest.current.onMove?.(pos.x, pos.y);
+        }
+        setLive(null);
       },
       onPanResponderTerminate: () => {
         scale.setValue(1);
+        liveRef.current = null;
         setLive(null);
       },
     }),

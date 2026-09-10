@@ -6,7 +6,7 @@ import type { IconName } from '../../../components/ui/Icon';
 import { listAssignmentQueue, listMusicApprovalQueue } from '../../../lib/admin-api';
 import { listAccountApprovalQueue } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
-import { unreadManagerMessageCount } from '../../../lib/manager-messages-api';
+import { unreadInboxCount } from '../../../lib/inbox-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, screenTransition } from '../../../theme/tokens';
 
@@ -65,7 +65,7 @@ export default function AdminTabsLayout() {
             ),
           )
           .catch(() => undefined);
-        void unreadManagerMessageCount()
+        void unreadInboxCount()
           .then(setUnreadCount)
           .catch(() => undefined);
       };

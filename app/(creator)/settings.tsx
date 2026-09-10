@@ -1,5 +1,15 @@
-import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  AppState,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AccountSwitcherSheet } from '../../components/AccountSwitcherSheet';
@@ -14,6 +24,7 @@ import { Button } from '../../components/ui/Button';
 import { Icon, type IconName } from '../../components/ui/Icon';
 import { modesForProfile, switchAccountRowLabel } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
+import { registerPushToken } from '../../lib/notifications';
 import { getCompany } from '../../lib/onboarding';
 import { contactSupport } from '../../lib/support';
 import { borderWidth, color, type } from '../../theme/tokens';
@@ -61,16 +72,6 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
-const NOTIF_ROWS: Array<{
-  key: 'week' | 'live' | 'earn';
-  label: string;
-  sub: string;
-}> = [
-  { key: 'week', label: 'New week is live', sub: 'Your briefs are ready to record' },
-  { key: 'live', label: 'Posts going live', sub: 'An approved post publishes' },
-  { key: 'earn', label: 'Earnings', sub: 'A post hits a view milestone' },
-];
-
 export default function CreatorSettingsScreen() {
   const { profile, signOut, activeMode, setActiveMode } = useAuth();
   const router = useRouter();
@@ -78,7 +79,53 @@ export default function CreatorSettingsScreen() {
   const [open, setOpen] = useState<OpenSheet>(null);
   const [switcher, setSwitcher] = useState(false);
   const [ended, setEnded] = useState(false);
-  const [notifs, setNotifs] = useState({ week: true, live: true, earn: true });
+  const [pushGranted, setPushGranted] = useState(false);
+
+  const loadPushStatus = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      setPushGranted(status === 'granted');
+    } catch {
+      setPushGranted(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open !== 'notifs') return;
+    void loadPushStatus();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadPushStatus();
+    });
+    return () => sub.remove();
+  }, [open, loadPushStatus]);
+
+  async function togglePush(next: boolean) {
+    if (Platform.OS === 'web') return;
+    try {
+      if (!next) {
+        await Linking.openSettings();
+        return;
+      }
+      const current = await Notifications.getPermissionsAsync();
+      if (current.status === 'granted') {
+        setPushGranted(true);
+        return;
+      }
+      if (current.canAskAgain) {
+        const { status } = await Notifications.requestPermissionsAsync();
+        setPushGranted(status === 'granted');
+        if (status === 'granted' && profile) void registerPushToken(profile.id);
+        return;
+      }
+      await Linking.openSettings();
+    } catch (e) {
+      Alert.alert(
+        'Could not update notifications',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -155,21 +202,15 @@ export default function CreatorSettingsScreen() {
         }
       >
         <View>
-          {NOTIF_ROWS.map((row, i) => (
-            <View
-              key={row.key}
-              style={[styles.notifRow, i < NOTIF_ROWS.length - 1 && styles.notifRowBorder]}
-            >
-              <View style={styles.notifText}>
-                <Text style={styles.notifLabel}>{row.label}</Text>
-                <Text style={styles.notifSub}>{row.sub}</Text>
-              </View>
-              <Toggle
-                on={notifs[row.key]}
-                onChange={(v) => setNotifs({ ...notifs, [row.key]: v })}
-              />
+          <View style={styles.notifRow}>
+            <View style={styles.notifText}>
+              <Text style={styles.notifLabel}>Push notifications</Text>
+              <Text style={styles.notifSub}>
+                New briefs, posts going live and earnings
+              </Text>
             </View>
-          ))}
+            <Toggle on={pushGranted} onChange={(v) => void togglePush(v)} />
+          </View>
         </View>
       </Sheet>
 
@@ -187,6 +228,7 @@ export default function CreatorSettingsScreen() {
               onPress={() => {
                 setOpen(null);
                 setEnded(true);
+                void signOut();
               }}
             >
               Sign out
@@ -214,7 +256,7 @@ export default function CreatorSettingsScreen() {
           title="Signed out"
           body="Sign back in anytime with the same email."
           actionLabel="Sign back in"
-          onAction={() => void signOut()}
+          onAction={() => router.replace('/(auth)/login')}
         />
       ) : null}
     </>
@@ -256,10 +298,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 13,
-  },
-  notifRowBorder: {
-    borderBottomWidth: borderWidth.hair,
-    borderBottomColor: color.line,
   },
   notifText: {
     flex: 1,

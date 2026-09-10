@@ -403,14 +403,17 @@ export async function fetchCompanyAnalytics(
 
   const days: AnalyticsDay[] = [];
   for (let i = 0; i < WINDOW_DAYS; i++) {
-    const date = new Date(windowStart.getTime() + i * DAY_MS);
-    const endOfDay = date.getTime() + DAY_MS - 1;
+    const date = new Date(windowStart);
+    date.setDate(windowStart.getDate() + i);
+    const nextDay = new Date(date);
+    nextDay.setDate(date.getDate() + 1);
+    const endOfDay = nextDay.getTime() - 1;
     const key = localDayKey(date);
     let views = 0;
     for (const post of posts) {
       views += Math.max(
         0,
-        viewsAt(post.series, endOfDay) - viewsAt(post.series, endOfDay - DAY_MS),
+        viewsAt(post.series, endOfDay) - viewsAt(post.series, date.getTime() - 1),
       );
     }
     const conversion = conversionByDay.get(key);

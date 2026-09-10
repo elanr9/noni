@@ -152,7 +152,7 @@ async function notifyCreditsLow(
     const tokens = await adminPushTokens(admin, companyId);
     await sendExpoPush(tokens, {
       title: 'Credits low',
-      body: 'UGC credits too low to pay bounties',
+      body: 'Add credits to keep paying bounties.',
       data: { event: 'credits_low', company_id: companyId },
     });
   } catch (e) {
@@ -178,7 +178,7 @@ async function notifyBountyEarned(
     );
     await sendExpoPush(tokens, {
       title: 'Bounty earned',
-      body: `You hit the views goal and earned ${formatCentsDollars(params.creatorNet)}!`,
+      body: `You hit the views goal and earned ${formatCentsDollars(params.creatorNet)}.`,
       data: {
         event: 'bounty_earned',
         assignment_id: params.assignmentId,
@@ -246,10 +246,10 @@ async function notifyCreatorMilestones(
 
   for (const claim of topByPost.values()) {
     if (!claim.creatorId) continue;
-    let body = `Your post just hit ${milestoneLabel(claim.threshold)} views`;
+    let body = `Your post just hit ${milestoneLabel(claim.threshold)} views.`;
     const earned = earnedByPost.get(claim.postId);
     if (earned != null && earned > 0) {
-      body += `, you've earned ${formatCentsDollars(earned)}!`;
+      body = `Your post just hit ${milestoneLabel(claim.threshold)} views. You earned ${formatCentsDollars(earned)}.`;
     }
     try {
       const creatorTokens = await creatorPushTokens(
@@ -706,7 +706,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       try {
         await sendExpoPush(tokens, {
           title: 'Milestone',
-          body: `${name}'s post crossed ${milestoneLabel(claim.threshold)} views${where}`,
+          body: `${name}'s post crossed ${milestoneLabel(claim.threshold)} views${where}.`,
           data: {
             post_id: claim.postId,
             assignment_id: claim.assignmentId,

@@ -6,7 +6,7 @@ import { PostRow } from '../../../../components/creator/PostRow';
 import {
   fetchCampaignNames,
   groupWeeks,
-  isPostedStatus,
+  opensPostDetail,
   shortDateLabel,
   viralityTopPercents,
   weekName,
@@ -16,7 +16,11 @@ import { Screen } from '../../../../components/layout/Screen';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { Icon } from '../../../../components/ui/Icon';
 import { PressableScale } from '../../../../components/ui/PressableScale';
-import { slotTimeLabel, useCreatorQueue } from '../../../../lib/creator-queue';
+import {
+  countOnDate,
+  publishTimeLabel,
+  useCreatorQueue,
+} from '../../../../lib/creator-queue';
 import { formatCount } from '../../../../lib/earnings';
 import type { AssignmentWithBrief } from '../../../../lib/tasks-api';
 import { parseAssignmentMetrics } from '../../../../lib/tasks-api';
@@ -38,7 +42,7 @@ function StatusPill({ status }: { status: CreatorWeek['status'] }) {
 export default function WeekDetailScreen() {
   const { key } = useLocalSearchParams<{ key: string }>();
   const router = useRouter();
-  const { assignments } = useCreatorQueue();
+  const { assignments, mediaPaths } = useCreatorQueue();
   const [campaignNames, setCampaignNames] = useState<Map<string, string>>(
     new Map(),
   );
@@ -81,7 +85,7 @@ export default function WeekDetailScreen() {
   }, [week]);
 
   const openRow = (a: AssignmentWithBrief) => {
-    if (isPostedStatus(a.status)) {
+    if (opensPostDetail(a.status)) {
       router.push(`/(creator)/posts/${a.id}` as Href);
     } else {
       router.push(`/(creator)/assignment/${a.id}` as Href);
@@ -164,7 +168,8 @@ export default function WeekDetailScreen() {
               key={a.id}
               title={a.briefs.title}
               isPhoto={a.briefs.format === 'photo_carousel'}
-              time={slotTimeLabel(a.slot_index)}
+              mediaPath={mediaPaths.get(a.id) ?? null}
+              time={publishTimeLabel(a, countOnDate(week.items, a.scheduled_date))}
               date={shortDateLabel(a.scheduled_date)}
               views={m.views ?? 0}
               likes={m.likes ?? 0}

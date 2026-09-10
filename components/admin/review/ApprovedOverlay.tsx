@@ -11,13 +11,21 @@ export interface ApprovedOverlayProps {
   /** Creator first name, e.g. "Fabri". */
   creatorShort: string;
   onNext: () => void;
+  /** Lands on the post's own thread. */
+  onOpenThread?: () => void;
 }
 
 /**
  * Admin handoff §3 approved takeover — the last human touch. The three
  * automatic steps differ by format.
  */
-export function ApprovedOverlay({ title, format, creatorShort, onNext }: ApprovedOverlayProps) {
+export function ApprovedOverlay({
+  title,
+  format,
+  creatorShort,
+  onNext,
+  onOpenThread,
+}: ApprovedOverlayProps) {
   const steps: Array<[IconName, string]> =
     format === 'video'
       ? [
@@ -40,6 +48,8 @@ export function ApprovedOverlay({ title, format, creatorShort, onNext }: Approve
       actionLabel="Next in queue"
       onAction={onNext}
       onBack={onNext}
+      secondaryLabel={onOpenThread ? 'Open thread' : undefined}
+      onSecondary={onOpenThread}
     >
       <View style={styles.steps}>
         {steps.map(([icon, text]) => (

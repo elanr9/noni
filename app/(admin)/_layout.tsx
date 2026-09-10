@@ -55,7 +55,11 @@ export default function AdminLayout() {
       <Stack.Screen name="creators" options={{ title: 'Creators', headerShown: false }} />
       <Stack.Screen name="creator/[id]" options={{ title: 'Creator' }} />
       <Stack.Screen name="creator/post/[assignmentId]" options={{ title: 'Post' }} />
-      <Stack.Screen name="chat/[creatorId]" options={{ title: 'Chat' }} />
+      <Stack.Screen name="chat/[creatorId]" options={{ title: 'Chat', headerShown: false }} />
+      <Stack.Screen
+        name="post-thread/[assignmentId]"
+        options={{ title: 'Post', headerShown: false }}
+      />
       <Stack.Screen
         name="account-approval/[accountId]"
         options={{ title: 'Account approval' }}

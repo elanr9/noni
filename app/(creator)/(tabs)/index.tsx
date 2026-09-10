@@ -6,7 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Screen } from '../../../components/layout/Screen';
 import { PostCard } from '../../../components/creator/PostCard';
 import { PostPager } from '../../../components/creator/PostPager';
-import { isPostedStatus } from '../../../components/creator/posts-shared';
+import { opensPostDetail } from '../../../components/creator/posts-shared';
 import { SwapSheet } from '../../../components/creator/SwapSheet';
 import { useCreatorToast } from '../../../components/creator/Toast';
 import { WeekStrip } from '../../../components/creator/WeekStrip';
@@ -16,7 +16,7 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { Wordmark } from '../../../components/ui/Wordmark';
 import { useAuth } from '../../../lib/auth';
-import { dayKey, useCreatorQueue, slotTimeLabel } from '../../../lib/creator-queue';
+import { dayKey, useCreatorQueue, publishTimeLabel } from '../../../lib/creator-queue';
 import { isSetupCompleteFlag, useSetupState } from '../../../lib/setup';
 import { supabase } from '../../../lib/supabase';
 import type { TaskStatus } from '../../../lib/tasks';
@@ -193,8 +193,10 @@ export default function HomeScreen() {
       .finally(() => setPoolLoading(false));
   };
 
+  const swapInFlight = useRef(false);
   const pickSwap = async (brief: Brief) => {
-    if (swapFor === null) return;
+    if (swapFor === null || swapInFlight.current) return;
+    swapInFlight.current = true;
     try {
       const updated = await swapAssignmentBrief(swapFor.id, brief.id);
       queue.applyLocal(updated);
@@ -203,6 +205,8 @@ export default function HomeScreen() {
     } catch {
       setSwapFor(null);
       toast.show('Could not swap that post. Try again.');
+    } finally {
+      swapInFlight.current = false;
     }
   };
 
@@ -251,7 +255,7 @@ export default function HomeScreen() {
         <PostPager
           items={dayList.map((a) => ({
             key: a.id,
-            label: slotTimeLabel(a.slot_index),
+            label: publishTimeLabel(a, dayList.length),
             status: a.status,
           }))}
           selectedKey={selected?.id ?? dayList[0].id}
@@ -263,6 +267,7 @@ export default function HomeScreen() {
         {selected !== null ? (
           <PostCard
             assignment={selected}
+            publishTime={publishTimeLabel(selected, dayList.length)}
             showSwap={selected.status === 'assigned' && selectedDate === todayKey}
             onOpen={() =>
               router.push({
@@ -276,7 +281,7 @@ export default function HomeScreen() {
               router.push({
                 // F7: posted work opens the post detail; in-review work keeps
                 // the brief detail with its "In review" state.
-                pathname: isPostedStatus(selected.status)
+                pathname: opensPostDetail(selected.status)
                   ? '/(creator)/posts/[id]'
                   : '/(creator)/post/[id]',
                 params: { id: selected.id },

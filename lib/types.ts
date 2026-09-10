@@ -4353,6 +4353,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      unread_inbox_count: { Args: never; Returns: number }
     }
     Enums: {
       [_ in never]: never
@@ -4485,4 +4486,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

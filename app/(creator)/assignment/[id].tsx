@@ -23,7 +23,12 @@ import { Button } from '../../../components/ui/Button';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { StatusChip } from '../../../components/ui/StatusChip';
-import { slotTimeLabel } from '../../../lib/creator-queue';
+import { useAuth } from '../../../lib/auth';
+import {
+  countOnDate,
+  publishTimeLabel,
+  useCreatorQueue,
+} from '../../../lib/creator-queue';
 import {
   getAssignment,
   type AssignmentWithBrief,
@@ -195,18 +200,26 @@ export default function AssignmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { profile } = useAuth();
+  const queue = useCreatorQueue();
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [loading, setLoading] = useState(true);
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    if (!profile?.company_id) return;
     try {
-      setAssignment(await getAssignment(id));
+      setAssignment(await getAssignment(profile.company_id, id));
+    } catch {
+      setAssignment(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, profile?.company_id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -291,7 +304,11 @@ export default function AssignmentDetailScreen() {
             <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
           ) : null}
           <Text style={styles.postsAt}>
-            Posts {slotTimeLabel(assignment.slot_index)}
+            Posts{' '}
+            {publishTimeLabel(
+              assignment,
+              countOnDate(queue.assignments, assignment.scheduled_date),
+            )}
           </Text>
         </View>
 

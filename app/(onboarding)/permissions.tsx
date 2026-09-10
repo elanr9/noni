@@ -1,12 +1,40 @@
+import { useEffect } from 'react';
+import { AppState, Linking } from 'react-native';
 import { router } from 'expo-router';
-import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import {
+  useCameraPermissions,
+  useMicrophonePermissions,
+  type PermissionResponse,
+} from 'expo-camera';
 
 import { OptionCard } from '../../components/ui/OptionCard';
 import { OnboardingShell } from './_shell';
 
+function askOrOpenSettings(
+  permission: PermissionResponse | null,
+  request: () => Promise<PermissionResponse>,
+): void {
+  if (permission && !permission.granted && !permission.canAskAgain) {
+    void Linking.openSettings();
+    return;
+  }
+  void request();
+}
+
 export default function PermissionsScreen() {
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [micPermission, requestMicPermission] = useMicrophonePermissions();
+  const [cameraPermission, requestCameraPermission, getCameraPermission] =
+    useCameraPermissions();
+  const [micPermission, requestMicPermission, getMicPermission] =
+    useMicrophonePermissions();
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      void getCameraPermission();
+      void getMicPermission();
+    });
+    return () => sub.remove();
+  }, [getCameraPermission, getMicPermission]);
 
   const cameraOn = Boolean(cameraPermission?.granted);
   const micOn = Boolean(micPermission?.granted);
@@ -25,12 +53,12 @@ export default function PermissionsScreen() {
       <OptionCard
         label={cameraOn ? 'Camera allowed' : 'Allow camera'}
         selected={cameraOn}
-        onPress={() => void requestCameraPermission()}
+        onPress={() => askOrOpenSettings(cameraPermission, requestCameraPermission)}
       />
       <OptionCard
         label={micOn ? 'Microphone allowed' : 'Allow microphone'}
         selected={micOn}
-        onPress={() => void requestMicPermission()}
+        onPress={() => askOrOpenSettings(micPermission, requestMicPermission)}
       />
     </OnboardingShell>
   );

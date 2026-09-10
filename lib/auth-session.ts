@@ -42,6 +42,21 @@ export function getAuthRedirectUri(): string {
   return NATIVE_RETURN_URL;
 }
 
+const codeExchanges = new Map<string, Promise<boolean>>();
+
+function exchangeCode(code: string): Promise<boolean> {
+  const pending = codeExchanges.get(code);
+  if (pending) return pending;
+  const exchange = supabase.auth
+    .exchangeCodeForSession(code)
+    .then(({ error }) => {
+      if (error) throw error;
+      return true;
+    });
+  codeExchanges.set(code, exchange);
+  return exchange;
+}
+
 export async function createSessionFromUrl(url: string): Promise<boolean> {
   const { params, errorCode } = QueryParams.getQueryParams(url);
 
@@ -50,9 +65,7 @@ export async function createSessionFromUrl(url: string): Promise<boolean> {
   }
 
   if (typeof params.code === 'string' && params.code.length > 0) {
-    const { error } = await supabase.auth.exchangeCodeForSession(params.code);
-    if (error) throw error;
-    return true;
+    return exchangeCode(params.code);
   }
 
   const accessToken = params.access_token;

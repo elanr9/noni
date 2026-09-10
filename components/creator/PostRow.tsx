@@ -1,9 +1,10 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { earningsForViews, formatCount } from '../../lib/earnings';
 import type { TaskStatus } from '../../lib/tasks';
 import { color, radius, shadow, type } from '../../theme/tokens';
+import { usePostThumb } from '../admin/creator/useVideoThumb';
 import { StatusChip } from '../ui/StatusChip';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
@@ -18,6 +19,8 @@ export interface PostRowProps {
   title: string;
   /** Static photo/carousel posts show the images glyph instead of play. */
   isPhoto: boolean;
+  /** Latest submission's first media path; the thumb is its first frame or slide 1. */
+  mediaPath?: string | null;
   /** "09:00" */
   time: string;
   /** "28 Jul" — rendered before the time when provided (list view). */
@@ -35,6 +38,7 @@ export interface PostRowProps {
 export function PostRow({
   title,
   isPhoto,
+  mediaPath = null,
   time,
   date,
   platform = 'tiktok',
@@ -44,7 +48,9 @@ export function PostRow({
   status,
   onPress,
 }: PostRowProps) {
-  const live = status === undefined || status === 'posted' || status === 'approved';
+  const thumbUri = usePostThumb(mediaPath, isPhoto ? 'photo_carousel' : 'video');
+  const live = status === undefined || status === 'posted';
+  const scheduled = status === 'approved';
   const { earned, next, toGo } = earningsForViews(views);
   const fillPercent = ((earned % 20) / 20) * 100;
   const showTopChip = topPercent !== undefined && topPercent <= 10;
@@ -56,16 +62,22 @@ export function PostRow({
       style={[styles.card, shadow.shadowCard]}
     >
       <View style={styles.thumb}>
-        <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-          <Defs>
-            <LinearGradient id="postRowThumb" x1="0" y1="0" x2="0.35" y2="1">
-              <Stop offset="0" stopColor={color.blue100} />
-              <Stop offset="1" stopColor={color.mediaGradEnd} />
-            </LinearGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#postRowThumb)" />
-        </Svg>
-        <Icon name={isPhoto ? 'images' : 'play'} size={15} color={color.slate400} />
+        {thumbUri !== null ? (
+          <Image source={{ uri: thumbUri }} resizeMode="cover" style={StyleSheet.absoluteFill} />
+        ) : (
+          <>
+            <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+              <Defs>
+                <LinearGradient id="postRowThumb" x1="0" y1="0" x2="0.35" y2="1">
+                  <Stop offset="0" stopColor={color.blue100} />
+                  <Stop offset="1" stopColor={color.mediaGradEnd} />
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="100%" height="100%" fill="url(#postRowThumb)" />
+            </Svg>
+            <Icon name={isPhoto ? 'images' : 'play'} size={15} color={color.slate400} />
+          </>
+        )}
       </View>
       <View style={styles.body}>
         <View style={styles.metaRow}>
@@ -83,15 +95,23 @@ export function PostRow({
               <Text style={styles.topChipText}>{`Top ${topPercent}%`}</Text>
             </View>
           )}
-          {status !== undefined && !live && (
+          {scheduled ? (
+            <View style={[styles.chipSlot, styles.topChip]}>
+              <Icon name="clock" size={11} color={color.green} />
+              <Text style={styles.topChipText}>Scheduled</Text>
+            </View>
+          ) : status !== undefined && !live ? (
             <View style={styles.chipSlot}>
               <StatusChip status={status} />
             </View>
-          )}
+          ) : null}
         </View>
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
+        {scheduled && (
+          <Text style={styles.statText}>{`Posts at ${time}`}</Text>
+        )}
         {live && (
           <>
             <View style={styles.statsRow}>

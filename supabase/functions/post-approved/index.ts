@@ -59,10 +59,11 @@ async function pollStatus(
   throw new Error('Upload-Post status poll timed out');
 }
 
+/** `callerCompanyId` null means the cron caller: no tenant restriction. */
 async function resolveTarget(
   admin: AdminClient,
   body: PostApprovedBody,
-  callerCompanyId: string,
+  callerCompanyId: string | null,
 ): Promise<PostTarget | Response> {
   if (body.assignment_id) {
     const { data: assignment } = await admin
@@ -70,7 +71,10 @@ async function resolveTarget(
       .select('id, company_id, creator_id, brief_id, status, submission_id, task_id')
       .eq('id', body.assignment_id)
       .maybeSingle();
-    if (!assignment || assignment.company_id !== callerCompanyId) {
+    if (
+      !assignment ||
+      (callerCompanyId !== null && assignment.company_id !== callerCompanyId)
+    ) {
       return jsonResponse({ error: 'assignment not found' }, 404);
     }
     if (assignment.status !== 'approved') {
@@ -102,7 +106,7 @@ async function resolveTarget(
     .select('id, title, caption, platforms, company_id, status, assigned_to')
     .eq('id', body.task_id)
     .maybeSingle();
-  if (!task || task.company_id !== callerCompanyId) {
+  if (!task || (callerCompanyId !== null && task.company_id !== callerCompanyId)) {
     return jsonResponse({ error: 'task not found' }, 404);
   }
   if (task.status !== 'approved') {
@@ -198,23 +202,31 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    const authHeader = req.headers.get('Authorization') ?? '';
-    const { data: userData } = await admin.auth.getUser(
-      authHeader.replace('Bearer ', ''),
-    );
-    if (!userData?.user) return jsonResponse({ error: 'unauthorized' }, 401);
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    const cronHeader = req.headers.get('x-cron-secret');
+    const isCron = Boolean(cronSecret && cronHeader && cronHeader === cronSecret);
 
-    const { data: caller } = await admin
-      .from('profiles')
-      .select('company_id, role')
-      .eq('id', userData.user.id)
-      .maybeSingle();
-    // Platform admin (role admin) inherits campaign manager powers.
-    if (!caller || (caller.role !== 'campaign_manager' && caller.role !== 'admin')) {
-      return jsonResponse({ error: 'forbidden' }, 403);
+    let callerCompanyId: string | null = null;
+    if (!isCron) {
+      const authHeader = req.headers.get('Authorization') ?? '';
+      const { data: userData } = await admin.auth.getUser(
+        authHeader.replace('Bearer ', ''),
+      );
+      if (!userData?.user) return jsonResponse({ error: 'unauthorized' }, 401);
+
+      const { data: caller } = await admin
+        .from('profiles')
+        .select('company_id, role')
+        .eq('id', userData.user.id)
+        .maybeSingle();
+      // Platform admin (role admin) inherits campaign manager powers.
+      if (!caller || (caller.role !== 'campaign_manager' && caller.role !== 'admin')) {
+        return jsonResponse({ error: 'forbidden' }, 403);
+      }
+      callerCompanyId = caller.company_id as string;
     }
 
-    const resolved = await resolveTarget(admin, body, caller.company_id as string);
+    const resolved = await resolveTarget(admin, body, callerCompanyId);
     if (resolved instanceof Response) return resolved;
     const target = resolved;
 

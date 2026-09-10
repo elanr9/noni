@@ -143,6 +143,7 @@ export default function ConnectAccountsScreen() {
   const celebrated = useRef(false);
 
   useEffect(() => {
+    alive.current = true;
     return () => {
       alive.current = false;
     };

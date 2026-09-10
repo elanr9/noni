@@ -112,7 +112,10 @@ export function ReviewThread({
           {events.map((e) => {
             const name = e.profiles?.full_name?.trim() || 'Someone';
             const role =
-              e.profiles?.role === 'campaign_manager' ? 'Campaign manager' : 'Creator';
+              e.profiles?.role === 'campaign_manager' ||
+              e.profiles?.role === 'company_admin'
+                ? 'Campaign manager'
+                : 'Creator';
             const tone = actionTone(e.action);
             return (
               <View key={e.id} style={styles.item}>

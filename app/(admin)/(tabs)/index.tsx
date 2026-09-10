@@ -45,16 +45,21 @@ type SubmissionQueueRow = {
   attempt: number;
   /** hook + points + outro, from the brief. Null when the brief has no count. */
   unitCount: number | null;
+  /** Latest submission's first media path for the row thumb. */
+  mediaPath: string | null;
 };
 
 function useAdminQueue(companyId: string | undefined): {
   posts: SubmissionQueueRow[];
   music: MusicApprovalItem[];
+  /** assignment id -> slide 1 path, for music rows. */
+  musicMedia: Map<string, string>;
   accounts: AccountApprovalItem[];
   loading: boolean;
 } {
   const [posts, setPosts] = useState<SubmissionQueueRow[]>([]);
   const [music, setMusic] = useState<MusicApprovalItem[]>([]);
+  const [musicMedia, setMusicMedia] = useState<Map<string, string>>(new Map());
   const [accounts, setAccounts] = useState<AccountApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -66,7 +71,10 @@ function useAdminQueue(companyId: string | undefined): {
         listMusicApprovalQueue(companyId),
         listAccountApprovalQueue(companyId),
       ]);
-      const subs = await latestSubmissionsByAssignment(queue.map((a) => a.id));
+      const subs = await latestSubmissionsByAssignment([
+        ...queue.map((a) => a.id),
+        ...musicQueue.map((m) => m.assignment.id),
+      ]);
       setPosts(
         queue.map((a) => {
           const submission = subs.get(a.id) ?? null;
@@ -74,10 +82,19 @@ function useAdminQueue(companyId: string | undefined): {
             item: toAssignmentQueueRow(a, submission),
             attempt: submission?.version ?? 1,
             unitCount: a.briefs.point_count !== null ? a.briefs.point_count + 2 : null,
+            mediaPath: submission?.video_path ?? null,
           };
         }),
       );
       setMusic(musicQueue);
+      setMusicMedia(
+        new Map(
+          musicQueue.flatMap((m) => {
+            const path = subs.get(m.assignment.id)?.video_path;
+            return path !== undefined ? [[m.assignment.id, path] as const] : [];
+          }),
+        ),
+      );
       setAccounts(accountQueue);
     } finally {
       setLoading(false);
@@ -91,13 +108,13 @@ function useAdminQueue(companyId: string | undefined): {
     }, [load]),
   );
 
-  return { posts, music, accounts, loading };
+  return { posts, music, musicMedia, accounts, loading };
 }
 
 export default function ReviewScreen() {
   const router = useRouter();
   const { profile } = useAuth();
-  const { posts, music, accounts, loading } = useAdminQueue(profile?.company_id);
+  const { posts, music, musicMedia, accounts, loading } = useAdminQueue(profile?.company_id);
   const [lane, setLane] = useState(0);
 
   const pendingAccounts = accounts.filter((a) => a.status !== 'needs_changes');
@@ -160,7 +177,7 @@ export default function ReviewScreen() {
                 key={row.item.id}
                 item={row.item}
                 attempt={row.attempt}
-                thumbUri={null}
+                mediaPath={row.mediaPath}
                 unitCount={row.unitCount}
                 onPress={() => router.push(`/(admin)/review/${row.item.id}`)}
               />
@@ -183,6 +200,7 @@ export default function ReviewScreen() {
               <MusicApprovalRow
                 key={item.assignment.id}
                 item={item}
+                mediaPath={musicMedia.get(item.assignment.id) ?? null}
                 onPress={() => router.push(`/(admin)/music/${item.assignment.id}`)}
               />
             ))}

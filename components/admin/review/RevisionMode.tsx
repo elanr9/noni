@@ -143,6 +143,7 @@ export function RevisionMode({
                     text={section.text}
                     format={format}
                     thumbUri={section.slide?.photoUri ?? null}
+                    clipUri={section.clipUri ?? null}
                     note={notes[section.key] ?? null}
                     open={openKey === section.key}
                     onWatch={() => setWatchKey(section.key)}

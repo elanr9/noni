@@ -24,6 +24,9 @@ export interface ConfirmationTakeoverProps {
   onAction: () => void;
   /** Renders the top-left circled chevron when provided. */
   onBack?: () => void;
+  /** Optional outline button above the primary one. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
   /** Optional rows between the paragraph and the button (e.g. what happens next). */
   children?: ReactNode;
 }
@@ -40,6 +43,8 @@ export function ConfirmationTakeover({
   actionLabel,
   onAction,
   onBack,
+  secondaryLabel,
+  onSecondary,
   children,
 }: ConfirmationTakeoverProps) {
   const insets = useSafeAreaInsets();
@@ -69,6 +74,11 @@ export function ConfirmationTakeover({
 
       {children}
 
+      {secondaryLabel !== undefined && onSecondary !== undefined && (
+        <Button variant="outline" size="md" block onPress={onSecondary} style={styles.action}>
+          {secondaryLabel}
+        </Button>
+      )}
       <Button variant="primary" size="lg" block onPress={onAction} style={styles.action}>
         {actionLabel}
       </Button>

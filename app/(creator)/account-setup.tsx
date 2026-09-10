@@ -119,10 +119,16 @@ export default function AccountSetupScreen() {
   const instagramExample = nameIdeas.usernames[1] ?? 'yourname.d1recruit';
 
   const pickSlot = async (slot: UploadSlot) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.85,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.85,
+      });
+    } catch (e) {
+      Alert.alert('Could not open your photos', e instanceof Error ? e.message : 'Try again');
+      return;
+    }
     if (result.canceled) return;
     const asset = result.assets[0];
     if (asset === undefined) return;

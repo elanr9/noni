@@ -46,11 +46,13 @@ export function parseAssignmentMetrics(
 const ASSIGNMENT_SELECT = '*, briefs:brief_id (*)';
 
 export async function listMyAssignments(
+  companyId: string,
   creatorId: string,
 ): Promise<AssignmentWithBrief[]> {
   const { data, error } = await supabase
     .from('assignments')
     .select(ASSIGNMENT_SELECT)
+    .eq('company_id', companyId)
     .eq('creator_id', creatorId)
     .order('scheduled_date', { ascending: true })
     .order('slot_index', { ascending: true });
@@ -60,11 +62,13 @@ export async function listMyAssignments(
 }
 
 export async function getAssignment(
+  companyId: string,
   assignmentId: string,
 ): Promise<AssignmentWithBrief | null> {
   const { data, error } = await supabase
     .from('assignments')
     .select(ASSIGNMENT_SELECT)
+    .eq('company_id', companyId)
     .eq('id', assignmentId)
     .maybeSingle();
 

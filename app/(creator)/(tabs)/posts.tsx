@@ -14,7 +14,7 @@ import { PostRow } from '../../../components/creator/PostRow';
 import {
   fetchCampaignNames,
   groupWeeks,
-  isPostedStatus,
+  opensPostDetail,
   shortDateLabel,
   viralityTopPercents,
   weekName,
@@ -29,8 +29,9 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import {
+  countOnDate,
   dayKey,
-  slotTimeLabel,
+  publishTimeLabel,
   statusDotColor,
   useCreatorQueue,
 } from '../../../lib/creator-queue';
@@ -112,7 +113,7 @@ function WeekPill({ status }: { status: CreatorWeek['status'] }) {
 
 export default function PostsScreen() {
   const router = useRouter();
-  const { assignments, loading, refetch, assignmentsForDate, changesRequested } =
+  const { assignments, mediaPaths, loading, refetch, assignmentsForDate, changesRequested } =
     useCreatorQueue();
 
   const [view, setView] = useState<PostsView>('calendar');
@@ -220,7 +221,7 @@ export default function PostsScreen() {
   }, [assignments, sort, topPercents]);
 
   const openRow = (a: AssignmentWithBrief) => {
-    if (isPostedStatus(a.status)) {
+    if (opensPostDetail(a.status)) {
       router.push(`/(creator)/posts/${a.id}` as Href);
     } else {
       router.push(`/(creator)/assignment/${a.id}` as Href);
@@ -234,7 +235,8 @@ export default function PostsScreen() {
         key={a.id}
         title={a.briefs.title}
         isPhoto={a.briefs.format === 'photo_carousel'}
-        time={slotTimeLabel(a.slot_index)}
+        mediaPath={mediaPaths.get(a.id) ?? null}
+        time={publishTimeLabel(a, countOnDate(assignments, a.scheduled_date))}
         date={withDate ? shortDateLabel(a.scheduled_date) : undefined}
         platform={rowPlatform}
         views={Math.round((m.views ?? 0) * share)}

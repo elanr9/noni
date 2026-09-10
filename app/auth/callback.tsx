@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Platform, Text, StyleSheet } from 'react-native';
 
 import { LoadingScreen, Screen, colors } from '../../components/Screen';
+import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../lib/auth';
 import { createSessionFromUrl, routeAfterSignIn } from '../../lib/auth-session';
 import { destinationForProfile } from '../../lib/profile';
@@ -52,6 +53,9 @@ export default function AuthCallbackScreen() {
       <Screen style={styles.center}>
         <Text style={styles.title}>Sign in failed</Text>
         <Text style={styles.body}>{error}</Text>
+        <Button size="lg" onPress={() => router.replace('/(auth)/login')}>
+          Back to sign in
+        </Button>
       </Screen>
     );
   }
@@ -70,7 +74,7 @@ export default function AuthCallbackScreen() {
 const styles = StyleSheet.create({
   center: {
     justifyContent: 'center',
-    gap: 8,
+    gap: 16,
   },
   title: {
     fontSize: 24,

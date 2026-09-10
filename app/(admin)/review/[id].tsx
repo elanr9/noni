@@ -38,6 +38,7 @@ import {
   type BriefSegment,
 } from '../../../lib/briefs-api';
 import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
+import { parseNotes } from '../../../lib/post-event-labels';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
@@ -399,7 +400,7 @@ export default function ReviewScreen() {
     if (action === 'approved' && editPending) {
       Alert.alert(
         'Still editing',
-        'The final video is not ready yet. It gets posted the moment you approve so wait for the edit to finish.',
+        'The final video is not ready yet. Wait for the edit to finish before you approve.',
       );
       return false;
     }
@@ -411,6 +412,7 @@ export default function ReviewScreen() {
         reviewerId: profile.id,
         action,
         note,
+        notes: action === 'changes_requested' ? parseNotes(note) : null,
       });
       return true;
     } catch (e) {
@@ -445,6 +447,16 @@ export default function ReviewScreen() {
     setApprovedVisible(false);
     setSentVisible(false);
     advance();
+  };
+
+  const openThread = () => {
+    if (!current) return;
+    const assignmentId = current.assignment.id;
+    closeAndAdvance();
+    router.push({
+      pathname: '/(admin)/post-thread/[assignmentId]',
+      params: { assignmentId },
+    });
   };
 
   return (
@@ -564,10 +576,15 @@ export default function ReviewScreen() {
           format={row.format}
           creatorShort={creatorShort}
           onNext={closeAndAdvance}
+          onOpenThread={openThread}
         />
       )}
       {sentVisible && (
-        <SentConfirmation creatorShort={creatorShort} onNext={closeAndAdvance} />
+        <SentConfirmation
+          creatorShort={creatorShort}
+          onNext={closeAndAdvance}
+          onOpenThread={openThread}
+        />
       )}
     </View>
   );

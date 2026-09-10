@@ -313,20 +313,20 @@ function photoExtension(mimeType: string | null): string {
   return 'jpg';
 }
 
-async function uploadPhoto(photo: PickedPhoto, path: string): Promise<void> {
-  const response = await fetch(photo.uri);
-  if (!response.ok) {
-    throw new Error('Could not read the selected photo');
-  }
-  const blob = await response.blob();
+function photoContentType(mimeType: string | null): string {
+  const ext = photoExtension(mimeType);
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/jpeg';
+}
 
-  const { error } = await supabase.storage
-    .from('videos')
-    .upload(path, blob, {
-      contentType: photo.mimeType ?? 'image/jpeg',
-      upsert: false,
-    });
-  if (error) throw error;
+async function uploadPhoto(photo: PickedPhoto, path: string): Promise<void> {
+  await uploadFileToStorage({
+    bucket: 'videos',
+    path,
+    localUri: photo.uri,
+    contentType: photoContentType(photo.mimeType),
+  });
 }
 
 /**
