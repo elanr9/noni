@@ -1,6 +1,5 @@
 // Admin handoff §6: one stamped row per post, five states. Format is
 // never repeated on the row; the lane states it.
-import { Search } from 'lucide-react-native';
 import { StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -84,21 +83,19 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
     return (
       <PressableScale
         accessibilityRole="button"
-        accessibilityLabel="Empty post, add a search phrase"
+        accessibilityLabel={`Post ${indexLabel}, empty`}
         disabled={disabled}
         onPress={onPress}
         style={[styles.row, styles.rowEmpty]}
       >
         <Text style={styles.index}>{indexLabel}</Text>
-        <View style={styles.phraseRow}>
-          <Search size={16} color={color.slate400} strokeWidth={2} />
-          <Text style={styles.phrase} numberOfLines={1}>
-            {brief.search_phrase?.trim()
-              ? `"${brief.search_phrase.trim()}"`
-              : 'Add a search phrase'}
-          </Text>
+        <View style={styles.emptyBody}>
+          {postType ? (
+            <PostTypeChip typeKey={postType.key} label={postType.label} />
+          ) : null}
+          <Text style={styles.emptyText}>Empty</Text>
         </View>
-        <Icon name="plus" size={16} color={color.slate400} />
+        <Icon name="plus" size={17} color={color.slate300} />
       </PressableScale>
     );
   }
@@ -213,16 +210,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: color.green,
   },
-  phraseRow: {
+  emptyBody: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
-  phrase: {
-    flexShrink: 1,
-    fontSize: 16,
-    fontWeight: '700',
+  emptyText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: color.slate400,
   },
   killedTitle: {

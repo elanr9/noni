@@ -7,7 +7,7 @@ import { Icon, type IconName } from './Icon';
 export interface EmptyStateProps {
   icon?: IconName;
   title: string;
-  body: string;
+  body?: string;
   actionLabel?: string;
   onAction?: () => void;
   /** Home uses tighter padding (24 vertical, 0 horizontal). */
@@ -30,7 +30,7 @@ export function EmptyState({
         <Icon name={icon} size={30} color={color.blue500} />
       </View>
       <Text style={styles.title}>{title}</Text>
-      <Text style={styles.body}>{body}</Text>
+      {body !== undefined && <Text style={styles.body}>{body}</Text>}
       {actionLabel !== undefined && (
         <Button variant="tint" size="md" onPress={onAction} style={styles.action}>
           {actionLabel}
@@ -76,5 +76,6 @@ const styles = StyleSheet.create({
   },
   action: {
     marginTop: 4,
+    alignSelf: 'center',
   },
 });

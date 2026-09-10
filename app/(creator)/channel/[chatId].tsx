@@ -1,43 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MuteButton } from '../../../components/admin/chat/MuteButton';
 import { Composer, type AttachTile } from '../../../components/admin/messages';
 import { ManagerThread } from '../../../components/admin/messages/channel/ManagerThread';
-import { MembersSheet } from '../../../components/admin/messages/channel/MembersSheet';
 import { useVoicePlayer } from '../../../components/admin/messages/channel/useVoicePlayer';
-import { EmptyState, PushHeader } from '../../../components/admin/shared';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { Icon } from '../../../components/ui/Icon';
+import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
-import { listTeam, type TeamMember } from '../../../lib/inbox-api';
+import { listTeam } from '../../../lib/inbox-api';
 import { useKeyboardPadding } from '../../../lib/keyboard';
 import {
-  addChannelMembers,
   firstNameOf,
   getManagerChat,
   isChatMuted,
-  leaveChannel,
-  listChannelMembers,
   listManagerMessages,
   markChatRead,
   sendManagerMessage,
-  setChannelAllCreators,
   setChatMuted,
   toggleReaction,
   uploadManagerChatMedia,
-  type ChannelMember,
   type ManagerChatInfo,
   type ManagerMessage,
 } from '../../../lib/manager-messages-api';
 import type { PostSummary } from '../../../lib/post-event-labels';
-import { listPostSummaries } from '../../../lib/post-events';
-import { borderWidth, color, space } from '../../../theme/tokens';
+import { borderWidth, color, radius, space, type } from '../../../theme/tokens';
 
 const POLL_MS = 5000;
 const TILES: AttachTile[] = ['photo', 'camera'];
+const NO_SUMMARIES = new Map<string, PostSummary>();
 
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -53,10 +49,6 @@ function param(value: string | string[] | undefined): string | undefined {
   return undefined;
 }
 
-function membersLabel(count: number): string {
-  return count === 1 ? '1 member' : `${count} members`;
-}
-
 function replySnippet(message: ManagerMessage): string {
   if (message.mediaKind === 'voice') return 'Voice note';
   const body = message.body.trim();
@@ -67,29 +59,26 @@ function replySnippet(message: ManagerMessage): string {
   return '';
 }
 
-export default function ManagerChatScreen() {
+/** A company channel the creator was let into (all_creators). */
+export default function CreatorChannelScreen() {
   const { chatId: chatIdParam } = useLocalSearchParams<{ chatId: string }>();
   const chatId = param(chatIdParam);
   const { profile } = useAuth();
+  const insets = useSafeAreaInsets();
   const keyboardPadding = useKeyboardPadding();
   const scrollRef = useRef<ScrollView | null>(null);
-  const summaryIdsRef = useRef<Set<string>>(new Set());
   const voice = useVoicePlayer();
   const stopVoice = voice.stop;
 
   const [chat, setChat] = useState<ManagerChatInfo | null>(null);
-  const [team, setTeam] = useState<TeamMember[]>([]);
-  const [members, setMembers] = useState<ChannelMember[]>([]);
+  const [teamIds, setTeamIds] = useState<Set<string>>(() => new Set());
   const [messages, setMessages] = useState<ManagerMessage[]>([]);
-  const [summaries, setSummaries] = useState<Map<string, PostSummary>>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<ManagerMessage | null>(null);
   const [muted, setMuted] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
-  const [membersBusy, setMembersBusy] = useState(false);
 
   useEffect(() => {
     if (!profile || !chatId) return;
@@ -121,53 +110,25 @@ export default function ManagerChatScreen() {
     }
   };
 
-  const companyId = profile?.company_id ?? null;
-  const loadSummaries = useCallback(async (rows: ManagerMessage[]) => {
-    if (companyId === null) return;
-    const known = summaryIdsRef.current;
-    const missing = rows
-      .map((m) => m.postRef?.assignmentId ?? null)
-      .filter((id): id is string => id !== null && !known.has(id));
-    if (missing.length === 0) return;
-    missing.forEach((id) => known.add(id));
-    const fetched = await listPostSummaries(companyId, missing);
-    setSummaries((prev) => new Map([...prev, ...fetched]));
-  }, [companyId]);
-
   const hasLoaded = useRef(false);
   const load = useCallback(async () => {
     if (!profile || !chatId) return;
     try {
-      const [info, rows, people] = await Promise.all([
+      const [info, rows, team] = await Promise.all([
         getManagerChat(profile.company_id, profile.id, chatId),
         listManagerMessages(chatId),
         listTeam(profile.company_id),
       ]);
       setChat(info);
       setMessages(rows);
-      setTeam(people);
+      setTeamIds(new Set(team.map((t) => t.id)));
       hasLoaded.current = true;
-      await loadSummaries(rows);
-      void markChatRead(chatId, profile.id);
     } catch (e) {
       if (!hasLoaded.current) Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
     } finally {
       setLoading(false);
     }
-  }, [profile, chatId, loadSummaries]);
-
-  const loadMembers = useCallback(async () => {
-    if (!chatId || !chat) return;
-    try {
-      if (chat.kind === 'channel') {
-        setMembers(await listChannelMembers(chatId));
-      } else {
-        setMembers(team.map((t) => ({ id: t.id, name: t.name, role: t.role })));
-      }
-    } catch (e) {
-      Alert.alert('Could not load members', e instanceof Error ? e.message : 'Try again');
-    }
-  }, [chatId, chat, team]);
+  }, [profile, chatId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -185,6 +146,12 @@ export default function ManagerChatScreen() {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 80);
     return () => clearTimeout(t);
   }, [loading, messages.length]);
+
+  const profileId = profile?.id;
+  useEffect(() => {
+    if (loading || !chatId || profileId === undefined) return;
+    void markChatRead(chatId, profileId).catch(() => undefined);
+  }, [loading, messages.length, chatId, profileId]);
 
   const sendText = async () => {
     const body = draft.trim();
@@ -303,82 +270,53 @@ export default function ManagerChatScreen() {
     ]);
   };
 
-  const openMembers = () => {
-    setMembersOpen(true);
-    void loadMembers();
-  };
-
-  const runMembersChange = async (change: () => Promise<void>) => {
-    setMembersBusy(true);
-    try {
-      await change();
-      await load();
-      await loadMembers();
-    } catch (e) {
-      Alert.alert('Could not update', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setMembersBusy(false);
-    }
-  };
-
-  const leave = async () => {
-    if (!profile || !chatId) return;
-    setMembersBusy(true);
-    try {
-      await leaveChannel(chatId, profile.id);
-      setMembersOpen(false);
-      router.back();
-    } catch (e) {
-      Alert.alert('Could not leave', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setMembersBusy(false);
-    }
-  };
-
   if (!profile || !chatId) return null;
 
   if (!loading && chat === null) {
     return (
-      <SafeAreaView edges={['top']} style={styles.screen}>
-        <Stack.Screen options={{ headerShown: false }} />
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
         <EmptyState
-          title="Chat not found"
-          body="This conversation is not available."
+          title="Channel not found"
+          body="This channel is not available to you anymore."
           actionLabel="Back"
           onAction={() => router.back()}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
-  const isDm = chat?.kind === 'dm';
-  const other = isDm ? team.find((t) => t.id === chat?.otherId) : undefined;
-  const title = isDm ? (chat?.otherName ?? 'Messages') : (chat?.title ?? 'Messages');
-  const subtitle = isDm ? (other?.roleLabel ?? 'Campaign manager') : membersLabel(chat?.memberCount ?? 0);
-  const placeholder = isDm ? `Message ${firstNameOf(title)}` : `Message ${title}`;
-  const teamIds = new Set(team.map((t) => t.id));
-
-  const header = (
-    <PushHeader
-      title={title}
-      subtitle={subtitle}
-      onBack={() => router.back()}
-      trailing={<MuteButton muted={muted} onToggle={() => void toggleMuted()} />}
-    />
-  );
+  const title = chat?.title ?? 'Channel';
+  const members = chat?.memberCount ?? 0;
+  const subtitle = chat?.allCreators
+    ? 'Everyone on the team and all creators'
+    : members === 1
+      ? '1 member'
+      : `${members} members`;
 
   return (
-    <SafeAreaView edges={['top']} style={styles.screen}>
-      <Stack.Screen options={{ headerShown: false }} />
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={[styles.fill, { paddingBottom: keyboardPadding }]}>
-        <View style={styles.headerWrap}>
-          {isDm || chat === null ? (
-            header
-          ) : (
-            <Pressable accessibilityRole="button" accessibilityLabel="Members" onPress={openMembers}>
-              {header}
-            </Pressable>
-          )}
+        <View style={styles.header}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={styles.backBtn}
+            onPress={() => router.back()}
+          >
+            <Icon name="chevron-left" size={22} color={color.ink} />
+          </PressableScale>
+          <View style={styles.hashAvatar}>
+            <Text style={styles.hashText}>#</Text>
+          </View>
+          <View style={styles.headerText}>
+            <Text numberOfLines={1} style={styles.headerTitle}>
+              {title}
+            </Text>
+            <Text numberOfLines={1} style={styles.headerSub}>
+              {subtitle}
+            </Text>
+          </View>
+          <MuteButton muted={muted} onToggle={() => void toggleMuted()} />
         </View>
         <ManagerThread
           scrollRef={scrollRef}
@@ -386,15 +324,15 @@ export default function ManagerChatScreen() {
           messages={messages}
           meId={profile.id}
           teamIds={teamIds}
-          summaries={summaries}
+          summaries={NO_SUMMARIES}
           playingId={voice.playingId}
           onPlayVoice={(m) => void voice.toggle(m)}
           onToggleReaction={(m, emoji) => void react(m, emoji)}
           onLongPress={showActions}
-          onOpenPost={(assignmentId) => router.push(`/(admin)/post-thread/${assignmentId}`)}
+          onOpenPost={() => undefined}
         />
         <Composer
-          placeholder={placeholder}
+          placeholder={`Message ${title}`}
           draft={draft}
           onChangeDraft={setDraft}
           canSend={draft.trim().length > 0}
@@ -416,37 +354,63 @@ export default function ManagerChatScreen() {
           onSendVoice={sendVoice}
         />
       </View>
-      {chat !== null && !isDm && (
-        <MembersSheet
-          visible={membersOpen}
-          onClose={() => setMembersOpen(false)}
-          chat={chat}
-          meId={profile.id}
-          members={members}
-          team={team}
-          busy={membersBusy}
-          onToggleAllCreators={(next) =>
-            void runMembersChange(() => setChannelAllCreators(chatId, next))
-          }
-          onAddMembers={(ids) => runMembersChange(() => addChannelMembers(chatId, ids))}
-          onLeave={() => void leave()}
-        />
-      )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: color.white,
+    backgroundColor: color.offWhite,
   },
   fill: {
     flex: 1,
   },
-  headerWrap: {
-    paddingHorizontal: space.gutterAdmin,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space.gutter,
+    paddingTop: space[2],
+    paddingBottom: space[3],
     borderBottomWidth: borderWidth.hair,
     borderBottomColor: color.line,
+    backgroundColor: color.offWhite,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hashAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hashText: {
+    fontSize: type.size.body,
+    fontWeight: type.weight.heavy,
+    color: color.slate500,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  headerTitle: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  headerSub: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.regular,
+    color: color.slate500,
   },
 });

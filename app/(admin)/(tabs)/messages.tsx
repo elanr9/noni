@@ -366,7 +366,7 @@ export default function MessagesScreen() {
 
 const styles = StyleSheet.create({
   body: {
-    paddingBottom: 40,
+    paddingBottom: 108,
   },
   newButton: {
     width: 38,

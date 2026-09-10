@@ -80,6 +80,13 @@ export function routeNotificationTap(
   }
 
   // Creator mode
+  if (event === 'manager_message') {
+    const chatId = str(data, 'chat_id');
+    if (chatId) {
+      router.push(`/(creator)/channel/${chatId}`);
+      return;
+    }
+  }
   if (event === 'message' || event === 'manager_message') {
     router.push('/(creator)/chat');
     return;

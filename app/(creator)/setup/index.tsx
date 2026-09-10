@@ -300,7 +300,7 @@ export function CreatorSetupChecklist() {
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Open messages"
-            onPress={() => router.push('/(creator)/messages' as Href)}
+            onPress={() => router.push('/(creator)/chat' as Href)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Icon name="message-circle" size={23} color={color.ink} />

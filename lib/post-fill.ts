@@ -23,6 +23,7 @@ import {
   type BriefWeekSummary,
   type PointMedia,
   type PostType,
+  type TalkingPoint,
 } from './briefs-api';
 import { placeRemoteImageOnSegment } from './media-library-api';
 import {
@@ -56,9 +57,54 @@ function mergeCaption(caption: string, hashtags: string[]): string {
   return [body, tags].filter(Boolean).join('\n\n');
 }
 
+/** What the manager already typed. Kept verbatim; only empty fields are written. */
+export type FillKeep = {
+  title: string;
+  searchPhrase: string;
+  hook: string;
+  caption: string;
+  points: TalkingPoint[];
+};
+
+function keepContext(keep: FillKeep): string | undefined {
+  const lines: string[] = [];
+  if (keep.title.trim()) lines.push(`Title: ${keep.title.trim()}`);
+  if (keep.searchPhrase.trim()) lines.push(`Search phrase: ${keep.searchPhrase.trim()}`);
+  if (keep.hook.trim()) lines.push(`Hook: ${keep.hook.trim()}`);
+  keep.points.forEach((p, i) => {
+    if (p.text?.trim()) lines.push(`Clip ${i + 1}: ${p.text.trim()}`);
+  });
+  if (keep.caption.trim()) lines.push(`Caption: ${keep.caption.trim()}`);
+  if (lines.length === 0) return undefined;
+  return `The manager already wrote these fields. Keep them verbatim and write the rest around them.\n${lines.join('\n')}`;
+}
+
+function mergeKeep(draft: BriefDraft, keep: FillKeep): BriefDraft {
+  const typedHook = keep.hook.trim();
+  const points = draft.talking_points.map((p, i) => {
+    const typed = keep.points[i];
+    return typed?.text?.trim() ? typed : p;
+  });
+  for (let i = draft.talking_points.length; i < keep.points.length; i += 1) {
+    const typed = keep.points[i];
+    if (typed?.text?.trim()) points.push(typed);
+  }
+  return {
+    ...draft,
+    title: keep.title.trim() || draft.title,
+    search_phrase: keep.searchPhrase.trim() || draft.search_phrase,
+    hook_options: typedHook
+      ? [typedHook, ...draft.hook_options.filter((h) => h !== typedHook)]
+      : draft.hook_options,
+    talking_points: points,
+    caption: keep.caption.trim() || draft.caption,
+  };
+}
+
 async function draftFor(
   source: FillSource,
   postTypeKey: string,
+  context: string | undefined,
 ): Promise<FillResult> {
   const result =
     source.kind === 'port'
@@ -67,10 +113,10 @@ async function draftFor(
           targetPostTypeKey: postTypeKey,
         })
       : source.kind === 'example'
-        ? await generatePost({ url: source.url, postTypeKey })
+        ? await generatePost({ url: source.url, postTypeKey, context })
         : source.kind === 'feature'
-          ? await generatePost({ featureId: source.featureId, postTypeKey })
-          : await generatePost({ query: source.text, postTypeKey });
+          ? await generatePost({ featureId: source.featureId, postTypeKey, context })
+          : await generatePost({ query: source.text, postTypeKey, context });
   if (result.kind === 'kill') {
     return { kind: 'kill', kill_reason: result.kill_reason };
   }
@@ -307,10 +353,16 @@ export async function fillPostSlot(params: {
   source: FillSource;
   /** Needed to place feature screenshots; when omitted nothing is placed. */
   companyId?: string;
+  /** Fields the manager typed before filling; they survive the fill untouched. */
+  keep?: FillKeep;
 }): Promise<FillResult> {
-  const result = await draftFor(params.source, params.postTypeKey);
+  const result = await draftFor(
+    params.source,
+    params.postTypeKey,
+    params.keep ? keepContext(params.keep) : undefined,
+  );
   if (result.kind === 'kill') return result;
-  const { draft } = result;
+  const draft = params.keep ? mergeKeep(result.draft, params.keep) : result.draft;
   const slideshow = params.family === 'photo_carousel';
 
   await updateBrief(params.briefId, {

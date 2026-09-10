@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { LibraryItem, OurPost } from '../../lib/library-api';
+import type { LibraryItem, LibraryItemWithBriefs, OurPost } from '../../lib/library-api';
 import { formatMetric } from '../../lib/analytics';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
 import { CreatorAvatar, PostThumb } from './shared';
@@ -75,14 +75,40 @@ function madeBits(usedCount: number, lastUsedAt: string | null): string[] {
   return date ? [`Made ${usedCount}x`, date] : [`Made ${usedCount}x`];
 }
 
+function hasReadyBriefs(
+  item: LibraryItem | LibraryItemWithBriefs,
+): item is LibraryItemWithBriefs {
+  return 'video_brief' in item;
+}
+
+/** "Ready as a reel" / "Ready as a slideshow" / "Ready in both lanes", lane first when given. */
+function readyBits(item: LibraryItemWithBriefs, family?: 'video' | 'photo_carousel'): string[] {
+  const video = item.video_brief !== null;
+  const slides = item.carousel_brief !== null;
+  if (!video && !slides) return [];
+  if (family) {
+    const inLane = family === 'video' ? video : slides;
+    return [inLane ? 'Ready, copies in instantly' : 'Ready in the other lane, ports across'];
+  }
+  if (video && slides) return ['Ready in both lanes'];
+  return [video ? 'Ready as a reel' : 'Ready as a slideshow'];
+}
+
 export function itemCardModel(
-  item: LibraryItem,
+  item: LibraryItem | LibraryItemWithBriefs,
   creatorName?: string | null,
+  family?: 'video' | 'photo_carousel',
 ): LibraryCardModel {
   const kind = sourceKind(item.source);
   const date = shortDate(item.created_at);
+  const ready = hasReadyBriefs(item) ? readyBits(item, family) : [];
+  const readyBrief = hasReadyBriefs(item)
+    ? (family === 'photo_carousel' ? item.carousel_brief : item.video_brief) ??
+      item.video_brief ??
+      item.carousel_brief
+    : null;
 
-  const bits: string[] = [];
+  const bits: string[] = [...ready];
   if (kind === 'reference') {
     const handle = handleOf(item.url);
     const host = hostOf(item.url);
@@ -94,17 +120,19 @@ export function itemCardModel(
     if (creatorName) bits.push(creatorName);
     if (date) bits.push(date);
     if (item.used_count > 0) bits.push(`Made ${item.used_count}x`);
-  } else {
+  } else if (ready.length === 0) {
     bits.push(...madeBits(item.used_count, item.last_used_at));
+  } else if (item.used_count > 0) {
+    bits.push(`Made ${item.used_count}x`);
   }
 
   return {
     id: item.id,
     kind,
-    title: item.text ?? item.url,
+    title: readyBrief?.title ?? item.text ?? item.url,
     url: item.url,
     thumbnailUrl: item.thumbnail_url,
-    format: 'video',
+    format: readyBrief?.format === 'photo_carousel' ? 'photo_carousel' : 'video',
     meta: bits.join(' · '),
     creatorName: creatorName ?? null,
     usedCount: item.used_count,

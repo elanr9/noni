@@ -59,7 +59,7 @@ export function QuickCapture({
             style={styles.pasteButton}
           >
             <Icon name="clipboard-paste" size={15} color={color.white} strokeWidth={2.4} />
-            <Text style={styles.pasteText}>{busy ? 'Saving' : 'Paste'}</Text>
+            <Text style={styles.pasteText}>{busy ? 'Making' : 'Paste'}</Text>
           </PressableScale>
         </Pressable>
         {note !== null && <Text style={styles.note}>{note}</Text>}

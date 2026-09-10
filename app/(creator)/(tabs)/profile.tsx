@@ -15,7 +15,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
@@ -52,25 +51,6 @@ import {
 } from '../../../theme/tokens';
 
 const TERMS_URL = 'https://www.usenoni.app/terms';
-
-async function unreadAdminCount(
-  companyId: string,
-  creatorId: string,
-): Promise<number> {
-  const seenAt = await AsyncStorage.getItem(`noni.chat.seenAt.${creatorId}`);
-  let query = supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .eq('creator_id', creatorId)
-    .neq('author_id', creatorId);
-  if (seenAt !== null) {
-    query = query.gt('created_at', seenAt);
-  }
-  const { count, error } = await query;
-  if (error) throw error;
-  return count ?? 0;
-}
 
 function GroupCard({ children }: { children: ReactNode }) {
   return <View style={[styles.groupCard, shadow.shadowCard]}>{children}</View>;
@@ -137,7 +117,6 @@ export default function ProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [availableCents, setAvailableCents] = useState<number | null>(null);
-  const [unread, setUnread] = useState(0);
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
   const pop = useRef(new Animated.Value(0)).current;
@@ -162,21 +141,11 @@ export default function ProfileScreen() {
     }
   }, [profile?.id, profile?.company_id]);
 
-  const loadUnread = useCallback(async () => {
-    if (!profile?.id || !profile.company_id) return;
-    try {
-      setUnread(await unreadAdminCount(profile.company_id, profile.id));
-    } catch {
-      setUnread(0);
-    }
-  }, [profile?.id, profile?.company_id]);
-
   useFocusEffect(
     useCallback(() => {
       void loadStatus();
       void loadWallet();
-      void loadUnread();
-    }, [loadStatus, loadWallet, loadUnread]),
+    }, [loadStatus, loadWallet]),
   );
 
   useEffect(() => {
@@ -437,14 +406,8 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.group}>
-          <Text style={styles.groupLabel}>Inbox and setup</Text>
+          <Text style={styles.groupLabel}>Setup</Text>
           <GroupCard>
-            <Row
-              icon="message-circle"
-              label="Messages"
-              badge={unread}
-              onPress={() => router.push('/(creator)/messages' as Href)}
-            />
             <Row
               icon="settings"
               label="Account setup"

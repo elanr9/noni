@@ -84,11 +84,17 @@ export function TabBar({
                   />
                   {badge !== undefined && (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{badge}</Text>
+                      <Text style={styles.badgeText}>
+                        {typeof badge === 'number' && badge > 99 ? '99+' : badge}
+                      </Text>
                     </View>
                   )}
                 </View>
                 <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
+                  maxFontSizeMultiplier={1}
                   style={[
                     styles.label,
                     {
@@ -132,15 +138,16 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    gap: 4,
+    gap: 2,
     padding: 8,
   },
   item: {
     flex: 1,
+    minWidth: 0,
     alignItems: 'center',
     gap: 3,
     paddingVertical: 10,
-    paddingHorizontal: 6,
+    paddingHorizontal: 2,
     borderRadius: 999,
   },
   itemActive: {
@@ -164,7 +171,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   label: {
+    width: '100%',
     fontSize: 11,
     fontWeight: '700',
+    textAlign: 'center',
   },
 });

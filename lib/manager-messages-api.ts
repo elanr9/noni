@@ -889,6 +889,7 @@ export async function setChatMuted(params: {
 
 export async function uploadManagerChatMedia(params: {
   companyId: string;
+  chatId: string;
   localUri: string;
   mime: string;
   ext: string;
@@ -896,7 +897,7 @@ export async function uploadManagerChatMedia(params: {
   const response = await fetch(params.localUri);
   if (!response.ok) throw new Error('Could not read the file');
   const blob = await response.blob();
-  const path = `${params.companyId}/${Date.now()}-${Math.random()
+  const path = `${params.companyId}/${params.chatId}/${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}.${params.ext}`;
   const { error } = await supabase.storage.from('manager-chat').upload(path, blob, {

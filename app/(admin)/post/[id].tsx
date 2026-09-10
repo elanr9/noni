@@ -47,14 +47,11 @@ import {
 } from '../../../components/admin/LibraryPickerSheet';
 import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
-import {
-  KindOfPostCard,
-  rankTypeSuggestions,
-} from '../../../components/admin/editor/KindOfPostCard';
+import { KindOfPostSheet } from '../../../components/admin/editor/KindOfPostSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
-import { StartPostCard } from '../../../components/admin/editor/StartPostCard';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
 import {
+  PostTypeChip,
   PushHeader,
   SectionLabel,
   SkeletonCard,
@@ -98,6 +95,12 @@ import {
   type RegenField,
   type TalkingPoint,
 } from '../../../lib/briefs-api';
+import { copyBriefInto } from '../../../lib/library-api';
+import {
+  AiWorkingCard,
+  SLIDESHOW_FILL_STEPS,
+  VIDEO_FILL_STEPS,
+} from '../../../components/admin/AiWorkingCard';
 import {
   applyPointMedia,
   ensureSlot,
@@ -254,27 +257,12 @@ export default function PostEditorScreen() {
   /** Bumped after a fill so the screen re-reads the row it just wrote. */
   const [reloadNonce, setReloadNonce] = useState(0);
   /** The manager chose to skip AI on this empty post; the form shows instead. */
-  const [startedBlank, setStartedBlank] = useState(false);
+  const [kindSheetOpen, setKindSheetOpen] = useState(false);
   const [placedNote, setPlacedNote] = useState<string | null>(null);
   /** Screenshots a regenerate picked from the feature library; the next save places them. */
   const pendingPointMedia = useRef<(PointMedia | null)[]>([]);
 
-  const pickedType = postTypes.find((t) => t.id === pickedTypeId) ?? null;
-  const lane: 'video' | 'photo_carousel' =
-    pickedType === null
-      ? briefFormat
-      : pickedType.family === 'photo_carousel'
-        ? 'photo_carousel'
-        : 'video';
-  const typeSuggestions = useMemo(
-    () => rankTypeSuggestions(postTypes, lane, weekPosts),
-    [postTypes, lane, weekPosts],
-  );
-  // A typeless row opens with the kind the week lacks most preselected.
-  // The pick is written on save or when the manager changes it.
-  const postTypeId =
-    pickedTypeId ??
-    (summaryMode === null ? (typeSuggestions[0]?.type.id ?? null) : null);
+  const postTypeId = pickedTypeId;
   const currentType = useMemo(
     () => postTypes.find((t) => t.id === postTypeId) ?? null,
     [postTypes, postTypeId],
@@ -353,7 +341,12 @@ export default function PostEditorScreen() {
         }
         setPoints(briefPoints);
         setCta(brief.cta ?? '');
-        setSubtitles(brief.subtitles);
+        setSubtitles(
+          briefPoints.length === 0 && brief.format !== 'photo_carousel'
+            ? true
+            : brief.subtitles,
+        );
+        setKindSheetOpen(brief.post_type_id === null);
         setSearchPhrase(brief.search_phrase ?? '');
         setCaption(brief.caption ?? '');
         setHashtags(brief.hashtags);
@@ -410,6 +403,7 @@ export default function PostEditorScreen() {
   }, [id, refreshScreenshotUrls, reloadNonce]);
 
   function chooseType(next: PostType) {
+    setKindSheetOpen(false);
     if (next.id === pickedTypeId) return;
     setPostTypeId(next.id);
     if (id) {
@@ -732,6 +726,13 @@ export default function PostEditorScreen() {
         family,
         source,
         companyId: profile.company_id,
+        keep: {
+          title,
+          searchPhrase,
+          hook: resolvedHook() ?? '',
+          caption,
+          points,
+        },
       });
       if (result.kind === 'kill') {
         Alert.alert('Generation refused', result.kill_reason);
@@ -760,7 +761,28 @@ export default function PostEditorScreen() {
     }
   }
 
+  /** A ready library post clones in whole. No AI, so it lands at once. */
+  async function copyReadyPost(sourceBriefId: string, sourceKind: 'idea' | 'example') {
+    if (!id) return;
+    setPortBusyId(sourceBriefId);
+    try {
+      await copyBriefInto({ sourceBriefId, targetBriefId: id, sourceKind });
+      setLibraryOpen(false);
+      setReloadNonce((n) => n + 1);
+    } catch (e) {
+      Alert.alert('Could not fill this post', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setPortBusyId(null);
+    }
+  }
+
   function onLibraryPick(pick: LibraryPick) {
+    if (pick.kind === 'copy') {
+      void copyReadyPost(pick.briefId, pick.sourceKind);
+      return;
+    }
+    // The sheet steps aside so the writing card is what you watch.
+    setLibraryOpen(false);
     if (pick.kind === 'port') {
       void fillThisSlot({ kind: 'port', sourceBriefId: pick.briefId }, pick.briefId);
       return;
@@ -776,10 +798,12 @@ export default function PostEditorScreen() {
     void fillThisSlot({ kind: 'idea', text: pick.text }, pick.text);
   }
 
-  function startBlank() {
-    if (family === 'video') setSubtitles(true);
-    setStartedBlank(true);
-  }
+  const hasTyped =
+    Boolean(title.trim()) ||
+    Boolean(searchPhrase.trim()) ||
+    Boolean(resolvedHook()) ||
+    Boolean(caption.trim()) ||
+    points.some((p) => p.text?.trim());
 
   /** Finished posts in this week on the other side, as port sources. */
   const portSourceOptions: PortOption[] = weekPosts
@@ -1298,14 +1322,6 @@ export default function PostEditorScreen() {
   const alsoSearched: string[] = [];
   const bankTags = [...new Set([...hashtagBank, ...hashtags])];
   const typeLabel = currentType?.label ?? 'Post';
-  const showStartCard =
-    summaryMode === null &&
-    points.length === 0 &&
-    !startedBlank &&
-    killReason === null;
-  /** A killed empty slot shows only the kill card until the manager starts blank. */
-  const hideForm =
-    showStartCard || (killReason !== null && points.length === 0 && !startedBlank);
 
   const overlaySegment =
     overlayIndex !== null
@@ -1329,12 +1345,26 @@ export default function PostEditorScreen() {
               ? `Post ${String(postNumber).padStart(2, '0')}`
               : 'Post'
           }
-          subtitle={
-            weekNumber !== null ? `${typeLabel} · Week ${weekNumber}` : typeLabel
-          }
+          subtitle={[
+            typeLabel,
+            family === 'photo_carousel' ? 'Slideshow' : 'Reel',
+            weekNumber !== null ? `Week ${weekNumber}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
           onBack={goBack}
           trailing={
-            summaryMode === 'view' ? (
+            summaryMode === null ? (
+              currentType ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Change the kind of post"
+                  onPress={() => setKindSheetOpen(true)}
+                >
+                  <PostTypeChip typeKey={currentType.key} label={currentType.label} />
+                </PressableScale>
+              ) : null
+            ) : summaryMode === 'view' ? (
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel="Edit this post"
@@ -1342,23 +1372,12 @@ export default function PostEditorScreen() {
               >
                 <Text style={styles.saveProgress}>Edit</Text>
               </PressableScale>
-            ) : summaryMode === 'edit' ? (
+            ) : (
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel="Save changes"
                 disabled={saving}
                 onPress={() => void saveSummaryEdits()}
-              >
-                <Text style={styles.saveProgress}>
-                  {saving ? 'Saving…' : 'Save'}
-                </Text>
-              </PressableScale>
-            ) : (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Save progress"
-                disabled={saving}
-                onPress={() => void saveProgress()}
               >
                 <Text style={styles.saveProgress}>
                   {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save'}
@@ -1481,11 +1500,6 @@ export default function PostEditorScreen() {
               <View style={styles.killCard}>
                 <Text style={styles.killTitle}>Generation killed this slot</Text>
                 <Text style={styles.killText}>{killReason}</Text>
-                {points.length === 0 && !startedBlank ? (
-                  <Button size="sm" variant="ghost" onPress={startBlank}>
-                    Start blank
-                  </Button>
-                ) : null}
               </View>
             ) : null}
             {warnings.length > 0 ? (
@@ -1497,51 +1511,12 @@ export default function PostEditorScreen() {
                 ))}
               </View>
             ) : null}
-            {summaryMode === null && typeSuggestions.length > 0 ? (
-              <>
-                <SectionLabel>Kind of post</SectionLabel>
-                <Text style={styles.summaryHint}>
-                  Suggested from what the week still lacks. Change it if you have a better idea.
-                </Text>
-                <KindOfPostCard
-                  suggestions={typeSuggestions}
-                  family={family}
-                  selectedId={postTypeId}
-                  onSelect={chooseType}
-                />
-              </>
-            ) : null}
-            {showStartCard ? (
-              <StartPostCard
-                family={family}
-                typeLabel={typeLabel}
-                busy={filling}
-                busyLabel={fillStatusLabel}
-                onWriteFromIdea={(text) =>
-                  void fillThisSlot({ kind: 'idea', text }, 'idea')
-                }
-                onOpenLibrary={() => setLibraryOpen(true)}
-                onStartBlank={startBlank}
-                onRewriteFromThisWeek={
-                  portSourceOptions.length > 0
-                    ? () => setPortSheet('source')
-                    : undefined
-                }
-              />
-            ) : null}
-            {hideForm ? null : (
-            <>
             <SectionLabel>Title</SectionLabel>
             <TitleCard value={title} onChange={setTitle} />
-            <Text style={styles.summaryHint}>
-              Skip the title and the grid shows the hook instead.
-            </Text>
             <SectionLabel>Search phrase</SectionLabel>
             <SearchPhraseCard
               value={searchPhrase}
               onChange={setSearchPhrase}
-              busy={regenBusy === 'search_phrase'}
-              onRegenerate={() => void regenerate('search_phrase')}
               alternates={alsoSearched}
               onPickAlternate={setSearchPhrase}
             />
@@ -1559,9 +1534,7 @@ export default function PostEditorScreen() {
               hookOverlayBoxes={hookOverlayBoxes}
               onOpenHookOverlay={() => void openOverlay(-1, 'text')}
               cta={cta}
-              busyAll={regenBusy === 'talking_points'}
               onChange={setPoints}
-              onRegenerateAll={() => void regenerate('talking_points')}
               onDragStateChange={setPointsDragging}
               screenshotUrlForIndex={(i) => {
                 const seg = segmentForPointIndex(i);
@@ -1591,8 +1564,6 @@ export default function PostEditorScreen() {
             <CaptionStep
               caption={caption}
               onChangeCaption={setCaption}
-              busy={regenBusy === 'caption'}
-              onRegenerate={() => void regenerate('caption')}
               hashtags={hashtags}
               bankTags={bankTags}
               onToggleTag={toggleHashtag}
@@ -1600,8 +1571,6 @@ export default function PostEditorScreen() {
               merged={mergedCaption()}
               accountName={accountName}
             />
-            </>
-            )}
           </View>
         )}
         {points.length > 0 || killReason !== null || reviewedAt !== null ? (
@@ -1620,21 +1589,53 @@ export default function PostEditorScreen() {
         ) : null}
       </ScrollView>
 
-      {summaryMode === null && !showStartCard ? (
+      {filling ? (
+        <View style={styles.fillTakeover}>
+          <AiWorkingCard
+            title={family === 'photo_carousel' ? 'Writing your slideshow' : 'Writing your reel'}
+            subtitle={
+              hasTyped
+                ? 'Keeping what you typed and writing the rest around it'
+                : 'Every field is written, then your pictures are placed'
+            }
+            steps={family === 'photo_carousel' ? SLIDESHOW_FILL_STEPS : VIDEO_FILL_STEPS}
+            family={family}
+          />
+        </View>
+      ) : null}
+
+      {summaryMode === null ? (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-          <Button
-            size="lg"
-            variant="primary"
-            block
-            disabled={saving || reviewRunning || reviewConfirming || points.length === 0}
-            onPress={() => void finishPost()}
-          >
-            {reviewConfirming
-              ? 'Saving…'
-              : family === 'photo_carousel'
-                ? 'Save post'
-                : 'Review and save'}
-          </Button>
+          <View style={styles.footerFill}>
+            <Button
+              size="lg"
+              variant="outline"
+              block
+              icon="sparkles"
+              disabled={filling || saving || reviewRunning || reviewConfirming || !currentType}
+              onPress={() => setLibraryOpen(true)}
+            >
+              {filling
+                ? (fillStatusLabel ?? 'Filling')
+                : hasTyped
+                  ? 'Finish with AI'
+                  : 'Fill with AI'}
+            </Button>
+          </View>
+          <View style={styles.flex}>
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              icon="check"
+              disabled={filling || saving || reviewRunning || reviewConfirming}
+              onPress={() =>
+                void (points.length === 0 ? saveProgress() : finishPost())
+              }
+            >
+              {saving || reviewConfirming ? 'Saving…' : 'Save post'}
+            </Button>
+          </View>
         </View>
       ) : null}
 
@@ -1760,9 +1761,20 @@ export default function PostEditorScreen() {
         }}
       />
 
+      <KindOfPostSheet
+        visible={kindSheetOpen && summaryMode === null}
+        postTypes={postTypes}
+        family={family}
+        selectedId={postTypeId}
+        dismissable={postTypeId !== null}
+        onSelect={chooseType}
+        onClose={() => setKindSheetOpen(false)}
+      />
+
       <LibraryPickerSheet
         visible={libraryOpen}
         postTypeId={postTypeId}
+        family={family}
         busy={filling}
         onClose={() => {
           if (filling) return;
@@ -1797,6 +1809,16 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.offWhite },
   flex: { flex: 1 },
   content: { padding: 20, paddingBottom: 24 },
+  fillTakeover: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    paddingHorizontal: 20,
+    paddingTop: 140,
+    backgroundColor: color.whiteA92,
+  },
   loadingShell: {
     flex: 1,
     backgroundColor: color.offWhite,
@@ -1880,6 +1902,7 @@ const styles = StyleSheet.create({
     borderTopColor: color.line,
     backgroundColor: color.glass,
   },
+  footerFill: { flex: 0.8 },
   summaryStack: {
     gap: 12,
   },

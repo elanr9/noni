@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { Screen } from '../../../components/layout/Screen';
@@ -16,9 +15,9 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { Wordmark } from '../../../components/ui/Wordmark';
 import { useAuth } from '../../../lib/auth';
+import { unreadCreatorInboxCount } from '../../../lib/creator-inbox-api';
 import { dayKey, useCreatorQueue, publishTimeLabel } from '../../../lib/creator-queue';
 import { isSetupCompleteFlag, useSetupState } from '../../../lib/setup';
-import { supabase } from '../../../lib/supabase';
 import type { TaskStatus } from '../../../lib/tasks';
 import {
   listSwapPool,
@@ -30,30 +29,6 @@ import { color, space, type } from '../../../theme/tokens';
 import { CreatorSetupChecklist } from '../setup';
 
 const OPEN = new Set<TaskStatus>(['assigned', 'changes_requested']);
-
-function chatSeenKey(creatorId: string): string {
-  return `noni.chat.seenAt.${creatorId}`;
-}
-
-async function hasUnreadAdminMessage(
-  companyId: string,
-  creatorId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('created_at')
-    .eq('company_id', companyId)
-    .eq('creator_id', creatorId)
-    .neq('author_id', creatorId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return false;
-  const seenAt = await AsyncStorage.getItem(chatSeenKey(creatorId));
-  if (seenAt === null) return true;
-  return new Date(data.created_at).getTime() > new Date(seenAt).getTime();
-}
 
 /** Monday-first week around today, as YYYY-MM-DD keys. */
 function weekDates(todayKey: string): string[] {
@@ -92,8 +67,8 @@ export default function HomeScreen() {
     useCallback(() => {
       void queue.refetch();
       if (profile?.company_id && profile.id) {
-        hasUnreadAdminMessage(profile.company_id, profile.id).then(
-          setUnreadAdmin,
+        unreadCreatorInboxCount(profile.company_id, profile.id).then(
+          (count) => setUnreadAdmin(count > 0),
           () => undefined,
         );
       }
@@ -164,14 +139,7 @@ export default function HomeScreen() {
   })();
 
   const openMessages = () => {
-    if (profile?.id) {
-      void AsyncStorage.setItem(
-        chatSeenKey(profile.id),
-        new Date().toISOString(),
-      ).catch(() => undefined);
-    }
-    setUnreadAdmin(false);
-    router.push('/(creator)/messages');
+    router.navigate('/(creator)/(tabs)/messages');
   };
 
   // F5: Fix it goes straight to the normal record/upload flow, the same

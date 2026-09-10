@@ -12,7 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,6 +26,7 @@ import { useCreatorQueue } from '../../lib/creator-queue';
 import { useKeyboardPadding } from '../../lib/keyboard';
 import {
   listThread,
+  markCreatorThreadRead,
   parseMessageMedia,
   sendMessage,
   type ThreadMessage,
@@ -154,16 +154,19 @@ export default function CreatorChat() {
     };
   }, [companyId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (creatorId !== null) {
-        void AsyncStorage.setItem(
-          `noni.chat.seenAt.${creatorId}`,
-          new Date().toISOString(),
-        ).catch(() => undefined);
-      }
-    }, [creatorId]),
-  );
+  const markRead = useCallback(() => {
+    if (companyId === null || creatorId === null) return;
+    void markCreatorThreadRead({ companyId, creatorId, profileId: creatorId }).catch(
+      () => undefined,
+    );
+  }, [companyId, creatorId]);
+
+  useFocusEffect(markRead);
+
+  const managerMessageCount = messages.filter((m) => !m.fromCreator).length;
+  useEffect(() => {
+    if (!loading && managerMessageCount > 0) markRead();
+  }, [loading, managerMessageCount, markRead]);
 
   useEffect(() => {
     if (loading || didInitialScroll.current) return;

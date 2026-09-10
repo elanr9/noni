@@ -13,15 +13,24 @@ import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { IdeaRow } from '../../../components/admin/library/IdeaRow';
 import { LibSearch } from '../../../components/admin/library/LibSearch';
 import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
+import {
+  FAMILIES_FOR,
+  MakeFormatSheet,
+  type FormatChoice,
+} from '../../../components/admin/library/MakeFormatSheet';
 import { MakePostSheet, type MakeTarget } from '../../../components/admin/library/MakePostSheet';
 import { MediaLane } from '../../../components/admin/library/MediaLane';
 import { OUR_POST_ROW_HEIGHT, OurPostRow } from '../../../components/admin/library/OurPostCard';
 import { OurPostsFilterSheet } from '../../../components/admin/library/OurPostsFilterSheet';
 import { QuickCapture } from '../../../components/admin/library/QuickCapture';
-import { ReferenceCard } from '../../../components/admin/library/ReferenceCard';
+import { ReadyPostCard } from '../../../components/admin/library/ReadyPostCard';
+import {
+  AiWorkingCard,
+  SLIDESHOW_FILL_STEPS,
+  VIDEO_FILL_STEPS,
+} from '../../../components/admin/AiWorkingCard';
 import { SourceChips, type LibraryLane } from '../../../components/admin/library/SourceChips';
 import { SubTabs } from '../../../components/admin/library/SubTabs';
 import { AdminHeader, AdminScreen } from '../../../components/admin/shared';
@@ -31,20 +40,22 @@ import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
 import { listPostTypes, type BriefFormat, type PostType } from '../../../lib/briefs-api';
+import { makeLibraryPosts, type LibraryMakeSource } from '../../../lib/library-make';
 import { fillPostSlot, type FillSource } from '../../../lib/post-fill';
 import {
-  captureQuick,
+  copyBriefInto,
   countLibraryItems,
   deleteLibraryItem,
   enrichOurPostThumbnail,
+  isCaptureUrl,
   listCreatorOptions,
   listLibraryItems,
   listOurPosts,
   markLibraryItemUsed,
   markOurPostUsed,
-  saveReference,
-  updateLibraryItemText,
+  readyBriefFor,
   type LibraryItem,
+  type LibraryItemWithBriefs,
   type OurPost,
   type OurPostsSort,
 } from '../../../lib/library-api';
@@ -56,8 +67,23 @@ const TOAST_MS = 1800;
 const SOCIAL_LINK = /(tiktok\.com|instagram\.com)\//i;
 
 type Row =
-  | { kind: 'item'; item: LibraryItem }
+  | { kind: 'item'; item: LibraryItemWithBriefs }
   | { kind: 'our_post'; post: OurPost };
+
+/** Progress while captured ideas turn into posts, shown above the list. */
+type Making = { done: number; total: number; label: string };
+
+function makeSourceLabel(sources: LibraryMakeSource[]): string {
+  if (sources.length > 1) return `${sources.length} ideas`;
+  const [one] = sources;
+  if (!one) return '';
+  if (one.kind === 'reference') {
+    const handle = one.url.match(/@([A-Za-z0-9._]+)/)?.[1];
+    const platform = /tiktok/i.test(one.url) ? 'TikTok' : /instagram/i.test(one.url) ? 'Instagram' : null;
+    return [handle ? `@${handle}` : 'this link', platform].filter(Boolean).join(' · ');
+  }
+  return `“${one.text.length > 80 ? `${one.text.slice(0, 77)}…` : one.text}”`;
+}
 
 type UsedTab = 'unused' | 'used';
 type ItemLane = 'idea' | 'reference';
@@ -67,32 +93,27 @@ const EMPTY: Record<ItemLane, Record<UsedTab, { icon: IconName; title: string; b
     unused: {
       icon: 'zap',
       title: 'No ideas yet',
-      body: 'Type one line above and save. Paste a whole doc to save one idea per line.',
+      body: 'Type one line above, pick video or slideshow, and the whole post is written and saved here ready.',
     },
     used: {
       icon: 'zap',
-      title: 'Nothing used yet',
-      body: 'Ideas move here the moment you make a post from them.',
+      title: 'Nothing in a week yet',
+      body: 'Ideas move here the moment one of their posts lands in a week.',
     },
   },
   reference: {
     unused: {
       icon: 'link',
       title: 'No references yet',
-      body: 'Copy a TikTok or Instagram link, come back, tap Paste. It saves with a thumbnail and title.',
+      body: 'Copy a TikTok or Instagram link, come back, tap Paste. The post is written from it and saved here ready.',
     },
     used: {
       icon: 'link',
-      title: 'Nothing used yet',
-      body: 'References move here the moment you make a post from them.',
+      title: 'Nothing in a week yet',
+      body: 'References move here the moment one of their posts lands in a week.',
     },
   },
 };
-
-function shortDate(iso: string | null): string | null {
-  if (!iso) return null;
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
 
 function rowKey(row: Row): string {
   return row.kind === 'item' ? row.item.id : row.post.post_id;
@@ -114,6 +135,11 @@ export default function LibraryScreen() {
   const [capture, setCapture] = useState('');
   const [pasting, setPasting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  /** Captured, waiting on the video / slideshow / both choice. */
+  const [pendingMake, setPendingMake] = useState<LibraryMakeSource[] | null>(null);
+  const [making, setMaking] = useState<Making | null>(null);
+  const [makingFamilies, setMakingFamilies] = useState<BriefFormat[]>([]);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [counts, setCounts] = useState<Record<ItemLane, { unused: number; used: number } | null>>({
@@ -241,36 +267,22 @@ export default function LibraryScreen() {
     setSub(next);
   }
 
-  async function onSaveIdeas() {
-    const raw = capture;
-    const lines = raw
+  /** Typed ideas, one per line. A pasted link on its own line becomes a reference. */
+  function onSaveIdeas() {
+    const lines = capture
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
-    if (!profile || lines.length === 0) return;
-    setCapture('');
-    try {
-      const result = await captureQuick(profile.company_id, profile.id, raw);
-      if (result.reference) {
-        flash('That was a link, saved under References');
-        void refreshCounts('reference');
-        return;
-      }
-      flash(result.ideas === 1 ? 'Idea saved' : `${result.ideas} ideas saved`);
-      if (sub !== 'unused') {
-        setRows([]);
-        setSub('unused');
-      } else {
-        void loadPage(0);
-      }
-    } catch (e) {
-      setCapture(raw);
-      Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
-    }
+    if (!profile || lines.length === 0 || making !== null) return;
+    setPendingMake(
+      lines.map((line): LibraryMakeSource =>
+        isCaptureUrl(line) ? { kind: 'reference', url: line } : { kind: 'idea', text: line },
+      ),
+    );
   }
 
   async function onPasteLink() {
-    if (!profile || pasting) return;
+    if (!profile || pasting || making !== null) return;
     setPasting(true);
     try {
       const text = (await Clipboard.getStringAsync()).trim();
@@ -278,18 +290,69 @@ export default function LibraryScreen() {
         flash('Copy a TikTok or Instagram link first');
         return;
       }
-      await saveReference(profile.company_id, profile.id, text);
-      flash('Reference saved');
-      if (sub !== 'unused') {
-        setRows([]);
-        setSub('unused');
-      } else {
-        void loadPage(0);
-      }
-    } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
+      setPendingMake([{ kind: 'reference', url: text }]);
     } finally {
       setPasting(false);
+    }
+  }
+
+  /**
+   * The whole post is written now, one lane at a time per idea, with the same
+   * fill an empty slot gets. The card appears the moment its posts exist.
+   */
+  async function onPickFormat(choice: FormatChoice) {
+    const sources = pendingMake;
+    if (!profile || !sources || sources.length === 0) return;
+    const families = FAMILIES_FOR[choice];
+    const targetLane: ItemLane = sources.every((s) => s.kind === 'reference')
+      ? 'reference'
+      : 'idea';
+    setPendingMake(null);
+    setCapture('');
+    setMakingFamilies(families);
+    setMaking({ done: 0, total: sources.length, label: makeSourceLabel(sources.slice(0, 1)) });
+    if (lane !== targetLane) {
+      setRows([]);
+      setSearch('');
+      setLane(targetLane);
+    }
+    if (sub !== 'unused') {
+      setRows([]);
+      setSub('unused');
+    }
+
+    let madeCount = 0;
+    const refusals: string[] = [];
+    try {
+      for (const [i, source] of sources.entries()) {
+        setMaking({ done: i, total: sources.length, label: makeSourceLabel([source]) });
+        const outcome = await makeLibraryPosts({
+          companyId: profile.company_id,
+          userId: profile.id,
+          source,
+          families,
+          postTypes,
+        });
+        madeCount += outcome.made.length;
+        refusals.push(...outcome.killed.map((k) => k.reason));
+        void loadPageRef.current(0);
+      }
+    } catch (e) {
+      Alert.alert('Could not make the post', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setMaking(null);
+      void refreshCounts('idea');
+      void refreshCounts('reference');
+    }
+
+    if (madeCount > 0) {
+      flash(madeCount === 1 ? 'Post ready' : `${madeCount} posts ready`);
+    }
+    if (refusals.length > 0) {
+      Alert.alert(
+        refusals.length === 1 ? 'One post was not made' : `${refusals.length} posts were not made`,
+        refusals.join('\n\n'),
+      );
     }
   }
 
@@ -301,12 +364,19 @@ export default function LibraryScreen() {
     router.push(`/(admin)/post/${briefId}`);
   }
 
-  /** One of ours ports from its brief; everything else generates fresh. */
-  function fillSourceFor(row: Row): FillSource | null {
+  /**
+   * One of ours ports from its brief. A library row with a ready post in the
+   * other lane ports that; a legacy row without ready posts generates fresh.
+   */
+  function fillSourceFor(row: Row, family?: BriefFormat): FillSource | null {
     if (row.kind === 'our_post') {
       if (row.post.brief_id) return { kind: 'port', sourceBriefId: row.post.brief_id };
       return row.post.post_url ? { kind: 'example', url: row.post.post_url } : null;
     }
+    const other = family
+      ? readyBriefFor(row.item, family === 'video' ? 'photo_carousel' : 'video')
+      : (row.item.video_brief ?? row.item.carousel_brief);
+    if (other) return { kind: 'port', sourceBriefId: other.id };
     if (row.item.url) return { kind: 'example', url: row.item.url };
     return row.item.text ? { kind: 'idea', text: row.item.text } : null;
   }
@@ -329,11 +399,14 @@ export default function LibraryScreen() {
   }
 
   function preferredFamilyFor(row: Row): BriefFormat | null {
-    if (row.kind !== 'our_post') return null;
+    if (row.kind !== 'our_post') {
+      if (row.item.video_brief) return 'video';
+      return row.item.carousel_brief ? 'photo_carousel' : null;
+    }
     return row.post.family === 'photo_carousel' ? 'photo_carousel' : 'video';
   }
 
-  function patchItem(id: string, patch: Partial<LibraryItem>) {
+  function patchItem(id: string, patch: Partial<LibraryItemWithBriefs>) {
     setRows((prev) =>
       prev.map((row) =>
         row.kind === 'item' && row.item.id === id
@@ -354,27 +427,37 @@ export default function LibraryScreen() {
   }
 
   /**
-   * Generates the whole post into the chosen empty slot: draft, slides, text
-   * boxes, screenshots. Then opens the editor on it, ready to review.
+   * A ready post in the slot's lane is cloned in, instantly. Otherwise the
+   * slot is generated: draft, slides, text boxes, screenshots. Then the
+   * editor opens on it, ready to review.
    */
   async function buildPost(row: Row, target: MakeTarget) {
-    const source = fillSourceFor(row);
-    if (!profile || !source) return;
     const { slot, postType } = target;
+    const ready = row.kind === 'item' ? readyBriefFor(row.item, slot.family) : null;
+    const source = ready ? null : fillSourceFor(row, slot.family);
+    if (!profile || (!ready && !source)) return;
     setMakeBusyKey(rowKey(row));
     try {
-      const result = await fillPostSlot({
-        briefId: slot.briefId,
-        postTypeId: postType.id,
-        postTypeKey: postType.key,
-        family: slot.family,
-        source,
-        companyId: profile.company_id,
-      });
-      if (result.kind === 'kill') {
-        setMakeFrom(null);
-        Alert.alert('Not made', result.kill_reason);
-        return;
+      if (ready && row.kind === 'item') {
+        await copyBriefInto({
+          sourceBriefId: ready.id,
+          targetBriefId: slot.briefId,
+          sourceKind: row.item.source === 'reference' ? 'example' : 'idea',
+        });
+      } else if (source) {
+        const result = await fillPostSlot({
+          briefId: slot.briefId,
+          postTypeId: postType.id,
+          postTypeKey: postType.key,
+          family: slot.family,
+          source,
+          companyId: profile.company_id,
+        });
+        if (result.kind === 'kill') {
+          setMakeFrom(null);
+          Alert.alert('Not made', result.kill_reason);
+          return;
+        }
       }
       const now = new Date().toISOString();
       if (row.kind === 'item') {
@@ -397,7 +480,7 @@ export default function LibraryScreen() {
       }
       setMakeFrom(null);
       flash(
-        `Made into ${slot.family === 'photo_carousel' ? 'Slideshow' : 'Reel'} ${String(slot.laneIndex).padStart(2, '0')}`,
+        `${ready ? 'Added to' : 'Made into'} ${slot.family === 'photo_carousel' ? 'Slideshow' : 'Reel'} ${String(slot.laneIndex).padStart(2, '0')}`,
       );
       openBrief(slot.briefId);
     } catch (e) {
@@ -407,18 +490,10 @@ export default function LibraryScreen() {
     }
   }
 
-  function onSaveIdeaText(item: LibraryItem, text: string) {
-    patchItem(item.id, { text });
-    updateLibraryItemText(item.id, text).catch((e: unknown) => {
-      patchItem(item.id, { text: item.text });
-      Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
-    });
-  }
-
   function confirmDelete(item: LibraryItem) {
     Alert.alert(
       item.source === 'reference' ? 'Delete this reference?' : 'Delete this idea?',
-      'Posts made from it are not affected.',
+      'Its ready posts go with it. Posts already in a week are not affected.',
       [
         { text: 'Keep', style: 'cancel' },
         {
@@ -453,7 +528,7 @@ export default function LibraryScreen() {
     if (fillSourceFor(row) === null) return undefined;
     return {
       busy: makeBusyKey === rowKey(row),
-      disabled: makeBusyKey !== null,
+      disabled: makeBusyKey !== null || making !== null,
       onPress: () => setMakeFrom(row),
     };
   }
@@ -476,27 +551,12 @@ export default function LibraryScreen() {
     }
     const briefId = row.item.last_brief_id;
     const onMetaPress = briefId ? () => openBrief(briefId) : undefined;
-    if (row.item.source === 'idea') {
-      return (
-        <View style={[styles.cardRow, first && styles.cardRowFirst, last && styles.cardRowLast]}>
-          <IdeaRow
-            text={row.item.text ?? ''}
-            usedCount={row.item.used_count}
-            lastUsedLabel={shortDate(row.item.last_used_at)}
-            last={last}
-            onSaveText={(text) => onSaveIdeaText(row.item, text)}
-            onLongPress={() => confirmDelete(row.item)}
-            onMetaPress={onMetaPress}
-            make={makeFor(row)}
-          />
-        </View>
-      );
-    }
     return (
       <View style={!last && styles.referenceGap}>
-        <ReferenceCard
+        <ReadyPostCard
           item={row.item}
-          onPress={() => openUrl(row.item.url)}
+          onOpenBrief={openBrief}
+          onOpenSource={row.item.url ? () => openUrl(row.item.url) : undefined}
           onLongPress={() => confirmDelete(row.item)}
           onMetaPress={onMetaPress}
           make={makeFor(row)}
@@ -511,6 +571,7 @@ export default function LibraryScreen() {
   const laneCounts = itemLane ? counts[itemLane] : null;
 
   function renderEmpty(): ReactNode {
+    if (making !== null) return null;
     if (loading) {
       return <LibraryListSkeleton height={lane === 'our_post' ? OUR_POST_ROW_HEIGHT : 84} />;
     }
@@ -541,11 +602,28 @@ export default function LibraryScreen() {
     );
   }
 
+  const makingCard =
+    making !== null && itemLane !== null ? (
+      <View style={styles.makingWrap}>
+        {makingFamilies.map((family) => (
+          <AiWorkingCard
+            key={family}
+            title={family === 'photo_carousel' ? 'Making your slideshow' : 'Making your reel'}
+            subtitle={`From ${making.label}`}
+            steps={family === 'photo_carousel' ? SLIDESHOW_FILL_STEPS : VIDEO_FILL_STEPS}
+            family={family}
+            progress={making.total > 1 ? { done: making.done + 1, total: making.total } : undefined}
+          />
+        ))}
+      </View>
+    ) : null;
+
   const list = (
     <FlatList
       data={rows}
       keyExtractor={rowKey}
       renderItem={({ item: row, index }) => renderRow(row, index)}
+      ListHeaderComponent={makingCard}
       contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
       onEndReachedThreshold={0.4}
       onEndReached={() => {
@@ -585,9 +663,9 @@ export default function LibraryScreen() {
               mode={itemLane}
               value={capture}
               onChangeText={setCapture}
-              onSave={() => void onSaveIdeas()}
+              onSave={onSaveIdeas}
               onPaste={() => void onPasteLink()}
-              busy={pasting}
+              busy={pasting || making !== null}
               note={null}
             />
             <SubTabs<UsedTab>
@@ -664,6 +742,14 @@ export default function LibraryScreen() {
       ) : (
         list
       )}
+
+      <MakeFormatSheet
+        visible={pendingMake !== null}
+        sourceLabel={pendingMake ? makeSourceLabel(pendingMake) : ''}
+        busy={false}
+        onPick={(choice) => void onPickFormat(choice)}
+        onClose={() => setPendingMake(null)}
+      />
 
       <MakePostSheet
         visible={makeFrom !== null}
@@ -779,7 +865,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   referenceGap: {
-    marginBottom: 8,
+    marginBottom: 10,
+  },
+  makingWrap: {
+    gap: 10,
+    marginBottom: 10,
   },
   noMatch: {
     marginVertical: 32,

@@ -14,7 +14,6 @@ import { SlideStage, type SlideInset } from '../../SlideStage';
 import { Icon } from '../../ui/Icon';
 import { MediaThumb } from '../../ui/MediaThumb';
 import { PressableScale } from '../../ui/PressableScale';
-import { AiPill } from './AiPill';
 import { type OverlayEditorMode } from './OverlayEditor';
 
 /** Matches styles.section gap so drag swap distances line up. */
@@ -36,9 +35,7 @@ export function PointsEditor(props: {
   onOpenHookOverlay: () => void;
   /** The plug sentence from the CTA step, shown as script inside the plug point. */
   cta: string;
-  busyAll: boolean;
   onChange: (points: TalkingPoint[]) => void;
-  onRegenerateAll: () => void;
   /** Signed URL for a screenshot attached to this point's segment, if any. */
   screenshotUrlForIndex: (index: number) => string | undefined;
   /** True when this point's segment renders as a green screen clip. */
@@ -61,9 +58,7 @@ export function PointsEditor(props: {
     hookOverlayBoxes,
     onOpenHookOverlay,
     cta,
-    busyAll,
     onChange,
-    onRegenerateAll,
     screenshotUrlForIndex,
     greenScreenForIndex,
     screenshotBusyIndex,
@@ -187,15 +182,6 @@ export function PointsEditor(props: {
 
   return (
     <View style={styles.section}>
-      <View style={styles.headRow}>
-        <AiPill
-          icon="rotate-ccw"
-          label="Regenerate all"
-          busy={busyAll}
-          onPress={onRegenerateAll}
-        />
-      </View>
-
       {slideshow ? null : (
       <View style={[styles.card, shadow.shadowCard]}>
         <View style={styles.cardHead}>
@@ -518,7 +504,7 @@ export function PointsEditor(props: {
       >
         <Icon name="plus" size={14} color={color.blue700} />
         <Text style={styles.addPointText}>
-          {slideshow ? 'Add slide' : 'Add point'}
+          {slideshow ? 'Add slide' : 'Add clip'}
         </Text>
       </PressableScale>
     </View>
@@ -527,11 +513,6 @@ export function PointsEditor(props: {
 
 const styles = StyleSheet.create({
   section: { gap: CARD_GAP },
-  headRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
   card: {
     gap: 10,
     padding: 14,

@@ -7,13 +7,10 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { PressableScale } from '../../ui/PressableScale';
 import { SectionLabel } from '../shared';
-import { AiPill } from './AiPill';
 
 export interface SearchPhraseCardProps {
   value: string;
   onChange: (text: string) => void;
-  busy: boolean;
-  onRegenerate: () => void;
   /** Alternate searches; the section renders only when some exist. */
   alternates: string[];
   onPickAlternate: (phrase: string) => void;
@@ -22,22 +19,12 @@ export interface SearchPhraseCardProps {
 export function SearchPhraseCard({
   value,
   onChange,
-  busy,
-  onRegenerate,
   alternates,
   onPickAlternate,
 }: SearchPhraseCardProps) {
   return (
     <View style={styles.block}>
       <View style={[styles.card, shadow.shadowCard]}>
-        <View style={styles.headRow}>
-          <AiPill
-            icon="rotate-ccw"
-            label="Regenerate"
-            busy={busy}
-            onPress={onRegenerate}
-          />
-        </View>
         <View style={styles.fieldRow}>
           <Search size={16} color={color.slate400} strokeWidth={2} />
           <TextInput
@@ -85,11 +72,6 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: radiusAdmin.lg,
     backgroundColor: color.white,
-  },
-  headRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
   },
   fieldRow: {
     flexDirection: 'row',

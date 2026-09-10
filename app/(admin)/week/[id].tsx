@@ -44,7 +44,7 @@ import {
   type WeekPostItem,
 } from '../../../lib/briefs-api';
 import { unreadManagerMessageCount } from '../../../lib/manager-messages-api';
-import { color, type } from '../../../theme/tokens';
+import { color, radiusAdmin, type } from '../../../theme/tokens';
 
 function mondayOf(iso: string): Date {
   const d = new Date(`${iso}T00:00:00`);
@@ -197,7 +197,8 @@ export default function WeekDetailScreen() {
     : leftCount === 0
       ? 'complete'
       : 'in_progress';
-  const showFooter = published || (editable && rows.length > 0);
+  const showFooter = published || (editable && rows.length > 0 && phase === 'complete');
+  const madeCount = rows.length - leftCount;
   const videoTarget = campaign?.video_target ?? 20;
   const slideshowTarget = campaign?.slideshow_target ?? 10;
 
@@ -315,6 +316,13 @@ export default function WeekDetailScreen() {
           </View>
         ) : (
           <View style={styles.stack}>
+            {!published && rows.length > 0 ? (
+              <View style={styles.madeTagRow}>
+                <View style={styles.madeTag}>
+                  <Text style={styles.madeTagText}>{`${madeCount}/${rows.length} posts made`}</Text>
+                </View>
+              </View>
+            ) : null}
             {laneSwitcher(false)}
             <SplitHeader
               split={splitChips}
@@ -349,6 +357,22 @@ const styles = StyleSheet.create({
   },
   rows: {
     gap: 10,
+  },
+  madeTagRow: {
+    flexDirection: 'row',
+    marginBottom: -4,
+  },
+  madeTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue50,
+  },
+  madeTagText: {
+    fontSize: type.size.micro11,
+    fontWeight: '700',
+    color: color.blue700,
+    fontVariant: ['tabular-nums'],
   },
   empty: {
     marginTop: 30,

@@ -188,7 +188,8 @@ export async function fetchManagerSetupState(
     supabase
       .from('briefs')
       .select('id', { count: 'exact', head: true })
-      .eq('company_id', companyId),
+      .eq('company_id', companyId)
+      .is('library_item_id', null),
     supabase
       .from('profiles')
       .select('id', { count: 'exact', head: true })

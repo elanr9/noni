@@ -872,6 +872,7 @@ export type Database = {
           hook_options: Json
           id: string
           kill_reason: string | null
+          library_item_id: string | null
           point_count: number | null
           post_type_id: string | null
           review_result: Json | null
@@ -902,6 +903,7 @@ export type Database = {
           hook_options?: Json
           id?: string
           kill_reason?: string | null
+          library_item_id?: string | null
           point_count?: number | null
           post_type_id?: string | null
           review_result?: Json | null
@@ -932,6 +934,7 @@ export type Database = {
           hook_options?: Json
           id?: string
           kill_reason?: string | null
+          library_item_id?: string | null
           point_count?: number | null
           post_type_id?: string | null
           review_result?: Json | null
@@ -959,6 +962,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "briefs_library_item_id_fkey"
+            columns: ["library_item_id"]
+            isOneToOne: false
+            referencedRelation: "library_items"
             referencedColumns: ["id"]
           },
           {
@@ -2388,6 +2398,7 @@ export type Database = {
       }
       library_items: {
         Row: {
+          carousel_brief_id: string | null
           company_id: string
           created_at: string
           created_by: string | null
@@ -2402,8 +2413,10 @@ export type Database = {
           thumbnail_url: string | null
           url: string | null
           used_count: number
+          video_brief_id: string | null
         }
         Insert: {
+          carousel_brief_id?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
@@ -2418,8 +2431,10 @@ export type Database = {
           thumbnail_url?: string | null
           url?: string | null
           used_count?: number
+          video_brief_id?: string | null
         }
         Update: {
+          carousel_brief_id?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null
@@ -2434,8 +2449,16 @@ export type Database = {
           thumbnail_url?: string | null
           url?: string | null
           used_count?: number
+          video_brief_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "library_items_carousel_brief_id_fkey"
+            columns: ["carousel_brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "library_items_company_id_fkey"
             columns: ["company_id"]
@@ -2476,6 +2499,13 @@ export type Database = {
             columns: ["post_type_id"]
             isOneToOne: false
             referencedRelation: "post_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_items_video_brief_id_fkey"
+            columns: ["video_brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
             referencedColumns: ["id"]
           },
         ]
@@ -4209,6 +4239,10 @@ export type Database = {
       claim_post_milestone: {
         Args: { p_post_id: string; p_threshold: number }
         Returns: boolean
+      }
+      copy_brief_into: {
+        Args: { p_source_brief_id: string; p_target_brief_id: string }
+        Returns: undefined
       }
       creator_place_segment: {
         Args: {

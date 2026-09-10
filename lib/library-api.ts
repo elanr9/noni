@@ -10,6 +10,37 @@ import type { Database } from './types';
 export type LibraryItem = Database['public']['Tables']['library_items']['Row'];
 export type LibrarySource = 'idea' | 'our_post' | 'reference' | 'from_creator';
 
+/** The slice of a ready brief the library shows before you open it. */
+export type ReadyBrief = {
+  id: string;
+  title: string;
+  hook: string | null;
+  caption: string | null;
+  talking_points: Database['public']['Tables']['briefs']['Row']['talking_points'];
+  format: string;
+  post_type_id: string | null;
+  post_types: { key: string; label: string; family: string } | null;
+};
+
+/** An idea or reference with the AI-made posts hanging off it. */
+export type LibraryItemWithBriefs = LibraryItem & {
+  video_brief: ReadyBrief | null;
+  carousel_brief: ReadyBrief | null;
+};
+
+const READY_BRIEF_COLUMNS =
+  'id, title, hook, caption, talking_points, format, post_type_id, post_types(key, label, family)';
+
+const ITEM_WITH_BRIEFS_SELECT = `*, video_brief:briefs!library_items_video_brief_id_fkey(${READY_BRIEF_COLUMNS}), carousel_brief:briefs!library_items_carousel_brief_id_fkey(${READY_BRIEF_COLUMNS})`;
+
+/** The ready brief for a lane, when the row has one. */
+export function readyBriefFor(
+  item: LibraryItemWithBriefs,
+  family: 'video' | 'photo_carousel',
+): ReadyBrief | null {
+  return family === 'photo_carousel' ? item.carousel_brief : item.video_brief;
+}
+
 export type OurPost =
   Database['public']['Functions']['library_our_posts']['Returns'][number];
 export type OurPostsSort = 'top' | 'recent';
@@ -45,10 +76,10 @@ export async function listLibraryItems(params: {
   used?: LibraryUsedFilter;
   limit?: number;
   offset?: number;
-}): Promise<LibraryItem[]> {
+}): Promise<LibraryItemWithBriefs[]> {
   let query = supabase
     .from('library_items')
-    .select('*')
+    .select(ITEM_WITH_BRIEFS_SELECT)
     .eq('source', params.source)
     .order('created_at', { ascending: false })
     .range(
@@ -66,9 +97,42 @@ export async function listLibraryItems(params: {
   }
   if (params.used === 'new') query = query.eq('used_count', 0);
   if (params.used === 'made') query = query.gt('used_count', 0);
-  const { data, error } = await query;
+  const { data, error } = await query.overrideTypes<LibraryItemWithBriefs[], { merge: false }>();
   if (error) throw error;
   return data ?? [];
+}
+
+export async function getLibraryItemWithBriefs(id: string): Promise<LibraryItemWithBriefs> {
+  const { data, error } = await supabase
+    .from('library_items')
+    .select(ITEM_WITH_BRIEFS_SELECT)
+    .eq('id', id)
+    .single()
+    .overrideTypes<LibraryItemWithBriefs, { merge: false }>();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Clones a ready library brief, segments and pictures included, into an
+ * empty slot. One RPC, no AI, instant. The snapshot the learning loop
+ * compares against is taken on the slot afterwards.
+ */
+export async function copyBriefInto(params: {
+  sourceBriefId: string;
+  targetBriefId: string;
+  sourceKind: 'idea' | 'example';
+}): Promise<void> {
+  const { error } = await supabase.rpc('copy_brief_into', {
+    p_source_brief_id: params.sourceBriefId,
+    p_target_brief_id: params.targetBriefId,
+  });
+  if (error) throw error;
+  const snapshot = await supabase.rpc('snapshot_ai_brief', {
+    p_brief_id: params.targetBriefId,
+    p_source_kind: params.sourceKind,
+  });
+  if (snapshot.error) console.warn('snapshot_ai_brief failed:', snapshot.error.message);
 }
 
 export async function updateLibraryItemText(id: string, text: string): Promise<void> {
@@ -172,7 +236,7 @@ async function resolveLinkPreview(url: string): Promise<LinkPreview | null> {
   return (data as LinkPreview | null) ?? null;
 }
 
-async function enrichReference(itemId: string, url: string): Promise<void> {
+export async function enrichReference(itemId: string, url: string): Promise<void> {
   try {
     const preview = await resolveLinkPreview(url);
     if (!preview?.thumbnail_url && !preview?.title) return;

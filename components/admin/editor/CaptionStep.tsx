@@ -7,15 +7,12 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 import { PressableScale } from '../../ui/PressableScale';
 import { CreatorAvatar, SectionLabel } from '../shared';
-import { AiPill } from './AiPill';
 
 const CAPTION_MAX = 200;
 
 export interface CaptionStepProps {
   caption: string;
   onChangeCaption: (text: string) => void;
-  busy: boolean;
-  onRegenerate: () => void;
   hashtags: string[];
   bankTags: string[];
   onToggleTag: (tag: string) => void;
@@ -29,8 +26,6 @@ export interface CaptionStepProps {
 export function CaptionStep({
   caption,
   onChangeCaption,
-  busy,
-  onRegenerate,
   hashtags,
   bankTags,
   onToggleTag,
@@ -52,9 +47,6 @@ export function CaptionStep({
   return (
     <View style={styles.stack}>
       <View style={[styles.card, shadow.shadowCard]}>
-        <View style={styles.headRow}>
-          <AiPill icon="rotate-ccw" label="Regenerate" busy={busy} onPress={onRegenerate} />
-        </View>
         <TextInput
           multiline
           value={caption}
@@ -137,11 +129,6 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: radiusAdmin.lg,
     backgroundColor: color.white,
-  },
-  headRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
   },
   captionField: {
     fontSize: 15,

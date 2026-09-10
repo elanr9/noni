@@ -26,6 +26,7 @@ const SETUP_EXEMPT = [
   '/settings',
   '/chat',
   '/messages',
+  '/channel',
   '/profile',
   '/posts',
   '/analytics',
@@ -110,7 +111,7 @@ export default function CreatorLayout() {
           <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
           <Stack.Screen name="balance" options={{ headerShown: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
-          <Stack.Screen name="messages/index" options={{ headerShown: false }} />
+          <Stack.Screen name="channel/[chatId]" options={{ headerShown: false }} />
           <Stack.Screen
             name="account-setup"
             options={{

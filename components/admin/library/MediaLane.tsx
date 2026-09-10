@@ -347,11 +347,6 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
             <EmptyState
               icon={kind === 'recording' ? 'video' : 'images'}
               title={kind === 'recording' ? 'No recordings yet' : 'No screenshots yet'}
-              body={
-                kind === 'recording'
-                  ? 'Add screen recordings of the product. Give each one a title so it is easy to find in the editor. Up to 200 MB.'
-                  : 'Add screenshots of the product. Give each one a title so it is easy to find in the editor.'
-              }
               actionLabel={noun.add}
               onAction={() => void pick()}
               compact

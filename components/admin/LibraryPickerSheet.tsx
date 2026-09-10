@@ -4,6 +4,7 @@
 // item used (used_count increments, nothing is ever removed) then hands the
 // result to the editor:
 //   { kind: 'feature', featureId } -> write a post about a Company Brain feature
+//   { kind: 'copy', briefId }      -> clone a ready library post in, no AI, instant
 //   { kind: 'port', briefId }      -> port that finished post into this slot
 //   { kind: 'example', url }       -> generate from the reference, keep the link
 //   { kind: 'fill', text }         -> generate from the idea
@@ -15,6 +16,7 @@ import { useAuth } from '../../lib/auth';
 import {
   listNoniLibrary,
   listPostTypes,
+  type BriefFormat,
   type NoniLibraryGroup,
   type PostType,
 } from '../../lib/briefs-api';
@@ -23,7 +25,8 @@ import {
   listOurPosts,
   markLibraryItemUsed,
   markOurPostUsed,
-  type LibraryItem,
+  readyBriefFor,
+  type LibraryItemWithBriefs,
   type OurPost,
 } from '../../lib/library-api';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
@@ -40,6 +43,7 @@ import {
 } from './LibraryItemCard';
 
 export type LibraryPick =
+  | { kind: 'copy'; briefId: string; sourceKind: 'idea' | 'example' }
   | { kind: 'port'; briefId: string }
   | { kind: 'example'; url: string }
   | { kind: 'fill'; text: string }
@@ -49,6 +53,8 @@ export interface LibraryPickerSheetProps {
   visible: boolean;
   /** The post's type; filters references, our posts and ideas. Null on legacy briefs shows all. */
   postTypeId: string | null;
+  /** The slot's lane; a library row with a ready post in it copies in instantly. */
+  family: BriefFormat;
   /** True while the editor is generating from the pick. */
   busy?: boolean;
   onClose: () => void;
@@ -63,7 +69,7 @@ const SEGMENT_IDEAS = 3;
 
 type Row =
   | { kind: 'feature'; group: NoniLibraryGroup }
-  | { kind: 'item'; item: LibraryItem }
+  | { kind: 'item'; item: LibraryItemWithBriefs }
   | { kind: 'our_post'; post: OurPost };
 
 function rowId(row: Row): string {
@@ -160,6 +166,7 @@ function NewIdeaRow({ text, onPress }: { text: string; onPress: () => void }) {
 export function LibraryPickerSheet({
   visible,
   postTypeId,
+  family,
   busy = false,
   onClose,
   onPick,
@@ -249,6 +256,25 @@ export function LibraryPickerSheet({
       marked.catch(() => undefined);
     }
 
+    // A library row already made into this lane copies in as is. One made
+    // only for the other lane ports across instead of regenerating.
+    if (selected.kind === 'item') {
+      const sourceKind = selected.item.source === 'reference' ? 'example' : 'idea';
+      const ready = readyBriefFor(selected.item, family);
+      if (ready) {
+        onPick({ kind: 'copy', briefId: ready.id, sourceKind });
+        return;
+      }
+      const other = readyBriefFor(
+        selected.item,
+        family === 'video' ? 'photo_carousel' : 'video',
+      );
+      if (other) {
+        onPick({ kind: 'port', briefId: other.id });
+        return;
+      }
+    }
+
     // One of ours carries its brief, so it ports whole rather than being
     // re-scraped off the platform.
     if (selected.kind === 'our_post' && selected.post.brief_id) {
@@ -264,12 +290,16 @@ export function LibraryPickerSheet({
     else if (text) onPick({ kind: 'fill', text });
   }
 
+  const selectedReady =
+    selected?.kind === 'item' ? readyBriefFor(selected.item, family) : null;
   const writes = segment === SEGMENT_FEATURES || segment === SEGMENT_IDEAS;
   const primaryLabel = busy
     ? 'Building the post…'
-    : writes
-      ? 'Write this post'
-      : 'Attach to post';
+    : selectedReady
+      ? 'Use this post'
+      : writes
+        ? 'Write this post'
+        : 'Attach to post';
 
   const line = segment === SEGMENT_FEATURES ? null : filterLine(postType);
 
@@ -339,7 +369,9 @@ export function LibraryPickerSheet({
               );
             }
             const model =
-              row.kind === 'item' ? itemCardModel(row.item) : ourPostCardModel(row.post);
+              row.kind === 'item'
+                ? itemCardModel(row.item, null, family)
+                : ourPostCardModel(row.post);
             return (
               <LibraryItemCard key={id} model={model} selected={isSelected} onPress={toggle} />
             );

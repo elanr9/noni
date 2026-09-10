@@ -1143,6 +1143,7 @@ export async function listBacklogBriefs(
         .from('briefs')
         .select('*')
         .is('archived_at', null)
+        .is('library_item_id', null)
         .order('created_at', { ascending: false }),
     ]);
   if (linksError) throw linksError;
