@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { ShareIntentProvider } from 'expo-share-intent';
 import {
   TikTokSans_700Bold,
   useFonts,
@@ -46,15 +47,17 @@ function App() {
   }, []);
 
   return (
-    <AuthProvider>
-      <StatusBar style="dark" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          animation: screenTransition.fade,
-          animationDuration: motion.base,
-        }}
-      />
-    </AuthProvider>
+    <ShareIntentProvider>
+      <AuthProvider>
+        <StatusBar style="dark" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: screenTransition.fade,
+            animationDuration: motion.base,
+          }}
+        />
+      </AuthProvider>
+    </ShareIntentProvider>
   );
 }

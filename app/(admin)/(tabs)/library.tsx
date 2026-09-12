@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useShareIntentContext } from 'expo-share-intent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LibSearch } from '../../../components/admin/library/LibSearch';
@@ -126,6 +127,7 @@ function rowKey(row: Row): string {
 
 export default function LibraryScreen() {
   const { profile } = useAuth();
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -310,6 +312,24 @@ export default function LibraryScreen() {
       ),
     );
   }
+
+  /**
+   * A link shared to Noni from the TikTok or Instagram share sheet lands here
+   * and opens the Make it into sheet exactly like a pasted link does.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasShareIntent || !profile || making !== null) return;
+      const url = shareIntent.webUrl ?? shareIntent.text?.match(/https?:\/\/\S+/i)?.[0] ?? null;
+      resetShareIntent();
+      if (!url || !SOCIAL_LINK.test(url)) {
+        flash('Share a TikTok or Instagram link');
+        return;
+      }
+      setMakeNotes('');
+      setPendingMake([{ kind: 'reference', url }]);
+    }, [hasShareIntent, shareIntent, profile, making, resetShareIntent]),
+  );
 
   async function onPasteLink() {
     if (!profile || pasting || making !== null) return;
