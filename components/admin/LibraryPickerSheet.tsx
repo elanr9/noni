@@ -1,25 +1,19 @@
-// The Library picker that opens from inside the post editor. A Features /
+// The Library picker that opens from inside the post editor. A Media /
 // References / Our posts / Ideas segmented control, a filter line naming the
 // post's type where it applies, and one primary action. Picking marks the
 // item used (used_count increments, nothing is ever removed) then hands the
 // result to the editor:
-//   { kind: 'feature', featureId } -> write a post about a Company Brain feature
+//   { kind: 'media', mediaId }     -> write a post about what a media library item shows
 //   { kind: 'copy', briefId }      -> clone a ready library post in, no AI, instant
 //   { kind: 'port', briefId }      -> port that finished post into this slot
-//   { kind: 'example', url }       -> generate from the reference, keep the link
+//   { kind: 'example', url, notes } -> generate from the reference, keep the link
 //   { kind: 'fill', text }         -> generate from the idea
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../../lib/auth';
-import {
-  listNoniLibrary,
-  listPostTypes,
-  type BriefFormat,
-  type NoniLibraryGroup,
-  type PostType,
-} from '../../lib/briefs-api';
+import { listPostTypes, type BriefFormat, type PostType } from '../../lib/briefs-api';
 import {
   listLibraryItems,
   listOurPosts,
@@ -29,6 +23,7 @@ import {
   type LibraryItemWithBriefs,
   type OurPost,
 } from '../../lib/library-api';
+import { listMediaLibrary, type MediaLibraryItem } from '../../lib/media-library-api';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
 import { LibraryListSkeleton } from './library/LibraryListSkeleton';
 import { PostThumb, Segmented, Sheet } from './shared';
@@ -45,9 +40,9 @@ import {
 export type LibraryPick =
   | { kind: 'copy'; briefId: string; sourceKind: 'idea' | 'example' }
   | { kind: 'port'; briefId: string }
-  | { kind: 'example'; url: string }
+  | { kind: 'example'; url: string; notes: string | null }
   | { kind: 'fill'; text: string }
-  | { kind: 'feature'; featureId: string };
+  | { kind: 'media'; mediaId: string };
 
 export interface LibraryPickerSheetProps {
   visible: boolean;
@@ -63,19 +58,19 @@ export interface LibraryPickerSheetProps {
 
 const SEARCH_DEBOUNCE_MS = 350;
 
-const SEGMENT_FEATURES = 0;
+const SEGMENT_MEDIA = 0;
 const SEGMENT_OUR_POSTS = 2;
 const SEGMENT_IDEAS = 3;
 
 type Row =
-  | { kind: 'feature'; group: NoniLibraryGroup }
+  | { kind: 'media'; media: MediaLibraryItem }
   | { kind: 'item'; item: LibraryItemWithBriefs }
   | { kind: 'our_post'; post: OurPost };
 
 function rowId(row: Row): string {
   switch (row.kind) {
-    case 'feature':
-      return row.group.featureId;
+    case 'media':
+      return row.media.id;
     case 'item':
       return row.item.id;
     case 'our_post':
@@ -89,12 +84,12 @@ function filterLine(postType: PostType | null): string | null {
   return `Filtered to ${postType.label.toLowerCase()} ${noun}.`;
 }
 
-function matchesFeature(group: NoniLibraryGroup, search: string): boolean {
+function matchesMedia(media: MediaLibraryItem, search: string): boolean {
   const q = search.trim().toLowerCase();
   if (!q) return true;
   return (
-    group.name.toLowerCase().includes(q) ||
-    (group.sentence?.toLowerCase().includes(q) ?? false)
+    (media.title?.toLowerCase().includes(q) ?? false) ||
+    (media.description?.toLowerCase().includes(q) ?? false)
   );
 }
 
@@ -106,16 +101,15 @@ function ideaExists(rows: Row[], text: string): boolean {
   );
 }
 
-function FeatureRow({
-  group,
+function MediaRow({
+  media,
   selected,
   onPress,
 }: {
-  group: NoniLibraryGroup;
+  media: MediaLibraryItem;
   selected: boolean;
   onPress: () => void;
 }) {
-  const count = group.shots.length;
   return (
     <PressableScale
       accessibilityRole="button"
@@ -123,20 +117,23 @@ function FeatureRow({
       onPress={onPress}
       style={[styles.card, shadow.shadowCard, selected && styles.cardSelected]}
     >
-      <PostThumb uri={group.shots[0]?.url ?? null} format="video" width={54} height={72} />
+      <PostThumb
+        uri={media.previewUrl}
+        format={media.kind === 'recording' ? 'video' : 'photo_carousel'}
+        width={54}
+        height={72}
+      />
       <View style={styles.cardBody}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {group.name}
+          {media.title ?? 'Untitled'}
         </Text>
-        {group.sentence !== null && (
-          <Text style={styles.cardMeta} numberOfLines={1}>
-            {group.sentence}
+        {media.description !== null && (
+          <Text style={styles.cardMeta} numberOfLines={2}>
+            {media.description}
           </Text>
         )}
       </View>
-      <Text style={styles.trailing}>
-        {count} {count === 1 ? 'screenshot' : 'screenshots'}
-      </Text>
+      <Text style={styles.trailing}>{media.kind === 'recording' ? 'Recording' : 'Screenshot'}</Text>
     </PressableScale>
   );
 }
@@ -172,10 +169,10 @@ export function LibraryPickerSheet({
   onPick,
 }: LibraryPickerSheetProps) {
   const { profile } = useAuth();
-  const [segment, setSegment] = useState(SEGMENT_FEATURES);
+  const [segment, setSegment] = useState(SEGMENT_MEDIA);
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
-  const [features, setFeatures] = useState<NoniLibraryGroup[]>([]);
+  const [mediaItems, setMediaItems] = useState<MediaLibraryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType | null>(null);
@@ -185,12 +182,12 @@ export function LibraryPickerSheet({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (segment === SEGMENT_FEATURES) {
+      if (segment === SEGMENT_MEDIA) {
         if (!companyId) {
-          setFeatures([]);
+          setMediaItems([]);
           return;
         }
-        setFeatures(await listNoniLibrary(companyId));
+        setMediaItems(await listMediaLibrary(companyId));
       } else if (segment === SEGMENT_OUR_POSTS) {
         const posts = await listOurPosts({
           postTypeId: postTypeId ?? undefined,
@@ -227,11 +224,11 @@ export function LibraryPickerSheet({
   }, [visible, postTypeId]);
 
   const visibleRows = useMemo<Row[]>(() => {
-    if (segment !== SEGMENT_FEATURES) return rows;
-    return features
-      .filter((group) => matchesFeature(group, search))
-      .map((group): Row => ({ kind: 'feature', group }));
-  }, [segment, rows, features, search]);
+    if (segment !== SEGMENT_MEDIA) return rows;
+    return mediaItems
+      .filter((media) => matchesMedia(media, search))
+      .map((media): Row => ({ kind: 'media', media }));
+  }, [segment, rows, mediaItems, search]);
 
   const selected = visibleRows.find((row) => rowId(row) === selectedId) ?? null;
 
@@ -242,8 +239,8 @@ export function LibraryPickerSheet({
   function attach() {
     if (!selected) return;
 
-    if (selected.kind === 'feature') {
-      onPick({ kind: 'feature', featureId: selected.group.featureId });
+    if (selected.kind === 'media') {
+      onPick({ kind: 'media', mediaId: selected.media.id });
       return;
     }
 
@@ -286,13 +283,14 @@ export function LibraryPickerSheet({
       selected.kind === 'item'
         ? selected.item.text
         : (selected.post.title ?? selected.post.hook);
-    if (url) onPick({ kind: 'example', url });
+    const notes = selected.kind === 'item' ? selected.item.notes : null;
+    if (url) onPick({ kind: 'example', url, notes });
     else if (text) onPick({ kind: 'fill', text });
   }
 
   const selectedReady =
     selected?.kind === 'item' ? readyBriefFor(selected.item, family) : null;
-  const writes = segment === SEGMENT_FEATURES || segment === SEGMENT_IDEAS;
+  const writes = segment === SEGMENT_MEDIA || segment === SEGMENT_IDEAS;
   const primaryLabel = busy
     ? 'Building the post…'
     : selectedReady
@@ -301,11 +299,11 @@ export function LibraryPickerSheet({
         ? 'Write this post'
         : 'Attach to post';
 
-  const line = segment === SEGMENT_FEATURES ? null : filterLine(postType);
+  const line = segment === SEGMENT_MEDIA ? null : filterLine(postType);
 
   const emptyCopy =
-    segment === SEGMENT_FEATURES
-      ? 'No features with screenshots yet. Add them on the Company Brain page.'
+    segment === SEGMENT_MEDIA
+      ? 'No media yet. Add screenshots and recordings in the Library tab.'
       : 'Nothing here for this post type yet.';
 
   return (
@@ -325,7 +323,7 @@ export function LibraryPickerSheet({
       <View style={styles.segmentWrap}>
         <Segmented
           options={[
-            { label: 'Features' },
+            { label: 'Media' },
             { label: 'References' },
             { label: 'Our posts' },
             { label: 'Ideas' },
@@ -363,9 +361,9 @@ export function LibraryPickerSheet({
             const id = rowId(row);
             const isSelected = id === selectedId;
             const toggle = () => setSelectedId(isSelected ? null : id);
-            if (row.kind === 'feature') {
+            if (row.kind === 'media') {
               return (
-                <FeatureRow key={id} group={row.group} selected={isSelected} onPress={toggle} />
+                <MediaRow key={id} media={row.media} selected={isSelected} onPress={toggle} />
               );
             }
             const model =

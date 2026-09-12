@@ -2,11 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -36,9 +39,36 @@ export function SheetShell({
   const keyboardHeight = useKeyboardHeight();
   const [shown, setShown] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current;
+  /** Finger offset while dragging the panel down; springs back or hands off to onClose. */
+  const [drag] = useState(() => new Animated.Value(0));
+  const scrollTop = useRef(true);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const [panHandlers] = useState(() => {
+    const settle = () =>
+      Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 2 }).start();
+    return PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        scrollTop.current && g.dy > 6 && g.dy > Math.abs(g.dx) * 1.5,
+      onPanResponderMove: (_, g) => drag.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 90 || g.vy > 0.6) onCloseRef.current();
+        else settle();
+      },
+      onPanResponderTerminate: settle,
+    }).panHandlers;
+  });
+
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    scrollTop.current = e.nativeEvent.contentOffset.y <= 0;
+  }
 
   useEffect(() => {
     if (visible) {
+      drag.setValue(0);
       setShown(true);
       Animated.timing(progress, {
         toValue: 1,
@@ -56,12 +86,15 @@ export function SheetShell({
         if (finished) setShown(false);
       });
     }
-  }, [visible, progress]);
+  }, [visible, progress, drag]);
 
-  const translateY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [height, 0],
-  });
+  const translateY = Animated.add(
+    progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [height, 0],
+    }),
+    drag,
+  );
 
   // The panel sits above the keyboard and never grows past the top safe area.
   const available = height - keyboardHeight - insets.top;
@@ -88,6 +121,7 @@ export function SheetShell({
             panelSize,
             { marginBottom: keyboardHeight, transform: [{ translateY }] },
           ]}
+          {...panHandlers}
         >
           <View style={styles.grabberWrap}>
             <View style={styles.grabber} />
@@ -96,6 +130,8 @@ export function SheetShell({
             contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
           >
             {children}
           </ScrollView>

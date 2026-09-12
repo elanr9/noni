@@ -4,13 +4,19 @@
 // empty slot can be filled from it later without touching the AI again.
 
 import type { BriefFormat, PostType } from './briefs-api';
-import { enrichReference, type LibraryItem } from './library-api';
+import {
+  enrichReference,
+  getLibraryItemWithBriefs,
+  readyBriefFor,
+  type LibraryItem,
+  type LibraryItemWithBriefs,
+} from './library-api';
 import { ensureSlot, fillPostSlot, type FillSource } from './post-fill';
 import { supabase } from './supabase';
 
 export type LibraryMakeSource =
   | { kind: 'idea'; text: string }
-  | { kind: 'reference'; url: string };
+  | { kind: 'reference'; url: string; notes?: string | null };
 
 export type LibraryMakeOutcome = {
   item: LibraryItem;
@@ -30,7 +36,7 @@ export function defaultPostTypeFor(postTypes: PostType[], family: BriefFormat): 
 function fillSourceOf(source: LibraryMakeSource): FillSource {
   return source.kind === 'idea'
     ? { kind: 'idea', text: source.text }
-    : { kind: 'example', url: source.url };
+    : { kind: 'example', url: source.url, notes: source.notes ?? null };
 }
 
 async function insertItem(
@@ -43,7 +49,13 @@ async function insertItem(
     .insert(
       source.kind === 'idea'
         ? { company_id: companyId, source: 'idea', text: source.text, created_by: userId }
-        : { company_id: companyId, source: 'reference', url: source.url, created_by: userId },
+        : {
+            company_id: companyId,
+            source: 'reference',
+            url: source.url,
+            notes: source.notes?.trim() || null,
+            created_by: userId,
+          },
     )
     .select('*')
     .single();
@@ -56,9 +68,11 @@ async function makeOne(params: {
   companyId: string;
   userId: string;
   item: LibraryItem;
-  source: LibraryMakeSource;
+  source: FillSource;
   family: BriefFormat;
+  /** The fallback kind; with autoType the model picks the kind from the source. */
   postType: PostType;
+  autoType?: boolean;
 }): Promise<{ briefId: string } | { kill: string }> {
   const briefId = await ensureSlot({
     companyId: params.companyId,
@@ -76,9 +90,9 @@ async function makeOne(params: {
   const result = await fillPostSlot({
     briefId,
     postTypeId: params.postType.id,
-    postTypeKey: params.postType.key,
+    postTypeKey: params.autoType ? 'auto' : params.postType.key,
     family: params.family,
-    source: fillSourceOf(params.source),
+    source: params.source,
     companyId: params.companyId,
   });
   if (result.kind === 'kill') {
@@ -89,9 +103,54 @@ async function makeOne(params: {
 }
 
 /**
+ * A ready reel becomes a ready slideshow, or the reverse, by porting the
+ * existing brief into a new one that belongs to no week. Returns the patched
+ * library row, or the reason the AI refused.
+ */
+export async function makeOtherFormat(params: {
+  companyId: string;
+  userId: string;
+  item: LibraryItemWithBriefs;
+  family: BriefFormat;
+  postTypes: PostType[];
+}): Promise<{ item: LibraryItemWithBriefs } | { kill: string }> {
+  const other = readyBriefFor(params.item, params.family === 'video' ? 'photo_carousel' : 'video');
+  if (!other) throw new Error('Nothing to port from yet.');
+  const postType = defaultPostTypeFor(params.postTypes, params.family);
+  if (!postType) {
+    throw new Error(
+      params.family === 'photo_carousel'
+        ? 'No slideshow post type is set up yet.'
+        : 'No video post type is set up yet.',
+    );
+  }
+  const made = await makeOne({
+    companyId: params.companyId,
+    userId: params.userId,
+    item: params.item,
+    source: { kind: 'port', sourceBriefId: other.id },
+    family: params.family,
+    postType,
+  });
+  if ('kill' in made) return made;
+  const { error } = await supabase
+    .from('library_items')
+    .update(
+      params.family === 'photo_carousel'
+        ? { carousel_brief_id: made.briefId }
+        : { video_brief_id: made.briefId },
+    )
+    .eq('id', params.item.id);
+  if (error) throw error;
+  return { item: await getLibraryItemWithBriefs(params.item.id) };
+}
+
+/**
  * Saves the row, then makes one ready post per requested lane in parallel.
- * A lane the AI refuses is reported, not saved. When every lane is refused
- * the row is removed again so the library never shows an empty idea.
+ * The model picks the kind of post from the idea itself, so a list idea
+ * becomes a list and a one line truth becomes a 7 second video. A lane the
+ * AI refuses is reported, not saved. When every lane is refused the row is
+ * removed again so the library never shows an empty idea.
  */
 export async function makeLibraryPosts(params: {
   companyId: string;
@@ -123,9 +182,10 @@ export async function makeLibraryPosts(params: {
           companyId: params.companyId,
           userId: params.userId,
           item,
-          source: params.source,
+          source: fillSourceOf(params.source),
           family: lane.family,
           postType: lane.postType,
+          autoType: true,
         });
         return { family: lane.family, ...made };
       } catch (e) {

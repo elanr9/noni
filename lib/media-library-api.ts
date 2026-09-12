@@ -23,6 +23,8 @@ export type MediaLibraryItem = {
   kind: MediaKind;
   /** Manager-given name, e.g. "Highlight video". */
   title: string | null;
+  /** Optional: what this shows and how it works, so a post can be written from it. */
+  description: string | null;
   path: string;
   thumbPath: string | null;
   /** Signed URL for the file itself. */
@@ -129,6 +131,7 @@ async function toItem(row: MediaLibraryRow): Promise<MediaLibraryItem> {
     id: row.id,
     kind,
     title: row.title,
+    description: row.description,
     path: row.path,
     thumbPath: row.thumb_path,
     url,
@@ -170,8 +173,9 @@ export async function addToMediaLibrary(params: {
   createdBy: string;
   media: LocalMedia;
   title?: string | null;
+  description?: string | null;
 }): Promise<MediaLibraryItem> {
-  const { companyId, createdBy, media, title = null } = params;
+  const { companyId, createdBy, media, title = null, description = null } = params;
   assertUploadable(media.uri);
   const prepared = await prepareLocal(media);
   const stamp = Date.now();
@@ -205,6 +209,7 @@ export async function addToMediaLibrary(params: {
       company_id: companyId,
       kind: media.kind,
       title,
+      description,
       path,
       thumb_path: thumbPath,
       duration_ms: media.durationMs,
@@ -218,8 +223,15 @@ export async function addToMediaLibrary(params: {
   return toItem(data);
 }
 
-export async function renameMediaLibraryItem(id: string, title: string | null): Promise<void> {
-  const { error } = await supabase.from('media_library').update({ title }).eq('id', id);
+export async function renameMediaLibraryItem(
+  id: string,
+  title: string | null,
+  description: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('media_library')
+    .update({ title, description })
+    .eq('id', id);
   if (error) throw error;
 }
 
@@ -342,7 +354,7 @@ export async function placeLibraryItemOnSegment(params: {
   companyId: string;
   briefId: string;
   segmentId: string;
-  item: MediaLibraryItem;
+  item: Pick<MediaLibraryItem, 'path' | 'kind'>;
 }): Promise<string> {
   const { item, ...target } = params;
   const ext = item.path.split('.').pop() ?? (item.kind === 'recording' ? 'mp4' : 'jpg');

@@ -25,8 +25,9 @@ export type QueueInboxRow = {
 
 export type DmInboxRow = {
   id: string;
-  kind: 'creator' | 'member';
-  /** Creator id for creators; chat id for team DMs. */
+  /** creator: the shared creator thread. creator_dm: a direct chat with one creator. member: a team DM. */
+  kind: 'creator' | 'creator_dm' | 'member';
+  /** Creator id for creator threads; chat id for DMs. */
   targetId: string;
   personId: string;
   name: string;
@@ -147,18 +148,20 @@ export async function loadInbox(
 
   const memberDms: DmInboxRow[] = manager.dms.map((d) => {
     const member = team.find((t) => t.id === d.otherId);
+    const isCreator = member === undefined && d.otherRole === 'creator';
+    const personId = d.otherId ?? d.chatId;
     return {
       id: `dm:${d.chatId}`,
-      kind: 'member',
+      kind: isCreator ? 'creator_dm' : 'member',
       targetId: d.chatId,
-      personId: d.otherId ?? d.chatId,
+      personId,
       name: d.otherName ?? d.title,
-      role: member?.roleLabel ?? 'Campaign manager',
+      role: isCreator ? 'Direct' : (member?.roleLabel ?? 'Campaign manager'),
       preview: d.preview,
       lastMessageAt: d.lastMessageAt,
       timeLabel: inboxAge(d.lastMessageAt),
       unread: d.unread,
-      online: false,
+      online: isCreator && online.has(personId),
     };
   });
 

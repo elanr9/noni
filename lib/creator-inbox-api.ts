@@ -1,10 +1,35 @@
-import { previewText } from './manager-messages-api';
+import { listCampaignManagers, listCampaigns } from './briefs-api';
+import {
+  briefChatTitle,
+  getOrCreateBriefChat,
+  getOrCreateDm,
+  previewText,
+  weekNumbers,
+} from './manager-messages-api';
 import { parseMessageMedia } from './messages-api';
 import { supabase } from './supabase';
 
 export type CreatorChannelRow = {
   chatId: string;
   name: string;
+  preview: string;
+  lastMessageAt: string | null;
+  unread: number;
+};
+
+export type CreatorDmRow = {
+  chatId: string;
+  managerId: string;
+  name: string;
+  preview: string;
+  lastMessageAt: string | null;
+  unread: number;
+};
+
+export type CreatorBriefChatRow = {
+  chatId: string;
+  campaignId: string;
+  title: string;
   preview: string;
   lastMessageAt: string | null;
   unread: number;
@@ -18,6 +43,8 @@ export type CreatorTeamThread = {
 
 export type CreatorInbox = {
   team: CreatorTeamThread;
+  dms: CreatorDmRow[];
+  briefs: CreatorBriefChatRow[];
   channels: CreatorChannelRow[];
 };
 
@@ -77,20 +104,19 @@ async function loadTeamThread(companyId: string, meId: string): Promise<CreatorT
   return { preview, lastMessageAt: latest?.created_at ?? null, unread: count ?? 0 };
 }
 
-/** Channels the creator can read (RLS: all_creators channels of the company), newest first. */
-export async function listCreatorChannels(
+type ChatActivity = {
+  latest: Map<string, LatestJoin>;
+  unreadByChat: Map<string, number>;
+};
+
+async function loadChatActivity(
   companyId: string,
   meId: string,
-): Promise<CreatorChannelRow[]> {
-  const { data: chats, error: chatsError } = await supabase
-    .from('manager_chats')
-    .select('id, name, created_at')
-    .eq('company_id', companyId)
-    .eq('kind', 'channel');
-  if (chatsError) throw chatsError;
-  const list = chats ?? [];
-  if (list.length === 0) return [];
-  const chatIds = list.map((c) => c.id);
+  chatIds: string[],
+): Promise<ChatActivity> {
+  const latest = new Map<string, LatestJoin>();
+  const unreadByChat = new Map<string, number>();
+  if (chatIds.length === 0) return { latest, unreadByChat };
 
   const [{ data: messages, error: msgError }, { data: reads, error: readError }] =
     await Promise.all([
@@ -113,8 +139,6 @@ export async function listCreatorChannels(
   if (readError) throw readError;
 
   const lastRead = new Map((reads ?? []).map((r) => [r.chat_id, r.last_read_at]));
-  const latest = new Map<string, LatestJoin>();
-  const unreadByChat = new Map<string, number>();
   for (const raw of (messages ?? []) as unknown as LatestJoin[]) {
     if (!latest.has(raw.chat_id)) latest.set(raw.chat_id, raw);
     if (raw.author_id === meId) continue;
@@ -122,33 +146,114 @@ export async function listCreatorChannels(
     if (at !== undefined && raw.created_at <= at) continue;
     unreadByChat.set(raw.chat_id, (unreadByChat.get(raw.chat_id) ?? 0) + 1);
   }
+  return { latest, unreadByChat };
+}
 
-  return list
+function chatPreview(last: LatestJoin | undefined, meId: string, group: boolean): string {
+  if (!last) return 'No messages yet';
+  return previewText({ ...last, authorName: authorName(last.author) }, meId, group);
+}
+
+function byRecency<T extends { lastMessageAt: string | null }>(a: T, b: T): number {
+  return (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '');
+}
+
+/** Distinct campaigns the creator has at least one assignment on. */
+async function myCampaignIds(companyId: string, meId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('campaign_id')
+    .eq('company_id', companyId)
+    .eq('creator_id', meId)
+    .not('campaign_id', 'is', null);
+  if (error) throw error;
+  return [...new Set((data ?? []).map((a) => a.campaign_id).filter((id): id is string => id !== null))];
+}
+
+export async function loadCreatorInbox(companyId: string, meId: string): Promise<CreatorInbox> {
+  const [team, managers, campaigns, campaignIds, { data: channelRows, error: channelError }] =
+    await Promise.all([
+      loadTeamThread(companyId, meId),
+      listCampaignManagers(companyId),
+      listCampaigns(),
+      myCampaignIds(companyId, meId),
+      supabase
+        .from('manager_chats')
+        .select('id, name, created_at')
+        .eq('company_id', companyId)
+        .eq('kind', 'channel'),
+    ]);
+  if (channelError) throw channelError;
+  const channelList = channelRows ?? [];
+
+  const [dmPairs, briefPairs] = await Promise.all([
+    Promise.all(
+      managers
+        .filter((m) => m.id !== meId)
+        .map(async (manager) => ({ manager, chatId: await getOrCreateDm(companyId, meId, manager.id) })),
+    ),
+    Promise.all(
+      campaignIds.map(async (campaignId) => ({
+        campaignId,
+        chatId: await getOrCreateBriefChat(companyId, campaignId),
+      })),
+    ),
+  ]);
+
+  const { latest, unreadByChat } = await loadChatActivity(companyId, meId, [
+    ...dmPairs.map((p) => p.chatId),
+    ...briefPairs.map((p) => p.chatId),
+    ...channelList.map((c) => c.id),
+  ]);
+  const numbers = weekNumbers(campaigns);
+
+  const dms = dmPairs
+    .map(({ manager, chatId }): CreatorDmRow => {
+      const last = latest.get(chatId);
+      return {
+        chatId,
+        managerId: manager.id,
+        name: manager.name,
+        preview: chatPreview(last, meId, false),
+        lastMessageAt: last?.created_at ?? null,
+        unread: unreadByChat.get(chatId) ?? 0,
+      };
+    })
+    .sort(byRecency);
+
+  const briefs = briefPairs
+    .map(({ campaignId, chatId }): CreatorBriefChatRow => {
+      const last = latest.get(chatId);
+      return {
+        chatId,
+        campaignId,
+        title: briefChatTitle(numbers.get(campaignId) ?? 1),
+        preview: chatPreview(last, meId, true),
+        lastMessageAt: last?.created_at ?? null,
+        unread: unreadByChat.get(chatId) ?? 0,
+      };
+    })
+    .sort((a, b) => (numbers.get(b.campaignId) ?? 0) - (numbers.get(a.campaignId) ?? 0));
+
+  const channels = channelList
     .map((c): CreatorChannelRow => {
       const last = latest.get(c.id);
       return {
         chatId: c.id,
         name: c.name ?? 'channel',
-        preview: last
-          ? previewText({ ...last, authorName: authorName(last.author) }, meId, true)
-          : 'No messages yet',
+        preview: chatPreview(last, meId, true),
         lastMessageAt: last?.created_at ?? c.created_at,
         unread: unreadByChat.get(c.id) ?? 0,
       };
     })
-    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
+    .sort(byRecency);
+
+  return { team, dms, briefs, channels };
 }
 
-export async function loadCreatorInbox(companyId: string, meId: string): Promise<CreatorInbox> {
-  const [team, channels] = await Promise.all([
-    loadTeamThread(companyId, meId),
-    listCreatorChannels(companyId, meId),
-  ]);
-  return { team, channels };
-}
-
-/** Badge for the creator Messages tab: team thread plus channel unread. */
+/** Badge for the creator Messages tab: team thread plus every chat's unread. */
 export async function unreadCreatorInboxCount(companyId: string, meId: string): Promise<number> {
   const inbox = await loadCreatorInbox(companyId, meId);
-  return inbox.team.unread + inbox.channels.reduce((sum, c) => sum + c.unread, 0);
+  const sum = (rows: { unread: number }[]) => rows.reduce((total, r) => total + r.unread, 0);
+  return inbox.team.unread + sum(inbox.dms) + sum(inbox.briefs) + sum(inbox.channels);
 }

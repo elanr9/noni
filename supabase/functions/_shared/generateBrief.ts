@@ -13,7 +13,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import type { BrainFeature, BrandContext } from './wp8.ts';
-import { legacyBrandLines } from './wp8.ts';
+import { askClaude, legacyBrandLines, parseClaudeJson } from './wp8.ts';
 import { validateBrief } from './validateBrief.ts';
 import type {
   BriefDraftShape,
@@ -51,6 +51,85 @@ export async function loadPostType(
     .maybeSingle();
   if (error) throw new Error(`post_types read failed: ${error.message}`);
   return data as PostTypeRow | null;
+}
+
+const POST_TYPE_COLUMNS =
+  'id, key, label, family, min_points, max_points, clip_structure, requires_plug, requires_credential, target_words_min, target_words_max';
+
+/**
+ * Lets the model pick the kind of post the source material actually wants
+ * ("5 mistakes" is a list, "X vs Y" is a contrast, one blunt truth is a
+ * 7 second video) instead of every idea landing in the first type. The
+ * company's recent mix is a tie breaker toward variety. Never throws on a
+ * bad answer: falls back to the type least used lately.
+ */
+export async function pickPostType(
+  admin: SupabaseClient,
+  companyId: string,
+  family: 'video' | 'photo_carousel',
+  sourceLines: string[],
+): Promise<PostTypeRow | null> {
+  const [{ data: typeRows, error: typeError }, { data: recentRows }] = await Promise.all([
+    admin
+      .from('post_types')
+      .select(POST_TYPE_COLUMNS)
+      .eq('company_id', companyId)
+      .eq('family', family)
+      .order('sort_order', { ascending: true }),
+    admin
+      .from('briefs')
+      .select('post_type_id')
+      .eq('company_id', companyId)
+      .not('post_type_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(12),
+  ]);
+  if (typeError) throw new Error(`post_types read failed: ${typeError.message}`);
+  const types = (typeRows ?? []) as PostTypeRow[];
+  if (types.length === 0) return null;
+  if (types.length === 1) return types[0];
+
+  const recentIds = ((recentRows ?? []) as { post_type_id: string | null }[]).map(
+    (r) => r.post_type_id,
+  );
+  const recentKeys = recentIds
+    .map((id) => types.find((t) => t.id === id)?.key ?? null)
+    .filter((k): k is string => k !== null);
+  const leastUsed = [...types].sort(
+    (a, b) =>
+      recentKeys.filter((k) => k === a.key).length -
+      recentKeys.filter((k) => k === b.key).length,
+  )[0];
+
+  const options = types
+    .map(
+      (t) =>
+        `- ${t.key}: ${t.label}. ${t.min_points === t.max_points ? t.min_points : `${t.min_points} to ${t.max_points}`} talking point${t.max_points === 1 ? '' : 's'}${t.clip_structure === 'single_clip' ? ', one clip only' : ''}.`,
+    )
+    .join('\n');
+  const system = [
+    'You choose which kind of short form post a piece of source material should become.',
+    'Answer with a single JSON object {"key": string} and nothing else. key must be one of the option keys exactly.',
+    'Pick by fit first: a counted set of tips or mistakes is a list; two sides or a before/after is a contrast; a how or why breakdown is an explainer; a personal story or opinion is a talking head; one blunt truth that fits in a sentence is a seven second video; a satisfying visual moment with no lesson is replay bait.',
+    'When two kinds fit equally, prefer the one used least in the recent mix.',
+  ].join('\n');
+  const user = [
+    `Options:\n${options}`,
+    recentKeys.length
+      ? `Recent mix, newest first: ${recentKeys.join(', ')}`
+      : 'Recent mix: nothing yet.',
+    `Source material:\n${sourceLines.join('\n').slice(0, 3000)}`,
+  ].join('\n\n');
+
+  try {
+    const raw = await askClaude(system, user, 64);
+    const parsed = parseClaudeJson<{ key?: unknown }>(raw);
+    const chosen = types.find((t) => t.key === parsed.key);
+    return chosen ?? leastUsed;
+  } catch (e) {
+    console.warn('pickPostType fell back:', e instanceof Error ? e.message : e);
+    return leastUsed;
+  }
 }
 
 export function toPostTypeShape(row: PostTypeRow): PostTypeShape {
@@ -117,7 +196,11 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
       `CONTRAST: one speaker alternating between two sides (red flags vs green flags, D3 commit vs D1 commit, 10 offers vs 0 offers). Never two people talking.`,
     );
   }
-  if (postType.clip_structure === 'single_clip') {
+  if (postType.key === 'seven_second') {
+    lines.push(
+      `SEVEN SECOND VIDEO: one clip of about 7 seconds. The creator says ONE complete, specific idea out loud in one or two short sentences (12 to 25 words total) and the same line sits on screen. No intro, no list, no outro, no plug. The hook options are candidates for that spoken line and must each stand alone as the whole video. The single talking point is that spoken line.`,
+    );
+  } else if (postType.clip_structure === 'single_clip') {
     lines.push(
       `REPLAY BAIT: one 6 to 9 second clip carrying on-screen text that takes slightly longer to read than the clip runs, so the viewer loops it. The hook options are candidates for that on-screen text. The single talking point says what the creator does on camera during the clip.`,
     );
@@ -149,6 +232,11 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
     case 'replay_bait':
       lines.push(
         `TITLE SHAPE: short loop provocation matching the on-screen text vibe, under 8 words.`,
+      );
+      break;
+    case 'seven_second':
+      lines.push(
+        `TITLE SHAPE: the one idea as a blunt statement, under 8 words, e.g. "Coaches decide in 8 seconds", "Your film starts too late".`,
       );
       break;
     case 'how_to':
@@ -479,10 +567,78 @@ export type GeneratedDraft = {
 };
 
 export type PointMedia = {
-  feature_id: string;
+  feature_id: string | null;
   screenshot_url: string | null;
   shape: 'phone' | 'laptop' | null;
+  /** Labeled media_library pick; wins over the feature screenshot when set. */
+  library_path?: string;
+  library_kind?: 'screenshot' | 'recording';
 };
+
+type LibraryRow = { id: string; kind: 'screenshot' | 'recording'; path: string; title: string };
+
+const MEDIA_MATCH_SYSTEM = `You attach on-screen media to the talking points of a short social video or slideshow. You get the company's media library (screen recordings and screenshots, each with a title the manager wrote) and the talking points in order. Pick, for each talking point, the one library item whose title clearly shows what that point talks about. Rules: a point with is_product true is the product plug and must get an item when any item shows the product; other points get an item only on a clear title match; use each item at most once; never invent indexes. Answer ONLY with JSON: {"picks": [{"point_index": number, "media_index": number}]}. An empty picks array is a valid answer.`;
+
+/**
+ * Asks Claude to match labeled library media to talking points and layers
+ * the picks over the feature screenshots. Untitled media is never offered.
+ * Any failure falls back to the feature screenshots alone.
+ */
+export async function resolvePointMedia(
+  admin: SupabaseClient,
+  companyId: string,
+  features: BrainFeature[],
+  featureIds: (string | null)[],
+  points: TalkingPoint[],
+): Promise<(PointMedia | null)[]> {
+  const base = buildPointMedia(features, featureIds);
+  const { data } = await admin
+    .from('media_library')
+    .select('id, kind, path, title')
+    .eq('company_id', companyId)
+    .not('title', 'is', null)
+    .order('created_at', { ascending: false });
+  const library = ((data ?? []) as LibraryRow[]).filter((r) => r.title.trim().length > 0);
+  if (library.length === 0 || points.length === 0) return base;
+
+  const user = [
+    `Media library:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}`).join('\n')}`,
+    `Talking points:\n${points.map((p, i) => `- point_index ${i}${p.is_product ? ' [is_product]' : ''}: ${p.text}`).join('\n')}`,
+  ].join('\n\n');
+
+  let picks: { point_index: number; media_index: number }[] = [];
+  try {
+    const raw = await askClaude(MEDIA_MATCH_SYSTEM, user, 512);
+    const parsed = parseClaudeJson<{ picks?: unknown }>(raw);
+    if (Array.isArray(parsed.picks)) {
+      picks = parsed.picks.filter(
+        (p): p is { point_index: number; media_index: number } =>
+          typeof p === 'object' && p !== null &&
+          Number.isInteger((p as { point_index?: unknown }).point_index) &&
+          Number.isInteger((p as { media_index?: unknown }).media_index),
+      );
+    }
+  } catch {
+    return base;
+  }
+
+  const used = new Set<number>();
+  for (const pick of picks) {
+    const item = library[pick.media_index];
+    if (!item || used.has(pick.media_index)) continue;
+    if (pick.point_index < 0 || pick.point_index >= points.length) continue;
+    used.add(pick.media_index);
+    const prior = base[pick.point_index];
+    base[pick.point_index] = {
+      feature_id: prior?.feature_id ?? null,
+      screenshot_url: prior?.screenshot_url ?? null,
+      shape: prior?.shape ?? null,
+      library_path: item.path,
+      library_kind: item.kind,
+    };
+  }
+  return base;
+}
 
 export function sanitizeFeatureId(
   value: unknown,

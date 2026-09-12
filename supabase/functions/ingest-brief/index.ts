@@ -1,4 +1,4 @@
-// Admin draft flow: { query }, { url } or { feature_id }, optionally with { post_type }, in;
+// Admin draft flow: { query }, { url }, { feature_id } or { media_id }, optionally with { post_type }, in;
 // structured draft brief out (or { kill_reason } when generation refuses to
 // pad). URL path scrapes via Apify, transcribes (actor / Deepgram), OCRs
 // carousels, then drafts. Query path drafts from the search string alone.
@@ -24,22 +24,29 @@ import {
 import {
   brandDocBlocks,
   buildBriefSystem,
-  buildPointMedia,
   generateValidated,
   isKill,
   loadPostType,
   normalizeGenerated,
+  pickPostType,
+  resolvePointMedia,
   type GenOutcome,
+  type PointMedia,
   type PostTypeRow,
   type RawGenerated,
 } from '../_shared/generateBrief.ts';
+import type { TalkingPoint } from '../_shared/validateBrief.ts';
 
 type Body = {
   url?: string;
   context?: string;
   query?: string;
   feature_id?: string;
+  media_id?: string;
+  /** A post_types.key, or "auto" to let the model pick the kind from the source. */
   post_type?: string;
+  /** Lane for "auto"; defaults to video, or the scraped post's format on the url path. */
+  family?: 'video' | 'photo_carousel';
 };
 
 type BrainFeatureRow = {
@@ -51,6 +58,51 @@ type BrainFeatureRow = {
   idea_action: string | null;
   idea_example: string | null;
 };
+
+type MediaLibraryRow = {
+  id: string;
+  kind: string;
+  path: string;
+  title: string | null;
+  description: string | null;
+};
+
+function mediaSourceLines(media: MediaLibraryRow, context: string | null): string[] {
+  const mediaWord = media.kind === 'recording' ? 'screen recording' : 'screenshot';
+  const title = media.title?.trim() ? media.title.trim() : 'Untitled';
+  const description = media.description?.trim();
+  return [
+    'There is no source post.',
+    [
+      `This post is about the one product moment shown in this ${mediaWord} from our media library. Every product talking point must be about what it shows; the plug point is where it appears on screen.`,
+      `Media: ${title}`,
+      description ? `What it shows and how it works: ${description}` : null,
+      'Write the search phrase a target viewer would type that this feature answers, and structure the post so the media lands on the product point.',
+    ]
+      .filter((l): l is string => l !== null)
+      .join('\n'),
+    ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
+  ];
+}
+
+function pinMedia(
+  pointMedia: (PointMedia | null)[],
+  points: TalkingPoint[],
+  media: MediaLibraryRow,
+): void {
+  if (pointMedia.some((m) => m?.library_path === media.path)) return;
+  if (points.length === 0) return;
+  const productIndex = points.findIndex((p) => p.is_product === true);
+  const index = productIndex >= 0 ? productIndex : 0;
+  const prior = pointMedia[index] ?? null;
+  pointMedia[index] = {
+    feature_id: prior?.feature_id ?? null,
+    screenshot_url: prior?.screenshot_url ?? null,
+    shape: prior?.shape ?? null,
+    library_path: media.path,
+    library_kind: media.kind === 'recording' ? 'recording' : 'screenshot',
+  };
+}
 
 function featureSourceLines(feature: BrainFeatureRow, context: string | null): string[] {
   const angleParts = [
@@ -261,25 +313,37 @@ Deno.serve(async (req) => {
   const url = body.url?.trim();
   const query = body.query?.trim();
   const featureId = body.feature_id?.trim();
+  const mediaId = body.media_id?.trim();
   const context = body.context?.trim() || null;
-  const inputCount = [url, query, featureId].filter(Boolean).length;
+  const inputCount = [url, query, featureId, mediaId].filter(Boolean).length;
   if (inputCount > 1) {
     return jsonResponse(
-      { error: 'expected exactly one of { url }, { query }, { feature_id }' },
+      { error: 'expected exactly one of { url }, { query }, { feature_id }, { media_id }' },
       400,
     );
   }
   if (inputCount === 0) {
-    return jsonResponse({ error: 'expected { url }, { query } or { feature_id }' }, 400);
+    return jsonResponse(
+      { error: 'expected { url }, { query }, { feature_id } or { media_id }' },
+      400,
+    );
   }
 
-  let postType: PostTypeRow | null = null;
-  if (body.post_type?.trim()) {
-    postType = await loadPostType(admin, caller.companyId, body.post_type.trim());
-    if (!postType) {
+  let requestedType: PostTypeRow | null = null;
+  const autoType = body.post_type?.trim() === 'auto';
+  if (body.post_type?.trim() && !autoType) {
+    requestedType = await loadPostType(admin, caller.companyId, body.post_type.trim());
+    if (!requestedType) {
       return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
     }
   }
+  const resolvePostType = async (
+    sourceLines: string[],
+    fallbackFamily: 'video' | 'photo_carousel',
+  ): Promise<PostTypeRow | null> => {
+    if (!autoType) return requestedType;
+    return pickPostType(admin, caller.companyId, body.family ?? fallbackFamily, sourceLines);
+  };
 
   // Query path: no scrape / transcribe / OCR. This is the grid's path: the
   // row is pre-stamped with a post type and a search phrase.
@@ -297,6 +361,7 @@ Deno.serve(async (req) => {
         'Invent the structure from the search phrase and brand.',
         ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
       ];
+      const postType = await resolvePostType(sourceLines, 'video');
       const { outcome, warnings } = await generateValidated(
         admin,
         caller.companyId,
@@ -317,7 +382,7 @@ Deno.serve(async (req) => {
         ...outcome.draft,
         search_phrase: query,
         overlay_labels: outcome.overlayLabels,
-        point_media: buildPointMedia(brand.features, outcome.featureIds),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
         post_type_id: postType?.id ?? null,
         generation_id: generationId,
         warnings,
@@ -375,6 +440,7 @@ Deno.serve(async (req) => {
       };
       const generationId = crypto.randomUUID();
       const sourceLines = featureSourceLines(feature, context);
+      const postType = await resolvePostType(sourceLines, 'video');
       const { outcome, warnings } = await generateValidated(
         admin,
         caller.companyId,
@@ -394,7 +460,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
-        point_media: buildPointMedia(brand.features, outcome.featureIds),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
         post_type_id: postType?.id ?? null,
         generation_id: generationId,
         warnings,
@@ -403,6 +469,69 @@ Deno.serve(async (req) => {
       });
     } catch (e) {
       console.error('ingest-brief feature error:', e);
+      return jsonResponse(
+        { error: e instanceof Error ? e.message : 'ingest failed' },
+        500,
+      );
+    }
+  }
+
+  if (mediaId) {
+    try {
+      const { data: mediaRow, error: mediaError } = await admin
+        .from('media_library')
+        .select('id, kind, path, title, description')
+        .eq('id', mediaId)
+        .eq('company_id', caller.companyId)
+        .maybeSingle();
+      if (mediaError) throw new Error(mediaError.message);
+      if (!mediaRow) return jsonResponse({ error: 'unknown media' }, 400);
+      const media = mediaRow as MediaLibraryRow;
+
+      const brand = await loadBrandContext(admin, caller.companyId);
+      const validationCtx = {
+        hashtagBank: brand.hashtagBank,
+        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+      };
+      const generationId = crypto.randomUUID();
+      const sourceLines = mediaSourceLines(media, context);
+      const postType = await resolvePostType(sourceLines, 'video');
+      const { outcome, warnings } = await generateValidated(
+        admin,
+        caller.companyId,
+        generationId,
+        postType,
+        (priorFailures) =>
+          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+        validationCtx,
+      );
+      if (isKill(outcome)) {
+        return jsonResponse({
+          kill_reason: outcome.kill_reason,
+          generation_id: generationId,
+          post_type_id: postType?.id ?? null,
+        });
+      }
+      const pointMedia = await resolvePointMedia(
+        admin,
+        caller.companyId,
+        brand.features,
+        outcome.featureIds,
+        outcome.draft.talking_points,
+      );
+      pinMedia(pointMedia, outcome.draft.talking_points, media);
+      return jsonResponse({
+        ...outcome.draft,
+        overlay_labels: outcome.overlayLabels,
+        point_media: pointMedia,
+        post_type_id: postType?.id ?? null,
+        generation_id: generationId,
+        warnings,
+        example_url: null,
+        example_transcript: null,
+      });
+    } catch (e) {
+      console.error('ingest-brief media error:', e);
       return jsonResponse(
         { error: e instanceof Error ? e.message : 'ingest failed' },
         500,
@@ -463,6 +592,7 @@ Deno.serve(async (req) => {
     // Nothing is saved yet, so brief_id stays null; generation_id joins the
     // validation rows to the brief once the admin saves it.
     const generationId = crypto.randomUUID();
+    const postType = await resolvePostType(sourceLines, post.format);
     const { outcome, warnings } = await generateValidated(
       admin,
       caller.companyId,
@@ -489,7 +619,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       ...outcome.draft,
       overlay_labels: outcome.overlayLabels,
-      point_media: buildPointMedia(brand.features, outcome.featureIds),
+      point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
       post_type_id: postType?.id ?? null,
       generation_id: generationId,
       warnings,

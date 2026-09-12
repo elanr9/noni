@@ -94,6 +94,7 @@ export const postTypeTone = {
   contrast: { bg: '#FDEEDC', fg: '#95560C' },
   getting_started: { bg: '#FDEEDC', fg: '#95560C' },
   replay_bait: { bg: '#FBE7EF', fg: '#A03A67' },
+  seven_second: { bg: '#FFF4D6', fg: '#8A6410' },
   how_to: { bg: '#E7EAFB', fg: '#3B4EA0' },
 } as const;
 

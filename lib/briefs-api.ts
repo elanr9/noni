@@ -8,10 +8,12 @@ import {
   type ReviewCheck,
   type TalkingPoint,
 } from '../supabase/functions/_shared/validateBrief';
+import type { MediaKind } from './media-library-api';
 import {
   parseOverlayBoxes,
   parseOverlayThemeColor,
   serializeOverlayBoxes,
+  type OverlayTextStyle,
 } from './overlay-boxes';
 import { supabase } from './supabase';
 import type { Database, Json } from './types';
@@ -39,6 +41,8 @@ export type TextOverlay = {
   mode: TextOverlayMode;
   text_color: string;
   accent_color: string;
+  /** Post-wide box style; null means theme when the company has a color, else classic. */
+  text_style: OverlayTextStyle | null;
 };
 
 export const DEFAULT_TEXT_OVERLAY: TextOverlay = {
@@ -46,7 +50,15 @@ export const DEFAULT_TEXT_OVERLAY: TextOverlay = {
   mode: 'box',
   text_color: '#B73B6B',
   accent_color: '#F9C9DC',
+  text_style: null,
 };
+
+export function resolveTextStyle(
+  overlay: TextOverlay,
+  themeColor: string | null,
+): OverlayTextStyle {
+  return overlay.text_style ?? (themeColor ? 'theme' : 'classic');
+}
 
 /** Reads the text_overlay jsonb column back into a typed config. */
 export function parseTextOverlay(value: Json | null | undefined): TextOverlay {
@@ -69,14 +81,19 @@ export function parseTextOverlay(value: Json | null | undefined): TextOverlay {
       typeof raw.accent_color === 'string'
         ? raw.accent_color
         : DEFAULT_TEXT_OVERLAY.accent_color,
+    text_style:
+      raw.text_style === 'classic' || raw.text_style === 'theme' ? raw.text_style : null,
   };
 }
 
 /** Feature screenshot the AI tied to a talking point, index aligned with talking_points. */
 export type PointMedia = {
-  feature_id: string;
+  feature_id: string | null;
   screenshot_url: string | null;
   shape: 'phone' | 'laptop' | null;
+  /** Labeled media library pick; wins over the feature screenshot when set. */
+  library_path: string | null;
+  library_kind: MediaKind | null;
 };
 
 /** Reads point_media off any generator response; older responses omit it. */
@@ -85,11 +102,18 @@ export function parsePointMedia(value: unknown): (PointMedia | null)[] {
   return value.map((entry): PointMedia | null => {
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
     const raw = entry as Record<string, unknown>;
-    if (typeof raw.feature_id !== 'string') return null;
+    const featureId = typeof raw.feature_id === 'string' ? raw.feature_id : null;
+    const libraryPath = typeof raw.library_path === 'string' ? raw.library_path : null;
+    if (!featureId && !libraryPath) return null;
     return {
-      feature_id: raw.feature_id,
+      feature_id: featureId,
       screenshot_url: typeof raw.screenshot_url === 'string' ? raw.screenshot_url : null,
       shape: raw.shape === 'phone' || raw.shape === 'laptop' ? raw.shape : null,
+      library_path: libraryPath,
+      library_kind:
+        raw.library_kind === 'screenshot' || raw.library_kind === 'recording'
+          ? raw.library_kind
+          : null,
     };
   });
 }
@@ -190,14 +214,21 @@ export async function generatePost(params: {
   query?: string;
   url?: string;
   featureId?: string;
+  /** A media_library id; the post is written about what that media shows. */
+  mediaId?: string;
+  /** A post_types.key, or "auto" to let the model pick the kind from the source. */
   postTypeKey?: string;
+  /** Lane the model picks within when postTypeKey is "auto". */
+  family?: BriefFormat;
   context?: string;
 }): Promise<GeneratePostResult> {
   const body: Record<string, string> = {};
   if (params.query?.trim()) body.query = params.query.trim();
   if (params.url?.trim()) body.url = params.url.trim();
   if (params.featureId) body.feature_id = params.featureId;
+  if (params.mediaId) body.media_id = params.mediaId;
   if (params.postTypeKey) body.post_type = params.postTypeKey;
+  if (params.family) body.family = params.family;
   if (params.context?.trim()) body.context = params.context.trim();
   const { data, error } = await supabase.functions.invoke('ingest-brief', {
     body,

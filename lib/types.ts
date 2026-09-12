@@ -2406,6 +2406,7 @@ export type Database = {
           id: string
           last_brief_id: string | null
           last_used_at: string | null
+          notes: string | null
           post_id: string | null
           post_type_id: string | null
           source: string
@@ -2424,6 +2425,7 @@ export type Database = {
           id?: string
           last_brief_id?: string | null
           last_used_at?: string | null
+          notes?: string | null
           post_id?: string | null
           post_type_id?: string | null
           source: string
@@ -2442,6 +2444,7 @@ export type Database = {
           id?: string
           last_brief_id?: string | null
           last_used_at?: string | null
+          notes?: string | null
           post_id?: string | null
           post_type_id?: string | null
           source?: string
@@ -2783,6 +2786,7 @@ export type Database = {
           company_id: string
           created_at: string
           created_by: string | null
+          description: string | null
           duration_ms: number | null
           height: number | null
           id: string
@@ -2796,6 +2800,7 @@ export type Database = {
           company_id: string
           created_at?: string
           created_by?: string | null
+          description?: string | null
           duration_ms?: number | null
           height?: number | null
           id?: string
@@ -2809,6 +2814,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           created_by?: string | null
+          description?: string | null
           duration_ms?: number | null
           height?: number | null
           id?: string
@@ -4200,6 +4206,7 @@ export type Database = {
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
       can_access_manager_chat: { Args: { p_chat_id: string }; Returns: boolean }
       can_create: { Args: never; Returns: boolean }
+      chat_media_chat_id: { Args: { object_name: string }; Returns: string }
       claim_pending_invite: {
         Args: never
         Returns: {

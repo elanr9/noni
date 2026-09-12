@@ -67,6 +67,30 @@ export async function countLibraryItems(
   return { unused: unused.count ?? 0, used: used.count ?? 0 };
 }
 
+const FAMILY_BRIEF_COLUMN: Record<'video' | 'photo_carousel', string> = {
+  video: 'video_brief_id',
+  photo_carousel: 'carousel_brief_id',
+};
+
+/** Reel and slideshow counts within one used filter, for the family sub tab pills. */
+export async function countLibraryFamilies(
+  source: Exclude<LibrarySource, 'our_post'>,
+  used: LibraryUsedFilter,
+): Promise<{ video: number; photo_carousel: number }> {
+  const base = (family: 'video' | 'photo_carousel') => {
+    const q = supabase
+      .from('library_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('source', source)
+      .not(FAMILY_BRIEF_COLUMN[family], 'is', null);
+    return used === 'new' ? q.eq('used_count', 0) : q.gt('used_count', 0);
+  };
+  const [video, carousel] = await Promise.all([base('video'), base('photo_carousel')]);
+  if (video.error) throw video.error;
+  if (carousel.error) throw carousel.error;
+  return { video: video.count ?? 0, photo_carousel: carousel.count ?? 0 };
+}
+
 export async function listLibraryItems(params: {
   source: Exclude<LibrarySource, 'our_post'>;
   search?: string;
@@ -74,6 +98,8 @@ export async function listLibraryItems(params: {
   postTypeId?: string;
   /** new = never made into a post, made = used at least once. */
   used?: LibraryUsedFilter;
+  /** Only items that already have a ready post in this lane. */
+  family?: 'video' | 'photo_carousel';
   limit?: number;
   offset?: number;
 }): Promise<LibraryItemWithBriefs[]> {
@@ -97,6 +123,7 @@ export async function listLibraryItems(params: {
   }
   if (params.used === 'new') query = query.eq('used_count', 0);
   if (params.used === 'made') query = query.gt('used_count', 0);
+  if (params.family) query = query.not(FAMILY_BRIEF_COLUMN[params.family], 'is', null);
   const { data, error } = await query.overrideTypes<LibraryItemWithBriefs[], { merge: false }>();
   if (error) throw error;
   return data ?? [];

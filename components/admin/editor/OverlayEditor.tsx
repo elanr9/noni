@@ -30,10 +30,8 @@ import {
   MIN_BOX_SIZE,
   newOverlayBox,
   overlayBoxFill,
-  overlayBoxStyle,
   overlayTextContrast,
   serializeOverlayBoxes,
-  styleColors,
   type OverlayBox,
   type OverlayTextStyle,
 } from '../../../lib/overlay-boxes';
@@ -169,6 +167,8 @@ export function OverlayEditor(props: {
   boxes: OverlayBox[];
   /** Company theme color from settings; null falls back to TikTok pink. */
   themeColor: string | null;
+  /** Post-wide text style; new boxes are born in it. */
+  textStyle: OverlayTextStyle;
   screenshotX: number | null;
   screenshotY: number | null;
   screenshotWidth: number | null;
@@ -187,6 +187,7 @@ export function OverlayEditor(props: {
     layoutSelectable = true,
     boxes: initialBoxes,
     themeColor,
+    textStyle,
     screenshotX,
     screenshotY,
     screenshotWidth,
@@ -254,18 +255,13 @@ export function OverlayEditor(props: {
   }
 
   function freshBox(): OverlayBox {
-    const last = boxesRef.current[boxesRef.current.length - 1];
     return newOverlayBox({
       id: Crypto.randomUUID(),
       text: '',
-      style: last ? overlayBoxStyle(last) : 'classic',
+      style: textStyle,
       themeColor,
       index: boxesRef.current.length,
     });
-  }
-
-  function setBoxStyle(id: string, style: OverlayTextStyle) {
-    patchBox(id, styleColors(style, themeColor));
   }
 
   function startNewBox() {
@@ -647,39 +643,6 @@ export function OverlayEditor(props: {
     );
   }
 
-  function styleToggle(box: OverlayBox): JSX.Element {
-    const current = overlayBoxStyle(box);
-    return (
-      <View style={styles.styleRow}>
-        {STYLES.map((s) => {
-          const isOn = s.value === current;
-          return (
-            <PressableScale
-              key={s.value}
-              accessibilityRole="button"
-              accessibilityLabel={`${s.label} text style`}
-              accessibilityState={{ selected: isOn }}
-              onPress={() => setBoxStyle(box.id, s.value)}
-              style={[styles.styleBtn, isOn && styles.styleBtnOn]}
-            >
-              <View
-                style={[
-                  styles.styleDot,
-                  s.value === 'theme'
-                    ? { backgroundColor: overlayBoxFill(styleColors('theme', themeColor).color) }
-                    : styles.styleDotClassic,
-                ]}
-              />
-              <Text style={[styles.styleLabel, isOn && styles.styleLabelOn]}>
-                {s.label}
-              </Text>
-            </PressableScale>
-          );
-        })}
-      </View>
-    );
-  }
-
   return (
     <Modal
       visible={visible}
@@ -909,11 +872,9 @@ export function OverlayEditor(props: {
                 })}
               </View>
             ) : null}
-            {editing && active !== null ? (
-              <View style={styles.bottomRow}>{styleToggle(active)}</View>
-            ) : (
+            {editing && active !== null ? null : (
               <View style={styles.addTextRow}>
-                {active !== null ? styleToggle(active) : <View style={styles.flex} />}
+                <View style={styles.flex} />
                 <PressableScale
                   accessibilityRole="button"
                   accessibilityLabel="Add another text box"

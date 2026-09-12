@@ -255,6 +255,13 @@ async function managerChatRecipients(
 
     let title = 'Brief chat';
     if (chat.campaign_id) {
+      const { data: assigned } = await admin
+        .from('assignments')
+        .select('creator_id')
+        .eq('company_id', chat.company_id)
+        .eq('campaign_id', chat.campaign_id);
+      for (const a of assigned ?? []) ids.add(a.creator_id as string);
+
       const { data: campaign } = await admin
         .from('campaigns')
         .select('week_number')

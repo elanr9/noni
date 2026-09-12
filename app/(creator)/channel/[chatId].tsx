@@ -21,6 +21,7 @@ import {
   isChatMuted,
   listManagerMessages,
   markChatRead,
+  roleLabel,
   sendManagerMessage,
   setChatMuted,
   toggleReaction,
@@ -276,8 +277,8 @@ export default function CreatorChannelScreen() {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
         <EmptyState
-          title="Channel not found"
-          body="This channel is not available to you anymore."
+          title="Chat not found"
+          body="This chat is not available to you anymore."
           actionLabel="Back"
           onAction={() => router.back()}
         />
@@ -285,13 +286,16 @@ export default function CreatorChannelScreen() {
     );
   }
 
-  const title = chat?.title ?? 'Channel';
+  const isDm = chat?.kind === 'dm';
+  const title = chat?.title ?? (isDm ? 'Messages' : 'Channel');
   const members = chat?.memberCount ?? 0;
-  const subtitle = chat?.allCreators
-    ? 'Everyone on the team and all creators'
-    : members === 1
-      ? '1 member'
-      : `${members} members`;
+  const subtitle = isDm
+    ? roleLabel(chat?.otherRole ?? 'campaign_manager')
+    : chat?.allCreators
+      ? 'Everyone on the team and all creators'
+      : members === 1
+        ? '1 member'
+        : `${members} members`;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -305,8 +309,8 @@ export default function CreatorChannelScreen() {
           >
             <Icon name="chevron-left" size={22} color={color.ink} />
           </PressableScale>
-          <View style={styles.hashAvatar}>
-            <Text style={styles.hashText}>#</Text>
+          <View style={[styles.hashAvatar, isDm && styles.personAvatar]}>
+            <Text style={styles.hashText}>{isDm ? title.charAt(0).toUpperCase() : '#'}</Text>
           </View>
           <View style={styles.headerText}>
             <Text numberOfLines={1} style={styles.headerTitle}>
@@ -332,7 +336,7 @@ export default function CreatorChannelScreen() {
           onOpenPost={() => undefined}
         />
         <Composer
-          placeholder={`Message ${title}`}
+          placeholder={`Message ${isDm ? firstNameOf(title) : title}`}
           draft={draft}
           onChangeDraft={setDraft}
           canSend={draft.trim().length > 0}
@@ -392,6 +396,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.fillQuiet,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  personAvatar: {
+    borderRadius: radius.pill,
   },
   hashText: {
     fontSize: type.size.body,

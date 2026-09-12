@@ -122,7 +122,11 @@ export default function CreatorMessagesScreen() {
 
   const company = companyName ?? 'Your team';
   const team = inbox?.team ?? null;
+  const dms = inbox?.dms ?? [];
+  const briefs = inbox?.briefs ?? [];
   const channels = inbox?.channels ?? [];
+  const openChat = (chatId: string) =>
+    router.push({ pathname: '/(creator)/channel/[chatId]', params: { chatId } });
 
   return (
     <Screen scroll={false} bg={color.offWhite} contentStyle={styles.content}>
@@ -165,6 +169,56 @@ export default function CreatorMessagesScreen() {
               />
             </View>
 
+            {dms.length > 0 && (
+              <View style={styles.group}>
+                <Text style={styles.groupLabel}>Campaign managers</Text>
+                <View style={[styles.card, shadow.shadowCard]}>
+                  {dms.map((d, i) => (
+                    <InboxRow
+                      key={d.chatId}
+                      lead={
+                        <View style={styles.personAvatar}>
+                          <Text style={styles.personAvatarText}>
+                            {d.name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      }
+                      title={d.name}
+                      sub={d.preview}
+                      time={d.lastMessageAt ? inboxTimeLabel(d.lastMessageAt) : null}
+                      unread={d.unread}
+                      last={i === dms.length - 1}
+                      onPress={() => openChat(d.chatId)}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {briefs.length > 0 && (
+              <View style={styles.group}>
+                <Text style={styles.groupLabel}>Briefs</Text>
+                <View style={[styles.card, shadow.shadowCard]}>
+                  {briefs.map((b, i) => (
+                    <InboxRow
+                      key={b.chatId}
+                      lead={
+                        <View style={styles.hashAvatar}>
+                          <Text style={styles.hashText}>#</Text>
+                        </View>
+                      }
+                      title={b.title}
+                      sub={b.preview}
+                      time={b.lastMessageAt ? inboxTimeLabel(b.lastMessageAt) : null}
+                      unread={b.unread}
+                      last={i === briefs.length - 1}
+                      onPress={() => openChat(b.chatId)}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
             {channels.length > 0 && (
               <View style={styles.group}>
                 <Text style={styles.groupLabel}>Channels</Text>
@@ -182,12 +236,7 @@ export default function CreatorMessagesScreen() {
                       time={c.lastMessageAt ? inboxTimeLabel(c.lastMessageAt) : null}
                       unread={c.unread}
                       last={i === channels.length - 1}
-                      onPress={() =>
-                        router.push({
-                          pathname: '/(creator)/channel/[chatId]',
-                          params: { chatId: c.chatId },
-                        })
-                      }
+                      onPress={() => openChat(c.chatId)}
                     />
                   ))}
                 </View>
@@ -316,6 +365,19 @@ const styles = StyleSheet.create({
     fontSize: type.size.body,
     fontWeight: type.weight.heavy,
     color: color.blue700,
+  },
+  personAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarText: {
+    fontSize: type.size.body,
+    fontWeight: type.weight.heavy,
+    color: color.slate500,
   },
   hashAvatar: {
     width: 44,

@@ -38,7 +38,10 @@ import {
   parseOverlayBoxes,
   parseOverlayThemeColor,
   serializeOverlayBoxes,
+  styleColors,
+  type OverlayTextStyle,
 } from '../../../lib/overlay-boxes';
+import { TextStyleCard } from '../../../components/admin/editor/TextStyleCard';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { PortSheet, type PortOption } from '../../../components/admin/editor/PortSheet';
 import {
@@ -68,6 +71,7 @@ import {
   confirmSlideshowReview,
   briefRowState,
   clearBrief,
+  DEFAULT_TEXT_OVERLAY,
   getBrief,
   listApprovedClaimIds,
   listBriefSegments,
@@ -78,6 +82,8 @@ import {
   logBriefReviewEvents,
   parseHookOptions,
   parseTalkingPoints,
+  parseTextOverlay,
+  resolveTextStyle,
   reviewBrief,
   runClientTier1,
   signedScreenshotUrl,
@@ -94,6 +100,7 @@ import {
   type RegenDraftPayload,
   type RegenField,
   type TalkingPoint,
+  type TextOverlay,
 } from '../../../lib/briefs-api';
 import { copyBriefInto } from '../../../lib/library-api';
 import {
@@ -107,6 +114,7 @@ import {
   fillPostSlot,
   saveTypedIdea,
   seedOverlayBoxes,
+  suggestPostType,
   type FillSource,
 } from '../../../lib/post-fill';
 import { supabase } from '../../../lib/supabase';
@@ -244,6 +252,9 @@ export default function PostEditorScreen() {
   /** The brand account shown on the merged caption preview. */
   const [accountName, setAccountName] = useState('');
   const [themeColor, setThemeColor] = useState<string | null>(null);
+  const [textOverlay, setTextOverlay] = useState<TextOverlay>(DEFAULT_TEXT_OVERLAY);
+  const [textStyle, setTextStyle] = useState<OverlayTextStyle>('classic');
+  const [textStyleBusy, setTextStyleBusy] = useState(false);
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [weekPosts, setWeekPosts] = useState<CampaignBriefItem[]>([]);
@@ -273,6 +284,15 @@ export default function PostEditorScreen() {
       : currentType.family === 'photo_carousel'
         ? 'photo_carousel'
         : 'video';
+  /** Types of every other post already in this week, this post excluded. */
+  const weekTypeIds = useMemo(
+    () => weekPosts.filter((w) => w.brief_id !== id).map((w) => w.briefs.post_type_id),
+    [weekPosts, id],
+  );
+  const suggestedType = useMemo(
+    () => suggestPostType(postTypes, family, weekTypeIds),
+    [postTypes, family, weekTypeIds],
+  );
   const refreshScreenshotUrls = useCallback((rows: BriefSegment[]) => {
     for (const row of rows) {
       if (!row.screenshot_url) continue;
@@ -321,7 +341,11 @@ export default function PostEditorScreen() {
         // No posting-account handle lives in the data; the slug is the
         // closest stable stand-in for the merged preview.
         setAccountName(company?.slug ?? company?.name ?? '');
-        setThemeColor(parseOverlayThemeColor(company?.settings));
+        const companyTheme = parseOverlayThemeColor(company?.settings);
+        setThemeColor(companyTheme);
+        const overlay = parseTextOverlay(brief.text_overlay);
+        setTextOverlay(overlay);
+        setTextStyle(resolveTextStyle(overlay, companyTheme));
 
         const options = parseHookOptions(brief.hook_options);
         const chosen = brief.hook ? options.indexOf(brief.hook) : 0;
@@ -593,6 +617,7 @@ export default function PostEditorScreen() {
         let rows = await seedOverlayBoxes(
           await assistDeriveSegments(id, pendingOverlayLabels ?? undefined),
           themeColor,
+          textStyle,
         );
         // Regenerated slide copy replaces each surviving slide's text boxes;
         // derivation alone only seeds brand-new segments.
@@ -613,7 +638,7 @@ export default function PostEditorScreen() {
                       newOverlayBox({
                         id: `slide-${row.talking_point_index}-box-0`,
                         text,
-                        style: themeColor ? 'theme' : 'classic',
+                        style: textStyle,
                         themeColor,
                       }),
                     ]
@@ -788,11 +813,11 @@ export default function PostEditorScreen() {
       return;
     }
     if (pick.kind === 'example') {
-      void fillThisSlot({ kind: 'example', url: pick.url }, pick.url);
+      void fillThisSlot({ kind: 'example', url: pick.url, notes: pick.notes }, pick.url);
       return;
     }
-    if (pick.kind === 'feature') {
-      void fillThisSlot({ kind: 'feature', featureId: pick.featureId }, pick.featureId);
+    if (pick.kind === 'media') {
+      void fillThisSlot({ kind: 'media', mediaId: pick.mediaId }, pick.mediaId);
       return;
     }
     void fillThisSlot({ kind: 'idea', text: pick.text }, pick.text);
@@ -1046,7 +1071,39 @@ export default function PostEditorScreen() {
     setShotPickerIndex(pointIndex);
   }
 
-  /** A sheet pick lands here: device upload, library copy, or Company Brain fetch. */
+  /** One style for the whole post: saves it and recolors every clip's boxes. */
+  async function changeTextStyle(next: OverlayTextStyle) {
+    if (!id || next === textStyle || textStyleBusy) return;
+    const previous = textStyle;
+    setTextStyle(next);
+    setTextStyleBusy(true);
+    try {
+      const overlay = { ...textOverlay, text_style: next };
+      await updateBrief(id, { text_overlay: overlay });
+      setTextOverlay(overlay);
+      const restyled = await Promise.all(
+        segments.map(async (seg) => {
+          const boxes = parseOverlayBoxes(seg.overlay_style, {
+            text: seg.overlay_text,
+            textY: seg.text_y,
+          });
+          if (boxes.length === 0) return seg;
+          const patch = serializeOverlayBoxes(
+            boxes.map((b) => ({ ...b, ...styleColors(next, themeColor) })),
+          );
+          await updateBriefSegment(seg.id, patch);
+          return { ...seg, ...patch } as BriefSegment;
+        }),
+      );
+      setSegments(restyled);
+    } catch (e) {
+      setTextStyle(previous);
+      Alert.alert('Could not change text style', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setTextStyleBusy(false);
+    }
+  }
+
   /** The segment for a point, deriving clips first when the point has none yet. */
   async function resolveSegmentForPoint(
     pointIndex: number,
@@ -1058,6 +1115,7 @@ export default function PostEditorScreen() {
     const rows = await seedOverlayBoxes(
       await assistDeriveSegments(id, pendingOverlayLabels ?? undefined),
       themeColor,
+      textStyle,
     );
     setSegments(rows);
     refreshScreenshotUrls(rows);
@@ -1363,7 +1421,15 @@ export default function PostEditorScreen() {
                 >
                   <PostTypeChip typeKey={currentType.key} label={currentType.label} />
                 </PressableScale>
-              ) : null
+              ) : (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick the kind of post"
+                  onPress={() => setKindSheetOpen(true)}
+                >
+                  <PostTypeChip typeKey="none" label="Pick a kind" />
+                </PressableScale>
+              )
             ) : summaryMode === 'view' ? (
               <PressableScale
                 accessibilityRole="button"
@@ -1519,6 +1585,13 @@ export default function PostEditorScreen() {
               onChange={setSearchPhrase}
               alternates={alsoSearched}
               onPickAlternate={setSearchPhrase}
+            />
+            <SectionLabel>On screen text</SectionLabel>
+            <TextStyleCard
+              value={textStyle}
+              themeColor={themeColor}
+              disabled={textStyleBusy}
+              onChange={(next) => void changeTextStyle(next)}
             />
             <SectionLabel>
               {family === 'photo_carousel' ? 'Slides' : 'Script'}
@@ -1700,6 +1773,7 @@ export default function PostEditorScreen() {
             textY: overlaySegment?.text_y,
           })}
           themeColor={themeColor}
+          textStyle={textStyle}
           screenshotX={overlaySegment?.screenshot_x ?? null}
           screenshotY={overlaySegment?.screenshot_y ?? null}
           screenshotWidth={overlaySegment?.screenshot_width ?? null}
@@ -1766,7 +1840,8 @@ export default function PostEditorScreen() {
         postTypes={postTypes}
         family={family}
         selectedId={postTypeId}
-        dismissable={postTypeId !== null}
+        suggestedId={suggestedType?.id ?? null}
+        weekTypeIds={campaignId ? weekTypeIds : []}
         onSelect={chooseType}
         onClose={() => setKindSheetOpen(false)}
       />

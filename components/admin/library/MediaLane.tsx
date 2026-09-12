@@ -175,7 +175,7 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
     setPending({ mode: 'add', media: localFromPickerAsset(result.assets[0], kind) });
   }
 
-  async function onSaveTitle(title: string) {
+  async function onSaveTitle(title: string, description: string | null) {
     if (!pending) return;
     setSaving(true);
     setSaveError(null);
@@ -186,15 +186,20 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
           createdBy: userId,
           media: pending.media,
           title,
+          description,
         });
         setItems((prev) => [added, ...prev]);
         onToast(added.kind === 'recording' ? 'Recording added' : 'Screenshot added');
       } else {
-        await renameMediaLibraryItem(pending.item.id, title);
+        await renameMediaLibraryItem(pending.item.id, title, description);
         setItems((prev) =>
-          prev.map((item) => (item.id === pending.item.id ? { ...item, title } : item)),
+          prev.map((item) =>
+            item.id === pending.item.id ? { ...item, title, description } : item,
+          ),
         );
-        setPreview((prev) => (prev && prev.id === pending.item.id ? { ...prev, title } : prev));
+        setPreview((prev) =>
+          prev && prev.id === pending.item.id ? { ...prev, title, description } : prev,
+        );
       }
       setPending(null);
     } catch (e) {
@@ -231,12 +236,14 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
             previewUri: pending.media.kind === 'screenshot' ? pending.media.uri : null,
             fileMeta: localFileMeta(pending.media),
             initialTitle: '',
+            initialDescription: '',
           }
         : {
             kind: pending.item.kind,
             previewUri: pending.item.previewUrl,
             fileMeta: itemMeta(pending.item),
             initialTitle: pending.item.title ?? '',
+            initialDescription: pending.item.description ?? '',
           };
 
   const tiles: Tile[] = [
@@ -360,7 +367,7 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
         prompt={prompt}
         busy={saving}
         error={saveError}
-        onSave={(title) => void onSaveTitle(title)}
+        onSave={(title, description) => void onSaveTitle(title, description)}
         onClose={() => {
           if (saving) return;
           setPending(null);
@@ -403,6 +410,11 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
                 <Text style={styles.previewMeta} numberOfLines={1}>
                   {itemMeta(preview)}
                 </Text>
+                {preview.description ? (
+                  <Text style={styles.previewDescription} numberOfLines={3}>
+                    {preview.description}
+                  </Text>
+                ) : null}
               </View>
             </View>
             <View style={styles.previewFrame}>
@@ -542,6 +554,12 @@ const styles = StyleSheet.create({
     fontSize: type.size.label,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.6)',
+  },
+  previewDescription: {
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
   },
   previewFrame: {
     flex: 1,

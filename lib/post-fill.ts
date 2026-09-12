@@ -8,6 +8,7 @@ import {
   assistDeriveSegments,
   briefRowState,
   createBrief,
+  DEFAULT_TEXT_OVERLAY,
   findEmptySlot,
   generatePost,
   getOverlayThemeColor,
@@ -15,6 +16,7 @@ import {
   listBriefWeeks,
   listCampaignBriefs,
   portPost,
+  resolveTextStyle,
   updateBrief,
   updateBriefSegment,
   type BriefDraft,
@@ -25,11 +27,12 @@ import {
   type PostType,
   type TalkingPoint,
 } from './briefs-api';
-import { placeRemoteImageOnSegment } from './media-library-api';
+import { placeLibraryItemOnSegment, placeRemoteImageOnSegment } from './media-library-api';
 import {
   hasOverlayBoxes,
   newOverlayBox,
   serializeOverlayBoxes,
+  type OverlayTextStyle,
 } from './overlay-boxes';
 import { supabase } from './supabase';
 import type { Database } from './types';
@@ -37,9 +40,10 @@ import type { Database } from './types';
 /** Where the new post comes from. A port reads a finished post in this company. */
 export type FillSource =
   | { kind: 'port'; sourceBriefId: string }
-  | { kind: 'example'; url: string }
+  | { kind: 'example'; url: string; notes?: string | null }
   | { kind: 'idea'; text: string }
-  | { kind: 'feature'; featureId: string };
+  | { kind: 'feature'; featureId: string }
+  | { kind: 'media'; mediaId: string };
 
 export type FillResult =
   | {
@@ -101,9 +105,16 @@ function mergeKeep(draft: BriefDraft, keep: FillKeep): BriefDraft {
   };
 }
 
+/** The reference's saved notes ride ahead of whatever the manager already typed. */
+function joinContext(notes: string | null | undefined, context: string | undefined): string | undefined {
+  const parts = [notes?.trim(), context?.trim()].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join('\n\n') : undefined;
+}
+
 async function draftFor(
   source: FillSource,
   postTypeKey: string,
+  family: BriefFormat,
   context: string | undefined,
 ): Promise<FillResult> {
   const result =
@@ -113,10 +124,17 @@ async function draftFor(
           targetPostTypeKey: postTypeKey,
         })
       : source.kind === 'example'
-        ? await generatePost({ url: source.url, postTypeKey, context })
+        ? await generatePost({
+            url: source.url,
+            postTypeKey,
+            family,
+            context: joinContext(source.notes, context),
+          })
         : source.kind === 'feature'
-          ? await generatePost({ featureId: source.featureId, postTypeKey, context })
-          : await generatePost({ query: source.text, postTypeKey, context });
+          ? await generatePost({ featureId: source.featureId, postTypeKey, family, context })
+          : source.kind === 'media'
+            ? await generatePost({ mediaId: source.mediaId, postTypeKey, family, context })
+            : await generatePost({ query: source.text, postTypeKey, family, context });
   if (result.kind === 'kill') {
     return { kind: 'kill', kill_reason: result.kill_reason };
   }
@@ -136,6 +154,7 @@ async function draftFor(
 export async function seedOverlayBoxes(
   rows: BriefSegment[],
   themeColor: string | null,
+  style: OverlayTextStyle,
 ): Promise<BriefSegment[]> {
   return Promise.all(
     rows.map(async (row) => {
@@ -147,7 +166,7 @@ export async function seedOverlayBoxes(
         newOverlayBox({
           id: `${row.kind}-${row.slot_index}-box-0`,
           text,
-          style: themeColor ? 'theme' : 'classic',
+          style,
           themeColor,
         }),
       ]);
@@ -198,24 +217,29 @@ export async function applyPointMedia(params: {
   rows: BriefSegment[];
   pointMedia: (PointMedia | null)[];
 }): Promise<number> {
-  const targets: { row: BriefSegment; url: string }[] = [];
+  const targets: { row: BriefSegment; media: PointMedia }[] = [];
   for (const row of params.rows) {
     if (row.talking_point_index === null || row.screenshot_url) continue;
-    const url = params.pointMedia[row.talking_point_index]?.screenshot_url;
-    if (url) targets.push({ row, url });
+    const media = params.pointMedia[row.talking_point_index];
+    if (media && (media.library_path || media.screenshot_url)) targets.push({ row, media });
   }
   let placed = 0;
   for (let i = 0; i < targets.length; i += PLACE_CONCURRENCY) {
     const chunk = targets.slice(i, i + PLACE_CONCURRENCY);
     const outcomes = await Promise.all(
-      chunk.map(async ({ row, url }) => {
+      chunk.map(async ({ row, media }) => {
         try {
-          const path = await placeRemoteImageOnSegment({
+          const target = {
             companyId: params.companyId,
             briefId: params.briefId,
             segmentId: row.id,
-            url,
-          });
+          };
+          const path = media.library_path
+            ? await placeLibraryItemOnSegment({
+                ...target,
+                item: { path: media.library_path, kind: media.library_kind ?? 'screenshot' },
+              })
+            : await placeRemoteImageOnSegment({ ...target, url: media.screenshot_url ?? '' });
           await updateBriefSegment(row.id, { screenshot_url: path });
           row.screenshot_url = path;
           return true;
@@ -252,6 +276,34 @@ export async function saveTypedIdea(params: {
   };
   const { error } = await supabase.from('library_items').insert(row);
   if (error) throw error;
+}
+
+export function familyOf(postType: PostType): BriefFormat {
+  return postType.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+}
+
+/**
+ * The kind a week is shortest on. Each type carries a target share per week
+ * (default_week_count); the one furthest below its share wins, so a week
+ * does not fill up with the first type in the list. Ties fall to sort_order.
+ */
+export function suggestPostType(
+  postTypes: PostType[],
+  family: BriefFormat,
+  usedTypeIds: (string | null)[],
+): PostType | null {
+  let best: PostType | null = null;
+  let bestShare = Number.POSITIVE_INFINITY;
+  for (const type of postTypes) {
+    if (familyOf(type) !== family) continue;
+    const used = usedTypeIds.filter((id) => id === type.id).length;
+    const share = used / Math.max(1, type.default_week_count);
+    if (share < bestShare) {
+      best = type;
+      bestShare = share;
+    }
+  }
+  return best;
 }
 
 /** The week a manager is planning right now: the newest unpublished week, else the live one. */
@@ -348,6 +400,7 @@ export async function ensureSlot(params: {
 export async function fillPostSlot(params: {
   briefId: string;
   postTypeId: string;
+  /** A post_types.key, or "auto" to let the model pick the kind within the lane. */
   postTypeKey: string;
   family: BriefFormat;
   source: FillSource;
@@ -359,11 +412,14 @@ export async function fillPostSlot(params: {
   const result = await draftFor(
     params.source,
     params.postTypeKey,
+    params.family,
     params.keep ? keepContext(params.keep) : undefined,
   );
   if (result.kind === 'kill') return result;
   const draft = params.keep ? mergeKeep(result.draft, params.keep) : result.draft;
   const slideshow = params.family === 'photo_carousel';
+  const postTypeId =
+    params.postTypeKey === 'auto' && draft.post_type_id ? draft.post_type_id : params.postTypeId;
 
   await updateBrief(params.briefId, {
     title: draft.title,
@@ -383,7 +439,7 @@ export async function fillPostSlot(params: {
     caption: mergeCaption(draft.caption, draft.hashtags) || null,
     why_it_works: draft.why_it_works || null,
     cta: slideshow ? null : draft.cta,
-    post_type_id: params.postTypeId,
+    post_type_id: postTypeId,
     kill_reason: null,
     generation_id: draft.generation_id,
     example_url: draft.example_url || null,
@@ -391,7 +447,12 @@ export async function fillPostSlot(params: {
   });
 
   const derived = await assistDeriveSegments(params.briefId, draft.overlay_labels);
-  const rows = await seedOverlayBoxes(derived, await getOverlayThemeColor());
+  const themeColor = await getOverlayThemeColor();
+  const rows = await seedOverlayBoxes(
+    derived,
+    themeColor,
+    resolveTextStyle(DEFAULT_TEXT_OVERLAY, themeColor),
+  );
   if (params.source.kind === 'port') {
     await carryScreenshots(params.source.sourceBriefId, rows);
   }

@@ -89,10 +89,10 @@ export default function MessagesScreen() {
     if (!inbox) return [];
     const q = query.trim().toLowerCase();
     return inbox.dms
-      .map((d) => ({ ...d, online: d.kind === 'creator' && online.has(d.personId) }))
+      .map((d) => ({ ...d, online: d.kind !== 'member' && online.has(d.personId) }))
       .filter((d) => {
         if (filter === 'Unread') return d.unread > 0;
-        if (filter === 'Creators') return d.kind === 'creator';
+        if (filter === 'Creators') return d.kind !== 'member';
         if (filter === 'Team') return d.kind === 'member';
         return filter !== 'Channels';
       })
@@ -271,12 +271,12 @@ export default function MessagesScreen() {
                       lead={
                         <PersonLead
                           name={d.name}
-                          tone={d.kind === 'creator' ? 'brand' : 'quiet'}
+                          tone={d.kind === 'member' ? 'quiet' : 'brand'}
                           online={d.online}
                         />
                       }
                       title={d.name}
-                      titleSuffix={d.kind === 'member' ? (d.role ?? undefined) : undefined}
+                      titleSuffix={d.kind === 'creator' ? undefined : (d.role ?? undefined)}
                       sub={d.preview}
                       time={d.timeLabel}
                       unread={d.unread}

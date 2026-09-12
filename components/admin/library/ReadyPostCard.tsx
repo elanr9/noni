@@ -6,18 +6,18 @@ import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/to
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { PostThumb, PostTypeChip } from '../shared';
-import { shortDate } from '../LibraryItemCard';
 import { MakeButton } from './MakeButton';
 
 export interface ReadyPostCardProps {
   item: LibraryItemWithBriefs;
+  /** The lane this card shows; the other lane's post is what Create makes. */
+  family: BriefFormat;
   onOpenBrief: (briefId: string) => void;
   /** References: open the original link. */
   onOpenSource?: () => void;
   onLongPress: () => void;
-  /** Meta line tap; only wired when the row already landed in a week. */
-  onMetaPress?: () => void;
-  make?: { busy: boolean; disabled: boolean; onPress: () => void };
+  /** Makes the other format; hidden once both exist. */
+  createOther?: { busy: boolean; disabled: boolean; onPress: () => void };
 }
 
 function platformOf(url: string | null): string | null {
@@ -90,17 +90,17 @@ function ReadyRow({
 }
 
 /**
- * One captured idea or reference and the finished posts the AI made from it.
- * The source is the small line on top; each ready post is a tappable row that
- * opens in the editor. Add to week clones a ready post into an empty slot.
+ * One captured idea or reference and the finished post the AI made from it in
+ * this lane. The source is the small line on top; the ready post is a tappable
+ * row that opens in the editor. Create makes the other format from it.
  */
 export function ReadyPostCard({
   item,
+  family,
   onOpenBrief,
   onOpenSource,
   onLongPress,
-  onMetaPress,
-  make,
+  createOther,
 }: ReadyPostCardProps) {
   const isReference = item.source === 'reference';
   const handle = handleOf(item.url);
@@ -112,18 +112,14 @@ export function ReadyPostCard({
     ? [handle ? `@${handle}` : null, platform].filter(Boolean).join(' · ')
     : null;
 
-  const ready: { brief: ReadyBrief; family: BriefFormat }[] = [];
-  if (item.video_brief) ready.push({ brief: item.video_brief, family: 'video' });
-  if (item.carousel_brief) ready.push({ brief: item.carousel_brief, family: 'photo_carousel' });
-
-  const used = item.used_count > 0;
-  const date = shortDate(item.last_used_at);
+  const brief = family === 'photo_carousel' ? item.carousel_brief : item.video_brief;
+  const other = family === 'photo_carousel' ? item.video_brief : item.carousel_brief;
 
   return (
     <Pressable
       accessibilityRole="button"
       onLongPress={onLongPress}
-      onPress={ready[0] ? () => onOpenBrief(ready[0].brief.id) : onOpenSource}
+      onPress={brief ? () => onOpenBrief(brief.id) : onOpenSource}
       style={[styles.card, shadow.shadowCard]}
     >
       <Pressable
@@ -146,53 +142,19 @@ export function ReadyPostCard({
             </Text>
           )}
         </View>
+        {createOther !== undefined && other === null && (
+          <MakeButton
+            label={family === 'photo_carousel' ? 'Create Reel' : 'Create Slideshow'}
+            busy={createOther.busy}
+            disabled={createOther.disabled}
+            onPress={createOther.onPress}
+          />
+        )}
       </Pressable>
 
-      {ready.length > 0 ? (
-        ready.map(({ brief, family }) => (
-          <ReadyRow
-            key={brief.id}
-            brief={brief}
-            family={family}
-            onPress={() => onOpenBrief(brief.id)}
-          />
-        ))
-      ) : (
-        <View style={styles.notMade}>
-          <Text style={styles.notMadeText}>Not made yet. Make writes it into a week slot.</Text>
-        </View>
+      {brief !== null && (
+        <ReadyRow brief={brief} family={family} onPress={() => onOpenBrief(brief.id)} />
       )}
-
-      <View style={styles.footer}>
-        {used ? (
-          <Pressable
-            onPress={onMetaPress}
-            disabled={onMetaPress === undefined}
-            hitSlop={{ top: 6, bottom: 6 }}
-            style={styles.metaRow}
-          >
-            <Text style={styles.meta} numberOfLines={1}>
-              {date ? `In a week ${item.used_count}x · ${date}` : `In a week ${item.used_count}x`}
-            </Text>
-            {onMetaPress !== undefined && (
-              <Icon name="chevron-right" size={12} color={color.blue700} />
-            )}
-          </Pressable>
-        ) : (
-          <Text style={styles.metaQuiet}>
-            {ready.length > 0 ? 'Ready, not in a week yet' : 'New'}
-          </Text>
-        )}
-        <View style={styles.flex} />
-        {make !== undefined && (
-          <MakeButton
-            label={ready.length > 0 ? 'Add to week' : 'Make'}
-            busy={make.busy}
-            disabled={make.disabled}
-            onPress={make.onPress}
-          />
-        )}
-      </View>
     </Pressable>
   );
 }
@@ -204,9 +166,6 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.hair,
     borderColor: color.line,
     overflow: 'hidden',
-  },
-  flex: {
-    flex: 1,
   },
   source: {
     flexDirection: 'row',
@@ -247,8 +206,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: borderWidth.hair,
-    borderBottomColor: color.line,
   },
   laneGlyph: {
     width: 30,
@@ -285,38 +242,5 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: color.slate500,
     lineHeight: 13 * 1.4,
-  },
-  notMade: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: borderWidth.hair,
-    borderBottomColor: color.line,
-  },
-  notMadeText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: color.slate400,
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  meta: {
-    fontSize: type.size.label,
-    fontWeight: '700',
-    color: color.blue700,
-  },
-  metaQuiet: {
-    fontSize: type.size.label,
-    fontWeight: '700',
-    color: color.slate400,
   },
 });

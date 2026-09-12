@@ -14,6 +14,7 @@ export interface NameMediaPrompt {
   /** "mov · 0:12 · 38 MB" or "png · 1170 × 2532". */
   fileMeta: string;
   initialTitle: string;
+  initialDescription: string;
 }
 
 export interface NameMediaSheetProps {
@@ -21,13 +22,18 @@ export interface NameMediaSheetProps {
   busy?: boolean;
   /** Upload failure shown inline; the sheet stays open. */
   error?: string | null;
-  onSave: (title: string) => void;
+  onSave: (title: string, description: string | null) => void;
   onClose: () => void;
 }
 
 const PLACEHOLDER: Record<MediaKind, string> = {
   screenshot: 'e.g. Chapter view, editor',
   recording: 'e.g. Highlight video',
+};
+
+const DESCRIPTION_PLACEHOLDER: Record<MediaKind, string> = {
+  screenshot: 'What it shows and how it works, optional',
+  recording: 'e.g. Reply AI drafts a reply to a college coach in one tap',
 };
 
 /** Names a screenshot or recording. The title is the label every picker shows. */
@@ -39,15 +45,18 @@ export function NameMediaSheet({
   onClose,
 }: NameMediaSheetProps) {
   const [draft, setDraft] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState('');
   const [seededFor, setSeededFor] = useState<NameMediaPrompt | null>(null);
 
   if (prompt !== null && seededFor !== prompt) {
     setSeededFor(prompt);
     setDraft(prompt.initialTitle);
+    setDescriptionDraft(prompt.initialDescription);
   }
 
   const kind = prompt?.kind ?? 'screenshot';
   const trimmed = draft.trim();
+  const description = descriptionDraft.trim() || null;
   const isRename = (prompt?.initialTitle ?? '').length > 0;
 
   return (
@@ -55,46 +64,60 @@ export function NameMediaSheet({
       visible={prompt !== null}
       onClose={onClose}
       title={kind === 'recording' ? 'Name this recording' : 'Name this screenshot'}
-      subtitle="This is the label you will see when adding it to a post."
+      subtitle="The name is the label you see when adding it to a post. The description tells the AI what it shows."
       footer={
         <Button
           size="lg"
           block
           disabled={busy || trimmed.length === 0}
-          onPress={() => onSave(trimmed)}
+          onPress={() => onSave(trimmed, description)}
         >
           {busy ? 'Saving' : isRename ? 'Save name' : 'Save to media'}
         </Button>
       }
     >
-      <View style={styles.row}>
-        <View style={styles.preview}>
-          {prompt?.previewUri ? (
-            <Image source={{ uri: prompt.previewUri }} style={styles.previewImage} resizeMode="cover" />
-          ) : null}
-          {kind === 'recording' && (
-            <View style={styles.playDisc}>
-              <Icon name="play" size={12} color={color.ink} />
-            </View>
-          )}
+      <View style={styles.body}>
+        <View style={styles.row}>
+          <View style={styles.preview}>
+            {prompt?.previewUri ? (
+              <Image source={{ uri: prompt.previewUri }} style={styles.previewImage} resizeMode="cover" />
+            ) : null}
+            {kind === 'recording' && (
+              <View style={styles.playDisc}>
+                <Icon name="play" size={12} color={color.ink} />
+              </View>
+            )}
+          </View>
+          <View style={styles.fieldWrap}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={PLACEHOLDER[kind]}
+              placeholderTextColor={color.slate400}
+              autoFocus
+              autoCapitalize="sentences"
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (trimmed.length > 0 && !busy) onSave(trimmed, description);
+              }}
+              style={[styles.input, trimmed.length > 0 && styles.inputActive]}
+            />
+            <Text style={[styles.meta, error !== null && styles.metaError]} numberOfLines={2}>
+              {error ?? prompt?.fileMeta ?? ''}
+            </Text>
+          </View>
         </View>
-        <View style={styles.fieldWrap}>
+        <View style={styles.descriptionWrap}>
+          <Text style={styles.label}>Description</Text>
           <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={PLACEHOLDER[kind]}
+            value={descriptionDraft}
+            onChangeText={setDescriptionDraft}
+            placeholder={DESCRIPTION_PLACEHOLDER[kind]}
             placeholderTextColor={color.slate400}
-            autoFocus
+            multiline
             autoCapitalize="sentences"
-            returnKeyType="done"
-            onSubmitEditing={() => {
-              if (trimmed.length > 0 && !busy) onSave(trimmed);
-            }}
-            style={[styles.input, trimmed.length > 0 && styles.inputActive]}
+            style={[styles.input, styles.descriptionInput, description !== null && styles.inputActive]}
           />
-          <Text style={[styles.meta, error !== null && styles.metaError]} numberOfLines={2}>
-            {error ?? prompt?.fileMeta ?? ''}
-          </Text>
         </View>
       </View>
     </Sheet>
@@ -102,6 +125,21 @@ export function NameMediaSheet({
 }
 
 const styles = StyleSheet.create({
+  body: {
+    gap: 16,
+  },
+  descriptionWrap: {
+    gap: 6,
+  },
+  label: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.slate500,
+  },
+  descriptionInput: {
+    minHeight: 84,
+    textAlignVertical: 'top',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -38,6 +38,11 @@ const FORMAT_COPY: Record<string, { description: string; example: string }> = {
       'One short, satisfying clip designed to loop. No script or structure, just a moment people want to watch twice.',
     example: '"A one-handed catch that syncs perfectly with the beat drop"',
   },
+  seven_second: {
+    description:
+      'One clip, about seven seconds. You say one complete idea out loud, once, while the same line sits on screen. No intro, no outro, no list.',
+    example: '"Coaches decide in the first 8 seconds of your film. Put the play first."',
+  },
   numbered_tips: {
     description:
       'A photo carousel where each slide is one tip. Viewers swipe through the list at their own pace and often save it for later.',

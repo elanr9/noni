@@ -15,7 +15,7 @@ export interface NewMessageSheetProps {
 /** The pencil button: pick a creator or team member, then open that thread. */
 export function NewMessageSheet({ visible, onClose, people, onPick }: NewMessageSheetProps) {
   const creators = people
-    .filter((p) => p.kind === 'creator')
+    .filter((p) => p.kind !== 'member')
     .sort((a, b) => a.name.localeCompare(b.name));
   const team = people
     .filter((p) => p.kind === 'member')
@@ -56,7 +56,7 @@ function PersonRow({ row, onPress }: { row: DmInboxRow; onPress: () => void }) {
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
     >
-      <Avatar name={row.name} size={36} tone={row.kind === 'creator' ? 'brand' : 'quiet'} />
+      <Avatar name={row.name} size={36} tone={row.kind === 'member' ? 'quiet' : 'brand'} />
       <View style={styles.body}>
         <Text numberOfLines={1} style={styles.name}>
           {row.name}

@@ -17,6 +17,7 @@ export type InboxRow = {
   campaignId?: string;
   otherId?: string;
   otherName?: string;
+  otherRole?: string;
   /** Channels and brief chats: slug without the leading "#". */
   name?: string;
   memberCount?: number;
@@ -30,6 +31,7 @@ export type ManagerChatInfo = {
   campaignId: string | null;
   otherId: string | null;
   otherName: string | null;
+  otherRole: string | null;
   /** Channels and brief chats: slug without the leading "#". */
   name: string | null;
   memberCount: number;
@@ -149,7 +151,7 @@ function asMediaKind(value: string | null): 'image' | 'video' | 'voice' | null {
   return null;
 }
 
-function weekNumbers(
+export function weekNumbers(
   campaigns: { id: string; drop_date: string | null }[],
 ): Map<string, number> {
   const numberById = new Map<string, number>();
@@ -384,6 +386,71 @@ export async function getOrCreateDm(
   throw insertError ?? new Error('Could not open this chat');
 }
 
+type PersonJoin = { full_name: string | null; role: string } | { full_name: string | null; role: string }[] | null;
+
+type DmRow = {
+  id: string;
+  user_a: string | null;
+  user_b: string | null;
+  profile_a: PersonJoin;
+  profile_b: PersonJoin;
+};
+
+const DM_JOINS = 'profile_a:user_a ( full_name, role ), profile_b:user_b ( full_name, role )';
+const DM_SELECT = `id, user_a, user_b, ${DM_JOINS}`;
+
+function dmOther(row: DmRow, myId: string): { id: string; name: string; role: string } {
+  const otherIsA = row.user_b === myId;
+  const id = (otherIsA ? row.user_a : row.user_b) ?? '';
+  const person = asOne(otherIsA ? row.profile_a : row.profile_b);
+  const role = person?.role ?? 'campaign_manager';
+  return {
+    id,
+    name: person?.full_name?.trim() || (role === 'creator' ? 'Creator' : 'Manager'),
+    role,
+  };
+}
+
+/** Creators with at least one assignment on the campaign, by campaign id. */
+async function assignedCreatorsByCampaign(
+  companyId: string,
+  campaignIds: string[],
+): Promise<Map<string, ChannelMember[]>> {
+  const out = new Map<string, ChannelMember[]>();
+  if (campaignIds.length === 0) return out;
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('campaign_id, creator_id, profiles:creator_id ( full_name, role )')
+    .eq('company_id', companyId)
+    .in('campaign_id', campaignIds);
+  if (error) throw error;
+  type Row = { campaign_id: string | null; creator_id: string; profiles: PersonJoin };
+  for (const row of (data ?? []) as unknown as Row[]) {
+    if (!row.campaign_id) continue;
+    const list = out.get(row.campaign_id) ?? [];
+    if (list.some((m) => m.id === row.creator_id)) continue;
+    const p = asOne(row.profiles);
+    list.push({ id: row.creator_id, name: p?.full_name?.trim() || 'Creator', role: p?.role ?? 'creator' });
+    out.set(row.campaign_id, list);
+  }
+  return out;
+}
+
+/** Everyone in a brief chat: managers and the admin plus creators assigned to the campaign. */
+export async function listBriefChatMembers(
+  companyId: string,
+  campaignId: string,
+): Promise<ChannelMember[]> {
+  const [managers, creators] = await Promise.all([
+    listCampaignManagers(companyId),
+    assignedCreatorsByCampaign(companyId, [campaignId]),
+  ]);
+  return [
+    ...managers.map((m) => ({ id: m.id, name: m.name, role: 'campaign_manager' })),
+    ...(creators.get(campaignId) ?? []),
+  ];
+}
+
 export async function getManagerChat(
   companyId: string,
   myId: string,
@@ -391,7 +458,7 @@ export async function getManagerChat(
 ): Promise<ManagerChatInfo | null> {
   const { data, error } = await supabase
     .from('manager_chats')
-    .select('*')
+    .select(`*, ${DM_JOINS}`)
     .eq('company_id', companyId)
     .eq('id', chatId)
     .maybeSingle();
@@ -401,9 +468,9 @@ export async function getManagerChat(
   if (!kind) return null;
 
   if (kind === 'brief') {
-    const [campaigns, managers] = await Promise.all([
+    const [campaigns, members] = await Promise.all([
       listCampaigns(),
-      listCampaignManagers(companyId),
+      data.campaign_id ? listBriefChatMembers(companyId, data.campaign_id) : Promise.resolve([]),
     ]);
     const numbers = weekNumbers(campaigns);
     const weekNumber = data.campaign_id
@@ -416,8 +483,9 @@ export async function getManagerChat(
       campaignId: data.campaign_id,
       otherId: null,
       otherName: null,
+      otherRole: null,
       name: briefChannelName(weekNumber),
-      memberCount: managers.length,
+      memberCount: members.length,
       allCreators: false,
       createdBy: null,
     };
@@ -432,6 +500,7 @@ export async function getManagerChat(
       campaignId: null,
       otherId: null,
       otherName: null,
+      otherRole: null,
       name: data.name,
       memberCount: members.length,
       allCreators: data.all_creators,
@@ -439,18 +508,15 @@ export async function getManagerChat(
     };
   }
 
-  const otherId = data.user_a === myId ? data.user_b : data.user_a;
-  const managers = await listCampaignManagers(companyId);
-  const other = otherId
-    ? managers.find((m) => m.id === otherId)
-    : undefined;
+  const other = dmOther(data as unknown as DmRow, myId);
   return {
     id: data.id,
     kind,
-    title: other?.name ?? 'Manager',
+    title: other.name,
     campaignId: null,
-    otherId,
-    otherName: other?.name ?? 'Manager',
+    otherId: other.id,
+    otherName: other.name,
+    otherRole: other.role,
     name: null,
     memberCount: 2,
     allCreators: false,
@@ -490,18 +556,27 @@ export async function listManagerInbox(
   const numbers = weekNumbers(campaigns);
   const others = managers.filter((m) => m.id !== myId);
 
-  const briefPairs = await Promise.all(
-    campaigns.map(async (campaign) => ({
-      campaign,
-      chatId: await getOrCreateBriefChat(companyId, campaign.id),
-    })),
-  );
-  const dmPairs = await Promise.all(
-    others.map(async (manager) => ({
-      manager,
-      chatId: await getOrCreateDm(companyId, myId, manager.id),
-    })),
-  );
+  const [briefPairs, creatorsByCampaign] = await Promise.all([
+    Promise.all(
+      campaigns.map(async (campaign) => ({
+        campaign,
+        chatId: await getOrCreateBriefChat(companyId, campaign.id),
+      })),
+    ),
+    assignedCreatorsByCampaign(companyId, campaigns.map((c) => c.id)),
+  ]);
+  await Promise.all(others.map((manager) => getOrCreateDm(companyId, myId, manager.id)));
+  const { data: dmRows, error: dmError } = await supabase
+    .from('manager_chats')
+    .select(DM_SELECT)
+    .eq('company_id', companyId)
+    .eq('kind', 'dm')
+    .or(`user_a.eq.${myId},user_b.eq.${myId}`);
+  if (dmError) throw dmError;
+  const dmPairs = ((dmRows ?? []) as unknown as DmRow[]).map((row) => ({
+    other: dmOther(row, myId),
+    chatId: row.id,
+  }));
 
   const chatIds = [
     ...briefPairs.map((p) => p.chatId),
@@ -552,6 +627,7 @@ export async function listManagerInbox(
       campaignId?: string;
       otherId?: string;
       otherName?: string;
+      otherRole?: string;
       name?: string;
       memberCount?: number;
       allCreators?: boolean;
@@ -589,7 +665,7 @@ export async function listManagerInbox(
       return toRow(chatId, briefChatTitle(n), 'brief', {
         campaignId: campaign.id,
         name: briefChannelName(n),
-        memberCount: managers.length,
+        memberCount: managers.length + (creatorsByCampaign.get(campaign.id)?.length ?? 0),
         allCreators: false,
       });
     })
@@ -607,8 +683,8 @@ export async function listManagerInbox(
   };
 
   const dms = dmPairs
-    .map(({ manager, chatId }) =>
-      toRow(chatId, manager.name, 'dm', { otherId: manager.id, otherName: manager.name }),
+    .map(({ other, chatId }) =>
+      toRow(chatId, other.name, 'dm', { otherId: other.id, otherName: other.name, otherRole: other.role }),
     )
     .sort(byRecency);
 

@@ -33,13 +33,13 @@ import {
 import {
   brandDocBlocks,
   buildFieldSystem,
-  buildPointMedia,
   buildPortSystem,
   deriveSegments,
   generateValidated,
   isKill,
   loadPostType,
   normalizeGenerated,
+  resolvePointMedia,
   sanitizeFeatureId,
   sortHooks,
   sourceBriefLines,
@@ -326,7 +326,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
-        point_media: buildPointMedia(brand.features, outcome.featureIds),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
         post_type_id: targetType.id,
         generation_id: generationId,
         warnings,
@@ -542,7 +542,7 @@ Deno.serve(async (req) => {
         script: merged.script,
         target_words: merged.target_words,
         overlay_labels: overlayLabels,
-        point_media: buildPointMedia(brand.features, featureIds),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, merged.talking_points),
         hook_may_be_stale: hookMayBeStale,
         warnings,
       });
@@ -551,7 +551,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         talking_point: merged.talking_points[body.index!],
         overlay_label: overlayLabels[0] ?? null,
-        point_media: buildPointMedia(brand.features, featureIds),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, [merged.talking_points[body.index!]]),
         index: body.index,
         hook_may_be_stale: hookMayBeStale,
         warnings,

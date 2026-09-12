@@ -40,10 +40,15 @@ import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
 import { listPostTypes, type BriefFormat, type PostType } from '../../../lib/briefs-api';
-import { makeLibraryPosts, type LibraryMakeSource } from '../../../lib/library-make';
+import {
+  makeLibraryPosts,
+  makeOtherFormat,
+  type LibraryMakeSource,
+} from '../../../lib/library-make';
 import { fillPostSlot, type FillSource } from '../../../lib/post-fill';
 import {
   copyBriefInto,
+  countLibraryFamilies,
   countLibraryItems,
   deleteLibraryItem,
   enrichOurPostThumbnail,
@@ -126,6 +131,7 @@ export default function LibraryScreen() {
 
   const [lane, setLane] = useState<LibraryLane>('idea');
   const [sub, setSub] = useState<UsedTab>('unused');
+  const [family, setFamily] = useState<BriefFormat>('video');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OurPostsSort>('top');
   const [creatorId, setCreatorId] = useState<string | null>(null);
@@ -138,6 +144,7 @@ export default function LibraryScreen() {
 
   /** Captured, waiting on the video / slideshow / both choice. */
   const [pendingMake, setPendingMake] = useState<LibraryMakeSource[] | null>(null);
+  const [makeNotes, setMakeNotes] = useState('');
   const [making, setMaking] = useState<Making | null>(null);
   const [makingFamilies, setMakingFamilies] = useState<BriefFormat[]>([]);
 
@@ -146,6 +153,10 @@ export default function LibraryScreen() {
     idea: null,
     reference: null,
   });
+  const [familyCounts, setFamilyCounts] = useState<{
+    video: number;
+    photo_carousel: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [endReached, setEndReached] = useState(false);
@@ -156,20 +167,29 @@ export default function LibraryScreen() {
   /** The row waiting on a slot before it becomes a post. */
   const [makeFrom, setMakeFrom] = useState<Row | null>(null);
   const [makeBusyKey, setMakeBusyKey] = useState<string | null>(null);
+  /** The library item whose other format is being written right now. */
+  const [creatingOtherId, setCreatingOtherId] = useState<string | null>(null);
 
   // One counter guards every list write: filter changes mid flight discard
   // the stale response instead of racing it.
   const queryVersion = useRef(0);
   const enriching = useRef(new Set<string>());
 
-  const refreshCounts = useCallback(async (which: ItemLane) => {
-    try {
-      const next = await countLibraryItems(which);
-      setCounts((prev) => ({ ...prev, [which]: next }));
-    } catch {
-      // Counts are decoration; the list itself reports load errors.
-    }
-  }, []);
+  const refreshCounts = useCallback(
+    async (which: ItemLane) => {
+      try {
+        const [next, families] = await Promise.all([
+          countLibraryItems(which),
+          countLibraryFamilies(which, sub === 'unused' ? 'new' : 'made'),
+        ]);
+        setCounts((prev) => ({ ...prev, [which]: next }));
+        setFamilyCounts(families);
+      } catch {
+        // Counts are decoration; the list itself reports load errors.
+      }
+    },
+    [sub],
+  );
 
   const loadPage = useCallback(
     async (offset: number) => {
@@ -196,6 +216,7 @@ export default function LibraryScreen() {
                   source: lane,
                   search,
                   used: sub === 'unused' ? 'new' : 'made',
+                  family,
                   limit: PAGE,
                   offset,
                 })
@@ -215,7 +236,7 @@ export default function LibraryScreen() {
         }
       }
     },
-    [lane, sub, search, sort, creatorId, postTypeId, refreshCounts],
+    [lane, sub, family, search, sort, creatorId, postTypeId, refreshCounts],
   );
 
   useEffect(() => {
@@ -258,13 +279,22 @@ export default function LibraryScreen() {
     setRows([]);
     setSearch('');
     setSub('unused');
+    setFamily('video');
+    setFamilyCounts(null);
     setLane(next);
   }
 
   function switchSub(next: UsedTab) {
     if (next === sub) return;
     setRows([]);
+    setFamilyCounts(null);
     setSub(next);
+  }
+
+  function switchFamily(next: BriefFormat) {
+    if (next === family) return;
+    setRows([]);
+    setFamily(next);
   }
 
   /** Typed ideas, one per line. A pasted link on its own line becomes a reference. */
@@ -290,6 +320,7 @@ export default function LibraryScreen() {
         flash('Copy a TikTok or Instagram link first');
         return;
       }
+      setMakeNotes('');
       setPendingMake([{ kind: 'reference', url: text }]);
     } finally {
       setPasting(false);
@@ -301,14 +332,18 @@ export default function LibraryScreen() {
    * fill an empty slot gets. The card appears the moment its posts exist.
    */
   async function onPickFormat(choice: FormatChoice) {
-    const sources = pendingMake;
-    if (!profile || !sources || sources.length === 0) return;
+    const notes = makeNotes.trim() || null;
+    const sources: LibraryMakeSource[] = (pendingMake ?? []).map((s) =>
+      s.kind === 'reference' ? { ...s, notes } : s,
+    );
+    if (!profile || sources.length === 0) return;
     const families = FAMILIES_FOR[choice];
     const targetLane: ItemLane = sources.every((s) => s.kind === 'reference')
       ? 'reference'
       : 'idea';
     setPendingMake(null);
     setCapture('');
+    setMakeNotes('');
     setMakingFamilies(families);
     setMaking({ done: 0, total: sources.length, label: makeSourceLabel(sources.slice(0, 1)) });
     if (lane !== targetLane) {
@@ -319,6 +354,10 @@ export default function LibraryScreen() {
     if (sub !== 'unused') {
       setRows([]);
       setSub('unused');
+    }
+    if (!families.includes(family) && families[0]) {
+      setRows([]);
+      setFamily(families[0]);
     }
 
     let madeCount = 0;
@@ -533,6 +572,33 @@ export default function LibraryScreen() {
     };
   }
 
+  /** The other lane's post, ported from this one, saved on the same library row. */
+  async function createOtherFormat(item: LibraryItemWithBriefs) {
+    if (!profile || creatingOtherId !== null) return;
+    const target: BriefFormat = family === 'video' ? 'photo_carousel' : 'video';
+    setCreatingOtherId(item.id);
+    try {
+      const outcome = await makeOtherFormat({
+        companyId: profile.company_id,
+        userId: profile.id,
+        item,
+        family: target,
+        postTypes,
+      });
+      if ('kill' in outcome) {
+        Alert.alert('Not made', outcome.kill);
+        return;
+      }
+      patchItem(item.id, outcome.item);
+      void refreshCounts(item.source === 'reference' ? 'reference' : 'idea');
+      flash(target === 'photo_carousel' ? 'Slideshow ready' : 'Reel ready');
+    } catch (e) {
+      Alert.alert('Could not make the post', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setCreatingOtherId(null);
+    }
+  }
+
   function renderRow(row: Row, index: number) {
     const first = index === 0;
     const last = index === rows.length - 1;
@@ -549,17 +615,19 @@ export default function LibraryScreen() {
         </View>
       );
     }
-    const briefId = row.item.last_brief_id;
-    const onMetaPress = briefId ? () => openBrief(briefId) : undefined;
     return (
       <View style={!last && styles.referenceGap}>
         <ReadyPostCard
           item={row.item}
+          family={family}
           onOpenBrief={openBrief}
           onOpenSource={row.item.url ? () => openUrl(row.item.url) : undefined}
           onLongPress={() => confirmDelete(row.item)}
-          onMetaPress={onMetaPress}
-          make={makeFor(row)}
+          createOther={{
+            busy: creatingOtherId === row.item.id,
+            disabled: creatingOtherId !== null || making !== null,
+            onPress: () => void createOtherFormat(row.item),
+          }}
         />
       </View>
     );
@@ -593,6 +661,14 @@ export default function LibraryScreen() {
       return (
         <Text style={styles.noMatch}>
           {itemLane === 'idea' ? 'No ideas match' : 'No references match'}
+        </Text>
+      );
+    }
+    const otherFamily = family === 'video' ? 'photo_carousel' : 'video';
+    if ((familyCounts?.[otherFamily] ?? 0) > 0) {
+      return (
+        <Text style={styles.noMatch}>
+          {family === 'video' ? 'No reels here yet' : 'No slideshows here yet'}
         </Text>
       );
     }
@@ -676,6 +752,14 @@ export default function LibraryScreen() {
               value={sub}
               onChange={switchSub}
             />
+            <SubTabs<BriefFormat>
+              items={[
+                { id: 'video', label: 'Reel', count: familyCounts?.video },
+                { id: 'photo_carousel', label: 'Slideshow', count: familyCounts?.photo_carousel },
+              ]}
+              value={family}
+              onChange={switchFamily}
+            />
             {(rows.length > 0 || search.length > 0) && (
               <View style={styles.toolbar}>
                 <LibSearch
@@ -747,8 +831,15 @@ export default function LibraryScreen() {
         visible={pendingMake !== null}
         sourceLabel={pendingMake ? makeSourceLabel(pendingMake) : ''}
         busy={false}
+        notes={
+          pendingMake !== null && pendingMake.every((s) => s.kind === 'reference') ? makeNotes : null
+        }
+        onChangeNotes={setMakeNotes}
         onPick={(choice) => void onPickFormat(choice)}
-        onClose={() => setPendingMake(null)}
+        onClose={() => {
+          setPendingMake(null);
+          setMakeNotes('');
+        }}
       />
 
       <MakePostSheet

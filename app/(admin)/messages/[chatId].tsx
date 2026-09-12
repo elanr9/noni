@@ -20,9 +20,11 @@ import {
   getManagerChat,
   isChatMuted,
   leaveChannel,
+  listBriefChatMembers,
   listChannelMembers,
   listManagerMessages,
   markChatRead,
+  roleLabel,
   sendManagerMessage,
   setChannelAllCreators,
   setChatMuted,
@@ -161,13 +163,15 @@ export default function ManagerChatScreen() {
     try {
       if (chat.kind === 'channel') {
         setMembers(await listChannelMembers(chatId));
+      } else if (chat.kind === 'brief' && chat.campaignId && profile) {
+        setMembers(await listBriefChatMembers(profile.company_id, chat.campaignId));
       } else {
         setMembers(team.map((t) => ({ id: t.id, name: t.name, role: t.role })));
       }
     } catch (e) {
       Alert.alert('Could not load members', e instanceof Error ? e.message : 'Try again');
     }
-  }, [chatId, chat, team]);
+  }, [chatId, chat, team, profile]);
 
   useFocusEffect(
     useCallback(() => {
@@ -354,7 +358,9 @@ export default function ManagerChatScreen() {
   const isDm = chat?.kind === 'dm';
   const other = isDm ? team.find((t) => t.id === chat?.otherId) : undefined;
   const title = isDm ? (chat?.otherName ?? 'Messages') : (chat?.title ?? 'Messages');
-  const subtitle = isDm ? (other?.roleLabel ?? 'Campaign manager') : membersLabel(chat?.memberCount ?? 0);
+  const subtitle = isDm
+    ? (other?.roleLabel ?? roleLabel(chat?.otherRole ?? 'campaign_manager'))
+    : membersLabel(chat?.memberCount ?? 0);
   const placeholder = isDm ? `Message ${firstNameOf(title)}` : `Message ${title}`;
   const teamIds = new Set(team.map((t) => t.id));
 

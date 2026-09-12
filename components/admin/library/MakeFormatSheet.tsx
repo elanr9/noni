@@ -1,4 +1,4 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { BriefFormat } from '../../../lib/briefs-api';
 import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
@@ -25,12 +25,23 @@ export interface MakeFormatSheetProps {
   /** "“The one note editors leave…”", "@handle · TikTok", or "3 ideas". */
   sourceLabel: string;
   busy: boolean;
+  /** null hides the field (ideas). A string shows it for references. */
+  notes: string | null;
+  onChangeNotes: (text: string) => void;
   onPick: (choice: FormatChoice) => void;
   onClose: () => void;
 }
 
 /** Right after capture: what should the AI make this into. A tap makes it. */
-export function MakeFormatSheet({ visible, sourceLabel, busy, onPick, onClose }: MakeFormatSheetProps) {
+export function MakeFormatSheet({
+  visible,
+  sourceLabel,
+  busy,
+  notes,
+  onChangeNotes,
+  onPick,
+  onClose,
+}: MakeFormatSheetProps) {
   return (
     <Sheet
       visible={visible}
@@ -40,6 +51,20 @@ export function MakeFormatSheet({ visible, sourceLabel, busy, onPick, onClose }:
       title="Make it into"
       subtitle={`From ${sourceLabel}. The whole post is written now and saved ready.`}
     >
+      {notes !== null && (
+        <>
+          <Text style={styles.notesLabel}>How should this translate to our product? Optional</Text>
+          <TextInput
+            value={notes}
+            onChangeText={onChangeNotes}
+            placeholder="e.g. Same hook and pacing, but show Reply AI answering a college coach instead of the spreadsheet"
+            placeholderTextColor={color.slate400}
+            multiline
+            editable={!busy}
+            style={styles.notesInput}
+          />
+        </>
+      )}
       <View style={styles.card}>
         {OPTIONS.map((option, i) => (
           <PressableScale
@@ -70,6 +95,26 @@ export function MakeFormatSheet({ visible, sourceLabel, busy, onPick, onClose }:
 }
 
 const styles = StyleSheet.create({
+  notesLabel: {
+    fontSize: type.size.label,
+    fontWeight: '700',
+    color: color.slate500,
+    marginBottom: 6,
+  },
+  notesInput: {
+    minHeight: 88,
+    textAlignVertical: 'top',
+    borderWidth: borderWidth.field,
+    borderColor: color.lineStrong,
+    borderRadius: radiusAdmin.md,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: type.size.bodySm,
+    fontWeight: '600',
+    color: color.ink,
+    backgroundColor: color.white,
+    marginBottom: 12,
+  },
   card: {
     backgroundColor: color.white,
     borderRadius: radiusAdmin.lg,
