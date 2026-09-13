@@ -134,6 +134,8 @@ export async function signVideoUrls(
 // sample rate, and front/back camera flips can change frame size.
 // Head: -ss 0.15 on input 0 only (sync-safe). Tail: silenceremove + -shortest.
 // Works for N=1 (replaces the old standalone edit pass).
+// Upload-Post rejects ';' in full_command, so every filter link is labeled
+// explicitly and chains are joined with ',' (valid since nothing is implicit).
 async function stitchAndEditPass(params: {
   admin: AdminClient;
   apiKey: string;
@@ -149,14 +151,14 @@ async function stitchAndEditPass(params: {
     .map(
       (_p, i) =>
         `[${i}:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,` +
-        `crop=1080:1920,setsar=1[v${i}];` +
+        `crop=1080:1920,setsar=1[v${i}],` +
         `[${i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`,
     )
-    .join(';');
+    .join(',');
   const streams = segmentPaths.map((_p, i) => `[v${i}][a${i}]`).join('');
   const fullCommand =
     `ffmpeg -y -hide_banner -ss 0.15 ${inputs} ` +
-    `-filter_complex "${normalize};${streams}concat=n=${n}:v=1:a=1[cv][ca];` +
+    `-filter_complex "${normalize},${streams}concat=n=${n}:v=1:a=1[cv][ca],` +
     `[ca]silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-45dB:detection=peak,` +
     `loudnorm=I=-16:TP=-1.5:LRA=11[outa]" ` +
     `-map "[cv]" -map "[outa]" -c:v h264_nvenc -preset p5 -cq 23 ` +
@@ -200,9 +202,9 @@ async function greenScreenComposite(params: {
   const fullCommand =
     `ffmpeg -y -hide_banner ${backgroundInput} -i {input1} -i {input2} ` +
     `-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
-    `crop=1080:1920,setsar=1[bg];` +
+    `crop=1080:1920,setsar=1[bg],` +
     `[1:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
-    `crop=1080:1920,setsar=1,chromakey=0x00FF00:0.28:0.06[fg];` +
+    `crop=1080:1920,setsar=1,chromakey=0x00FF00:0.28:0.06[fg],` +
     `[bg][fg]overlay=shortest=1[outv]" ` +
     `-map "[outv]" -map 2:a? -c:v h264_nvenc -preset p5 -cq 23 ` +
     `-c:a aac -b:a 128k -shortest {output}`;
