@@ -41,6 +41,7 @@ import { Icon } from '../../ui/Icon';
 import { posterForVideo } from '../../ui/MediaThumb';
 import { OutlinedText } from '../../ui/OutlinedText';
 import { PressableScale } from '../../ui/PressableScale';
+import { SubtitlePreview } from './SubtitlePreview';
 
 const SCREEN_BG = '#10161D';
 const RAIL_BG = 'rgba(16,22,29,0.45)';
@@ -64,6 +65,7 @@ function RecordingPreview({ uri }: { uri: string }): JSX.Element {
       style={styles.mediaImg}
       contentFit="cover"
       nativeControls={false}
+      pointerEvents="none"
     />
   );
 }
@@ -88,7 +90,8 @@ export type OverlaySavePatch = {
   screenshot_width?: number;
 };
 
-const DEFAULT_SHOT = { x: 0.23, y: 0.19, w: 0.46 };
+const DEFAULT_SHOT = { x: 0.72, y: 0.56, w: 0.34 };
+const DEFAULT_SUBTITLES_Y = 0.78;
 
 /** Drag-to-delete: how close the fingers must get to the trash to drop. */
 const TRASH_RADIUS = 64;
@@ -172,6 +175,9 @@ export function OverlayEditor(props: {
   screenshotX: number | null;
   screenshotY: number | null;
   screenshotWidth: number | null;
+  /** Shows a mock of the burned in subtitles so the admin places media around them. */
+  subtitles?: boolean;
+  subtitlesY?: number;
   saving?: boolean;
   onClose: () => void;
   onSave: (patch: OverlaySavePatch) => void | Promise<void>;
@@ -191,6 +197,8 @@ export function OverlayEditor(props: {
     screenshotX,
     screenshotY,
     screenshotWidth,
+    subtitles = false,
+    subtitlesY = DEFAULT_SUBTITLES_Y,
     saving = false,
     onClose,
     onSave,
@@ -416,6 +424,9 @@ export function OverlayEditor(props: {
         onMoveShouldSetPanResponder: (evt) =>
           boxAtPoint(evt.nativeEvent.pageX, evt.nativeEvent.pageY) !== null ||
           shotDraggableRef.current,
+        // A second finger landing elsewhere must not end the pinch.
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
         onPanResponderGrant: (evt) => {
           const { pageX, pageY } = evt.nativeEvent;
           const hit = boxAtPoint(pageX, pageY);
@@ -708,6 +719,10 @@ export function OverlayEditor(props: {
           </View>
         ) : null}
 
+        {subtitles ? (
+          <SubtitlePreview top={subtitlesY * stage.h} dimmed={editing} />
+        ) : null}
+
         {!editing ? (
           <>
             {boxes.map((box) => (
@@ -757,6 +772,7 @@ export function OverlayEditor(props: {
         ) : null}
 
         <View
+          pointerEvents="box-none"
           style={[styles.chrome, { paddingTop: Math.max(insets.top, 12) + 8 }]}
         >
           <PressableScale
@@ -845,13 +861,14 @@ export function OverlayEditor(props: {
 
         {draggingTarget === null ? (
           <View
+            pointerEvents="box-none"
             style={[
               styles.bottomWrap,
               { paddingBottom: Math.max(insets.bottom, 12) + 22 },
             ]}
           >
             {hasShot && layoutSelectable && !editing ? (
-              <View style={styles.layoutRow}>
+              <View pointerEvents="box-none" style={styles.layoutRow}>
                 {LAYOUTS.map((l) => {
                   const isOn = l.value === layout;
                   return (
@@ -873,8 +890,8 @@ export function OverlayEditor(props: {
               </View>
             ) : null}
             {editing && active !== null ? null : (
-              <View style={styles.addTextRow}>
-                <View style={styles.flex} />
+              <View pointerEvents="box-none" style={styles.addTextRow}>
+                <View style={styles.flex} pointerEvents="none" />
                 <PressableScale
                   accessibilityRole="button"
                   accessibilityLabel="Add another text box"

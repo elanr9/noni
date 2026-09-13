@@ -1,5 +1,6 @@
-// Admin handoff §6: the footer state machine. One week at a time: no
-// buttons while in progress, Publish when every row is complete, Start
+// Admin handoff §6: the footer state machine. One week at a time: while in
+// progress, Publish appears as soon as any row is ready so days can go out
+// as they finish; Publish to creators when every row is complete; Start
 // week N+1 only after publish. Publishing never creates the next week.
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -20,7 +21,9 @@ export interface WeekFooterProps {
   onStartNext: () => void;
   /** Published and still live: opens the day planner above Start week. */
   onPlanMore?: () => void;
+  /** Rows complete and not killed, ready to send before the week is done. */
   readyCount?: number;
+  /** Publish ready handler; falls back to onPublish when absent. */
   onPublishReady?: () => void;
 }
 
@@ -33,15 +36,37 @@ export function WeekFooter({
   onPublish,
   onStartNext,
   onPlanMore,
+  readyCount = 0,
+  onPublishReady,
 }: WeekFooterProps) {
   if (phase === 'in_progress') {
+    if (readyCount > 0) {
+      return (
+        <View style={styles.stack}>
+          <Button
+            variant="primary"
+            size="md"
+            block
+            disabled={publishing}
+            onPress={onPublishReady ?? onPublish}
+          >
+            {publishing
+              ? 'Publishing…'
+              : `Publish ${readyCount} ready ${readyCount === 1 ? 'post' : 'posts'}`}
+          </Button>
+          <Text style={styles.line}>
+            {`${left} left this week. Send what is ready now and keep going.`}
+          </Text>
+        </View>
+      );
+    }
     return (
       <View style={[styles.strip, shadow.shadowCard]}>
         <View style={styles.bubble}>
           <Text style={styles.bubbleText}>{left}</Text>
         </View>
         <Text style={styles.stripText}>
-          {`${left} ${left === 1 ? 'post' : 'posts'} left this week. Publish opens when every row is complete.`}
+          {`${left} ${left === 1 ? 'post' : 'posts'} left this week. Publish opens once a post is marked complete.`}
         </Text>
       </View>
     );

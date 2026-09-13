@@ -27,7 +27,11 @@ import {
   type PostType,
   type TalkingPoint,
 } from './briefs-api';
-import { placeLibraryItemOnSegment, placeRemoteImageOnSegment } from './media-library-api';
+import {
+  DEFAULT_SHOT_PLACEMENT,
+  placeLibraryItemOnSegment,
+  placeRemoteImageOnSegment,
+} from './media-library-api';
 import {
   hasOverlayBoxes,
   newOverlayBox,
@@ -151,6 +155,9 @@ async function draftFor(
  * theme when one is set and TikTok classic otherwise. Rows that already carry
  * boxes (survivors of a re-derive, possibly hand placed) are left alone.
  */
+/** Top band: seeded text stays off a talking head's face. */
+const SEED_TEXT_Y = 0.12;
+
 export async function seedOverlayBoxes(
   rows: BriefSegment[],
   themeColor: string | null,
@@ -163,12 +170,15 @@ export async function seedOverlayBoxes(
         return row;
       }
       const patch = serializeOverlayBoxes([
-        newOverlayBox({
-          id: `${row.kind}-${row.slot_index}-box-0`,
-          text,
-          style,
-          themeColor,
-        }),
+        {
+          ...newOverlayBox({
+            id: `${row.kind}-${row.slot_index}-box-0`,
+            text,
+            style,
+            themeColor,
+          }),
+          y: SEED_TEXT_Y,
+        },
       ]);
       await updateBriefSegment(row.id, patch);
       return { ...row, ...patch } as BriefSegment;
@@ -216,12 +226,16 @@ export async function applyPointMedia(params: {
   briefId: string;
   rows: BriefSegment[];
   pointMedia: (PointMedia | null)[];
+  /** Slideshows take stills only: recordings are skipped. */
+  family?: BriefFormat;
 }): Promise<number> {
   const targets: { row: BriefSegment; media: PointMedia }[] = [];
   for (const row of params.rows) {
     if (row.talking_point_index === null || row.screenshot_url) continue;
     const media = params.pointMedia[row.talking_point_index];
-    if (media && (media.library_path || media.screenshot_url)) targets.push({ row, media });
+    if (!media || !(media.library_path || media.screenshot_url)) continue;
+    if (params.family === 'photo_carousel' && media.library_kind === 'recording') continue;
+    targets.push({ row, media });
   }
   let placed = 0;
   for (let i = 0; i < targets.length; i += PLACE_CONCURRENCY) {
@@ -240,7 +254,12 @@ export async function applyPointMedia(params: {
                 item: { path: media.library_path, kind: media.library_kind ?? 'screenshot' },
               })
             : await placeRemoteImageOnSegment({ ...target, url: media.screenshot_url ?? '' });
-          await updateBriefSegment(row.id, { screenshot_url: path });
+          await updateBriefSegment(row.id, {
+            screenshot_url: path,
+            screenshot_x: row.screenshot_x ?? DEFAULT_SHOT_PLACEMENT.x,
+            screenshot_y: row.screenshot_y ?? DEFAULT_SHOT_PLACEMENT.y,
+            screenshot_width: row.screenshot_width ?? DEFAULT_SHOT_PLACEMENT.w,
+          });
           row.screenshot_url = path;
           return true;
         } catch {
@@ -462,6 +481,7 @@ export async function fillPostSlot(params: {
         briefId: params.briefId,
         rows,
         pointMedia: draft.point_media,
+        family: params.family,
       })
     : 0;
   await snapshotAiFill(params.briefId, params.source.kind);

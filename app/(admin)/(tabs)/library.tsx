@@ -584,7 +584,8 @@ export default function LibraryScreen() {
   }
 
   function makeFor(row: Row) {
-    if (fillSourceFor(row) === null) return undefined;
+    const ready = row.kind === 'item' ? readyBriefFor(row.item, family) : null;
+    if (ready === null && fillSourceFor(row) === null) return undefined;
     return {
       busy: makeBusyKey === rowKey(row),
       disabled: makeBusyKey !== null || making !== null,
@@ -648,6 +649,7 @@ export default function LibraryScreen() {
             disabled: creatingOtherId !== null || making !== null,
             onPress: () => void createOtherFormat(row.item),
           }}
+          add={makeFor(row)}
         />
       </View>
     );

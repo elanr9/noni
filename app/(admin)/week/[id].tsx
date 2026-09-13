@@ -197,7 +197,10 @@ export default function WeekDetailScreen() {
     : leftCount === 0
       ? 'complete'
       : 'in_progress';
-  const showFooter = published || (editable && rows.length > 0 && phase === 'complete');
+  const readyCount = rows.filter(
+    (r) => r.state === 'complete' && !r.item.briefs.kill_reason,
+  ).length;
+  const showFooter = published || (editable && readyCount > 0);
   const madeCount = rows.length - leftCount;
   const videoTarget = campaign?.video_target ?? 20;
   const slideshowTarget = campaign?.slideshow_target ?? 10;
@@ -259,6 +262,7 @@ export default function WeekDetailScreen() {
             <WeekFooter
               phase={phase}
               left={leftCount}
+              readyCount={readyCount}
               weekNumber={weekNumber ?? 1}
               beforeCutoff={
                 campaign?.drop_date

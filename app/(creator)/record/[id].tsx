@@ -196,8 +196,17 @@ function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
   const hookLine =
     brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || '';
   const ctaLine = brief.cta?.trim() || '';
+  const ctaInsidePoint = talkingPoints.some(
+    (p) =>
+      p.is_product ||
+      (ctaLine.length > 0 &&
+        (p.text?.toLowerCase() ?? '').includes(ctaLine.toLowerCase())),
+  );
+  const wantsOutro = !ctaInsidePoint;
 
-  const videoSegments = segments.filter((s) => s.kind !== 'slide');
+  const videoSegments = segments.filter(
+    (s) => s.kind !== 'slide' && (s.kind !== 'outro' || wantsOutro),
+  );
   if (videoSegments.length > 0) {
     let pointNumber = 0;
     return videoSegments.map((s) => {
@@ -258,7 +267,7 @@ function briefPlan(brief: Brief, segments: BriefSegment[]): ClipPlan[] {
         scripted: point.scripted,
       });
     });
-    if (ctaLine) {
+    if (ctaLine && wantsOutro) {
       plan.push({
         slotIndex: plan.length,
         kind: 'outro',
@@ -353,6 +362,7 @@ export default function RecordScreen() {
   const [takeCount, setTakeCount] = useState(0);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+  const [promptHeight, setPromptHeight] = useState(0);
   const [shots, setShots] = useState<Record<string, ShotPreview>>({});
 
   // Review player state.
@@ -1326,6 +1336,8 @@ export default function RecordScreen() {
   ).length;
 
   const reviewData = brief ?? null;
+  const promptMaxHeight = Math.round((stageSize?.h ?? 640) * 0.22);
+  const headerTop = insets.top + 8 + (showPrompt ? promptHeight + 10 : 0);
 
   return (
     <View style={styles.root}>
@@ -1634,7 +1646,12 @@ export default function RecordScreen() {
               />
             ) : null}
 
-            <View style={[styles.topBar, { paddingTop: insets.top + space[2] }]}>
+            <View
+              style={[
+                styles.topBar,
+                { paddingTop: headerTop },
+              ]}
+            >
               <View style={styles.progressRow}>
                 {plan.map((c, i) => {
                   const isDone = kept[c.slotIndex] !== undefined;
@@ -1685,23 +1702,35 @@ export default function RecordScreen() {
             </View>
 
             {showPrompt && activeClip !== null ? (
-              <View style={[styles.promptSlot, { top: insets.top + 56 }]}>
+              <View
+                style={[
+                  styles.promptSlot,
+                  { top: insets.top + 8, maxHeight: promptMaxHeight },
+                ]}
+                onLayout={(e) => setPromptHeight(e.nativeEvent.layout.height)}
+              >
                 {activeClip.scripted ? (
                   <TeleprompterOverlay
                     key={`${activeIndex}-${takeCount}`}
                     text={activeClip.script}
                     speed={speed}
                     running={phase === 'recording'}
+                    maxHeight={promptMaxHeight}
                   />
                 ) : (
-                  <View style={styles.talkingPoint}>
-                    <Text style={styles.talkingLabel}>Talk about</Text>
-                    <Text style={styles.talkingHint}>
-                      Say it your way. Not shown on the video
-                    </Text>
-                    <View style={styles.talkingBox}>
-                      <Text style={styles.talkingText}>{activeClip.script}</Text>
+                  <View style={[styles.talkingPoint, { maxHeight: promptMaxHeight }]}>
+                    <View style={styles.talkingHead}>
+                      <Text style={styles.talkingLabel}>Talk about</Text>
+                      <Text style={styles.talkingHint}>
+                        Say it your way. Not shown on the video
+                      </Text>
                     </View>
+                    <ScrollView
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.talkingBox}
+                    >
+                      <Text style={styles.talkingText}>{activeClip.script}</Text>
+                    </ScrollView>
                   </View>
                 )}
               </View>
@@ -1709,7 +1738,7 @@ export default function RecordScreen() {
 
             {capturePhase && phase !== 'between' && activeClip !== null ? (
               <CameraRail
-                style={{ top: insets.top + 56 }}
+                style={{ top: headerTop + 48 }}
                 facing={facing}
                 onFlip={flipCamera}
                 flashOn={flashOn}
@@ -2043,39 +2072,44 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    zIndex: 3,
-    paddingTop: 40,
-    paddingHorizontal: 60,
+    zIndex: 5,
+    paddingHorizontal: 16,
   },
   talkingPoint: {
-    alignItems: 'center',
-    gap: 4,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    gap: 8,
+  },
+  talkingHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   talkingBox: {
-    marginTop: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.42)',
+    flexGrow: 0,
   },
   talkingLabel: {
-    fontSize: type.size.micro,
+    fontSize: 11,
     fontWeight: type.weight.heavy,
-    letterSpacing: 2,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
     color: color.whiteA60,
   },
   talkingHint: {
-    fontSize: type.size.micro11,
+    fontSize: 12,
     fontWeight: type.weight.semibold,
     color: color.whiteA45,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   talkingText: {
-    fontSize: 21,
-    lineHeight: 21 * 1.35,
-    fontWeight: type.weight.bold,
+    fontSize: 16,
+    lineHeight: 16 * 1.35,
+    fontWeight: type.weight.semibold,
     color: color.white,
-    textAlign: 'center',
   },
   countdownWrap: {
     ...StyleSheet.absoluteFill,

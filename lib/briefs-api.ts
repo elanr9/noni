@@ -1293,43 +1293,6 @@ export async function publishCampaign(
 // and the Tier 3 verdict. Review never blocks and never edits; the editor
 // applies accepted suggestions itself and logs everything on confirm.
 
-export type ReviewScores = {
-  overall: number;
-  hook: number;
-  talking_points: number;
-  cta: number;
-};
-
-export type Tier3Verdict = { spoken: boolean; worst_line: string | null };
-
-export type BriefReviewResult = {
-  checks: ReviewCheck[];
-  scores: ReviewScores;
-  tier3: Tier3Verdict;
-};
-
-export async function reviewBrief(params: {
-  draft: RegenDraftPayload;
-  postTypeKey?: string;
-  hookIndex?: number;
-}): Promise<BriefReviewResult> {
-  const { data, error } = await supabase.functions.invoke('brief-review', {
-    body: {
-      draft: params.draft,
-      ...(params.postTypeKey ? { post_type: params.postTypeKey } : {}),
-      ...(typeof params.hookIndex === 'number' ? { hook_index: params.hookIndex } : {}),
-    },
-  });
-  if (error) throw error;
-  const raw = data as Partial<BriefReviewResult> & { error?: string };
-  if (raw.error) throw new Error(raw.error);
-  return {
-    checks: raw.checks ?? [],
-    scores: raw.scores ?? { overall: 0, hook: 0, talking_points: 0, cta: 0 },
-    tier3: raw.tier3 ?? { spoken: true, worst_line: null },
-  };
-}
-
 /**
  * Client-side Tier 1 re-run at confirm time, so overrides are logged against
  * what is still fired after edits, not against the stale review response.
@@ -1353,35 +1316,6 @@ export async function listApprovedClaimIds(): Promise<string[]> {
     .eq('approved', true);
   if (error) throw error;
   return (data ?? []).map((r) => r.id);
-}
-
-export type BriefReviewEventInput = {
-  brief_id: string;
-  company_id: string;
-  author_id: string;
-  event: 'override' | 'edit' | 'confirm';
-  check_id?: string;
-  tier?: number;
-  diff?: { field: string; before: string | null; after: string | null };
-};
-
-/** The override log is the point, not telemetry. One row per override/edit/confirm. */
-export async function logBriefReviewEvents(
-  events: BriefReviewEventInput[],
-): Promise<void> {
-  if (events.length === 0) return;
-  const { error } = await supabase.from('brief_review_events').insert(
-    events.map((e) => ({
-      brief_id: e.brief_id,
-      company_id: e.company_id,
-      author_id: e.author_id,
-      event: e.event,
-      check_id: e.check_id ?? null,
-      tier: e.tier ?? null,
-      diff: (e.diff ?? null) as Json,
-    })),
-  );
-  if (error) throw error;
 }
 
 /** Rewritten generated lines feed the tenant ban list; generation avoids them. */
@@ -1408,32 +1342,13 @@ export async function appendBannedPhrases(
   if (writeError) throw writeError;
 }
 
-/**
- * Slideshow confirm: no spoken script, so there is no AI review to snapshot.
- * The admin approved the visual preview; reviewed_at alone flips the row to
- * complete (checks stay empty so the grid never shows a fake score).
- */
-export async function confirmSlideshowReview(briefId: string): Promise<void> {
+/** The admin approved the post; reviewed_at alone flips the row to complete. */
+export async function markBriefComplete(briefId: string): Promise<void> {
   const { error } = await supabase
     .from('briefs')
     .update({
       reviewed_at: new Date().toISOString(),
       review_result: { checks: [] } as unknown as Json,
-    })
-    .eq('id', briefId);
-  if (error) throw error;
-}
-
-/** Confirm flips the post to complete: reviewed_at + the review snapshot. */
-export async function confirmBriefReview(
-  briefId: string,
-  result: BriefReviewResult,
-): Promise<void> {
-  const { error } = await supabase
-    .from('briefs')
-    .update({
-      reviewed_at: new Date().toISOString(),
-      review_result: result as unknown as Json,
     })
     .eq('id', briefId);
   if (error) throw error;

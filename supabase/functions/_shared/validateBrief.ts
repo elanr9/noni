@@ -127,6 +127,13 @@ function normalizePhrase(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+function leadingTitleCount(title: string): number | null {
+  const match = /^\s*(\d{1,2})(?=[\s:.\-–—])/.exec(title);
+  if (!match) return null;
+  const count = Number(match[1]);
+  return count >= 2 && count <= 10 ? count : null;
+}
+
 function spokenText(draft: BriefDraftShape): string {
   const points = draft.talking_points
     .map((p) => p.text ?? '')
@@ -195,6 +202,14 @@ export function runTier1Checks(
       'point_count_mismatch',
       'talking_points',
       `talking_points length ${draft.talking_points.length} does not equal point_count ${draft.point_count}`,
+    );
+  }
+  const titleCount = leadingTitleCount(draft.title);
+  if (titleCount !== null && draft.talking_points.length !== titleCount) {
+    fail(
+      'point_count_source_mismatch',
+      'talking_points',
+      `title leads with ${titleCount} but talking_points has ${draft.talking_points.length} entries; the count must match the number the title promises`,
     );
   }
   if (

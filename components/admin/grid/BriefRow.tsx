@@ -13,16 +13,6 @@ import { PostTypeChip } from '../shared';
 
 export type GridRowState = 'empty' | 'partial' | 'filled' | 'complete' | 'killed';
 
-/** Last review's overall score, stored on confirm. Never recomputed here. */
-function aiScore(brief: BriefWithType): number | null {
-  const raw = brief.review_result;
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const scores = (raw as { scores?: unknown }).scores;
-  if (scores === null || typeof scores !== 'object' || Array.isArray(scores)) return null;
-  const overall = (scores as { overall?: unknown }).overall;
-  return typeof overall === 'number' ? Math.round(overall) : null;
-}
-
 /** e.g. "Hook and 3 of 5 points" for a partial row. */
 function progressLine(brief: BriefWithType): string {
   const points = parseTalkingPoints(brief.talking_points);
@@ -100,15 +90,12 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
     );
   }
 
-  const score = state === 'complete' ? aiScore(brief) : null;
   const statusLine =
     state === 'partial'
       ? progressLine(brief)
       : state === 'filled'
         ? 'Needs review'
-        : score !== null
-          ? `AI score ${score}`
-          : 'Complete';
+        : 'Complete';
   const title = titleOf(brief);
 
   return (

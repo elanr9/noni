@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { parseTalkingPoints, type BriefFormat } from '../../../lib/briefs-api';
 import type { LibraryItemWithBriefs, ReadyBrief } from '../../../lib/library-api';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../../theme/tokens';
+import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { PostThumb, PostTypeChip } from '../shared';
@@ -18,6 +19,8 @@ export interface ReadyPostCardProps {
   onLongPress: () => void;
   /** Makes the other format; hidden once both exist. */
   createOther?: { busy: boolean; disabled: boolean; onPress: () => void };
+  /** Puts this lane's ready post into a week slot. */
+  add?: { busy: boolean; disabled: boolean; onPress: () => void };
 }
 
 function platformOf(url: string | null): string | null {
@@ -47,10 +50,12 @@ function ReadyRow({
   brief,
   family,
   onPress,
+  add,
 }: {
   brief: ReadyBrief;
   family: BriefFormat;
   onPress: () => void;
+  add?: { busy: boolean; disabled: boolean; onPress: () => void };
 }) {
   const preview = previewOf(brief, family);
   return (
@@ -83,6 +88,18 @@ function ReadyRow({
             {preview}
           </Text>
         )}
+        {add !== undefined && (
+          <Button
+            variant="tint"
+            size="sm"
+            icon="plus"
+            disabled={add.disabled || add.busy}
+            onPress={add.onPress}
+            style={styles.addButton}
+          >
+            {add.busy ? 'Adding' : 'Add to week'}
+          </Button>
+        )}
       </View>
       <Icon name="chevron-right" size={16} color={color.slate300} />
     </PressableScale>
@@ -101,6 +118,7 @@ export function ReadyPostCard({
   onOpenSource,
   onLongPress,
   createOther,
+  add,
 }: ReadyPostCardProps) {
   const isReference = item.source === 'reference';
   const handle = handleOf(item.url);
@@ -153,7 +171,12 @@ export function ReadyPostCard({
       </Pressable>
 
       {brief !== null && (
-        <ReadyRow brief={brief} family={family} onPress={() => onOpenBrief(brief.id)} />
+        <ReadyRow
+          brief={brief}
+          family={family}
+          onPress={() => onOpenBrief(brief.id)}
+          add={add}
+        />
       )}
     </Pressable>
   );
@@ -242,5 +265,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: color.slate500,
     lineHeight: 13 * 1.4,
+  },
+  addButton: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
   },
 });

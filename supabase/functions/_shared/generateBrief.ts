@@ -62,12 +62,17 @@ const POST_TYPE_COLUMNS =
  * 7 second video) instead of every idea landing in the first type. The
  * company's recent mix is a tie breaker toward variety. Never throws on a
  * bad answer: falls back to the type least used lately.
+ *
+ * `mirror` is for a pasted reference post: name the kind the source already
+ * is and copy it, no variety rotation. A bad answer there falls back to the
+ * first type by sort order.
  */
 export async function pickPostType(
   admin: SupabaseClient,
   companyId: string,
   family: 'video' | 'photo_carousel',
   sourceLines: string[],
+  mode: 'fit' | 'mirror' = 'fit',
 ): Promise<PostTypeRow | null> {
   const [{ data: typeRows, error: typeError }, { data: recentRows }] = await Promise.all([
     admin
@@ -107,25 +112,39 @@ export async function pickPostType(
         `- ${t.key}: ${t.label}. ${t.min_points === t.max_points ? t.min_points : `${t.min_points} to ${t.max_points}`} talking point${t.max_points === 1 ? '' : 's'}${t.clip_structure === 'single_clip' ? ', one clip only' : ''}.`,
     )
     .join('\n');
-  const system = [
-    'You choose which kind of short form post a piece of source material should become.',
-    'Answer with a single JSON object {"key": string} and nothing else. key must be one of the option keys exactly.',
-    'Pick by fit first: a counted set of tips or mistakes is a list; two sides or a before/after is a contrast; a how or why breakdown is an explainer; a personal story or opinion is a talking head; one blunt truth that fits in a sentence is a seven second video; a satisfying visual moment with no lesson is replay bait.',
-    'When two kinds fit equally, prefer the one used least in the recent mix.',
-  ].join('\n');
+  const kinds =
+    'a counted set of tips or mistakes is a list; two sides or a before/after is a contrast; a how or why breakdown is an explainer; a personal story or opinion is a talking head; one blunt truth that fits in a sentence is a seven second video; a satisfying visual moment with no lesson is replay bait.';
+  const system =
+    mode === 'mirror'
+      ? [
+          'You identify which kind of short form post a source post already is.',
+          'Answer with a single JSON object {"key": string} and nothing else. key must be one of the option keys exactly.',
+          `Mirror the source exactly, never pick for variety: ${kinds}`,
+        ].join('\n')
+      : [
+          'You choose which kind of short form post a piece of source material should become.',
+          'Answer with a single JSON object {"key": string} and nothing else. key must be one of the option keys exactly.',
+          `Pick by fit first: ${kinds}`,
+          'When two kinds fit equally, prefer the one used least in the recent mix.',
+        ].join('\n');
   const user = [
     `Options:\n${options}`,
-    recentKeys.length
-      ? `Recent mix, newest first: ${recentKeys.join(', ')}`
-      : 'Recent mix: nothing yet.',
+    ...(mode === 'mirror'
+      ? []
+      : [
+          recentKeys.length
+            ? `Recent mix, newest first: ${recentKeys.join(', ')}`
+            : 'Recent mix: nothing yet.',
+        ]),
     `Source material:\n${sourceLines.join('\n').slice(0, 3000)}`,
   ].join('\n\n');
+  const unparsedFallback = mode === 'mirror' ? types[0] : leastUsed;
 
   try {
     const raw = await askClaude(system, user, 64);
     const parsed = parseClaudeJson<{ key?: unknown }>(raw);
     const chosen = types.find((t) => t.key === parsed.key);
-    return chosen ?? leastUsed;
+    return chosen ?? unparsedFallback;
   } catch (e) {
     console.warn('pickPostType fell back:', e instanceof Error ? e.message : e);
     return leastUsed;
@@ -173,23 +192,27 @@ function plugRule(requiresPlug: boolean): string {
   return `CLAIM AND PLUG (settle this first): pick the one approved claim from the message that fits this topic best (or the closest useful one) and put its id in the top-level claim_id. Competitor or comparison topics still get a plug — angle it as the practical next step using a real approved capability (emails, school list, film, price), never invent competitor facts or fake positioning. The plug is ONE sentence composed from that claim — mechanism, not benefit: "writes and sends the emails and follows up", never "streamlines your outreach". Put that exact sentence in cta AND inside exactly one talking point, riding with that point's advice (set is_product true and claim_id on that point). Never the first point, never the last, never a standalone plug point.`;
 }
 
+const POINT_COUNT_RULE =
+  `POINT COUNT: if the source material, title, idea or search phrase names a number of items ("5 tips", "3 things", "7 mistakes"), point_count MUST equal that number exactly, talking_points MUST have exactly that many entries, and the title MUST lead with that same number. Never add or drop a point to fit a plug — the plug rides inside one of those points. Otherwise 3 to 10, pick the count the topic actually supports, default 4.`;
+
 function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | 'photo_carousel'): string {
   if (!postType) {
     return [
-      `FORMAT: ${fallbackFormat === 'photo_carousel' ? 'photo carousel — each talking point becomes one slide, read not spoken' : 'video — hook clip, one clip per talking point, outro clip'}.`,
-      `POINT COUNT: 3 to 10; point_count comes from the concept ("5 tips" means 5), default 4.`,
+      `FORMAT: ${fallbackFormat === 'photo_carousel' ? 'photo carousel — each talking point becomes one slide, read not spoken' : 'video — hook clip, then one clip per talking point, nothing after; the plug rides inside one point clip, never a separate outro clip'}.`,
+      POINT_COUNT_RULE,
       `TARGET WORDS: set target_words to your honest estimate of spoken words for the finished post. There is no length target.`,
     ].join('\n');
   }
   const lines: string[] = [];
   const structure =
     postType.clip_structure === 'hook_points_outro'
-      ? 'hook clip, one clip per talking point, outro clip'
+      ? 'hook clip, then one clip per talking point, nothing after; the plug rides inside one point clip, never a separate outro clip'
       : postType.clip_structure === 'single_clip'
         ? 'one single clip'
         : 'photo carousel, one slide per talking point';
   lines.push(
     `POST TYPE: ${postType.label} (${postType.family}). Structure: ${structure}. Talking points: ${postType.min_points} to ${postType.max_points} — pick the count this topic actually supports.`,
+    POINT_COUNT_RULE,
   );
   if (postType.key === 'contrast') {
     lines.push(
@@ -289,7 +312,7 @@ function briefSystemBlocks(
     CREDENTIAL_RULE,
     SECOND_PERSON_RULE,
     HOOK_RULES,
-    `TITLE: the admin-facing name of THIS post format — never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs). Other types follow TITLE SHAPE above. Keep it under 12 words.`,
+    `TITLE: the admin-facing name of THIS post format — never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs); when the source names a number, that digit is the source's number and talking_points has exactly that many entries. Other types follow TITLE SHAPE above. Keep it under 12 words.`,
     CAPTION_RULES,
     `WHY IT WORKS: one punchy sentence a content strategist would say about why this concept performs.`,
     bannedPhrases.length
@@ -577,7 +600,7 @@ export type PointMedia = {
 
 type LibraryRow = { id: string; kind: 'screenshot' | 'recording'; path: string; title: string };
 
-const MEDIA_MATCH_SYSTEM = `You attach on-screen media to the talking points of a short social video or slideshow. You get the company's media library (screen recordings and screenshots, each with a title the manager wrote) and the talking points in order. Pick, for each talking point, the one library item whose title clearly shows what that point talks about. Rules: a point with is_product true is the product plug and must get an item when any item shows the product; other points get an item only on a clear title match; use each item at most once; never invent indexes. Answer ONLY with JSON: {"picks": [{"point_index": number, "media_index": number}]}. An empty picks array is a valid answer.`;
+const MEDIA_MATCH_SYSTEM = `You attach on-screen media to the talking points of a short social video or slideshow. You get the company's media library (each item has a title the manager wrote; videos may get screen recordings and screenshots, slideshows are offered screenshots only) and the talking points in order. Pick, for each talking point, the one library item whose title clearly shows what that point talks about. Rules: a point with is_product true is the product plug and must get an item when any item shows the product; other points get an item only on a clear title match; use each item at most once; never invent indexes. Answer ONLY with JSON: {"picks": [{"point_index": number, "media_index": number}]}. An empty picks array is a valid answer.`;
 
 /**
  * Asks Claude to match labeled library media to talking points and layers
@@ -590,6 +613,7 @@ export async function resolvePointMedia(
   features: BrainFeature[],
   featureIds: (string | null)[],
   points: TalkingPoint[],
+  family: 'video' | 'photo_carousel',
 ): Promise<(PointMedia | null)[]> {
   const base = buildPointMedia(features, featureIds);
   const { data } = await admin
@@ -598,11 +622,14 @@ export async function resolvePointMedia(
     .eq('company_id', companyId)
     .not('title', 'is', null)
     .order('created_at', { ascending: false });
-  const library = ((data ?? []) as LibraryRow[]).filter((r) => r.title.trim().length > 0);
+  // Slideshows are stills only: recordings are never offered to the matcher.
+  const library = ((data ?? []) as LibraryRow[]).filter(
+    (r) => r.title.trim().length > 0 && (family === 'video' || r.kind === 'screenshot'),
+  );
   if (library.length === 0 || points.length === 0) return base;
 
   const user = [
-    `Media library:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}`).join('\n')}`,
+    `Media library${family === 'photo_carousel' ? ' (slideshow: screenshots only)' : ''}:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}`).join('\n')}`,
     `Talking points:\n${points.map((p, i) => `- point_index ${i}${p.is_product ? ' [is_product]' : ''}: ${p.text}`).join('\n')}`,
   ].join('\n\n');
 
@@ -825,9 +852,10 @@ function fallbackLabel(index: number, text: string | null): string | null {
 }
 
 /**
- * One row per clip or slide, including hook and outro.
- * hook_points_outro: [hook][point 0..n-1][outro]; hook overlay = the hook
- * line, point overlay = short label, outro = null with show_on_screen false.
+ * One row per clip or slide.
+ * hook_points_outro: [hook][point 0..n-1]; hook overlay = the hook line,
+ * point overlay = short label. No separate outro clip: the product CTA rides
+ * inside one of the point clips (is_product).
  * single_clip: one hook-kind segment carrying the hook line.
  * slide_per_point: one slide per point, overlay = the point text (read, not
  * spoken); no hook or outro clip.
@@ -876,13 +904,6 @@ export function deriveSegments(params: {
       overlay_text: overlayLabels?.[i] ?? fallbackLabel(i, p.text),
       show_on_screen: true,
     });
-  });
-  segments.push({
-    slot_index: talkingPoints.length + 1,
-    kind: 'outro',
-    talking_point_index: null,
-    overlay_text: null,
-    show_on_screen: false,
   });
   return segments;
 }

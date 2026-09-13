@@ -1,7 +1,7 @@
-// Day planner publish. The campaign manager fills each day with exactly two
+// Day planner publish. The campaign manager fills each day with up to two
 // posts and one slideshow, by hand or with Randomize, then sends only the
-// days they planned. Creators are notified right away, and the screen can be
-// reopened later to plan the rest of the week.
+// days they planned. Partial days send too. Creators are notified right
+// away, and the screen can be reopened later to plan the rest of the week.
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -159,33 +159,25 @@ export default function WeekPlanScreen() {
     const next: Record<string, DaySlots> = {};
     for (const date of dates) {
       if (sentDates.has(date)) continue;
-      const slots: DaySlots = [
+      if (videos.length === 0 && slides.length === 0) break;
+      next[date] = [
         videos.shift()?.brief_id ?? null,
         videos.shift()?.brief_id ?? null,
         slides.shift()?.brief_id ?? null,
       ];
-      // Only whole days: 2 posts and 1 slideshow, or nothing.
-      if (slots.some((s) => s === null)) break;
-      next[date] = slots;
     }
     setPlan(next);
   }
 
   const plannedDays = dates.filter(
     (date) =>
-      !sentDates.has(date) && slotsFor(date).every((briefId) => briefId !== null),
-  );
-  const partialDays = dates.filter(
-    (date) =>
-      !sentDates.has(date) &&
-      slotsFor(date).some((briefId) => briefId !== null) &&
-      slotsFor(date).some((briefId) => briefId === null),
+      !sentDates.has(date) && slotsFor(date).some((briefId) => briefId !== null),
   );
 
   function confirmPublish() {
     Alert.alert(
       `Send ${plannedDays.length} ${plannedDays.length === 1 ? 'day' : 'days'} to creators?`,
-      'Every creator gets these exact posts on these days and is notified right away. You can come back anytime to plan more days.',
+      'Every creator gets the posts planned on these days and is notified right away. You can come back anytime to add more posts or days.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send', onPress: () => void publish() },
@@ -237,25 +229,17 @@ export default function WeekPlanScreen() {
       <AdminScreen
         actionBar={
           plannedDays.length > 0 ? (
-            <View style={styles.footerStack}>
-              <Button
-                variant="primary"
-                size="md"
-                block
-                disabled={publishing}
-                onPress={confirmPublish}
-              >
-                {publishing
-                  ? 'Sending…'
-                  : `Send ${plannedDays.length} ${plannedDays.length === 1 ? 'day' : 'days'} to creators`}
-              </Button>
-              {partialDays.length > 0 ? (
-                <Text style={styles.footerHint}>
-                  Days send once they have 2 posts and 1 slideshow. Unfinished
-                  days stay here.
-                </Text>
-              ) : null}
-            </View>
+            <Button
+              variant="primary"
+              size="md"
+              block
+              disabled={publishing}
+              onPress={confirmPublish}
+            >
+              {publishing
+                ? 'Sending…'
+                : `Send ${plannedDays.length} ${plannedDays.length === 1 ? 'day' : 'days'} to creators`}
+            </Button>
           ) : undefined
         }
       >
@@ -540,14 +524,5 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: radiusAdmin.lg,
     backgroundColor: color.fillQuiet,
-  },
-  footerStack: {
-    gap: 8,
-  },
-  footerHint: {
-    fontSize: 12,
-    lineHeight: 12 * 1.4,
-    color: color.slate500,
-    textAlign: 'center',
   },
 });

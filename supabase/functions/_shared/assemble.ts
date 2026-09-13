@@ -373,9 +373,9 @@ async function runSlideshowAssembly(params: {
         inset = {
           url: signedImg.signedUrl,
           // Same defaults the app previews when no placement was saved.
-          x: segment.screenshot_x ?? 0.5,
-          y: segment.screenshot_y ?? 0.62,
-          width: segment.screenshot_width ?? 0.85,
+          x: segment.screenshot_x ?? 0.72,
+          y: segment.screenshot_y ?? 0.56,
+          width: segment.screenshot_width ?? 0.34,
         };
       }
       const bytes = await renderSlideImage({

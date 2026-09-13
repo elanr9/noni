@@ -340,9 +340,10 @@ Deno.serve(async (req) => {
   const resolvePostType = async (
     sourceLines: string[],
     fallbackFamily: 'video' | 'photo_carousel',
+    mode: 'fit' | 'mirror' = 'fit',
   ): Promise<PostTypeRow | null> => {
     if (!autoType) return requestedType;
-    return pickPostType(admin, caller.companyId, body.family ?? fallbackFamily, sourceLines);
+    return pickPostType(admin, caller.companyId, body.family ?? fallbackFamily, sourceLines, mode);
   };
 
   // Query path: no scrape / transcribe / OCR. This is the grid's path: the
@@ -382,7 +383,7 @@ Deno.serve(async (req) => {
         ...outcome.draft,
         search_phrase: query,
         overlay_labels: outcome.overlayLabels,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, postType?.family ?? body.family ?? 'video'),
         post_type_id: postType?.id ?? null,
         generation_id: generationId,
         warnings,
@@ -460,7 +461,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, postType?.family ?? body.family ?? 'video'),
         post_type_id: postType?.id ?? null,
         generation_id: generationId,
         warnings,
@@ -496,6 +497,10 @@ Deno.serve(async (req) => {
       const generationId = crypto.randomUUID();
       const sourceLines = mediaSourceLines(media, context);
       const postType = await resolvePostType(sourceLines, 'video');
+      const mediaFamily = postType?.family ?? body.family ?? 'video';
+      if (mediaFamily === 'photo_carousel' && media.kind === 'recording') {
+        return jsonResponse({ error: 'Slideshows use screenshots only' }, 400);
+      }
       const { outcome, warnings } = await generateValidated(
         admin,
         caller.companyId,
@@ -518,6 +523,7 @@ Deno.serve(async (req) => {
         brand.features,
         outcome.featureIds,
         outcome.draft.talking_points,
+        mediaFamily,
       );
       pinMedia(pointMedia, outcome.draft.talking_points, media);
       return jsonResponse({
@@ -592,7 +598,7 @@ Deno.serve(async (req) => {
     // Nothing is saved yet, so brief_id stays null; generation_id joins the
     // validation rows to the brief once the admin saves it.
     const generationId = crypto.randomUUID();
-    const postType = await resolvePostType(sourceLines, post.format);
+    const postType = await resolvePostType(sourceLines, post.format, 'mirror');
     const { outcome, warnings } = await generateValidated(
       admin,
       caller.companyId,
@@ -619,7 +625,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       ...outcome.draft,
       overlay_labels: outcome.overlayLabels,
-      point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
+      point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, postType?.family ?? post.format),
       post_type_id: postType?.id ?? null,
       generation_id: generationId,
       warnings,

@@ -49,7 +49,6 @@ import {
   type LibraryPick,
 } from '../../../components/admin/LibraryPickerSheet';
 import { SlideStage, type SlideInset } from '../../../components/SlideStage';
-import { ReviewSheet } from '../../../components/admin/editor/ReviewSheet';
 import { KindOfPostSheet } from '../../../components/admin/editor/KindOfPostSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
@@ -64,39 +63,30 @@ import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
 import {
-  appendBannedPhrases,
   assistDeriveSegments,
   assistRegenerateField,
-  confirmBriefReview,
-  confirmSlideshowReview,
+  markBriefComplete,
   briefRowState,
   clearBrief,
   DEFAULT_TEXT_OVERLAY,
   getBrief,
-  listApprovedClaimIds,
   listBriefSegments,
   listCampaignBriefs,
   listCampaigns,
   listNoniLibrary,
   listPostTypes,
-  logBriefReviewEvents,
   parseHookOptions,
   parseTalkingPoints,
   parseTextOverlay,
   resolveTextStyle,
-  reviewBrief,
-  runClientTier1,
   signedScreenshotUrl,
   updateBrief,
   updateBriefSegment,
-  type BriefReviewEventInput,
-  type BriefReviewResult,
   type BriefSegment,
   type CampaignBriefItem,
   type NoniLibraryGroup,
   type PointMedia,
   type PostType,
-  type PostTypeShape,
   type RegenDraftPayload,
   type RegenField,
   type TalkingPoint,
@@ -119,15 +109,6 @@ import {
 } from '../../../lib/post-fill';
 import { supabase } from '../../../lib/supabase';
 import { color, radius, radiusAdmin, space, type } from '../../../theme/tokens';
-
-/** The fields as they stood when review opened, for edit diffs and the ban list. */
-type ReviewSnapshot = {
-  hook: string;
-  cta: string;
-  caption: string;
-  searchPhrase: string;
-  points: { id: string; text: string | null; edited_by_admin: boolean }[];
-};
 
 /** What save must re-derive segments for: points, hook, or type changed. */
 function deriveSnapshot(params: {
@@ -229,14 +210,7 @@ export default function PostEditorScreen() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [baseline, setBaseline] = useState('');
 
-  const [approvedClaimIds, setApprovedClaimIds] = useState<string[]>([]);
-  const [reviewVisible, setReviewVisible] = useState(false);
-  const [reviewRunning, setReviewRunning] = useState(false);
-  const [reviewConfirming, setReviewConfirming] = useState(false);
-  const [reviewResult, setReviewResult] = useState<BriefReviewResult | null>(null);
-  const [appliedIndexes, setAppliedIndexes] = useState<ReadonlySet<number>>(new Set());
-  const [appliedPointIds, setAppliedPointIds] = useState<ReadonlySet<string>>(new Set());
-  const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [completing, setCompleting] = useState(false);
 
   const [regenBusy, setRegenBusy] = useState<RegenField | null>(null);
   const [saving, setSaving] = useState(false);
@@ -313,7 +287,6 @@ export default function PostEditorScreen() {
           types,
           segs,
           { data: brand },
-          claimIds,
           { data: link },
           { data: company },
         ] = await Promise.all([
@@ -321,7 +294,6 @@ export default function PostEditorScreen() {
           listPostTypes(),
           listBriefSegments(id),
           supabase.from('brand_profiles').select('hashtag_bank').maybeSingle(),
-          listApprovedClaimIds(),
           supabase
             .from('campaign_briefs')
             .select('position, campaign_id')
@@ -337,7 +309,6 @@ export default function PostEditorScreen() {
         setSegments(segs);
         refreshScreenshotUrls(segs);
         setHashtagBank(brand?.hashtag_bank ?? []);
-        setApprovedClaimIds(claimIds);
         // No posting-account handle lives in the data; the slug is the
         // closest stable stand-in for the merged preview.
         setAccountName(company?.slug ?? company?.name ?? '');
@@ -366,7 +337,7 @@ export default function PostEditorScreen() {
         setPoints(briefPoints);
         setCta(brief.cta ?? '');
         setSubtitles(
-          briefPoints.length === 0 && brief.format !== 'photo_carousel'
+          brief.format !== 'photo_carousel' && brief.reviewed_at === null
             ? true
             : brief.subtitles,
         );
@@ -680,6 +651,7 @@ export default function PostEditorScreen() {
       briefId: id,
       rows,
       pointMedia,
+      family,
     });
     if (placed === 0) return rows;
     return listBriefSegments(id);
@@ -855,196 +827,6 @@ export default function PostEditorScreen() {
       label: t.label,
       sub: `${t.min_points} to ${t.max_points} ${otherFamily === 'photo_carousel' ? 'slides' : 'points'}`,
     }));
-
-  // --- AI review. On demand, not a background check: on demand, never blocks,
-  // never edits anything without an explicit Apply. -------------------------
-
-  function takeReviewSnapshot(): ReviewSnapshot {
-    return {
-      hook: resolvedHook() ?? '',
-      cta,
-      caption: mergedCaption(),
-      searchPhrase,
-      points: points.map((p) => ({
-        id: p.id,
-        text: p.text,
-        edited_by_admin: p.edited_by_admin,
-      })),
-    };
-  }
-
-  async function runReview() {
-    setReviewResult(null);
-    setAppliedIndexes(new Set());
-    setAppliedPointIds(new Set());
-    setReviewSnapshot(takeReviewSnapshot());
-    setReviewVisible(true);
-    setReviewRunning(true);
-    try {
-      const result = await reviewBrief({
-        draft: {
-          ...buildRegenPayload(),
-          caption: mergedCaption(),
-          hook_options: useCustomHook
-            ? [customHook.trim(), ...hookOptions].filter(Boolean)
-            : hookOptions,
-        },
-        postTypeKey: currentType?.key,
-        hookIndex: useCustomHook ? 0 : chosenHookIndex,
-      });
-      setReviewResult(result);
-    } catch (e) {
-      setReviewVisible(false);
-      Alert.alert(
-        'Review failed',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setReviewRunning(false);
-    }
-  }
-
-  function applySuggestion(checkIndex: number) {
-    const suggestion = reviewResult?.checks[checkIndex]?.suggestion;
-    if (!suggestion) return;
-    const replacement = suggestion.replacement;
-    switch (suggestion.field) {
-      case 'hook':
-        if (useCustomHook) {
-          setCustomHook(replacement);
-        } else {
-          setHookOptions((prev) =>
-            prev.map((h, i) => (i === chosenHookIndex ? replacement : h)),
-          );
-        }
-        break;
-      case 'talking_point': {
-        const index = suggestion.index ?? -1;
-        const target = points[index];
-        if (!target) return;
-        setPoints((prev) =>
-          prev.map((p, i) => (i === index ? { ...p, text: replacement } : p)),
-        );
-        // Applied swaps are the model correcting itself, not her rewrite;
-        // they never feed banned_phrases.
-        setAppliedPointIds((prev) => new Set([...prev, target.id]));
-        break;
-      }
-      case 'cta':
-        setCta(replacement);
-        break;
-      case 'caption':
-        setCaption(replacement);
-        break;
-      case 'search_phrase':
-        setSearchPhrase(replacement);
-        break;
-    }
-    setAppliedIndexes((prev) => new Set([...prev, checkIndex]));
-  }
-
-  function toPostTypeShape(row: PostType | null): PostTypeShape | null {
-    if (!row) return null;
-    return {
-      key: row.key,
-      family: row.family === 'photo_carousel' ? 'photo_carousel' : 'video',
-      min_points: row.min_points,
-      max_points: row.max_points,
-      requires_plug: row.requires_plug,
-      target_words_min: row.target_words_min,
-      target_words_max: row.target_words_max,
-    };
-  }
-
-  async function confirmReview() {
-    if (!id || !profile || !reviewResult || !reviewSnapshot) return;
-    setReviewConfirming(true);
-    try {
-      const base = {
-        brief_id: id,
-        company_id: profile.company_id,
-        author_id: profile.id,
-      };
-      const events: BriefReviewEventInput[] = [];
-
-      // Edit diffs: what changed between opening review and confirming.
-      const snapshot = reviewSnapshot;
-      const hookNow = resolvedHook() ?? '';
-      const captionNow = mergedCaption();
-      const fieldDiffs: { field: string; before: string | null; after: string | null }[] = [];
-      if (snapshot.hook !== hookNow) {
-        fieldDiffs.push({ field: 'hook', before: snapshot.hook || null, after: hookNow || null });
-      }
-      if (snapshot.cta !== cta) {
-        fieldDiffs.push({ field: 'cta', before: snapshot.cta || null, after: cta || null });
-      }
-      if (snapshot.caption !== captionNow) {
-        fieldDiffs.push({
-          field: 'caption',
-          before: snapshot.caption || null,
-          after: captionNow || null,
-        });
-      }
-      if (snapshot.searchPhrase !== searchPhrase) {
-        fieldDiffs.push({
-          field: 'search_phrase',
-          before: snapshot.searchPhrase || null,
-          after: searchPhrase || null,
-        });
-      }
-      const bannedPhrases: string[] = [];
-      for (const before of snapshot.points) {
-        const now = points.find((p) => p.id === before.id);
-        if (!now || (now.text ?? '') === (before.text ?? '')) continue;
-        fieldDiffs.push({
-          field: `talking_point:${before.id}`,
-          before: before.text,
-          after: now.text,
-        });
-        // Her rewrite of a generated line bans the removed phrase. Lines she
-        // had already hand-edited, and applied suggestions, do not count.
-        if (before.text && !before.edited_by_admin && !appliedPointIds.has(before.id)) {
-          bannedPhrases.push(before.text);
-        }
-      }
-      for (const diff of fieldDiffs) {
-        events.push({ ...base, event: 'edit', diff });
-      }
-
-      // Overrides: Tier 1 re-runs against the post as it stands now, so a
-      // fixed check is not logged as overridden. Tier 2/3 come from the
-      // review response; applied suggestions are not overrides.
-      const tier1Now = runClientTier1(buildRegenPayload(), {
-        hashtagBank,
-        approvedClaimIds,
-        postType: toPostTypeShape(currentType),
-      });
-      for (const check of tier1Now) {
-        events.push({ ...base, event: 'override', check_id: check.check_id, tier: 1 });
-      }
-      reviewResult.checks.forEach((check, index) => {
-        if (check.tier !== 1 && !appliedIndexes.has(index)) {
-          events.push({ ...base, event: 'override', check_id: check.check_id, tier: check.tier });
-        }
-      });
-      events.push({ ...base, event: 'confirm' });
-
-      const saved = await save();
-      if (!saved) return;
-      await confirmBriefReview(id, reviewResult);
-      await logBriefReviewEvents(events);
-      await appendBannedPhrases(profile.company_id, bannedPhrases);
-      setReviewVisible(false);
-      router.back();
-    } catch (e) {
-      Alert.alert(
-        'Could not confirm',
-        e instanceof Error ? e.message : 'Try again',
-      );
-    } finally {
-      setReviewConfirming(false);
-    }
-  }
 
   async function ensureSegmentsDerived(): Promise<BriefSegment[]> {
     const ok = await save();
@@ -1268,8 +1050,7 @@ export default function PostEditorScreen() {
     });
   }
 
-  /** Footer action. Video posts save then open the AI review; slideshows
-   * save and finish, there is no spoken script to review. */
+  /** Footer action: save, derive segments, then mark the post complete. */
   async function finishPost() {
     if (cta.trim() && points.length > 0 && !points.some((p) => p.is_product)) {
       setPoints((prev) =>
@@ -1277,12 +1058,7 @@ export default function PostEditorScreen() {
       );
     }
     await ensureSegmentsDerived();
-    if (family === 'photo_carousel') {
-      await confirmSlideshow();
-      return;
-    }
-    const ok = await save();
-    if (ok) void runReview();
+    await markComplete();
   }
 
   function goBack() {
@@ -1293,14 +1069,14 @@ export default function PostEditorScreen() {
     router.back();
   }
 
-  /** Slideshow finish: the admin approved the visual preview. */
-  async function confirmSlideshow() {
+  /** The admin approved the post; reviewed_at flips the row to complete. */
+  async function markComplete() {
     if (!id) return;
-    setReviewConfirming(true);
+    setCompleting(true);
     try {
       const ok = await save();
       if (!ok) return;
-      await confirmSlideshowReview(id);
+      await markBriefComplete(id);
       router.back();
     } catch (e) {
       Alert.alert(
@@ -1308,7 +1084,7 @@ export default function PostEditorScreen() {
         e instanceof Error ? e.message : 'Try again',
       );
     } finally {
-      setReviewConfirming(false);
+      setCompleting(false);
     }
   }
 
@@ -1464,6 +1240,14 @@ export default function PostEditorScreen() {
       >
         {summaryMode === 'view' ? (
           <View style={styles.summaryStack}>
+            {family === 'video' ? (
+              <View style={styles.summaryChips}>
+                <PostTypeChip
+                  typeKey="none"
+                  label={subtitles ? 'Subtitles on' : 'No subtitles'}
+                />
+              </View>
+            ) : null}
             {title.trim() ? (
               <View style={styles.summaryCard}>
                 <SectionLabel>Title</SectionLabel>
@@ -1652,7 +1436,7 @@ export default function PostEditorScreen() {
               size="md"
               variant="danger"
               block
-              disabled={saving || reviewRunning || reviewConfirming}
+              disabled={saving || completing}
               onPress={confirmDeletePost}
             >
               Delete post
@@ -1685,7 +1469,7 @@ export default function PostEditorScreen() {
               variant="outline"
               block
               icon="sparkles"
-              disabled={filling || saving || reviewRunning || reviewConfirming || !currentType}
+              disabled={filling || saving || completing || !currentType}
               onPress={() => setLibraryOpen(true)}
             >
               {filling
@@ -1701,12 +1485,12 @@ export default function PostEditorScreen() {
               variant="primary"
               block
               icon="check"
-              disabled={filling || saving || reviewRunning || reviewConfirming}
+              disabled={filling || saving || completing}
               onPress={() =>
                 void (points.length === 0 ? saveProgress() : finishPost())
               }
             >
-              {saving || reviewConfirming ? 'Saving…' : 'Save post'}
+              {saving || completing ? 'Saving…' : 'Save post'}
             </Button>
           </View>
         </View>
@@ -1717,42 +1501,18 @@ export default function PostEditorScreen() {
           style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}
         >
           <View style={styles.flex}>
-            {family === 'photo_carousel' ? (
-              <Button
-                size="lg"
-                variant="primary"
-                block
-                disabled={saving || reviewConfirming}
-                onPress={() => void confirmSlideshow()}
-              >
-                {reviewConfirming ? 'Saving…' : 'Mark complete'}
-              </Button>
-            ) : (
-              <Button
-                size="lg"
-                variant="primary"
-                block
-                disabled={reviewRunning}
-                onPress={() => void runReview()}
-              >
-                Run final review
-              </Button>
-            )}
+            <Button
+              size="lg"
+              variant="primary"
+              block
+              disabled={saving || completing}
+              onPress={() => void markComplete()}
+            >
+              {completing ? 'Saving…' : 'Mark complete'}
+            </Button>
           </View>
         </View>
       ) : null}
-
-      <ReviewSheet
-        visible={reviewVisible}
-        running={reviewRunning}
-        confirming={reviewConfirming}
-        result={reviewResult}
-        appliedIndexes={appliedIndexes}
-        onApply={applySuggestion}
-        onClose={() => setReviewVisible(false)}
-        onConfirm={() => void confirmReview()}
-        confirmLabel="Save post"
-      />
 
       {overlayIndex !== null ? (
         <OverlayEditor
@@ -1777,6 +1537,7 @@ export default function PostEditorScreen() {
           screenshotX={overlaySegment?.screenshot_x ?? null}
           screenshotY={overlaySegment?.screenshot_y ?? null}
           screenshotWidth={overlaySegment?.screenshot_width ?? null}
+          subtitles={family === 'video' && subtitles}
           saving={overlaySaving}
           onClose={() => setOverlayIndex(null)}
           onSave={saveOverlay}
@@ -1864,6 +1625,7 @@ export default function PostEditorScreen() {
           companyId={profile.company_id}
           userId={profile.id}
           allowRecordings={family === 'video'}
+          screenshotsOnly={family === 'photo_carousel'}
           library={mediaLibrary}
           onLibraryChange={setMediaLibrary}
           noniLibrary={noniLibrary}
@@ -1980,6 +1742,11 @@ const styles = StyleSheet.create({
   footerFill: { flex: 0.8 },
   summaryStack: {
     gap: 12,
+  },
+  summaryChips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   deleteWrap: {
     marginTop: 28,

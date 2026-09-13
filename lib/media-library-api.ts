@@ -16,6 +16,9 @@ export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 
 export type MediaKind = 'screenshot' | 'recording';
 
+/** Default inset placement: lower right, off a talking head's face and above the subtitles. */
+export const DEFAULT_SHOT_PLACEMENT = { x: 0.72, y: 0.56, w: 0.34 } as const;
+
 export type MediaLibraryRow = Tables<'media_library'>;
 
 export type MediaLibraryItem = {

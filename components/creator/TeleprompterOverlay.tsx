@@ -23,6 +23,7 @@ export interface TeleprompterOverlayProps {
   /** 1 = about 150 words a minute. */
   speed: number;
   running: boolean;
+  maxHeight?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -72,6 +73,7 @@ export function TeleprompterOverlay({
   text,
   speed,
   running,
+  maxHeight,
   style,
 }: TeleprompterOverlayProps) {
   const chunks = useMemo(() => chunkScript(text), [text]);
@@ -113,7 +115,7 @@ export function TeleprompterOverlay({
       onPress={() => {
         if (running) setPaused((p) => !p);
       }}
-      style={[styles.root, style]}
+      style={[styles.root, maxHeight !== undefined && { maxHeight }, style]}
     >
       <View style={styles.labels}>
         <Text style={styles.microLabel}>
@@ -123,66 +125,76 @@ export function TeleprompterOverlay({
       </View>
       <Animated.View style={[styles.box, { opacity: fade }]}>
         {lines.map((line, i) => (
-          <Text key={`${index}-${i}`} style={styles.line}>
+          <Text
+            key={`${index}-${i}`}
+            style={[styles.line, i > 0 && styles.lineNext]}
+          >
             {line}
           </Text>
         ))}
       </Animated.View>
-      {chunks.length > 1 ? (
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: `${progress * 100}%` }]} />
-        </View>
-      ) : null}
-      {atEnd && running ? (
-        <Text style={styles.endHint}>End of script. Stop when you are done.</Text>
-      ) : null}
+      <View style={styles.foot}>
+        {chunks.length > 1 ? (
+          <View style={styles.track}>
+            <View style={[styles.fill, { width: `${progress * 100}%` }]} />
+          </View>
+        ) : null}
+        {atEnd && running ? (
+          <Text style={styles.endHint}>End of script. Stop when you are done.</Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 22,
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   labels: {
-    alignItems: 'center',
-    gap: 2,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   microLabel: {
-    fontSize: type.size.micro,
+    fontSize: 11,
     fontWeight: type.weight.heavy,
-    letterSpacing: 2,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
     color: color.whiteA60,
   },
   microHint: {
-    fontSize: type.size.micro11,
+    fontSize: 12,
     fontWeight: type.weight.semibold,
     color: color.whiteA45,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   box: {
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.42)',
-    maxWidth: '100%',
+    gap: 2,
   },
   line: {
-    fontSize: 22,
-    lineHeight: 30,
-    fontWeight: type.weight.heavy,
-    textAlign: 'center',
+    fontSize: 16,
+    lineHeight: 16 * 1.35,
+    fontWeight: type.weight.semibold,
     color: color.white,
-    textShadowColor: 'rgba(0,0,0,0.6)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+  },
+  lineNext: {
+    color: color.whiteA75,
+  },
+  foot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 14,
   },
   track: {
-    width: 120,
+    width: 96,
     height: 3,
     borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.22)',
@@ -194,8 +206,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.white,
   },
   endHint: {
-    fontSize: type.size.micro11,
+    fontSize: 12,
     fontWeight: type.weight.semibold,
     color: color.whiteA60,
+    flexShrink: 1,
   },
 });

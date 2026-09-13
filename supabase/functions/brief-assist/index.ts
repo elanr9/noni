@@ -326,7 +326,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, targetType.family),
         post_type_id: targetType.id,
         generation_id: generationId,
         warnings,
@@ -542,7 +542,7 @@ Deno.serve(async (req) => {
         script: merged.script,
         target_words: merged.target_words,
         overlay_labels: overlayLabels,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, merged.talking_points),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, merged.talking_points, postType?.family ?? draft.format),
         hook_may_be_stale: hookMayBeStale,
         warnings,
       });
@@ -551,7 +551,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         talking_point: merged.talking_points[body.index!],
         overlay_label: overlayLabels[0] ?? null,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, [merged.talking_points[body.index!]]),
+        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, [merged.talking_points[body.index!]], postType?.family ?? draft.format),
         index: body.index,
         hook_may_be_stale: hookMayBeStale,
         warnings,

@@ -72,6 +72,8 @@ export interface CameraRollSheetProps {
   userId: string;
   /** Slideshows take stills only; the Recordings toggle hides. */
   allowRecordings: boolean;
+  /** Slideshow posts: only screenshots are listed and only images can be picked. */
+  screenshotsOnly?: boolean;
   library: MediaLibraryItem[];
   onLibraryChange: (items: MediaLibraryItem[]) => void;
   /** Company Brain feature shots, shown under the shared screenshots. */
@@ -84,11 +86,13 @@ export function CameraRollSheet({
   onPick,
   companyId,
   userId,
-  allowRecordings,
+  allowRecordings: allowRecordingsProp,
+  screenshotsOnly = false,
   library,
   onLibraryChange,
   noniLibrary = [],
 }: CameraRollSheetProps) {
+  const allowRecordings = allowRecordingsProp && !screenshotsOnly;
   const { width } = useWindowDimensions();
   const [kind, setKind] = useState<MediaKind>('screenshot');
   const [tab, setTab] = useState<'library' | 'roll'>('library');
@@ -118,6 +122,7 @@ export function CameraRollSheet({
   }
 
   function switchKind(next: MediaKind) {
+    if (!allowRecordings && next === 'recording') return;
     setKind(next);
     setSelectedId(null);
   }

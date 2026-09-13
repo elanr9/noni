@@ -181,9 +181,11 @@ export const TEXT_HOLD_MS = 3000;
 
 /** Mid-frame text box position, used by the render adapter. */
 export const TEXT_Y = 0.45;
-const IMAGE_Y = 0.62;
+// Lower right, clear of a talking head's face and above the subtitle block.
+const IMAGE_X = 0.72;
+const IMAGE_Y = 0.56;
 const DEFAULT_SUBTITLES_Y = 0.78;
-const IMAGE_WIDTH = 0.85;
+const IMAGE_WIDTH = 0.34;
 
 /**
  * Build the timeline from the brief's render manifest and the real clip
@@ -239,7 +241,7 @@ export function buildRenderTimeline(params: {
           screenshot_path: segment.screenshot_url,
           start_ms: cursorMs,
           duration_ms: effectiveMs,
-          x: segment.screenshot_x ?? 0.5,
+          x: segment.screenshot_x ?? IMAGE_X,
           y: segment.screenshot_y ?? IMAGE_Y,
           width: segment.screenshot_width ?? IMAGE_WIDTH,
         });
