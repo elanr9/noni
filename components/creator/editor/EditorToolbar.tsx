@@ -5,7 +5,14 @@ import { Icon, type IconName } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { color, type } from '../../../theme/tokens';
 
-export type ToolId = 'split' | 'replace' | 'delete' | 'speed' | 'crop' | 'volume';
+export type ToolId =
+  | 'split'
+  | 'replace'
+  | 'delete'
+  | 'speed'
+  | 'crop'
+  | 'volume'
+  | 'text-color';
 
 type Tool = {
   id: ToolId;
@@ -20,10 +27,15 @@ export function EditorToolbar(props: {
   hasSelection: boolean;
   canDelete: boolean;
   selectedMuted: boolean;
+  /** The clip under the playhead carries text boxes the creator can recolor. */
+  canStyleText: boolean;
   onTool: (tool: ToolId) => void;
 }): JSX.Element {
-  const { canSplit, hasSelection, canDelete, selectedMuted, onTool } = props;
+  const { canSplit, hasSelection, canDelete, selectedMuted, canStyleText, onTool } = props;
   const tools: Tool[] = [
+    ...(canStyleText
+      ? [{ id: 'text-color' as const, label: 'Text color', icon: 'palette' as const, enabled: true }]
+      : []),
     { id: 'split', label: 'Split', icon: 'scissors', enabled: canSplit },
     { id: 'replace', label: 'Replace', icon: 'repeat', enabled: hasSelection },
     { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },

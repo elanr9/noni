@@ -4,7 +4,7 @@
 // screenshot card at its admin-placed spot. Green screen segments skip
 // the card here because the screenshot fills the stage as the background.
 import { useEffect, useState, type JSX } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   TikTokSans_700Bold,
@@ -12,12 +12,8 @@ import {
 } from '@expo-google-fonts/tiktok-sans';
 
 import type { BriefSegment, TextOverlay } from '../../lib/briefs-api';
-import {
-  overlayBoxFill,
-  overlayTextContrast,
-  parseOverlayBoxes,
-} from '../../lib/overlay-boxes';
-import { OutlinedText } from '../ui/OutlinedText';
+import { OVERLAY_TEXT_SPEC, parseOverlayBoxes } from '../../lib/overlay-boxes';
+import { OverlayTextBox } from '../ui/OverlayTextBox';
 import { DragPlacement, type PlacementMove } from './DragPlacement';
 
 const IMAGE_Y = 0.62;
@@ -218,10 +214,6 @@ export function SegmentOverlayPreview(props: {
           .filter((line) => line.length > 0)
           .join('\n');
         if (text.length === 0) return null;
-        const base = {
-          lineHeight: font * 1.3,
-          fontFamily: fontLoaded ? 'TikTokSans_700Bold' : undefined,
-        };
         return (
           <DragPlacement
             key={box.id}
@@ -233,35 +225,15 @@ export function SegmentOverlayPreview(props: {
               onMoveBox ? (nx, ny) => onMoveBox(box.id, nx, ny) : undefined
             }
             onDragStart={onDragStart}
-            layerStyle={styles.textLayer}
-            style={styles.textWrap}
           >
-            {box.bg ? (
-              <Text
-                style={[
-                  styles.text,
-                  base,
-                  {
-                    fontSize: font,
-                    color: overlayTextContrast(box.color),
-                    backgroundColor: overlayBoxFill(box.color),
-                    paddingHorizontal: font * 0.72,
-                    paddingVertical: font * 0.48,
-                    borderRadius: font * 0.72,
-                    overflow: 'hidden',
-                  },
-                ]}
-              >
-                {text}
-              </Text>
-            ) : (
-              <OutlinedText
-                text={text}
-                fontSize={font}
-                color={box.color}
-                style={[styles.text, base]}
-              />
-            )}
+            <OverlayTextBox
+              text={text}
+              color={box.color}
+              bg={box.bg}
+              fontSize={font}
+              maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stageWidth}
+              fontLoaded={fontLoaded}
+            />
           </DragPlacement>
         );
       })}
@@ -278,17 +250,5 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
-  },
-  textLayer: {
-    paddingHorizontal: 36,
-  },
-  textWrap: {
-    maxWidth: '100%',
-  },
-  text: {
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    textAlign: 'center',
-    maxWidth: '100%',
   },
 });

@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
-import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { color, radiusAdmin } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 
 export interface ReelSurfaceProps {
@@ -15,16 +15,9 @@ export interface ReelSurfaceProps {
   onPositionSec: (sec: number) => void;
 }
 
-function formatTime(sec: number): string {
-  const whole = Math.max(0, Math.floor(sec));
-  const m = Math.floor(whole / 60);
-  const s = whole % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 /**
- * Admin handoff §3 — the post as it will appear on the platform. Player
- * surface with a 3px scrubber at bottom:148 and `0:13 / 0:52`.
+ * The post as it plays in the feed: full bleed player with a hairline
+ * progress bar pinned to the bottom edge.
  */
 export function ReelSurface({
   videoUri,
@@ -82,13 +75,8 @@ export function ReelSurface({
         </View>
       )}
 
-      <View style={styles.scrubRow} pointerEvents="none">
-        <View style={styles.track}>
-          <View style={[styles.trackFill, { width: `${progress * 100}%` }]} />
-        </View>
-        <Text style={styles.time}>
-          {`${formatTime(positionSec)} / ${formatTime(durationSec)}`}
-        </Text>
+      <View style={styles.track} pointerEvents="none">
+        <View style={[styles.trackFill, { width: `${progress * 100}%` }]} />
       </View>
     </Pressable>
   );
@@ -112,30 +100,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scrubRow: {
-    position: 'absolute',
-    bottom: 148,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
   track: {
-    flex: 1,
-    height: 3,
-    borderRadius: radiusAdmin.pill,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 2.5,
     backgroundColor: color.whiteA28,
-    overflow: 'hidden',
   },
   trackFill: {
-    height: 3,
-    borderRadius: radiusAdmin.pill,
+    height: 2.5,
     backgroundColor: color.white,
-  },
-  time: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.bold,
-    color: color.whiteA75,
   },
 });

@@ -78,11 +78,13 @@ import {
   DEFAULT_SUBTITLES_Y,
   creatorPlaceSegment,
   creatorPlaceSubtitles,
+  creatorStyleSegmentBox,
   listBriefSegments,
   parseHookOptions,
   parseTalkingPoints,
   parseTextOverlay,
   segmentWithBoxMoved,
+  segmentWithBoxStyled,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
@@ -1258,6 +1260,17 @@ export default function RecordScreen() {
     );
   }
 
+  function styleBox(segmentId: string, boxId: string, boxColor: string, bg: boolean) {
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segmentId ? segmentWithBoxStyled(s, boxId, boxColor, bg) : s,
+      ),
+    );
+    creatorStyleSegmentBox({ segmentId, boxId, color: boxColor, bg }).catch(() =>
+      setErrorToast('Could not save that color. Try again.'),
+    );
+  }
+
   function moveReviewBox(boxId: string, x: number, y: number) {
     if (!reviewSegment) return;
     const segmentId = reviewSegment.id;
@@ -1366,6 +1379,9 @@ export default function RecordScreen() {
             );
             persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
           }}
+          onStyleBox={(segment, boxId, boxColor, bg) =>
+            styleBox(segment.id, boxId, boxColor, bg)
+          }
           onMoveCard={(segment, x, y) => {
             setBriefSegments((prev) =>
               prev.map((s) =>

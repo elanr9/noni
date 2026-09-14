@@ -43,6 +43,8 @@ export interface SlideNavProps {
   onMoveBox?: (slideIndex: number, boxId: string, x: number, y: number) => void;
   /** When set, the creator can hold and drag the inset on the current slide. */
   onMoveInset?: (slideIndex: number, x: number, y: number) => void;
+  /** Fires when the creator pages to another slide. */
+  onIndexChange?: (slideIndex: number) => void;
 }
 
 const DARK_TINTS = ['#16324A', '#242C3B', '#2E2838', '#1E3A30'];
@@ -107,6 +109,7 @@ export function SlideNav({
   style,
   onMoveBox,
   onMoveInset,
+  onIndexChange,
 }: SlideNavProps) {
   const dark = variant === 'dark';
   const [index, setIndex] = useState(0);
@@ -121,6 +124,7 @@ export function SlideNav({
     if (next === safeIndex || next < 0 || next >= count) return;
     prevIndexRef.current = safeIndex;
     setIndex(next);
+    onIndexChange?.(next);
     fade.setValue(0);
     Animated.timing(fade, {
       toValue: 1,

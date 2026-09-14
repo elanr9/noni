@@ -580,6 +580,40 @@ export function segmentWithBoxMoved(
   return { ...segment, overlay_style: next.overlay_style, text_y: next.text_y };
 }
 
+/**
+ * Creator side: recolor one text box on a clip or slide. Color and bg only;
+ * the RPC refuses everything else.
+ */
+export async function creatorStyleSegmentBox(params: {
+  segmentId: string;
+  boxId: string;
+  color: string;
+  bg: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc('creator_style_segment_box', {
+    p_segment_id: params.segmentId,
+    p_box_id: params.boxId,
+    p_color: params.color,
+    p_bg: params.bg,
+  });
+  if (error) throw error;
+}
+
+/** The same segment with one text box restyled; text, size and position untouched. */
+export function segmentWithBoxStyled(
+  segment: BriefSegment,
+  boxId: string,
+  color: string,
+  bg: boolean,
+): BriefSegment {
+  const boxes = parseOverlayBoxes(segment.overlay_style, {
+    text: segment.overlay_text,
+    textY: segment.text_y,
+  }).map((b) => (b.id === boxId ? { ...b, color, bg } : b));
+  const next = serializeOverlayBoxes(boxes);
+  return { ...segment, overlay_style: next.overlay_style, text_y: next.text_y };
+}
+
 /** Uploads to the private brief-assets bucket; returns the storage path. */
 export async function uploadSegmentScreenshot(params: {
   companyId: string;

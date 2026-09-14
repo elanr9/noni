@@ -23,20 +23,29 @@ const TEXT_BASE = {
   y_alignment: '50%',
   font_family: 'TikTok Sans',
   font_weight: '700',
-  line_height: '128%',
+  line_height: '115%',
 } as const;
 
-/** Outline thickness as a fraction of the font size, same as the app preview. */
-const CLASSIC_OUTLINE_RATIO = 0.06;
+// ---- Per-box styling. Source of truth: lib/overlay-boxes.ts on the client
+// (OVERLAY_TEXT_SPEC, overlayBoxFill, overlayTextContrast,
+// classicOutlineColor). Edge functions cannot import from lib/, so these are
+// mirrored verbatim; change both together. ----
 
-/**
- * Creatomate text properties for the admin's overlay config. Every mode is
- * ONE auto-wrapping element, exactly like a TikTok text box.
- * 'box': the classic look, a rounded background hugging each wrapped line
- * (accent is the box fill); 'outline': letters stroked with the accent;
- * 'plain': bare text with a soft shadow.
- */
-// ---- Per-box styling (mirrors lib/overlay-boxes.ts on the client) ----
+/** TikTok text tool metrics as multiples of the font size. */
+const OVERLAY_TEXT_SPEC = {
+  lineHeight: 1.15,
+  boxPadX: 0.55,
+  boxPadY: 0.26,
+  boxRadius: 0.38,
+  outlineRatio: 0.075,
+  maxWidth: 0.86,
+} as const;
+
+/** Creatomate background_* paddings are percent of the font size. */
+const BOX_WIDTH = `${OVERLAY_TEXT_SPEC.maxWidth * 100}%`;
+const BOX_PAD_X = `${OVERLAY_TEXT_SPEC.boxPadX * 100}%`;
+const BOX_PAD_Y = `${OVERLAY_TEXT_SPEC.boxPadY * 100}%`;
+const BOX_RADIUS = `${OVERLAY_TEXT_SPEC.boxRadius * 100}%`;
 
 function parseHex(hex: string): { r: number; g: number; b: number } | null {
   const raw = hex.replace('#', '').trim();
@@ -60,42 +69,77 @@ function toHex(r: number, g: number, b: number): string {
   return `#${byte(r)}${byte(g)}${byte(b)}`;
 }
 
-function mixHex(a: string, b: string, t: number): string | null {
-  const from = parseHex(a);
-  const to = parseHex(b);
-  if (!from || !to) return null;
-  return toHex(
-    from.r + (to.r - from.r) * t,
-    from.g + (to.g - from.g) * t,
-    from.b + (to.b - from.b) * t,
-  );
-}
-
 function luminance(hex: string): number | null {
   const p = parseHex(hex);
   if (p === null) return null;
   return (0.299 * p.r + 0.587 * p.g + 0.114 * p.b) / 255;
 }
 
-/** Pastel wash of the picked color — TikTok/Reels Classic box fill. */
-function overlayBoxFill(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82 || lum < 0.18) return fill;
-  return mixHex(fill, '#FFFFFF', 0.7) ?? fill;
+function toHsl(hex: string): { h: number; s: number; l: number } | null {
+  const p = parseHex(hex);
+  if (p === null) return null;
+  const r = p.r / 255;
+  const g = p.g / 255;
+  const b = p.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: ((h * 60) % 360 + 360) % 360, s, l };
 }
 
-/** Darker same-hue letters on the pastel box (white/black stay high-contrast). */
+function fromHsl(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const sector = Math.floor(h / 60) % 6;
+  const rgb: [number, number, number][] = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ];
+  const [r, g, b] = rgb[sector] ?? [0, 0, 0];
+  return toHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+}
+
+/** Below this the pick is a grey and keeps its own tone. */
+const NEUTRAL_SATURATION = 0.12;
+
+/** TikTok colored bubble fill: the picked hue lifted to a light saturated tint. */
+function overlayBoxFill(fill: string): string {
+  const hsl = toHsl(fill);
+  if (hsl === null) return fill;
+  if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#FFFFFF' : '#000000';
+  return fromHsl(hsl.h, Math.max(hsl.s, 0.9), 0.71);
+}
+
+/** Letters on the bubble: the same hue driven deep and fully saturated. */
 function overlayTextContrast(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82) return '#0F1720';
-  if (lum < 0.18) return '#FFFFFF';
-  return mixHex(fill, '#000000', 0.22) ?? fill;
+  const hsl = toHsl(fill);
+  if (hsl === null) return '#0F1720';
+  if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#000000' : '#FFFFFF';
+  return fromHsl(hsl.h, 1, 0.24);
+}
+
+/** Classic outline sits behind the letters in the opposite tone. */
+function classicOutlineColor(textColor: string): string {
+  const lum = luminance(textColor);
+  return lum !== null && lum < 0.5 ? '#FFFFFF' : '#000000';
 }
 
 /**
  * Creatomate props for one admin-placed box: exact position, exact size
  * (box.size is a fraction of the frame width, which equals vmin on a 9:16
- * frame) and the same pastel wash the composer previews.
+ * frame) and the same look the composer previews.
  */
 function boxTextProps(box: {
   x: number;
@@ -105,16 +149,14 @@ function boxTextProps(box: {
 }): Record<string, string> {
   const sizeVmin = `${(box.size * 100).toFixed(2)} vmin`;
   if (!box.bg) {
-    // TikTok classic: white letters with a thin black outline plus a soft
-    // shadow. Stroke scales with the font (OUTLINE_RATIO in OutlinedText.tsx).
     return {
       ...TEXT_BASE,
       x: `${box.x * 100}%`,
-      width: '86%',
+      width: BOX_WIDTH,
       font_size: sizeVmin,
       fill_color: box.color,
-      stroke_color: '#000000',
-      stroke_width: `${(box.size * 100 * CLASSIC_OUTLINE_RATIO).toFixed(2)} vmin`,
+      stroke_color: classicOutlineColor(box.color),
+      stroke_width: `${(box.size * 100 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
       shadow_color: 'rgba(0,0,0,0.35)',
       shadow_blur: '0.8 vmin',
     };
@@ -122,32 +164,35 @@ function boxTextProps(box: {
   return {
     ...TEXT_BASE,
     x: `${box.x * 100}%`,
-    width: '86%',
+    width: BOX_WIDTH,
     font_size: sizeVmin,
     fill_color: overlayTextContrast(box.color),
     background_color: overlayBoxFill(box.color),
-    background_x_padding: '58%',
-    background_y_padding: '42%',
-    background_border_radius: '52%',
+    background_x_padding: BOX_PAD_X,
+    background_y_padding: BOX_PAD_Y,
+    background_border_radius: BOX_RADIUS,
   };
 }
 
+/**
+ * Legacy brief-level overlay config (no per-box colors). Every mode is ONE
+ * auto-wrapping element; geometry follows OVERLAY_TEXT_SPEC, colors stay.
+ */
 function textProps(overlay: TimelineTextOverlay): Record<string, string> {
   if (overlay.mode === 'outline') {
     return {
       ...TEXT_BASE,
-      width: '78%',
-      font_weight: '800',
+      width: BOX_WIDTH,
       font_size_maximum: '4.6 vmin',
       fill_color: overlay.text_color,
       stroke_color: overlay.accent_color,
-      stroke_width: '0.4 vmin',
+      stroke_width: `${(4.6 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
     };
   }
   if (overlay.mode === 'plain') {
     return {
       ...TEXT_BASE,
-      width: '78%',
+      width: BOX_WIDTH,
       font_size_maximum: '4.2 vmin',
       fill_color: overlay.text_color,
       shadow_color: 'rgba(0,0,0,0.6)',
@@ -156,13 +201,13 @@ function textProps(overlay: TimelineTextOverlay): Record<string, string> {
   }
   return {
     ...TEXT_BASE,
-    width: '78%',
+    width: BOX_WIDTH,
     font_size_maximum: '4.4 vmin',
     fill_color: overlay.text_color,
     background_color: overlay.accent_color,
-    background_x_padding: '58%',
-    background_y_padding: '42%',
-    background_border_radius: '52%',
+    background_x_padding: BOX_PAD_X,
+    background_y_padding: BOX_PAD_Y,
+    background_border_radius: BOX_RADIUS,
   };
 }
 

@@ -528,6 +528,8 @@ export default function ReviewScreen() {
           format={row.format}
           caption={caption}
           hashtags={briefRow.hashtags}
+          slideCount={isReel ? 0 : surfaceSlides.length}
+          slideIndex={slideIndex}
         />
         <ReviewTopBar
           topInset={insets.top}

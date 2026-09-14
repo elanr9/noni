@@ -18,6 +18,7 @@ import { ImagePlus } from 'lucide-react-native';
 import { FormatTag, TypeTag } from '../../../components/creator/Chips';
 import { scriptBlocks, usePostTypeMeta } from '../../../components/creator/PostCard';
 import { SlideNav } from '../../../components/creator/SlideNav';
+import { TextColorPicker } from '../../../components/creator/TextColorPicker';
 import { useCreatorToast } from '../../../components/creator/Toast';
 import { DetailSkeleton, SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
@@ -27,9 +28,11 @@ import { color, motion, radius, shadow, space, type } from '../../../theme/token
 import { useAuth } from '../../../lib/auth';
 import {
   creatorPlaceSegment,
+  creatorStyleSegmentBox,
   listBriefSegments,
   parseTalkingPoints,
   segmentWithBoxMoved,
+  segmentWithBoxStyled,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
@@ -145,6 +148,7 @@ export default function UploadScreen() {
   const [picking, setPicking] = useState(false);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [placedOnce, setPlacedOnce] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
   const reviewSheet = useRef(new Animated.Value(0)).current;
 
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
@@ -347,6 +351,19 @@ export default function UploadScreen() {
     persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
   }
 
+  function styleSlideBox(slideIndex: number, boxId: string, boxColor: string, bg: boolean) {
+    const segment = slideSegment(slideIndex);
+    if (!segment) return;
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segment.id ? segmentWithBoxStyled(s, boxId, boxColor, bg) : s,
+      ),
+    );
+    creatorStyleSegmentBox({ segmentId: segment.id, boxId, color: boxColor, bg }).catch(() =>
+      setErrorToast('Could not save that color. Try again.'),
+    );
+  }
+
   function moveSlideInset(slideIndex: number, x: number, y: number) {
     const segment = slideSegment(slideIndex);
     if (!segment) return;
@@ -361,6 +378,9 @@ export default function UploadScreen() {
   const canPlace = slides.some(
     (s) => s.boxes.length > 0 || s.inset !== undefined,
   );
+  const reviewSlide = slides[Math.min(reviewIndex, Math.max(slides.length - 1, 0))];
+  const reviewBoxes = reviewSlide?.boxes ?? [];
+  const reviewSegmentId = slideSegment(reviewIndex)?.id ?? null;
 
   if (loading) {
     return <DetailSkeleton />;
@@ -423,6 +443,7 @@ export default function UploadScreen() {
               style={StyleSheet.absoluteFill}
               onMoveBox={moveSlideBox}
               onMoveInset={moveSlideInset}
+              onIndexChange={setReviewIndex}
             />
             {canPlace && !placedOnce ? (
               <View style={styles.placeHint} pointerEvents="none">
@@ -433,6 +454,17 @@ export default function UploadScreen() {
             ) : null}
           </View>
         </View>
+        {reviewBoxes.length > 0 && reviewSegmentId !== null ? (
+          <View style={styles.colorPicker}>
+            <TextColorPicker
+              key={reviewSegmentId}
+              boxes={reviewBoxes}
+              onChange={(boxId, pick) =>
+                styleSlideBox(reviewIndex, boxId, pick.color, pick.bg)
+              }
+            />
+          </View>
+        ) : null}
 
         <Animated.View
           style={[
@@ -778,6 +810,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingTop: space[6],
     gap: 10,
+  },
+  colorPicker: {
+    paddingBottom: space[3],
   },
   placeHint: {
     position: 'absolute',

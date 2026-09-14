@@ -23,9 +23,9 @@ export interface SlideshowSurfaceProps {
 }
 
 /**
- * Admin handoff §3 — the real post in the platform box: the creator's photos
- * with the admin's text and pictures on them, dot pager at top:62 (active dot
- * 18px), glass 34px arrows.
+ * The real post in photo mode: the creator's photos with the admin's text and
+ * pictures on them, `n / total` pill under the top bar, glass 34px arrows.
+ * Pager dots live in ReviewMetaOverlay, between the photo and the caption.
  */
 export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfaceProps) {
   const slide = slides[index];
@@ -50,11 +50,11 @@ export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfacePro
         </View>
       ) : null}
 
-      <View style={styles.dots} pointerEvents="none">
-        {slides.map((_, i) => (
-          <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
-        ))}
-      </View>
+      {slides.length > 1 && (
+        <View style={styles.counter} pointerEvents="none">
+          <Text style={styles.counterText}>{`${index + 1} / ${slides.length}`}</Text>
+        </View>
+      )}
 
       {index > 0 && (
         <PressableScale
@@ -99,25 +99,19 @@ const styles = StyleSheet.create({
     color: color.white,
     textAlign: 'center',
   },
-  dots: {
+  counter: {
     position: 'absolute',
-    top: 62,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 5,
-  },
-  dot: {
-    width: 6,
-    height: 6,
+    top: 112,
+    right: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: radiusAdmin.pill,
-    backgroundColor: color.whiteA45,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  dotActive: {
-    width: 18,
-    backgroundColor: color.white,
+  counterText: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.semibold,
+    color: color.white,
   },
   arrow: {
     position: 'absolute',

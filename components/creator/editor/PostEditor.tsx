@@ -24,6 +24,7 @@ import {
   type EditCrop,
   type EditTimeline,
 } from '../../../lib/video-edit';
+import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
 import {
   toNativeTimeline,
   type NativeTimeline,
@@ -33,6 +34,7 @@ import { color, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import type { ShotPreview } from '../SegmentOverlayPreview';
+import { TextColorPicker } from '../TextColorPicker';
 import { clampCrop } from './CropGesture';
 import { EditorStage, type StageSize } from './EditorStage';
 import { EditorToolbar, type ToolId } from './EditorToolbar';
@@ -56,6 +58,7 @@ export type PostEditorProps = {
   subtitles: { y: number } | null;
   onTimelineChange: (timeline: EditTimeline) => void;
   onMoveBox: (segment: BriefSegment, boxId: string, x: number, y: number) => void;
+  onStyleBox: (segment: BriefSegment, boxId: string, color: string, bg: boolean) => void;
   onMoveCard: (segment: BriefSegment, x: number, y: number) => void;
   onMoveSubtitles: (y: number) => void;
   onBack: () => void;
@@ -68,7 +71,7 @@ export type PostEditorProps = {
   bottomInset: number;
 };
 
-type OpenTool = 'speed' | 'crop';
+type OpenTool = 'speed' | 'crop' | 'text-color';
 
 const NATIVE_MIN_GAP_MS = 80;
 const IDENTITY_CROP: EditCrop = { scale: 1, x: 0, y: 0 };
@@ -86,6 +89,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     subtitles,
     onTimelineChange,
     onMoveBox,
+    onStyleBox,
     onMoveCard,
     onMoveSubtitles,
     onBack,
@@ -158,6 +162,17 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     ? shown.pieces.find((p) => p.id === selectedId) ?? null
     : null;
   const allMuted = shown.pieces.length > 0 && shown.pieces.every((p) => p.muted);
+  const currentSegment = currentSlot?.segment ?? null;
+  const currentBoxes = useMemo(
+    () =>
+      currentSegment && currentSegment.show_on_screen && overlay.enabled
+        ? parseOverlayBoxes(currentSegment.overlay_style, {
+            text: currentSegment.overlay_text,
+            textY: currentSegment.text_y,
+          })
+        : [],
+    [currentSegment, overlay.enabled],
+  );
   const canSplit = !busy && tool === null && canSplitAt(shown, positionMs);
   const canDelete =
     selected !== null && slotPieces(shown, selected.slotIndex).length > 1;
@@ -272,6 +287,11 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         return;
       case 'volume':
         toggleSelectedMuted();
+        return;
+      case 'text-color':
+        if (currentBoxes.length === 0) return;
+        pause();
+        setTool('text-color');
         return;
       case 'replace':
         if (!selected) return;
@@ -469,12 +489,27 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
               </Text>
             </View>
           </ToolPanel>
+        ) : tool === 'text-color' && currentSegment !== null && currentBoxes.length > 0 ? (
+          <ToolPanel
+            title="Text color"
+            onCancel={() => closeTool(false)}
+            onDone={() => closeTool(true)}
+          >
+            <TextColorPicker
+              key={currentSegment.id}
+              boxes={currentBoxes}
+              onChange={(boxId, pick) =>
+                onStyleBox(currentSegment, boxId, pick.color, pick.bg)
+              }
+            />
+          </ToolPanel>
         ) : (
           <EditorToolbar
             canSplit={canSplit}
             hasSelection={selected !== null && !busy}
             canDelete={canDelete && !busy}
             selectedMuted={selected?.muted ?? false}
+            canStyleText={currentBoxes.length > 0 && !busy}
             onTool={onTool}
           />
         )}

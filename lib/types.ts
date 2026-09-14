@@ -4272,6 +4272,15 @@ export type Database = {
         Args: { p_brief_id: string; p_y: number }
         Returns: undefined
       }
+      creator_style_segment_box: {
+        Args: {
+          p_bg: boolean
+          p_box_id: string
+          p_color: string
+          p_segment_id: string
+        }
+        Returns: undefined
+      }
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       default_member_permissions: { Args: never; Returns: Json }

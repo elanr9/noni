@@ -13,16 +13,11 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import {
-  overlayBoxFill,
-  overlayTextContrast,
-  type OverlayBox,
-} from '../lib/overlay-boxes';
+import { OVERLAY_TEXT_SPEC, type OverlayBox } from '../lib/overlay-boxes';
 import { color } from '../theme/tokens';
 import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
-import { OutlinedText } from './ui/OutlinedText';
+import { OverlayTextBox } from './ui/OverlayTextBox';
 
-const OVERLAY_FONT = 'TikTokSans_700Bold';
 /** Defaults when the admin attached a picture but never saved a placement.
  * Mirrors renderTimeline.ts (IMAGE_Y / IMAGE_WIDTH). */
 export const SLIDE_INSET_DEFAULTS = { x: 0.5, y: 0.62, width: 0.85 };
@@ -82,8 +77,6 @@ export function SlideStage(props: {
 
   const insetW = (inset?.width ?? SLIDE_INSET_DEFAULTS.width) * stage.w;
   const insetH = insetW / insetAspect;
-  // Pill chrome scales with the stage so a card thumbnail looks like the
-  // full-screen composer, not a giant bubble on a tiny slide.
   const k = stage.w > 0 ? stage.w / 390 : 1;
 
   return (
@@ -145,43 +138,14 @@ export function SlideStage(props: {
                     : undefined
                 }
                 onDragStart={onDragStart}
-                style={styles.boxWrap}
               >
-                <View
-                  style={[
-                    styles.pill,
-                    {
-                      paddingVertical: 12 * k,
-                      paddingHorizontal: 18 * k,
-                      borderRadius: 16 * k,
-                    },
-                    box.bg
-                      ? { backgroundColor: overlayBoxFill(box.color) }
-                      : styles.pillClear,
-                  ]}
-                >
-                  {box.bg ? (
-                    <Text
-                      style={[
-                        styles.boxText,
-                        {
-                          color: overlayTextContrast(box.color),
-                          fontSize,
-                          lineHeight: fontSize * 1.22,
-                        },
-                      ]}
-                    >
-                      {box.text}
-                    </Text>
-                  ) : (
-                    <OutlinedText
-                      text={box.text}
-                      fontSize={fontSize}
-                      color={box.color}
-                      style={[styles.boxText, { lineHeight: fontSize * 1.22 }]}
-                    />
-                  )}
-                </View>
+                <OverlayTextBox
+                  text={box.text}
+                  color={box.color}
+                  bg={box.bg}
+                  fontSize={fontSize}
+                  maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.w}
+                />
               </DragPlacement>
             );
           })
@@ -212,21 +176,5 @@ const styles = StyleSheet.create({
   insetImg: {
     width: '100%',
     height: '100%',
-  },
-  boxWrap: {
-    maxWidth: '86%',
-  },
-  pill: {
-    maxWidth: '100%',
-    justifyContent: 'center',
-  },
-  pillClear: {
-    backgroundColor: 'transparent',
-  },
-  boxText: {
-    fontFamily: OVERLAY_FONT,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    textAlign: 'center',
   },
 });

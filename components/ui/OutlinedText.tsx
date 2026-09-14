@@ -1,7 +1,8 @@
-// TikTok's classic caption look: white bold letters with a thin black
-// outline. React Native has no text stroke, so eight black copies sit one
-// stroke width behind the white text. The top element defines the layout;
-// pass children to swap it for a TextInput that shares the same style.
+// TikTok's classic caption look: bold letters with a thin outline drawn
+// fully outside the glyph. React Native has no text stroke, so copies in the
+// outline color sit one stroke width behind the text, spread evenly around a
+// circle so curves stay smooth. The top element defines the layout; pass
+// children to swap it for a TextInput that shares the same style.
 import type { JSX, ReactNode } from 'react';
 import {
   StyleSheet,
@@ -11,19 +12,17 @@ import {
   type TextStyle,
 } from 'react-native';
 
-/** Outline thickness as a fraction of the font size, matching the render pass. */
-export const OUTLINE_RATIO = 0.06;
+import { classicOutlineColor, OVERLAY_TEXT_SPEC } from '../../lib/overlay-boxes';
 
-const OFFSETS: readonly (readonly [number, number])[] = [
-  [-1, -1],
-  [0, -1],
-  [1, -1],
-  [-1, 0],
-  [1, 0],
-  [-1, 1],
-  [0, 1],
-  [1, 1],
-];
+const OFFSET_COUNT = 16;
+
+const OFFSETS: readonly (readonly [number, number])[] = Array.from(
+  { length: OFFSET_COUNT },
+  (_, i) => {
+    const angle = (i / OFFSET_COUNT) * Math.PI * 2;
+    return [Math.cos(angle), Math.sin(angle)] as const;
+  },
+);
 
 export function OutlinedText(props: {
   text: string;
@@ -33,18 +32,21 @@ export function OutlinedText(props: {
   children?: ReactNode;
 }): JSX.Element {
   const { text, fontSize, color, style, children } = props;
-  const stroke = fontSize * OUTLINE_RATIO;
+  const stroke = fontSize * OVERLAY_TEXT_SPEC.outlineRatio;
+  const outline = classicOutlineColor(color);
   return (
     <View>
-      {OFFSETS.map(([dx, dy]) => (
+      {OFFSETS.map(([dx, dy], i) => (
         <Text
-          key={`${dx},${dy}`}
+          key={i}
           pointerEvents="none"
           style={[
+            styles.base,
             style,
             styles.layer,
             {
               fontSize,
+              color: outline,
               transform: [{ translateX: dx * stroke }, { translateY: dy * stroke }],
             },
           ]}
@@ -52,17 +54,22 @@ export function OutlinedText(props: {
           {text}
         </Text>
       ))}
-      {children ?? <Text style={[style, { fontSize, color }]}>{text}</Text>}
+      {children ?? (
+        <Text style={[styles.base, style, { fontSize, color }]}>{text}</Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  base: {
+    fontFamily: OVERLAY_TEXT_SPEC.fontFamily,
+    fontWeight: '700',
+  },
   layer: {
     ...StyleSheet.absoluteFill,
-    color: '#000000',
-    textShadowColor: 'rgba(0,0,0,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.06)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 6,
+    textShadowRadius: 4,
   },
 });

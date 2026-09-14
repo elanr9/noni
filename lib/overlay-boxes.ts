@@ -26,6 +26,51 @@ export type OverlayBox = {
 export type OverlayTextStyle = 'classic' | 'theme';
 
 export const CLASSIC_TEXT_COLOR = '#FFFFFF';
+export const CLASSIC_BLACK_TEXT_COLOR = '#000000';
+
+/**
+ * TikTok text tool metrics, measured off real posts. Every unit is a
+ * multiple of the font size so previews at any stage width and the
+ * 1080x1920 render come out identical. Mirrored in
+ * supabase/functions/_shared/renderAdapter.ts; change both together.
+ */
+export const OVERLAY_TEXT_SPEC = {
+  fontFamily: 'TikTokSans_700Bold',
+  /** Line box height. */
+  lineHeight: 1.15,
+  /** Background bubble padding, per wrapped line. */
+  boxPadX: 0.55,
+  boxPadY: 0.26,
+  boxRadius: 0.38,
+  /** Classic outline thickness, drawn fully outside the letter. */
+  outlineRatio: 0.075,
+  /** Widest a box may wrap, as a fraction of the stage width. */
+  maxWidth: 0.86,
+} as const;
+
+/**
+ * Creator picks for the on-screen text. The two classic swatches keep the
+ * bare outlined look; the rest become TikTok colored bubbles.
+ */
+export const CREATOR_TEXT_PALETTE: readonly { color: string; bg: boolean }[] = [
+  { color: CLASSIC_TEXT_COLOR, bg: false },
+  { color: CLASSIC_BLACK_TEXT_COLOR, bg: false },
+  { color: '#FFFFFF', bg: true },
+  { color: '#000000', bg: true },
+  { color: '#FE2C55', bg: true },
+  { color: '#FF7A1A', bg: true },
+  { color: '#FFD23F', bg: true },
+  { color: '#25D366', bg: true },
+  { color: '#1E88F5', bg: true },
+  { color: '#8A4DFF', bg: true },
+  { color: '#EB4C89', bg: true },
+];
+
+/** Classic outline sits behind the letters in the opposite tone. */
+export function classicOutlineColor(textColor: string): string {
+  const lum = luminance(textColor);
+  return lum !== null && lum < 0.5 ? '#FFFFFF' : '#000000';
+}
 
 /** Theme fallback until the company picks a color: TikTok hot pink. */
 export const DEFAULT_OVERLAY_FILL = '#EB4C89';
@@ -234,34 +279,70 @@ function toHex(r: number, g: number, b: number): string {
   return `#${byte(r)}${byte(g)}${byte(b)}`;
 }
 
-function mixHex(a: string, b: string, t: number): string | null {
-  const from = parseHex(a);
-  const to = parseHex(b);
-  if (!from || !to) return null;
-  return toHex(
-    from.r + (to.r - from.r) * t,
-    from.g + (to.g - from.g) * t,
-    from.b + (to.b - from.b) * t,
-  );
-}
-
 function luminance(hex: string): number | null {
   const p = parseHex(hex);
   if (p === null) return null;
   return (0.299 * p.r + 0.587 * p.g + 0.114 * p.b) / 255;
 }
 
-/** Pastel wash of the picked color — TikTok/Reels Classic box fill. */
-export function overlayBoxFill(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82 || lum < 0.18) return fill;
-  return mixHex(fill, '#FFFFFF', 0.7) ?? fill;
+function toHsl(hex: string): { h: number; s: number; l: number } | null {
+  const p = parseHex(hex);
+  if (p === null) return null;
+  const r = p.r / 255;
+  const g = p.g / 255;
+  const b = p.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: ((h * 60) % 360 + 360) % 360, s, l };
 }
 
-/** Darker same-hue letters on the pastel box (white/black stay high-contrast). */
+function fromHsl(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const sector = Math.floor(h / 60) % 6;
+  const rgb: [number, number, number][] = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ];
+  const [r, g, b] = rgb[sector] ?? [0, 0, 0];
+  return toHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+}
+
+/** Below this the pick is a grey and keeps its own tone. */
+const NEUTRAL_SATURATION = 0.12;
+
+/**
+ * TikTok colored bubble fill: the picked hue lifted to a light, still
+ * saturated tint (a TikTok blue box measures #74B9F8). White and black picks
+ * stay white and black, matching the platform's own swatches.
+ */
+export function overlayBoxFill(fill: string): string {
+  const hsl = toHsl(fill);
+  if (hsl === null) return fill;
+  if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#FFFFFF' : '#000000';
+  return fromHsl(hsl.h, Math.max(hsl.s, 0.9), 0.71);
+}
+
+/**
+ * Letters on the bubble: the same hue driven deep and fully saturated (TikTok
+ * blue letters measure #00107C). Black on white, white on black.
+ */
 export function overlayTextContrast(fill: string): string {
-  const lum = luminance(fill);
-  if (lum == null || lum > 0.82) return '#0F1720';
-  if (lum < 0.18) return '#FFFFFF';
-  return mixHex(fill, '#000000', 0.22) ?? fill;
+  const hsl = toHsl(fill);
+  if (hsl === null) return '#0F1720';
+  if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#000000' : '#FFFFFF';
+  return fromHsl(hsl.h, 1, 0.24);
 }

@@ -29,7 +29,7 @@ import {
   MAX_BOX_SIZE,
   MIN_BOX_SIZE,
   newOverlayBox,
-  overlayBoxFill,
+  OVERLAY_TEXT_SPEC,
   overlayTextContrast,
   serializeOverlayBoxes,
   type OverlayBox,
@@ -39,14 +39,13 @@ import type { Json } from '../../../lib/types';
 import { color, radiusAdmin } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { posterForVideo } from '../../ui/MediaThumb';
-import { OutlinedText } from '../../ui/OutlinedText';
+import { OverlayTextBox, overlayTextStyle } from '../../ui/OverlayTextBox';
 import { PressableScale } from '../../ui/PressableScale';
 import { SubtitlePreview } from './SubtitlePreview';
 
 const SCREEN_BG = '#10161D';
 const RAIL_BG = 'rgba(16,22,29,0.45)';
 const TOOL_HIT = { top: 1, bottom: 1, left: 1, right: 1 } as const;
-const OVERLAY_FONT = 'TikTokSans_700Bold';
 /** Extra grab area around a box so small text is still easy to catch. */
 const HIT_SLOP = 26;
 
@@ -618,7 +617,6 @@ export function OverlayEditor(props: {
   function pillFor(box: OverlayBox, forInput: boolean): JSX.Element {
     const fontSize = clamp(box.size * stage.w, 10, 96);
     const textColor = box.bg ? overlayTextContrast(box.color) : box.color;
-    const textStyle = { color: textColor, fontSize, lineHeight: fontSize * 1.22 };
     const input = forInput ? (
       <TextInput
         ref={inputRef}
@@ -630,27 +628,19 @@ export function OverlayEditor(props: {
         placeholderTextColor={color.whiteA45}
         selectionColor={color.blue300}
         underlineColorAndroid="transparent"
-        style={[styles.inputText, textStyle]}
+        style={[styles.inputText, overlayTextStyle(fontSize), { color: textColor }]}
       />
-    ) : null;
-    if (!box.bg) {
-      return (
-        <View style={[styles.pill, styles.pillClear]}>
-          <OutlinedText
-            text={box.text}
-            fontSize={fontSize}
-            color={textColor}
-            style={[styles.inputText, { lineHeight: fontSize * 1.22 }]}
-          >
-            {input}
-          </OutlinedText>
-        </View>
-      );
-    }
+    ) : undefined;
     return (
-      <View style={[styles.pill, { backgroundColor: overlayBoxFill(box.color) }]}>
-        {input ?? <Text style={[styles.inputText, textStyle]}>{box.text}</Text>}
-      </View>
+      <OverlayTextBox
+        text={box.text}
+        color={box.color}
+        bg={box.bg}
+        fontSize={fontSize}
+        maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.w}
+      >
+        {input}
+      </OverlayTextBox>
     );
   }
 
@@ -1020,27 +1010,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 56,
     zIndex: 1,
   },
-  pill: {
-    minWidth: 48,
-    minHeight: 48,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 16,
-    maxWidth: '100%',
-    justifyContent: 'center',
-  },
-  pillClear: {
-    backgroundColor: 'transparent',
-  },
   inputText: {
-    fontFamily: OVERLAY_FONT,
-    fontWeight: '700',
-    letterSpacing: -0.3,
     padding: 0,
     margin: 0,
     minWidth: 24,
     maxWidth: '100%',
-    textAlign: 'center',
     includeFontPadding: false,
   },
   bottomWrap: {
