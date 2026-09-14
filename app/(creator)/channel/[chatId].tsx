@@ -291,11 +291,13 @@ export default function CreatorChannelScreen() {
   const members = chat?.memberCount ?? 0;
   const subtitle = isDm
     ? roleLabel(chat?.otherRole ?? 'campaign_manager')
-    : chat?.allCreators
-      ? 'Everyone on the team and all creators'
-      : members === 1
-        ? '1 member'
-        : `${members} members`;
+    : chat?.isGeneral
+      ? `Everyone on the team · ${members} people`
+      : chat?.allCreators
+        ? 'Everyone on the team and all creators'
+        : members === 1
+          ? '1 member'
+          : `${members} members`;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -309,8 +311,12 @@ export default function CreatorChannelScreen() {
           >
             <Icon name="chevron-left" size={22} color={color.ink} />
           </PressableScale>
-          <View style={[styles.hashAvatar, isDm && styles.personAvatar]}>
-            <Text style={styles.hashText}>{isDm ? title.charAt(0).toUpperCase() : '#'}</Text>
+          <View style={[styles.hashAvatar, isDm && styles.personAvatar, chat?.isGeneral && styles.generalAvatar]}>
+            {chat?.isGeneral ? (
+              <Icon name="users" size={18} color={color.white} />
+            ) : (
+              <Text style={styles.hashText}>{isDm ? title.charAt(0).toUpperCase() : '#'}</Text>
+            )}
           </View>
           <View style={styles.headerText}>
             <Text numberOfLines={1} style={styles.headerTitle}>
@@ -396,6 +402,10 @@ const styles = StyleSheet.create({
     backgroundColor: color.fillQuiet,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  generalAvatar: {
+    borderRadius: 20,
+    backgroundColor: color.blue500,
   },
   personAvatar: {
     borderRadius: radius.pill,

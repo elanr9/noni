@@ -9,7 +9,7 @@ import { summaryCardState, type PostSummary } from '../../../../lib/post-event-l
 import { color, radiusAdmin } from '../../../../theme/tokens';
 import { Icon } from '../../../ui/Icon';
 import { MediaBlock } from '../MediaBlock';
-import { MsgBody } from '../MsgRow';
+import { MsgBody, useMsgSide } from '../MsgRow';
 import { PostCard } from '../PostCard';
 
 export type ManagerMessageViewProps = {
@@ -40,19 +40,20 @@ export function ManagerMessageView({
   const mediaPath = message.mediaPath;
   const isMedia = message.mediaKind === 'image' || message.mediaKind === 'video';
   const assignmentId = message.postRef?.assignmentId ?? null;
+  const { mine: isMine } = useMsgSide();
 
   return (
     <View>
       {message.replyTo !== null && (
-        <View style={styles.quote}>
-          <Text style={styles.quoteWho}>{message.replyTo.authorName}</Text>
-          <Text numberOfLines={1} style={styles.quoteSnippet}>
+        <View style={[styles.quote, isMine && styles.quoteMine]}>
+          <Text style={[styles.quoteWho, isMine && styles.onBlue]}>{message.replyTo.authorName}</Text>
+          <Text numberOfLines={1} style={[styles.quoteSnippet, isMine && styles.onBlueSoft]}>
             {message.replyTo.snippet}
           </Text>
         </View>
       )}
       {message.forwardLabel !== null && (
-        <Text style={styles.forward}>{message.forwardLabel}</Text>
+        <Text style={[styles.forward, isMine && styles.onBlueSoft]}>{message.forwardLabel}</Text>
       )}
       {body.length > 0 && <MsgBody text={message.body} />}
       {isMedia && mediaPath !== null && message.mediaKind !== null && message.mediaKind !== 'voice' && (
@@ -70,10 +71,12 @@ export function ManagerMessageView({
           accessibilityRole="button"
           accessibilityLabel={playing ? 'Pause voice note' : 'Play voice note'}
           onPress={onPlayVoice}
-          style={styles.voice}
+          style={[styles.voice, isMine && styles.voiceMine]}
         >
-          <Icon name={playing ? 'pause' : 'play'} size={16} color={color.blue700} />
-          <Text style={styles.voiceLabel}>{formatVoiceDuration(message.voiceDurationMs ?? 0)}</Text>
+          <Icon name={playing ? 'pause' : 'play'} size={16} color={isMine ? color.white : color.blue700} />
+          <Text style={[styles.voiceLabel, isMine && styles.onBlue]}>
+            {formatVoiceDuration(message.voiceDurationMs ?? 0)}
+          </Text>
         </Pressable>
       )}
       {assignmentId !== null && summary !== undefined && (
@@ -94,9 +97,9 @@ export function ManagerMessageView({
                 accessibilityState={{ selected: mine }}
                 onPress={() => onToggleReaction(r.emoji)}
                 hitSlop={8}
-                style={[styles.pill, mine && styles.pillMine]}
+                style={[styles.pill, mine && styles.pillMine, isMine && styles.pillOnBlue]}
               >
-                <Text style={[styles.pillText, mine && styles.pillTextMine]}>
+                <Text style={[styles.pillText, mine && styles.pillTextMine, isMine && styles.onBlue]}>
                   {reactionLabel(r.emoji, r.count)}
                 </Text>
               </Pressable>
@@ -170,5 +173,20 @@ const styles = StyleSheet.create({
   },
   pillTextMine: {
     color: color.blue700,
+  },
+  pillOnBlue: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  quoteMine: {
+    borderLeftColor: 'rgba(255,255,255,0.6)',
+  },
+  onBlue: {
+    color: color.white,
+  },
+  onBlueSoft: {
+    color: 'rgba(255,255,255,0.8)',
+  },
+  voiceMine: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
 });

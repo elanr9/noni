@@ -231,6 +231,7 @@ type ManagerChat = {
   name: string | null;
   all_creators: boolean;
   created_by: string | null;
+  is_general?: boolean;
 };
 
 async function managerChatRecipients(
@@ -272,6 +273,15 @@ async function managerChatRecipients(
       }
     }
     return { ids, title };
+  }
+
+  if (chat.is_general) {
+    const { data: everyone } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('company_id', chat.company_id);
+    for (const p of everyone ?? []) ids.add(p.id as string);
+    return { ids, title: 'General' };
   }
 
   // channel
@@ -456,7 +466,9 @@ Deno.serve(async (req) => {
       }
       const { data: chatRow } = await admin
         .from('manager_chats')
-        .select('id, company_id, kind, campaign_id, user_a, user_b, name, all_creators, created_by')
+        .select(
+          'id, company_id, kind, campaign_id, user_a, user_b, name, all_creators, created_by, is_general',
+        )
         .eq('id', body.chat_id)
         .maybeSingle();
       if (!chatRow) return jsonResponse({ error: 'chat not found' }, 404);

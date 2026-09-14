@@ -2587,6 +2587,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          is_general: boolean
           kind: string
           name: string | null
           user_a: string | null
@@ -2599,6 +2600,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          is_general?: boolean
           kind: string
           name?: string | null
           user_a?: string | null
@@ -2611,6 +2613,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          is_general?: boolean
           kind?: string
           name?: string | null
           user_a?: string | null
@@ -3790,6 +3793,7 @@ export type Database = {
           creator_id: string
           duration_seconds: number | null
           id: string
+          overlay_render_id: string | null
           render_error: string | null
           render_status: string
           render_timeline: Json | null
@@ -3804,6 +3808,7 @@ export type Database = {
           creator_id: string
           duration_seconds?: number | null
           id?: string
+          overlay_render_id?: string | null
           render_error?: string | null
           render_status?: string
           render_timeline?: Json | null
@@ -3818,6 +3823,7 @@ export type Database = {
           creator_id?: string
           duration_seconds?: number | null
           id?: string
+          overlay_render_id?: string | null
           render_error?: string | null
           render_status?: string
           render_timeline?: Json | null

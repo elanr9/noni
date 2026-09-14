@@ -8,6 +8,7 @@ import {
   type Brief,
 } from '../../lib/tasks-api';
 import { color, radius, type } from '../../theme/tokens';
+import { usePostThumb } from '../admin/creator/useVideoThumb';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { MediaCard } from '../ui/MediaCard';
@@ -97,6 +98,8 @@ export function usePostTypeMeta(postTypeId: string | null): PostTypeMeta | null 
 
 export interface PostCardProps {
   assignment: AssignmentWithBrief;
+  /** Latest submission's first media path; null before anything was recorded. */
+  mediaPath?: string | null;
   /** "12:00 PM", shown on approved posts waiting for the publish cron. */
   publishTime: string;
   /** Swap is offered on untouched posts, today only. */
@@ -124,6 +127,7 @@ function StatusPill({ label, fg, bg }: { label: string; fg: string; bg: string }
  */
 export function PostCard({
   assignment,
+  mediaPath = null,
   publishTime,
   showSwap,
   onOpen,
@@ -137,6 +141,7 @@ export function PostCard({
   const slideshow = brief.format === 'photo_carousel';
   const typeMeta = usePostTypeMeta(brief.post_type_id);
   const metrics = parseAssignmentMetrics(assignment.metrics);
+  const thumb = usePostThumb(mediaPath, slideshow ? 'photo_carousel' : 'video');
 
   const assigned = assignment.status === 'assigned';
   const pending =
@@ -149,6 +154,7 @@ export function PostCard({
     <MediaCard
       variant="hero"
       fill
+      thumbnail={thumb ?? undefined}
       title={brief.title}
       format={slideshow ? 'slideshow' : 'reel'}
       duration={estimateDurationLabel(brief)}

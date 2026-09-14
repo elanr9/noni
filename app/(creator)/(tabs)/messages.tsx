@@ -3,6 +3,7 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native
 import { router, useFocusEffect } from 'expo-router';
 
 import { Screen } from '../../../components/layout/Screen';
+import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { useAuth } from '../../../lib/auth';
@@ -123,8 +124,8 @@ export default function CreatorMessagesScreen() {
   const company = companyName ?? 'Your team';
   const team = inbox?.team ?? null;
   const dms = inbox?.dms ?? [];
-  const briefs = inbox?.briefs ?? [];
-  const channels = inbox?.channels ?? [];
+  const general = inbox?.channels.find((c) => c.isGeneral) ?? null;
+  const channels = (inbox?.channels ?? []).filter((c) => !c.isGeneral);
   const openChat = (chatId: string) =>
     router.push({ pathname: '/(creator)/channel/[chatId]', params: { chatId } });
 
@@ -154,6 +155,21 @@ export default function CreatorMessagesScreen() {
         ) : (
           <>
             <View style={[styles.card, shadow.shadowCard]}>
+              {general !== null && (
+                <InboxRow
+                  lead={
+                    <View style={styles.generalAvatar}>
+                      <Icon name="users" size={20} color={color.white} />
+                    </View>
+                  }
+                  title="General"
+                  sub={general.preview}
+                  time={general.lastMessageAt ? inboxTimeLabel(general.lastMessageAt) : null}
+                  unread={general.unread}
+                  last={false}
+                  onPress={() => openChat(general.chatId)}
+                />
+              )}
               <InboxRow
                 lead={
                   <View style={styles.companyAvatar}>
@@ -189,30 +205,6 @@ export default function CreatorMessagesScreen() {
                       unread={d.unread}
                       last={i === dms.length - 1}
                       onPress={() => openChat(d.chatId)}
-                    />
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {briefs.length > 0 && (
-              <View style={styles.group}>
-                <Text style={styles.groupLabel}>Briefs</Text>
-                <View style={[styles.card, shadow.shadowCard]}>
-                  {briefs.map((b, i) => (
-                    <InboxRow
-                      key={b.chatId}
-                      lead={
-                        <View style={styles.hashAvatar}>
-                          <Text style={styles.hashText}>#</Text>
-                        </View>
-                      }
-                      title={b.title}
-                      sub={b.preview}
-                      time={b.lastMessageAt ? inboxTimeLabel(b.lastMessageAt) : null}
-                      unread={b.unread}
-                      last={i === briefs.length - 1}
-                      onPress={() => openChat(b.chatId)}
                     />
                   ))}
                 </View>
@@ -352,6 +344,14 @@ const styles = StyleSheet.create({
     fontSize: type.size.label,
     fontWeight: type.weight.heavy,
     color: color.white,
+  },
+  generalAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue500,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   companyAvatar: {
     width: 44,

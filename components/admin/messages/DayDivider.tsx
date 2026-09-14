@@ -9,9 +9,9 @@ const DAY_MS = 86_400_000;
 export function DayDivider({ label }: { label: string }) {
   return (
     <View style={styles.row}>
-      <View style={styles.hair} />
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.hair} />
+      <View style={styles.pill}>
+        <Text style={styles.label}>{label}</Text>
+      </View>
     </View>
   );
 }
@@ -42,22 +42,20 @@ export function dayDividerLabel(iso: string, now: Date = new Date()): string {
 
 const styles = StyleSheet.create({
   row: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingTop: 14,
+    paddingTop: 18,
     paddingBottom: 2,
   },
-  hair: {
-    flex: 1,
-    height: 1,
-    backgroundColor: color.line,
+  pill: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: color.fillQuiet,
   },
   label: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    color: color.slate400,
+    letterSpacing: 0.2,
+    color: color.slate500,
   },
 });

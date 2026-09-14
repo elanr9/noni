@@ -12,7 +12,7 @@ import {
 
 const RENDERS_URL = 'https://api.creatomate.com/v1/renders';
 const POLL_INTERVAL_MS = 3000;
-const POLL_ATTEMPTS = 40;
+const POLL_ATTEMPTS = 80;
 
 // TikTok Sans is TikTok's own caption font, open sourced on Google Fonts,
 // which Creatomate loads by name. Using it is what makes burned-in text read
@@ -231,10 +231,10 @@ type CreatomateRender = {
  */
 function assertFullResolution(
   render: CreatomateRender,
-  source: Record<string, unknown>,
+  want: { width: unknown; height: unknown },
 ): void {
-  const wantW = source.width;
-  const wantH = source.height;
+  const wantW = want.width;
+  const wantH = want.height;
   if (typeof wantW !== 'number' || typeof wantH !== 'number') return;
   if (typeof render.width !== 'number' || typeof render.height !== 'number') return;
   if (render.width >= wantW && render.height >= wantH) return;
@@ -341,7 +341,7 @@ export async function renderGreenScreenClip(params: {
   durationMs: number;
   width?: number;
   height?: number;
-}): Promise<Uint8Array> {
+}): Promise<ReadableStream<Uint8Array>> {
   const { apiKey, clipUrl, imageUrl, durationMs } = params;
   const width = params.width ?? 1080;
   const height = params.height ?? 1920;
@@ -395,7 +395,7 @@ export async function renderSlideImage(params: {
   photoUrl: string;
   boxes: SegmentBox[];
   inset?: { url: string; x: number; y: number; width: number };
-}): Promise<Uint8Array> {
+}): Promise<ReadableStream<Uint8Array>> {
   const { apiKey, photoUrl, boxes, inset } = params;
   const elements: CreatomateElement[] = [
     {
@@ -442,18 +442,17 @@ export async function renderSlideImage(params: {
 }
 
 /**
- * Render the timeline's overlays onto the stitched video and return the MP4
- * bytes. videoUrl is a signed URL to the stitched video; imageUrls maps each
- * timeline screenshot_path to a signed URL.
+ * Kick off the overlay render on Creatomate and return its id. The caller
+ * waits on it with awaitRender, possibly from a later invocation.
  */
-export async function renderOverlays(params: {
+export async function startOverlayRender(params: {
   apiKey: string;
   videoUrl: string;
   timeline: RenderTimeline;
   imageUrls: Record<string, string>;
-}): Promise<Uint8Array> {
+}): Promise<string> {
   const { apiKey, timeline } = params;
-  return runRender(apiKey, {
+  return createRender(apiKey, {
     output_format: 'mp4',
     width: timeline.width,
     height: timeline.height,
@@ -486,10 +485,28 @@ async function creatomateFetch(
   }
 }
 
+// Resolves to the finished render as a byte stream so callers can pipe it
+// into storage without holding a whole video in memory.
 async function runRender(
   apiKey: string,
   source: Record<string, unknown>,
-): Promise<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
+  const renderId = await createRender(apiKey, source);
+  const want = { width: source.width, height: source.height };
+  const stream = await awaitRender(
+    apiKey,
+    renderId,
+    want,
+    Date.now() + POLL_ATTEMPTS * POLL_INTERVAL_MS,
+  );
+  if (!stream) throw new Error('render timed out');
+  return stream;
+}
+
+async function createRender(
+  apiKey: string,
+  source: Record<string, unknown>,
+): Promise<string> {
   const createRes = await creatomateFetch(RENDERS_URL, {
     method: 'POST',
     headers: {
@@ -504,16 +521,29 @@ async function runRender(
     const detail = first?.error_message ?? JSON.stringify(created);
     throw new Error(`render create failed: ${detail}`);
   }
+  return first.id;
+}
 
+/**
+ * Poll a render until it finishes or deadlineAt passes. Resolves to the
+ * finished file as a byte stream, or null when it is still in progress at
+ * the deadline so the caller can pick it up later.
+ */
+export async function awaitRender(
+  apiKey: string,
+  renderId: string,
+  want: { width: unknown; height: unknown },
+  deadlineAt: number,
+): Promise<ReadableStream<Uint8Array> | null> {
   let url: string | null = null;
-  for (let i = 0; i < POLL_ATTEMPTS; i++) {
+  while (Date.now() < deadlineAt) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    const statusRes = await creatomateFetch(`${RENDERS_URL}/${first.id}`, {
+    const statusRes = await creatomateFetch(`${RENDERS_URL}/${renderId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     const render = statusRes.body as CreatomateRender;
     if (render.status === 'succeeded' && render.url) {
-      assertFullResolution(render, source);
+      assertFullResolution(render, want);
       url = render.url;
       break;
     }
@@ -521,9 +551,11 @@ async function runRender(
       throw new Error(`render failed: ${render.error_message ?? 'unknown'}`);
     }
   }
-  if (!url) throw new Error('render timed out');
+  if (!url) return null;
 
   const download = await fetch(url);
-  if (!download.ok) throw new Error(`render download failed: ${download.status}`);
-  return new Uint8Array(await download.arrayBuffer());
+  if (!download.ok || !download.body) {
+    throw new Error(`render download failed: ${download.status}`);
+  }
+  return download.body;
 }

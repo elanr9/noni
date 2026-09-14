@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { color } from '../../../theme/tokens';
@@ -9,47 +9,67 @@ export type MsgRowProps = {
   tone: 'brand' | 'quiet';
   timeLabel: string;
   collapsed: boolean;
+  /** My own message: right aligned, filled bubble, no avatar or name. */
+  mine?: boolean;
   avatarUri?: string | null;
   onLongPress?: () => void;
   children: ReactNode;
 };
 
-const AVATAR = 34;
+const AVATAR = 30;
+const BUBBLE_MAX = '82%';
 
-/** Handoff 2.4: left-aligned Slack rhythm, header collapses for same-author runs. */
+/** Lets bubble children (body text, quotes, reaction pills) pick ink or white. */
+const MsgSideContext = createContext<{ mine: boolean }>({ mine: false });
+export const useMsgSide = () => useContext(MsgSideContext);
+
+/** Chat bubbles: theirs on the left with an avatar per run, mine on the right in blue. */
 export function MsgRow({
   authorName,
   tone,
   timeLabel,
   collapsed,
+  mine = false,
   avatarUri,
   onLongPress,
   children,
 }: MsgRowProps) {
   return (
-    <Pressable
-      onLongPress={onLongPress}
-      disabled={onLongPress === undefined}
-      style={[styles.row, collapsed ? styles.rowCollapsed : styles.rowFull]}
-    >
-      <View style={styles.avatarCol}>
-        {!collapsed && <Avatar name={authorName} uri={avatarUri} size={AVATAR} tone={tone} />}
-      </View>
-      <View style={styles.body}>
-        {!collapsed && (
-          <View style={styles.header}>
-            <Text style={styles.name}>{authorName}</Text>
-            <Text style={styles.time}>{timeLabel}</Text>
+    <MsgSideContext.Provider value={{ mine }}>
+      <View style={[styles.row, collapsed ? styles.rowCollapsed : styles.rowFull, mine && styles.rowMine]}>
+        {!mine && (
+          <View style={styles.avatarCol}>
+            {!collapsed && <Avatar name={authorName} uri={avatarUri} size={AVATAR} tone={tone} />}
           </View>
         )}
-        {children}
+        <View style={[styles.stack, mine && styles.stackMine]}>
+          {!collapsed && (
+            <View style={[styles.meta, mine && styles.metaMine]}>
+              {!mine && <Text style={styles.name}>{authorName}</Text>}
+              <Text style={styles.time}>{timeLabel}</Text>
+            </View>
+          )}
+          <Pressable
+            onLongPress={onLongPress}
+            disabled={onLongPress === undefined}
+            style={({ pressed }) => [
+              styles.bubble,
+              mine ? styles.bubbleMine : styles.bubbleTheirs,
+              collapsed && (mine ? styles.bubbleMineRun : styles.bubbleTheirsRun),
+              pressed && onLongPress !== undefined && styles.bubblePressed,
+            ]}
+          >
+            {children}
+          </Pressable>
+        </View>
       </View>
-    </Pressable>
+    </MsgSideContext.Provider>
   );
 }
 
 export function MsgBody({ text }: { text: string }) {
-  return <Text style={styles.msgBody}>{text}</Text>;
+  const { mine } = useMsgSide();
+  return <Text style={[styles.msgBody, mine && styles.msgBodyMine]}>{text}</Text>;
 }
 
 export function msgTimeLabel(iso: string): string {
@@ -64,42 +84,80 @@ export function msgTimeLabel(iso: string): string {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  rowMine: {
+    justifyContent: 'flex-end',
   },
   rowFull: {
-    paddingTop: 10,
+    paddingTop: 14,
   },
   rowCollapsed: {
-    paddingTop: 2,
+    paddingTop: 3,
   },
   avatarCol: {
     width: AVATAR,
+    alignSelf: 'flex-start',
+    paddingTop: 18,
   },
-  body: {
-    flex: 1,
-    minWidth: 0,
+  stack: {
+    maxWidth: BUBBLE_MAX,
+    alignItems: 'flex-start',
   },
-  header: {
+  stackMine: {
+    alignItems: 'flex-end',
+  },
+  meta: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 7,
+    gap: 6,
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  metaMine: {
+    justifyContent: 'flex-end',
   },
   name: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: '700',
-    letterSpacing: -0.2,
-    color: color.ink,
+    letterSpacing: -0.1,
+    color: color.slate500,
   },
   time: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '500',
     color: color.slate400,
   },
+  bubble: {
+    paddingVertical: 9,
+    paddingHorizontal: 13,
+    borderRadius: 18,
+  },
+  bubbleTheirs: {
+    backgroundColor: color.fillQuiet,
+    borderBottomLeftRadius: 6,
+  },
+  bubbleTheirsRun: {
+    borderTopLeftRadius: 6,
+  },
+  bubbleMine: {
+    backgroundColor: color.blue500,
+    borderBottomRightRadius: 6,
+  },
+  bubbleMineRun: {
+    borderTopRightRadius: 6,
+  },
+  bubblePressed: {
+    opacity: 0.85,
+  },
   msgBody: {
-    marginTop: 2,
-    fontSize: 14.5,
-    lineHeight: 14.5 * 1.45,
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: '400',
     color: color.ink,
+  },
+  msgBodyMine: {
+    color: color.white,
   },
 });

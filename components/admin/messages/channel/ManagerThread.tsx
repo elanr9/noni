@@ -73,6 +73,7 @@ export function ManagerThread({
               tone={mine || teamIds.has(m.authorId) ? 'quiet' : 'brand'}
               timeLabel={entry.timeLabel}
               collapsed={entry.collapsed}
+              mine={mine}
               onLongPress={() => onLongPress(m)}
             >
               <ManagerMessageView

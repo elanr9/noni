@@ -172,14 +172,16 @@ export async function loadInbox(
     return a.name.localeCompare(b.name);
   });
 
-  const channels = [...manager.channels, ...manager.briefChats]
+  const channels = manager.channels
     .map((c) => ({ ...c, timeLabel: inboxAge(c.lastMessageAt) }))
     .sort((a, b) => {
-    const ta = a.lastMessageAt ?? '';
-    const tb = b.lastMessageAt ?? '';
-    if (ta !== tb) return ta < tb ? 1 : -1;
-    return a.title.localeCompare(b.title);
-  });
+      const general = Number(b.isGeneral ?? false) - Number(a.isGeneral ?? false);
+      if (general !== 0) return general;
+      const ta = a.lastMessageAt ?? '';
+      const tb = b.lastMessageAt ?? '';
+      if (ta !== tb) return ta < tb ? 1 : -1;
+      return a.title.localeCompare(b.title);
+    });
 
   const unreadTotal =
     creators.reduce((sum, c) => sum + c.unread, 0) +

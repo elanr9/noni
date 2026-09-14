@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { color, radiusAdmin, type } from '../../../../theme/tokens';
+import { Icon } from '../../../ui/Icon';
 import { Avatar, Thumb } from '../../shared';
 import { usePostThumb } from '../../creator/useVideoThumb';
 
@@ -137,6 +138,15 @@ export function ChannelLead() {
   );
 }
 
+/** The company-wide General chat. */
+export function GeneralLead() {
+  return (
+    <View style={styles.general}>
+      <Icon name="users" size={18} color={color.white} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
@@ -266,5 +276,13 @@ const styles = StyleSheet.create({
     fontSize: type.size.card,
     fontWeight: type.weight.bold,
     color: color.slate500,
+  },
+  general: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: color.blue500,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

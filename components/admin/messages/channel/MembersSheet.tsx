@@ -38,7 +38,8 @@ export function MembersSheet({
   onLeave,
 }: MembersSheetProps) {
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
-  const isChannel = chat.kind === 'channel';
+  // The General chat holds everyone in the company; nothing to manage there.
+  const isChannel = chat.kind === 'channel' && !chat.isGeneral;
   const memberIds = new Set(members.map((m) => m.id));
   const candidates = team.filter((t) => !memberIds.has(t.id));
   const canLeave = isChannel && chat.createdBy !== meId;
@@ -64,7 +65,7 @@ export function MembersSheet({
       visible={visible}
       onClose={onClose}
       title={chat.title}
-      subtitle="Members"
+      subtitle={chat.isGeneral ? 'Everyone on the team' : 'Members'}
       footer={
         canLeave ? (
           <Button variant="outline" size="md" block disabled={busy} onPress={onLeave}>

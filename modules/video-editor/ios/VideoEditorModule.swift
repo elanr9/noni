@@ -19,6 +19,39 @@ struct PieceRecord: Record {
 
 struct TimelineRecord: Record {
   @Field var pieces: [PieceRecord] = []
+
+  static func parse(_ raw: [String: Any]) throws -> TimelineRecord {
+    guard let pieces = raw["pieces"] as? [Any] else {
+      throw VideoEditorException("timeline.pieces is missing")
+    }
+    var record = TimelineRecord()
+    record.pieces = try pieces.map { entry in
+      guard let dict = entry as? [String: Any], let uri = dict["uri"] as? String else {
+        throw VideoEditorException("timeline piece is missing a uri")
+      }
+      var piece = PieceRecord()
+      piece.uri = uri
+      piece.inMs = number(dict["inMs"]) ?? 0
+      piece.outMs = number(dict["outMs"]) ?? 0
+      piece.speed = number(dict["speed"]) ?? 1
+      piece.muted = (dict["muted"] as? Bool) ?? false
+      if let crop = dict["crop"] as? [String: Any] {
+        var cropRecord = CropRecord()
+        cropRecord.scale = number(crop["scale"]) ?? 1
+        cropRecord.x = number(crop["x"]) ?? 0
+        cropRecord.y = number(crop["y"]) ?? 0
+        piece.crop = cropRecord
+      }
+      return piece
+    }
+    return record
+  }
+
+  private static func number(_ value: Any?) -> Double? {
+    if let double = value as? Double { return double }
+    if let int = value as? Int { return Double(int) }
+    return nil
+  }
 }
 
 internal func videoEditorCacheUrl(fileName: String) -> URL {
@@ -107,7 +140,14 @@ public class VideoEditorModule: Module {
   public func definition() -> ModuleDefinition {
     Name("VideoEditor")
 
-    AsyncFunction("exportTimeline") { (timeline: TimelineRecord, promise: Promise) in
+    AsyncFunction("exportTimeline") { (raw: [String: Any], promise: Promise) in
+      let timeline: TimelineRecord
+      do {
+        timeline = try TimelineRecord.parse(raw)
+      } catch {
+        promise.reject(VideoEditorException(videoEditorErrorMessage(error)))
+        return
+      }
       Task {
         await self.exporter.start(timeline: timeline, promise: promise)
       }
@@ -136,8 +176,11 @@ public class VideoEditorModule: Module {
     View(VideoEditorPreviewView.self) {
       Events("onTime", "onReady", "onEnd", "onError")
 
-      Prop("timeline") { (view: VideoEditorPreviewView, timeline: TimelineRecord) in
-        view.setTimeline(timeline)
+      // Parsed by hand: a Record that fails to convert is dropped silently by
+      // the prop setter, which left the preview black with no error. Parsing
+      // here lets a bad timeline surface through onError instead.
+      Prop("timeline") { (view: VideoEditorPreviewView, timeline: [String: Any]) in
+        view.setTimeline(raw: timeline)
       }
 
       Prop("playing") { (view: VideoEditorPreviewView, playing: Bool) in

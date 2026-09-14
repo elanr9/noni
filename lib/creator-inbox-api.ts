@@ -1,17 +1,13 @@
-import { listCampaignManagers, listCampaigns } from './briefs-api';
-import {
-  briefChatTitle,
-  getOrCreateBriefChat,
-  getOrCreateDm,
-  previewText,
-  weekNumbers,
-} from './manager-messages-api';
+import { listCampaignManagers } from './briefs-api';
+import { getOrCreateDm, previewText } from './manager-messages-api';
 import { parseMessageMedia } from './messages-api';
 import { supabase } from './supabase';
 
 export type CreatorChannelRow = {
   chatId: string;
   name: string;
+  /** The company-wide General chat, pinned first. */
+  isGeneral: boolean;
   preview: string;
   lastMessageAt: string | null;
   unread: number;
@@ -26,15 +22,6 @@ export type CreatorDmRow = {
   unread: number;
 };
 
-export type CreatorBriefChatRow = {
-  chatId: string;
-  campaignId: string;
-  title: string;
-  preview: string;
-  lastMessageAt: string | null;
-  unread: number;
-};
-
 export type CreatorTeamThread = {
   preview: string;
   lastMessageAt: string | null;
@@ -44,7 +31,6 @@ export type CreatorTeamThread = {
 export type CreatorInbox = {
   team: CreatorTeamThread;
   dms: CreatorDmRow[];
-  briefs: CreatorBriefChatRow[];
   channels: CreatorChannelRow[];
 };
 
@@ -158,54 +144,29 @@ function byRecency<T extends { lastMessageAt: string | null }>(a: T, b: T): numb
   return (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '');
 }
 
-/** Distinct campaigns the creator has at least one assignment on. */
-async function myCampaignIds(companyId: string, meId: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('assignments')
-    .select('campaign_id')
-    .eq('company_id', companyId)
-    .eq('creator_id', meId)
-    .not('campaign_id', 'is', null);
-  if (error) throw error;
-  return [...new Set((data ?? []).map((a) => a.campaign_id).filter((id): id is string => id !== null))];
-}
-
 export async function loadCreatorInbox(companyId: string, meId: string): Promise<CreatorInbox> {
-  const [team, managers, campaigns, campaignIds, { data: channelRows, error: channelError }] =
-    await Promise.all([
-      loadTeamThread(companyId, meId),
-      listCampaignManagers(companyId),
-      listCampaigns(),
-      myCampaignIds(companyId, meId),
-      supabase
-        .from('manager_chats')
-        .select('id, name, created_at')
-        .eq('company_id', companyId)
-        .eq('kind', 'channel'),
-    ]);
+  const [team, managers, { data: channelRows, error: channelError }] = await Promise.all([
+    loadTeamThread(companyId, meId),
+    listCampaignManagers(companyId),
+    supabase
+      .from('manager_chats')
+      .select('id, name, created_at, is_general')
+      .eq('company_id', companyId)
+      .eq('kind', 'channel'),
+  ]);
   if (channelError) throw channelError;
   const channelList = channelRows ?? [];
 
-  const [dmPairs, briefPairs] = await Promise.all([
-    Promise.all(
-      managers
-        .filter((m) => m.id !== meId)
-        .map(async (manager) => ({ manager, chatId: await getOrCreateDm(companyId, meId, manager.id) })),
-    ),
-    Promise.all(
-      campaignIds.map(async (campaignId) => ({
-        campaignId,
-        chatId: await getOrCreateBriefChat(companyId, campaignId),
-      })),
-    ),
-  ]);
+  const dmPairs = await Promise.all(
+    managers
+      .filter((m) => m.id !== meId)
+      .map(async (manager) => ({ manager, chatId: await getOrCreateDm(companyId, meId, manager.id) })),
+  );
 
   const { latest, unreadByChat } = await loadChatActivity(companyId, meId, [
     ...dmPairs.map((p) => p.chatId),
-    ...briefPairs.map((p) => p.chatId),
     ...channelList.map((c) => c.id),
   ]);
-  const numbers = weekNumbers(campaigns);
 
   const dms = dmPairs
     .map(({ manager, chatId }): CreatorDmRow => {
@@ -221,39 +182,26 @@ export async function loadCreatorInbox(companyId: string, meId: string): Promise
     })
     .sort(byRecency);
 
-  const briefs = briefPairs
-    .map(({ campaignId, chatId }): CreatorBriefChatRow => {
-      const last = latest.get(chatId);
-      return {
-        chatId,
-        campaignId,
-        title: briefChatTitle(numbers.get(campaignId) ?? 1),
-        preview: chatPreview(last, meId, true),
-        lastMessageAt: last?.created_at ?? null,
-        unread: unreadByChat.get(chatId) ?? 0,
-      };
-    })
-    .sort((a, b) => (numbers.get(b.campaignId) ?? 0) - (numbers.get(a.campaignId) ?? 0));
-
   const channels = channelList
     .map((c): CreatorChannelRow => {
       const last = latest.get(c.id);
       return {
         chatId: c.id,
-        name: c.name ?? 'channel',
+        name: c.is_general ? 'General' : c.name ?? 'channel',
+        isGeneral: c.is_general,
         preview: chatPreview(last, meId, true),
         lastMessageAt: last?.created_at ?? c.created_at,
         unread: unreadByChat.get(c.id) ?? 0,
       };
     })
-    .sort(byRecency);
+    .sort((a, b) => Number(b.isGeneral) - Number(a.isGeneral) || byRecency(a, b));
 
-  return { team, dms, briefs, channels };
+  return { team, dms, channels };
 }
 
 /** Badge for the creator Messages tab: team thread plus every chat's unread. */
 export async function unreadCreatorInboxCount(companyId: string, meId: string): Promise<number> {
   const inbox = await loadCreatorInbox(companyId, meId);
   const sum = (rows: { unread: number }[]) => rows.reduce((total, r) => total + r.unread, 0);
-  return inbox.team.unread + sum(inbox.dms) + sum(inbox.briefs) + sum(inbox.channels);
+  return inbox.team.unread + sum(inbox.dms) + sum(inbox.channels);
 }

@@ -16,6 +16,7 @@ import { SubmissionRow } from '../../../components/admin/SubmissionRow';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import {
   latestSubmissionsByAssignment,
+  submissionThumbPath,
   listAssignmentQueue,
   listMusicApprovalQueue,
   type MusicApprovalItem,
@@ -82,7 +83,7 @@ function useAdminQueue(companyId: string | undefined): {
             item: toAssignmentQueueRow(a, submission),
             attempt: submission?.version ?? 1,
             unitCount: a.briefs.point_count !== null ? a.briefs.point_count + 2 : null,
-            mediaPath: submission?.video_path ?? null,
+            mediaPath: submission ? submissionThumbPath(submission) : null,
           };
         }),
       );

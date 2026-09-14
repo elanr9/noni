@@ -12,7 +12,9 @@ declare const EdgeRuntime:
   | { waitUntil(promise: Promise<unknown>): void }
   | undefined;
 
-type Body = { submission_id?: string };
+type Body = { submission_id?: string; resume?: boolean; hop?: number };
+
+const MAX_HOPS = 5;
 
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
@@ -28,26 +30,35 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const authHeader = req.headers.get('Authorization') ?? '';
-    const { data: userData } = await admin.auth.getUser(
-      authHeader.replace('Bearer ', ''),
-    );
-    if (!userData?.user) return jsonResponse({ error: 'unauthorized' }, 401);
+    const token = authHeader.replace('Bearer ', '');
+    // The overlay pass is handed to a fresh invocation by this function
+    // itself, authenticated with the service role key.
+    const internal = token === serviceKey;
+    const userId = internal
+      ? null
+      : (await admin.auth.getUser(token)).data?.user?.id ?? null;
+    if (!internal && !userId) return jsonResponse({ error: 'unauthorized' }, 401);
 
-    const { data: caller } = await admin
-      .from('profiles')
-      .select('company_id, role')
-      .eq('id', userData.user.id)
-      .maybeSingle();
-    if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
-    // Platform admin (role admin) inherits campaign manager powers.
-    const isManager =
-      caller.role === 'campaign_manager' || caller.role === 'admin';
+    let callerCompanyId: string | null = null;
+    let isManager = internal;
+    if (userId) {
+      const { data: caller } = await admin
+        .from('profiles')
+        .select('company_id, role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
+      callerCompanyId = caller.company_id as string;
+      // Platform admin (role admin) inherits campaign manager powers.
+      isManager = caller.role === 'campaign_manager' || caller.role === 'admin';
+    }
 
     const { data: submission } = await admin
       .from('submissions')
       .select(
-        'id, video_path, segment_paths, version, creator_id, assignment_id, task_id, render_status',
+        'id, video_path, segment_paths, version, creator_id, assignment_id, task_id, render_status, overlay_render_id',
       )
       .eq('id', body.submission_id)
       .maybeSingle();
@@ -79,10 +90,10 @@ Deno.serve(async (req) => {
         targetId = task.id as string;
       }
     }
-    if (!companyId || !targetId || companyId !== caller.company_id) {
+    if (!companyId || !targetId || (!internal && companyId !== callerCompanyId)) {
       return jsonResponse({ error: 'submission not found' }, 404);
     }
-    const isOwner = submission.creator_id === userData.user.id;
+    const isOwner = userId !== null && submission.creator_id === userId;
     if (!isOwner && !isManager) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
@@ -110,13 +121,41 @@ Deno.serve(async (req) => {
       return jsonResponse({ status: submission.render_status as string });
     }
 
+    // Stitch and overlays each get their own invocation (and wall clock):
+    // once the cut is stored this calls itself with resume and the next run
+    // picks up from the cut, or from the overlay render still in flight.
+    // hop caps the chain so a render that never finishes cannot loop.
+    const hop = typeof body.hop === 'number' ? body.hop : 0;
+    const handoff = hop >= MAX_HOPS
+      ? undefined
+      : async () => {
+          const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/render-submission`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              submission_id: body.submission_id,
+              resume: true,
+              hop: hop + 1,
+            }),
+          });
+          return res.ok;
+        };
+
     const job = assembleSubmission({
       admin,
       submission: submission as unknown as SubmissionRow,
       targetId,
       companyId,
       briefId,
-    }).catch((error) => {
+      handoff,
+    })
+      .then((result) => {
+        if (result.overlayWarning) console.warn(`render-submission: ${result.overlayWarning}`);
+      })
+      .catch((error) => {
       console.error('render-submission failed', error);
     });
 

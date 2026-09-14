@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { latestSubmissionsByAssignment } from './admin-api';
+import { latestSubmissionsByAssignment, submissionThumbPath } from './admin-api';
 import { useAuth } from './auth';
 import { supabase } from './supabase';
 import type { Assignment, TaskStatus } from './tasks';
@@ -160,7 +160,9 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
       void latestSubmissionsByAssignment(inWindow.map((a) => a.id))
         .then((subs) => {
           if (seq !== refetchSeq.current) return;
-          setMediaPaths(new Map([...subs].map(([id, sub]) => [id, sub.video_path])));
+          setMediaPaths(
+            new Map([...subs].map(([id, sub]) => [id, submissionThumbPath(sub)])),
+          );
         })
         .catch(() => undefined);
     } catch {

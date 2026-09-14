@@ -98,6 +98,18 @@ export async function latestSubmissionsByAssignment(
   return map;
 }
 
+/**
+ * Media path to thumbnail a submission from. The edited file only exists once
+ * the render is ready; before that (and after a failed edit) the first raw
+ * clip or slide is the source.
+ */
+export function submissionThumbPath(
+  sub: Pick<Submission, 'render_status' | 'video_path' | 'segment_paths'>,
+): string {
+  if (sub.render_status === 'ready') return sub.video_path;
+  return sub.segment_paths?.[0] ?? sub.video_path;
+}
+
 /** Live edit-job state for a submission, polled while the review screen waits. */
 export async function getSubmissionRenderState(
   submissionId: string,

@@ -94,13 +94,19 @@ export default function ReviewScreen() {
   const urlCache = useRef(new Map<string, string>());
 
   const signedUrlFor = useCallback(async (item: ReviewItem): Promise<string | null> => {
-    if (item.row.format !== 'video' || !item.submission?.video_path) return null;
-    // The finished edit is what gets reviewed; raw clips never play here.
-    if (item.submission.render_status !== 'ready') return null;
-    const cached = urlCache.current.get(item.assignment.id);
+    if (item.row.format !== 'video' || !item.submission) return null;
+    // The finished edit is what gets reviewed. Until it is ready (or when it
+    // failed) the first raw clip plays so the footage is still watchable.
+    const ready = item.submission.render_status === 'ready';
+    const path = ready
+      ? item.submission.video_path
+      : item.submission.segment_paths?.[0] ?? item.submission.video_path;
+    if (!path) return null;
+    const cacheKey = `${item.assignment.id}:${ready ? 'edit' : 'raw'}`;
+    const cached = urlCache.current.get(cacheKey);
     if (cached !== undefined) return cached;
-    const url = await signedVideoUrl(item.submission.video_path);
-    urlCache.current.set(item.assignment.id, url);
+    const url = await signedVideoUrl(path);
+    urlCache.current.set(cacheKey, url);
     return url;
   }, []);
 
@@ -502,7 +508,7 @@ export default function ReviewScreen() {
                 <Text style={styles.editTitle}>Editing the final video</Text>
                 <Text style={styles.editDetail}>
                   Clips are being stitched and captions added. This can take a
-                  couple of minutes.
+                  couple of minutes. The first raw clip plays meanwhile.
                 </Text>
                 {submission?.render_status === 'queued' && (
                   <Button size="md" variant="outline" onPress={() => void restartEdit()}>
@@ -631,12 +637,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   editOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    top: 104,
+    left: 16,
+    right: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    paddingHorizontal: 40,
-    backgroundColor: 'rgba(10, 10, 14, 0.88)',
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 18,
+    backgroundColor: 'rgba(10, 10, 14, 0.82)',
   },
   editTitle: {
     fontSize: type.size.body,

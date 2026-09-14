@@ -16,7 +16,8 @@ import {
 } from './renderTimeline.ts';
 import {
   renderGreenScreenClip,
-  renderOverlays,
+  awaitRender,
+  startOverlayRender,
   renderSlideImage,
 } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
@@ -28,6 +29,7 @@ export type SubmissionRow = {
   video_path: string | null;
   segment_paths: string[] | null;
   version: number | null;
+  overlay_render_id?: string | null;
 };
 
 export function uploadPostKey(): string {
@@ -38,6 +40,9 @@ export function uploadPostKey(): string {
 
 // Run an FFmpeg job on Upload-Post (docs.upload-post.com/api/ffmpeg-editor),
 // download the result, and store it in the videos bucket.
+// Upload-Post rejects `;` `|` `&` `$` and backticks anywhere in the command,
+// so no filtergraph here may use `;` to separate chains. Each pass below is
+// one linear chain per -filter_complex (repeatable) or plain -vf/-af.
 async function runFfmpegJob(params: {
   admin: AdminClient;
   apiKey: string;
@@ -45,8 +50,33 @@ async function runFfmpegJob(params: {
   fullCommand: string;
   outputPath: string;
   label: string;
+  outputExtension?: 'mp4' | 'png';
+  // Upload-Post rejects ';' in full_command, so a multi chain graph travels
+  // as a file and the command reads it with -filter_complex_script. The
+  // script is appended as the last input file; {graph} marks its placeholder.
+  filterGraph?: string;
 }): Promise<void> {
-  const { admin, apiKey, files, fullCommand, outputPath, label } = params;
+  const { admin, apiKey, outputPath, label } = params;
+  const outputExtension = params.outputExtension ?? 'mp4';
+  let files = params.files;
+  let fullCommand = params.fullCommand;
+  let scriptPath: string | null = null;
+  if (params.filterGraph) {
+    scriptPath = `${outputPath}.graph`;
+    const { error } = await admin.storage
+      .from('videos')
+      .upload(scriptPath, new TextEncoder().encode(params.filterGraph), {
+        contentType: 'video/mp4',
+        upsert: true,
+      });
+    if (error) throw new Error(`could not store ${label} graph: ${error.message}`);
+    const [scriptUrl] = await signVideoUrls(admin, [scriptPath]);
+    files = [...files, scriptUrl];
+    fullCommand = fullCommand.replace('{graph}', inputPlaceholder(files.length - 1, files.length));
+  }
+  if (/[;|&$`]/.test(fullCommand)) {
+    throw new Error(`ffmpeg ${label} command contains a forbidden character`);
+  }
 
   const jobRes = await fetch(
     'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/upload',
@@ -59,10 +89,11 @@ async function runFfmpegJob(params: {
       body: JSON.stringify({
         files,
         full_command: fullCommand,
-        output_extension: 'mp4',
+        output_extension: outputExtension,
       }),
     },
   );
+  console.log(`ffmpeg ${label} job created`);
   const jobJson = (await jobRes.json()) as {
     success?: boolean;
     job_id?: string;
@@ -76,19 +107,28 @@ async function runFfmpegJob(params: {
   }
 
   let finished = false;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     const statusRes = await fetch(
       `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}`,
       { headers: { Authorization: `Apikey ${apiKey}` } },
     );
-    const statusJson = (await statusRes.json()) as { status?: string };
-    if (statusJson.status === 'FINISHED') {
+    const statusJson = (await statusRes.json()) as {
+      status?: string;
+      exc_info?: string | null;
+      result?: { stderr_tail?: string | null } | null;
+    };
+    const status = (statusJson.status ?? '').toLowerCase();
+    if (status === 'finished' || status === 'done') {
       finished = true;
       break;
     }
-    if (statusJson.status === 'ERROR') {
-      throw new Error(`ffmpeg ${label} job errored`);
+    if (status === 'failed' || status === 'error') {
+      const detail =
+        statusJson.result?.stderr_tail?.trim().split('\n').slice(-3).join(' ') ??
+        statusJson.exc_info?.trim().split('\n').pop() ??
+        '';
+      throw new Error(`ffmpeg ${label} job errored${detail ? `: ${detail}` : ''}`);
     }
   }
   if (!finished) throw new Error(`ffmpeg ${label} timed out`);
@@ -97,17 +137,43 @@ async function runFfmpegJob(params: {
     `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}/download`,
     { headers: { Authorization: `Apikey ${apiKey}` } },
   );
-  if (!download.ok) {
+  if (!download.ok || !download.body) {
     throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
   }
-  const bytes = new Uint8Array(await download.arrayBuffer());
+  console.log(`ffmpeg ${label} finished, storing ${outputPath}`);
+  await streamToVideos({
+    path: outputPath,
+    contentType: outputExtension === 'png' ? 'image/png' : 'video/mp4',
+    body: download.body,
+    label,
+  });
+  console.log(`ffmpeg ${label} stored ${outputPath}`);
+  if (scriptPath) await admin.storage.from('videos').remove([scriptPath]);
+}
 
-  const { error: uploadError } = await admin.storage
-    .from('videos')
-    .upload(outputPath, bytes, { contentType: 'video/mp4', upsert: true });
-  if (uploadError) {
-    throw new Error(`could not store ${label} video: ${uploadError.message}`);
-  }
+// Pipe a byte stream straight into the videos bucket. The body is handed to
+// fetch untouched so the bytes never pass through JS; copying a long render
+// chunk by chunk in the isolate exhausts the edge function CPU budget.
+export async function streamToVideos(params: {
+  path: string;
+  contentType: string;
+  body: ReadableStream<Uint8Array>;
+  label: string;
+}): Promise<void> {
+  const { path, contentType, body, label } = params;
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/storage/v1/object/videos/${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      apikey: key,
+      'Content-Type': contentType,
+      'x-upsert': 'true',
+    },
+    body,
+  });
+  if (!res.ok) throw new Error(`could not store ${label}: upload ${res.status}`);
+  console.log(`${label}: stored ${path}`);
 }
 
 export async function signVideoUrls(
@@ -127,40 +193,140 @@ export async function signVideoUrls(
   return urls;
 }
 
-// Stitch and the WP9 basic pass merged into ONE job: one re-encode instead of
-// two, one poll against the wall clock. Every input is normalized first
-// (fps 30, 1080x1920, 48k stereo) so concat never sees mismatched clips —
-// capture pins codec and resolution, but expo-camera cannot pin fps or audio
-// sample rate, and front/back camera flips can change frame size.
-// Head: -ss 0.15 on input 0 only (sync-safe). Tail: silenceremove + -shortest.
-// Works for N=1 (replaces the old standalone edit pass).
-async function stitchAndEditPass(params: {
+const VIDEO_CODEC = '-c:v h264_nvenc -preset p5 -cq 23';
+const AUDIO_CODEC = '-c:a aac -b:a 128k';
+const CONFORM_1080x1920 =
+  'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1';
+
+// Upload-Post names a lone input {input}; several are {input0}, {input1}, ...
+function inputPlaceholder(index: number, total: number): string {
+  return total === 1 ? '{input}' : `{input${index}}`;
+}
+
+// Conform one clip to fps 30, 1080x1920, 48k stereo AAC. A clip with no
+// audio track (muted in the editor) gets silence so the concat never sees a
+// missing stream. -shortest ends the silence with the video. Head trim
+// (-ss 0.15) is applied by the caller on the first clip only.
+async function normalizeClipPass(params: {
+  admin: AdminClient;
+  apiKey: string;
+  clipPath: string;
+  outputPath: string;
+  headTrim: boolean;
+  loudnorm: boolean;
+}): Promise<void> {
+  const { admin, apiKey, clipPath, outputPath, headTrim, loudnorm } = params;
+  const [file] = await signVideoUrls(admin, [clipPath]);
+  const fullCommand =
+    `ffmpeg -y -hide_banner ${headTrim ? '-ss 0.15 ' : ''}-i {input} ` +
+    `-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 ` +
+    `-map 0:v -map 0:a? -map 1:a ` +
+    `-vf fps=30,${CONFORM_1080x1920} ` +
+    `-af aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo` +
+    `${loudnorm ? ',loudnorm=I=-16:TP=-1.5:LRA=11' : ''} ` +
+    `${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`;
+
+  await runFfmpegJob({
+    admin,
+    apiKey,
+    files: [file],
+    fullCommand,
+    outputPath,
+    label: 'normalize',
+  });
+}
+
+const AUDIO_CONFORM = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
+const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+
+// One job: every clip is conformed (fps 30, 1080x1920, 48k stereo) inside
+// the graph, concat joins them, loudnorm evens the audio. Head: -ss 0.15 on
+// input 0 only. Works for N=1.
+async function stitchGraphPass(params: {
   admin: AdminClient;
   apiKey: string;
   segmentPaths: string[];
   outputPath: string;
 }): Promise<void> {
   const { admin, apiKey, segmentPaths, outputPath } = params;
-  const files = await signVideoUrls(admin, segmentPaths);
-
   const n = segmentPaths.length;
-  const inputs = segmentPaths.map((_p, i) => `-i {input${i}}`).join(' ');
-  const normalize = segmentPaths
-    .map(
-      (_p, i) =>
-        `[${i}:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,` +
-        `crop=1080:1920,setsar=1[v${i}];` +
-        `[${i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`,
-    )
-    .join(';');
+  const files = await signVideoUrls(admin, segmentPaths);
+  const inputs = segmentPaths
+    .map((_p, i) => `${i === 0 ? '-ss 0.15 ' : ''}-i ${inputPlaceholder(i, n + 1)}`)
+    .join(' ');
+  const conform = segmentPaths.flatMap((_p, i) => [
+    `[${i}:v]fps=30,${CONFORM_1080x1920}[v${i}]`,
+    `[${i}:a]${AUDIO_CONFORM}[a${i}]`,
+  ]);
   const streams = segmentPaths.map((_p, i) => `[v${i}][a${i}]`).join('');
+  const filterGraph = [
+    ...conform,
+    `${streams}concat=n=${n}:v=1:a=1[cv][ca]`,
+    `[ca]${LOUDNORM}[outa]`,
+  ].join(';');
+
+  await runFfmpegJob({
+    admin,
+    apiKey,
+    files,
+    fullCommand:
+      `ffmpeg -y -hide_banner ${inputs} -filter_complex_script {graph} ` +
+      `-map "[cv]" -map "[outa]" ${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`,
+    outputPath,
+    label: 'stitch-edit',
+    filterGraph,
+  });
+}
+
+// Fallback for clips with no audio track (fully muted in the editor): each
+// clip is conformed on its own with silence injected, then one concat job
+// joins the conformed copies. Costs N+1 jobs, so it only runs when the
+// single graph job rejects a missing audio stream.
+async function stitchNormalizedPass(params: {
+  admin: AdminClient;
+  apiKey: string;
+  segmentPaths: string[];
+  outputPath: string;
+  scratchPrefix: string;
+}): Promise<void> {
+  const { admin, apiKey, segmentPaths, outputPath, scratchPrefix } = params;
+  const n = segmentPaths.length;
+
+  if (n === 1) {
+    await normalizeClipPass({
+      admin,
+      apiKey,
+      clipPath: segmentPaths[0],
+      outputPath,
+      headTrim: true,
+      loudnorm: true,
+    });
+    return;
+  }
+
+  const normalizedPaths = segmentPaths.map((_p, i) => `${scratchPrefix}-norm-${i}.mp4`);
+  await Promise.all(
+    segmentPaths.map((clipPath, i) =>
+      normalizeClipPass({
+        admin,
+        apiKey,
+        clipPath,
+        outputPath: normalizedPaths[i],
+        headTrim: i === 0,
+        loudnorm: false,
+      }),
+    ),
+  );
+
+  const files = await signVideoUrls(admin, normalizedPaths);
+  const inputs = normalizedPaths.map((_p, i) => `-i ${inputPlaceholder(i, n)}`).join(' ');
+  const videoStreams = normalizedPaths.map((_p, i) => `[${i}:v]`).join('');
+  const audioStreams = normalizedPaths.map((_p, i) => `[${i}:a]`).join('');
   const fullCommand =
-    `ffmpeg -y -hide_banner -ss 0.15 ${inputs} ` +
-    `-filter_complex "${normalize};${streams}concat=n=${n}:v=1:a=1[cv][ca];` +
-    `[ca]silenceremove=stop_periods=1:stop_duration=0.25:stop_threshold=-45dB:detection=peak,` +
-    `loudnorm=I=-16:TP=-1.5:LRA=11[outa]" ` +
-    `-map "[cv]" -map "[outa]" -c:v h264_nvenc -preset p5 -cq 23 ` +
-    `-c:a aac -b:a 128k -shortest {output}`;
+    `ffmpeg -y -hide_banner ${inputs} ` +
+    `-filter_complex "${videoStreams}concat=n=${n}:v=1:a=0[cv]" ` +
+    `-filter_complex "${audioStreams}concat=n=${n}:v=0:a=1,${LOUDNORM}[outa]" ` +
+    `-map "[cv]" -map "[outa]" ${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`;
 
   await runFfmpegJob({
     admin,
@@ -170,6 +336,24 @@ async function stitchAndEditPass(params: {
     outputPath,
     label: 'stitch-edit',
   });
+
+  await admin.storage.from('videos').remove(normalizedPaths);
+}
+
+async function stitchAndEditPass(params: {
+  admin: AdminClient;
+  apiKey: string;
+  segmentPaths: string[];
+  outputPath: string;
+  scratchPrefix: string;
+}): Promise<void> {
+  try {
+    await stitchGraphPass(params);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/matches no streams/i.test(message)) throw err;
+    await stitchNormalizedPass(params);
+  }
 }
 
 // Chroma key the cutout (creator on solid green) over the screenshot or
@@ -185,35 +369,28 @@ async function greenScreenComposite(params: {
   clipUrl: string;
   outputPath: string;
 }): Promise<void> {
-  const {
-    admin,
-    apiKey,
-    backgroundUrl,
-    backgroundIsVideo,
-    greenUrl,
-    clipUrl,
-    outputPath,
-  } = params;
+  const { admin, apiKey, backgroundUrl, backgroundIsVideo, greenUrl, clipUrl, outputPath } =
+    params;
   const backgroundInput = backgroundIsVideo
     ? '-stream_loop -1 -i {input0}'
     : '-loop 1 -i {input0}';
-  const fullCommand =
-    `ffmpeg -y -hide_banner ${backgroundInput} -i {input1} -i {input2} ` +
-    `-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
-    `crop=1080:1920,setsar=1[bg];` +
-    `[1:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
-    `crop=1080:1920,setsar=1,chromakey=0x00FF00:0.28:0.06[fg];` +
-    `[bg][fg]overlay=shortest=1[outv]" ` +
-    `-map "[outv]" -map 2:a? -c:v h264_nvenc -preset p5 -cq 23 ` +
-    `-c:a aac -b:a 128k -shortest {output}`;
+  const filterGraph = [
+    `[0:v]fps=30,${CONFORM_1080x1920}[bg]`,
+    `[1:v]${CONFORM_1080x1920},chromakey=0x00FF00:0.28:0.06[fg]`,
+    `[bg][fg]overlay=shortest=1[outv]`,
+  ].join(';');
 
   await runFfmpegJob({
     admin,
     apiKey,
     files: [backgroundUrl, greenUrl, clipUrl],
-    fullCommand,
+    fullCommand:
+      `ffmpeg -y -hide_banner ${backgroundInput} -i {input1} -i {input2} ` +
+      `-filter_complex_script {graph} ` +
+      `-map "[outv]" -map 2:a? ${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`,
     outputPath,
     label: 'green-screen',
+    filterGraph,
   });
 }
 
@@ -262,7 +439,21 @@ export type AssembleResult = {
   overlayWarning: string | null;
   /** Final slide image paths, photo submissions only. */
   slidePaths?: string[];
+  /** True when the overlay pass was handed to a fresh invocation. */
+  deferred?: boolean;
 };
+
+/**
+ * Kicks a fresh invocation to carry on the overlay pass: once after the cut
+ * is stored, and again whenever the Creatomate render is still in progress
+ * at the wait deadline. Keeps a long edit off a single edge function wall
+ * clock. Resolves true when the hand-off was made.
+ */
+export type OverlayHandoff = () => Promise<boolean>;
+
+// How long one invocation waits on the overlay render before handing the
+// wait to the next one. Well inside the 400s edge function wall clock.
+const OVERLAY_WAIT_MS = 240_000;
 
 function isVideoFile(path: string): boolean {
   return /\.(mp4|mov|m4v|webm)$/i.test(path);
@@ -281,6 +472,7 @@ export async function assembleSubmission(params: {
   targetId: string;
   companyId: string;
   briefId: string | null;
+  handoff?: OverlayHandoff;
 }): Promise<AssembleResult> {
   const { admin, submission } = params;
   try {
@@ -289,6 +481,7 @@ export async function assembleSubmission(params: {
     const result = isPhoto
       ? await runSlideshowAssembly(params)
       : await runAssembly(params);
+    if (result.deferred) return result;
     await admin
       .from('submissions')
       .update({ render_status: 'ready', render_error: null })
@@ -296,6 +489,7 @@ export async function assembleSubmission(params: {
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`assemble ${submission.id} failed: ${message}`);
     await admin
       .from('submissions')
       .update({ render_status: 'failed', render_error: message })
@@ -378,19 +572,19 @@ async function runSlideshowAssembly(params: {
           width: segment.screenshot_width ?? 0.34,
         };
       }
-      const bytes = await renderSlideImage({
+      const image = await renderSlideImage({
         apiKey: renderKey,
         photoUrl,
         boxes,
         inset,
       });
       const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.jpg`;
-      const { error: uploadError } = await admin.storage
-        .from('videos')
-        .upload(outPath, bytes, { contentType: 'image/jpeg', upsert: true });
-      if (uploadError) {
-        throw new Error(`could not store slide ${i + 1}: ${uploadError.message}`);
-      }
+      await streamToVideos({
+        path: outPath,
+        contentType: 'image/jpeg',
+        body: image,
+        label: `slide ${i + 1}`,
+      });
       return outPath;
     }),
   );
@@ -413,12 +607,18 @@ async function runAssembly(params: {
   targetId: string;
   companyId: string;
   briefId: string | null;
+  handoff?: OverlayHandoff;
 }): Promise<AssembleResult> {
-  const { admin, submission, targetId, companyId, briefId } = params;
+  const { admin, submission, targetId, companyId, briefId, handoff } = params;
   if (!submission.video_path) {
     throw new Error('submission has no video');
   }
   const apiKey = uploadPostKey();
+  const version = submission.version ?? 1;
+  const editedPath = `${companyId}/${targetId}/${version}-edited.mp4`;
+  // A previous invocation already stitched this version (video_path points
+  // at the cut it stored), so resume at the overlay pass.
+  const stitched = submission.video_path === editedPath;
 
   // Clips in slot order: submission_segments when present (new recordings),
   // legacy segment_paths otherwise, the single video_path as last resort.
@@ -428,7 +628,6 @@ async function runAssembly(params: {
     clips?.paths ??
     (legacyPaths.length > 0 ? legacyPaths : [submission.video_path]);
   const durationsMs = clips?.durationsMs ?? null;
-  const version = submission.version ?? 1;
 
   let briefSegments: BriefSegmentRow[] = [];
   let textOverlay: TimelineTextOverlay = DEFAULT_TEXT_OVERLAY;
@@ -480,7 +679,7 @@ async function runAssembly(params: {
   const greenScreenSlots = briefSegments.filter(
     (s) => s.layout === 'green_screen' && s.screenshot_url,
   );
-  if (greenScreenSlots.length > 0) {
+  if (greenScreenSlots.length > 0 && !stitched) {
     if (!durationsMs) {
       overlayWarning =
         'green screen skipped: this submission has no per-clip durations';
@@ -529,36 +728,33 @@ async function runAssembly(params: {
             imageUrl: signedImg.signedUrl,
             durationMs: durationsMs[slot],
           });
-          const { error: gsUploadError } = await admin.storage
-            .from('videos')
-            .upload(compositePath, composite, {
-              contentType: 'video/mp4',
-              upsert: true,
-            });
-          if (gsUploadError) {
-            throw new Error(
-              `could not store green screen clip: ${gsUploadError.message}`,
-            );
-          }
+          await streamToVideos({
+            path: compositePath,
+            contentType: 'video/mp4',
+            body: composite,
+            label: 'green screen clip',
+          });
         }
         segmentPaths[slot] = compositePath;
       }
     }
   }
 
-  // One FFmpeg job on Upload-Post: normalize each clip, concat, trim,
-  // loudnorm, conform 1080x1920. Single re-encode for any clip count.
-  let videoPath = `${companyId}/${targetId}/${version}-edited.mp4`;
-  await stitchAndEditPass({
-    admin,
-    apiKey,
-    segmentPaths,
-    outputPath: videoPath,
-  });
-  await admin
-    .from('submissions')
-    .update({ video_path: videoPath })
-    .eq('id', submission.id);
+  // Conform every clip, concat, loudnorm, 1080x1920 (see stitchAndEditPass).
+  let videoPath = editedPath;
+  if (!stitched) {
+    await stitchAndEditPass({
+      admin,
+      apiKey,
+      segmentPaths,
+      outputPath: videoPath,
+      scratchPrefix: `${companyId}/${targetId}/${version}`,
+    });
+    await admin
+      .from('submissions')
+      .update({ video_path: videoPath })
+      .eq('id', submission.id);
+  }
 
   // On-screen text and screenshots from brief_segments, plus subtitles when
   // the campaign manager turned them on, rendered through the adapter.
@@ -588,6 +784,11 @@ async function runAssembly(params: {
         .eq('id', submission.id);
 
       if (timelineHasOverlays(timeline)) {
+        if (!stitched && handoff && (await handoff())) {
+          console.log(`overlays for ${submission.id} handed to a new invocation`);
+          return { videoPath, overlayWarning, deferred: true };
+        }
+        console.log(`rendering overlays for ${submission.id}`);
         const renderKey = Deno.env.get('CREATOMATE_API_KEY');
         if (!renderKey) {
           throw new Error(
@@ -607,28 +808,56 @@ async function runAssembly(params: {
           }
           imageUrls[img.screenshot_path] = signedImg.signedUrl;
         }
-        const rendered = await renderOverlays({
-          apiKey: renderKey,
-          videoUrl,
-          timeline,
-          imageUrls,
-        });
-        const renderedPath = `${companyId}/${targetId}/${version}-rendered.mp4`;
-        const { error: renderUploadError } = await admin.storage
-          .from('videos')
-          .upload(renderedPath, rendered, {
-            contentType: 'video/mp4',
-            upsert: true,
-          });
-        if (renderUploadError) {
-          throw new Error(
-            `could not store rendered video: ${renderUploadError.message}`,
+        // The stitched cut is already stored and watchable, so an overlay
+        // render that fails degrades to that cut with a warning instead of
+        // failing the whole edit. A render still running at the deadline is
+        // handed to the next invocation, which resumes on the stored id.
+        let rendered: ReadableStream<Uint8Array> | null = null;
+        let renderId = submission.overlay_render_id ?? null;
+        try {
+          if (!renderId) {
+            renderId = await startOverlayRender({
+              apiKey: renderKey,
+              videoUrl,
+              timeline,
+              imageUrls,
+            });
+            await admin
+              .from('submissions')
+              .update({ overlay_render_id: renderId })
+              .eq('id', submission.id);
+            console.log(`overlay render ${renderId} started for ${submission.id}`);
+          }
+          rendered = await awaitRender(
+            renderKey,
+            renderId,
+            { width: timeline.width, height: timeline.height },
+            Date.now() + OVERLAY_WAIT_MS,
           );
+          if (!rendered) {
+            if (handoff && (await handoff())) {
+              console.log(`overlay render ${renderId} still running, handed to a new invocation`);
+              return { videoPath, overlayWarning, deferred: true };
+            }
+            throw new Error('render timed out');
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          overlayWarning = `overlays skipped: ${message}`;
         }
-        videoPath = renderedPath;
+        if (rendered) {
+          const renderedPath = `${companyId}/${targetId}/${version}-rendered.mp4`;
+          await streamToVideos({
+            path: renderedPath,
+            contentType: 'video/mp4',
+            body: rendered,
+            label: 'rendered video',
+          });
+          videoPath = renderedPath;
+        }
         await admin
           .from('submissions')
-          .update({ video_path: renderedPath })
+          .update({ video_path: videoPath, overlay_render_id: null })
           .eq('id', submission.id);
       }
     }

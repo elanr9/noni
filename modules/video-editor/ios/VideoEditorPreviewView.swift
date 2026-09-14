@@ -21,6 +21,8 @@ final class VideoEditorPreviewView: ExpoView {
   private var durationMs: Double = 0
   private var timeObserver: Any?
   private var endObserver: NSObjectProtocol?
+  private var failObserver: NSObjectProtocol?
+  private var statusObserver: NSKeyValueObservation?
   private var backgroundObserver: NSObjectProtocol?
 
   private var seekInFlight = false
@@ -65,6 +67,10 @@ final class VideoEditorPreviewView: ExpoView {
     if let endObserver {
       NotificationCenter.default.removeObserver(endObserver)
     }
+    if let failObserver {
+      NotificationCenter.default.removeObserver(failObserver)
+    }
+    statusObserver?.invalidate()
     if let backgroundObserver {
       NotificationCenter.default.removeObserver(backgroundObserver)
     }
@@ -88,6 +94,15 @@ final class VideoEditorPreviewView: ExpoView {
   }
 
   // MARK: Timeline
+
+  func setTimeline(raw: [String: Any]) {
+    do {
+      setTimeline(try TimelineRecord.parse(raw))
+    } catch {
+      let message = videoEditorErrorMessage(error)
+      onError(["message": message])
+    }
+  }
 
   func setTimeline(_ timeline: TimelineRecord) {
     onMain { [weak self] in
@@ -129,6 +144,7 @@ final class VideoEditorPreviewView: ExpoView {
     durationMs = built.durationMs
 
     observeEnd(of: item)
+    observeStatus(of: item)
     player.replaceCurrentItem(with: item)
 
     // Any seek still in flight targeted the old item; drop its completion.
@@ -149,6 +165,12 @@ final class VideoEditorPreviewView: ExpoView {
       NotificationCenter.default.removeObserver(endObserver)
       self.endObserver = nil
     }
+    if let failObserver {
+      NotificationCenter.default.removeObserver(failObserver)
+      self.failObserver = nil
+    }
+    statusObserver?.invalidate()
+    statusObserver = nil
     player.pause()
     player.replaceCurrentItem(with: nil)
     durationMs = 0
@@ -171,6 +193,37 @@ final class VideoEditorPreviewView: ExpoView {
       self.onTime(["positionMs": self.durationMs])
       self.onEnd([:])
     }
+  }
+
+  // A composition that AVFoundation refuses only shows up as a failed item,
+  // never as a thrown error, so the item's status is the one place to catch it.
+  private func observeStatus(of item: AVPlayerItem) {
+    statusObserver?.invalidate()
+    statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+      guard let self, item.status == .failed else { return }
+      DispatchQueue.main.async { [weak self] in
+        self?.onError(["message": Self.describe(item.error, fallback: "The preview could not load")])
+      }
+    }
+    if let failObserver {
+      NotificationCenter.default.removeObserver(failObserver)
+    }
+    failObserver = NotificationCenter.default.addObserver(
+      forName: .AVPlayerItemFailedToPlayToEndTime,
+      object: item,
+      queue: .main
+    ) { [weak self] note in
+      let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+      self?.onError(["message": Self.describe(error, fallback: "Playback stopped")])
+    }
+  }
+
+  private static func describe(_ error: Error?, fallback: String) -> String {
+    guard let error else { return fallback }
+    let nsError = error as NSError
+    let underlying = (nsError.userInfo[NSUnderlyingErrorKey] as? NSError)
+      .map { " (\($0.domain) \($0.code))" } ?? ""
+    return "\(nsError.localizedDescription) [\(nsError.domain) \(nsError.code)]\(underlying)"
   }
 
   // MARK: Playback

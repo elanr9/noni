@@ -50,6 +50,7 @@ export function ThreadItemView({ item, renderEvent, renderPostRef }: ThreadItemV
       tone={entry.tone}
       timeLabel={item.timeLabel}
       collapsed={item.collapsed}
+      mine={entry.kind === 'message' && entry.authorName === 'You'}
       onLongPress={copyText.length > 0 ? () => copyMessage(copyText) : undefined}
     >
       {entry.kind === 'message' ? (

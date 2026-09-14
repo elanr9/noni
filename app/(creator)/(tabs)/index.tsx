@@ -235,6 +235,7 @@ export default function HomeScreen() {
         {selected !== null ? (
           <PostCard
             assignment={selected}
+            mediaPath={queue.mediaPaths.get(selected.id) ?? null}
             publishTime={publishTimeLabel(selected, dayList.length)}
             showSwap={selected.status === 'assigned' && selectedDate === todayKey}
             onOpen={() =>

@@ -22,6 +22,7 @@ import {
   leaveChannel,
   listBriefChatMembers,
   listChannelMembers,
+  listGeneralMembers,
   listManagerMessages,
   markChatRead,
   roleLabel,
@@ -161,7 +162,9 @@ export default function ManagerChatScreen() {
   const loadMembers = useCallback(async () => {
     if (!chatId || !chat) return;
     try {
-      if (chat.kind === 'channel') {
+      if (chat.isGeneral && profile) {
+        setMembers(await listGeneralMembers(profile.company_id));
+      } else if (chat.kind === 'channel') {
         setMembers(await listChannelMembers(chatId));
       } else if (chat.kind === 'brief' && chat.campaignId && profile) {
         setMembers(await listBriefChatMembers(profile.company_id, chat.campaignId));
@@ -360,8 +363,14 @@ export default function ManagerChatScreen() {
   const title = isDm ? (chat?.otherName ?? 'Messages') : (chat?.title ?? 'Messages');
   const subtitle = isDm
     ? (other?.roleLabel ?? roleLabel(chat?.otherRole ?? 'campaign_manager'))
-    : membersLabel(chat?.memberCount ?? 0);
-  const placeholder = isDm ? `Message ${firstNameOf(title)}` : `Message ${title}`;
+    : chat?.isGeneral
+      ? `Everyone on the team · ${chat.memberCount} people`
+      : membersLabel(chat?.memberCount ?? 0);
+  const placeholder = isDm
+    ? `Message ${firstNameOf(title)}`
+    : chat?.isGeneral
+      ? 'Message everyone'
+      : `Message ${title}`;
   const teamIds = new Set(team.map((t) => t.id));
 
   const header = (

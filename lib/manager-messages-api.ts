@@ -22,6 +22,8 @@ export type InboxRow = {
   name?: string;
   memberCount?: number;
   allCreators?: boolean;
+  /** The company-wide General chat, pinned first. */
+  isGeneral?: boolean;
 };
 
 export type ManagerChatInfo = {
@@ -37,6 +39,7 @@ export type ManagerChatInfo = {
   memberCount: number;
   allCreators: boolean;
   createdBy: string | null;
+  isGeneral: boolean;
 };
 
 export type ChannelMember = {
@@ -308,39 +311,6 @@ async function currentProfile(): Promise<{ id: string; company_id: string } | nu
   return { id: profile.id, company_id: profile.company_id };
 }
 
-export async function getOrCreateBriefChat(
-  companyId: string,
-  campaignId: string,
-): Promise<string> {
-  const { data: existing, error: selectError } = await supabase
-    .from('manager_chats')
-    .select('id')
-    .eq('company_id', companyId)
-    .eq('kind', 'brief')
-    .eq('campaign_id', campaignId)
-    .maybeSingle();
-  if (selectError) throw selectError;
-  if (existing) return existing.id;
-
-  const { data: created, error: insertError } = await supabase
-    .from('manager_chats')
-    .insert({ company_id: companyId, kind: 'brief', campaign_id: campaignId })
-    .select('id')
-    .single();
-  if (!insertError && created) return created.id;
-
-  const { data: raced, error: raceError } = await supabase
-    .from('manager_chats')
-    .select('id')
-    .eq('company_id', companyId)
-    .eq('kind', 'brief')
-    .eq('campaign_id', campaignId)
-    .maybeSingle();
-  if (raceError) throw raceError;
-  if (raced) return raced.id;
-  throw insertError ?? new Error('Could not open this brief chat');
-}
-
 export async function getOrCreateDm(
   companyId: string,
   myId: string,
@@ -488,15 +458,18 @@ export async function getManagerChat(
       memberCount: members.length,
       allCreators: false,
       createdBy: null,
+      isGeneral: false,
     };
   }
 
   if (kind === 'channel') {
-    const members = await listChannelMembers(chatId);
+    const members = data.is_general
+      ? await listGeneralMembers(companyId)
+      : await listChannelMembers(chatId);
     return {
       id: data.id,
       kind,
-      title: `#${data.name ?? 'channel'}`,
+      title: data.is_general ? 'General' : `#${data.name ?? 'channel'}`,
       campaignId: null,
       otherId: null,
       otherName: null,
@@ -505,6 +478,7 @@ export async function getManagerChat(
       memberCount: members.length,
       allCreators: data.all_creators,
       createdBy: data.created_by,
+      isGeneral: data.is_general,
     };
   }
 
@@ -521,6 +495,7 @@ export async function getManagerChat(
     memberCount: 2,
     allCreators: false,
     createdBy: null,
+    isGeneral: false,
   };
 }
 
@@ -528,6 +503,7 @@ type ChannelRow = {
   id: string;
   name: string | null;
   all_creators: boolean;
+  is_general: boolean;
   created_at: string;
   created_by: string | null;
   members: { profile_id: string }[] | { profile_id: string } | null;
@@ -537,34 +513,25 @@ export async function listManagerInbox(
   companyId: string,
   myId: string,
 ): Promise<{
-  briefChats: InboxRow[];
   dms: InboxRow[];
   channels: InboxRow[];
   unread: number;
 }> {
-  const [campaigns, managers, { data: channelRows, error: channelError }] = await Promise.all([
-    listCampaigns(),
+  const [managers, companyMembers, { data: channelRows, error: channelError }] = await Promise.all([
     listCampaignManagers(companyId),
+    listGeneralMembers(companyId),
     supabase
       .from('manager_chats')
-      .select('id, name, all_creators, created_at, created_by, members:manager_chat_members ( profile_id )')
+      .select(
+        'id, name, all_creators, is_general, created_at, created_by, members:manager_chat_members ( profile_id )',
+      )
       .eq('company_id', companyId)
       .eq('kind', 'channel'),
   ]);
   if (channelError) throw channelError;
   const channelList = (channelRows ?? []) as unknown as ChannelRow[];
-  const numbers = weekNumbers(campaigns);
   const others = managers.filter((m) => m.id !== myId);
 
-  const [briefPairs, creatorsByCampaign] = await Promise.all([
-    Promise.all(
-      campaigns.map(async (campaign) => ({
-        campaign,
-        chatId: await getOrCreateBriefChat(companyId, campaign.id),
-      })),
-    ),
-    assignedCreatorsByCampaign(companyId, campaigns.map((c) => c.id)),
-  ]);
   await Promise.all(others.map((manager) => getOrCreateDm(companyId, myId, manager.id)));
   const { data: dmRows, error: dmError } = await supabase
     .from('manager_chats')
@@ -578,13 +545,9 @@ export async function listManagerInbox(
     chatId: row.id,
   }));
 
-  const chatIds = [
-    ...briefPairs.map((p) => p.chatId),
-    ...dmPairs.map((p) => p.chatId),
-    ...channelList.map((c) => c.id),
-  ];
+  const chatIds = [...dmPairs.map((p) => p.chatId), ...channelList.map((c) => c.id)];
   if (chatIds.length === 0) {
-    return { briefChats: [], dms: [], channels: [], unread: 0 };
+    return { dms: [], channels: [], unread: 0 };
   }
 
   const [{ data: messages, error: msgError }, { data: reads, error: readError }] =
@@ -631,6 +594,7 @@ export async function listManagerInbox(
       name?: string;
       memberCount?: number;
       allCreators?: boolean;
+      isGeneral?: boolean;
     },
   ): InboxRow => {
     const last = latest.get(chatId);
@@ -659,22 +623,6 @@ export async function listManagerInbox(
     };
   };
 
-  const briefChats = briefPairs
-    .map(({ campaign, chatId }) => {
-      const n = numbers.get(campaign.id) ?? 1;
-      return toRow(chatId, briefChatTitle(n), 'brief', {
-        campaignId: campaign.id,
-        name: briefChannelName(n),
-        memberCount: managers.length + (creatorsByCampaign.get(campaign.id)?.length ?? 0),
-        allCreators: false,
-      });
-    })
-    .sort((a, b) => {
-      const na = numbers.get(a.campaignId ?? '') ?? 0;
-      const nb = numbers.get(b.campaignId ?? '') ?? 0;
-      return nb - na;
-    });
-
   const byRecency = (a: InboxRow, b: InboxRow): number => {
     const ta = a.lastMessageAt ?? '';
     const tb = b.lastMessageAt ?? '';
@@ -691,26 +639,28 @@ export async function listManagerInbox(
   const channels = channelList
     .map((c) => {
       const members = c.members == null ? [] : Array.isArray(c.members) ? c.members : [c.members];
-      return toRow(c.id, `#${c.name ?? 'channel'}`, 'channel', {
+      return toRow(c.id, c.is_general ? 'General' : `#${c.name ?? 'channel'}`, 'channel', {
         name: c.name ?? 'channel',
-        memberCount: members.length,
+        memberCount: c.is_general ? companyMembers.length : members.length,
         allCreators: c.all_creators,
+        isGeneral: c.is_general,
       });
     })
     .map((row) => {
       const channel = channelList.find((c) => c.id === row.chatId);
       if (row.lastMessageAt !== null || channel === undefined) return row;
       const creator = others.find((m) => m.id === channel.created_by);
-      const preview =
-        channel.created_by === myId || creator === undefined
+      const preview = channel.is_general
+        ? 'Everyone on the team is here.'
+        : channel.created_by === myId || creator === undefined
           ? 'You created this channel.'
           : `${firstName(creator.name)} created this channel.`;
       return { ...row, lastMessageAt: channel.created_at, timeLabel: inboxTimeLabel(channel.created_at), preview };
     })
-    .sort(byRecency);
+    .sort((a, b) => Number(b.isGeneral ?? false) - Number(a.isGeneral ?? false) || byRecency(a, b));
 
   const unread = [...unreadByChat.values()].reduce((sum, n) => sum + n, 0);
-  return { briefChats, dms, channels, unread };
+  return { dms, channels, unread };
 }
 
 // --- Channels ---------------------------------------------------------------
@@ -766,6 +716,23 @@ export async function listChannelMembers(chatId: string): Promise<ChannelMember[
         role: p?.role ?? 'campaign_manager',
       };
     })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Everyone in the company: the General chat's members. */
+export async function listGeneralMembers(companyId: string): Promise<ChannelMember[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, role')
+    .eq('company_id', companyId)
+    .in('role', ['company_admin', 'campaign_manager', 'creator']);
+  if (error) throw error;
+  return (data ?? [])
+    .map((p) => ({
+      id: p.id,
+      name: p.full_name?.trim() || (p.role === 'creator' ? 'Creator' : 'Manager'),
+      role: p.role,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

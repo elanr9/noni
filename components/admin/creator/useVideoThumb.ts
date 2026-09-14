@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 
-import { latestSubmissionsByAssignment, signedVideoUrl } from '../../../lib/admin-api';
+import {
+  latestSubmissionsByAssignment,
+  signedVideoUrl,
+  submissionThumbPath,
+} from '../../../lib/admin-api';
 
 /** Thumbnails are expensive to extract; keep them for the session. */
 const cache = new Map<string, string>();
@@ -25,7 +29,8 @@ export function useAssignmentMediaPath(assignmentId: string | null): string | nu
     let cancelled = false;
     void latestSubmissionsByAssignment([assignmentId])
       .then((subs) => {
-        const found = subs.get(assignmentId)?.video_path ?? null;
+        const sub = subs.get(assignmentId);
+        const found = sub ? submissionThumbPath(sub) : null;
         assignmentMediaCache.set(assignmentId, found);
         if (!cancelled) setPath(found);
       })

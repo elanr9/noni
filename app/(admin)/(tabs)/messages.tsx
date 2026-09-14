@@ -13,6 +13,7 @@ import { router, useFocusEffect } from 'expo-router';
 
 import {
   ChannelLead,
+  GeneralLead,
   InboxRow,
   PersonLead,
   QueueSubline,
@@ -316,7 +317,7 @@ export default function MessagesScreen() {
                     <InboxRow
                       key={c.chatId}
                       last={i === channels.length - 1}
-                      lead={<ChannelLead />}
+                      lead={c.isGeneral ? <GeneralLead /> : <ChannelLead />}
                       title={c.title}
                       sub={c.preview}
                       time={c.timeLabel}
