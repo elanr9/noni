@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LibSearch } from '../../../components/admin/library/LibSearch';
 import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
 import {
+  AUTO_KIND,
   FAMILIES_FOR,
   MakeFormatSheet,
   type FormatChoice,
@@ -147,6 +148,7 @@ export default function LibraryScreen() {
   /** Captured, waiting on the video / slideshow / both choice. */
   const [pendingMake, setPendingMake] = useState<LibraryMakeSource[] | null>(null);
   const [makeNotes, setMakeNotes] = useState('');
+  const [makeKind, setMakeKind] = useState(AUTO_KIND);
   const [making, setMaking] = useState<Making | null>(null);
   const [makingFamilies, setMakingFamilies] = useState<BriefFormat[]>([]);
 
@@ -306,6 +308,7 @@ export default function LibraryScreen() {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
     if (!profile || lines.length === 0 || making !== null) return;
+    setMakeKind(AUTO_KIND);
     setPendingMake(
       lines.map((line): LibraryMakeSource =>
         isCaptureUrl(line) ? { kind: 'reference', url: line } : { kind: 'idea', text: line },
@@ -327,6 +330,7 @@ export default function LibraryScreen() {
         return;
       }
       setMakeNotes('');
+      setMakeKind(AUTO_KIND);
       setPendingMake([{ kind: 'reference', url }]);
     }, [hasShareIntent, shareIntent, profile, making, resetShareIntent]),
   );
@@ -341,6 +345,7 @@ export default function LibraryScreen() {
         return;
       }
       setMakeNotes('');
+      setMakeKind(AUTO_KIND);
       setPendingMake([{ kind: 'reference', url: text }]);
     } finally {
       setPasting(false);
@@ -353,6 +358,7 @@ export default function LibraryScreen() {
    */
   async function onPickFormat(choice: FormatChoice) {
     const notes = makeNotes.trim() || null;
+    const postTypeKey = makeKind;
     const sources: LibraryMakeSource[] = (pendingMake ?? []).map((s) =>
       s.kind === 'reference' ? { ...s, notes } : s,
     );
@@ -391,6 +397,7 @@ export default function LibraryScreen() {
           source,
           families,
           postTypes,
+          postTypeKey,
         });
         madeCount += outcome.made.length;
         refusals.push(...outcome.killed.map((k) => k.reason));
@@ -857,6 +864,9 @@ export default function LibraryScreen() {
           pendingMake !== null && pendingMake.every((s) => s.kind === 'reference') ? makeNotes : null
         }
         onChangeNotes={setMakeNotes}
+        postTypes={postTypes}
+        kind={makeKind}
+        onChangeKind={setMakeKind}
         onPick={(choice) => void onPickFormat(choice)}
         onClose={() => {
           setPendingMake(null);

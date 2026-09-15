@@ -113,13 +113,22 @@ export async function pickPostType(
     )
     .join('\n');
   const kinds =
-    'a counted set of tips or mistakes is a list; two sides or a before/after is a contrast; a how or why breakdown is an explainer; a personal story or opinion is a talking head; one blunt truth that fits in a sentence is a seven second video; a satisfying visual moment with no lesson is replay bait.';
+    'a counted set of tips, steps, reasons or mistakes is a list, even when the video is short; two sides or a before/after is a contrast; a how or why breakdown is an explainer; a personal story or opinion is a talking head; a seven second video is ONLY one blunt truth whose entire spoken content is one or two short sentences, never anything that walks through several points; a satisfying visual moment with no lesson is replay bait.';
+  const transcriptLine = sourceLines.find((l) => l.startsWith('Transcript:'));
+  const spokenWords = transcriptLine
+    ? transcriptLine.replace(/^Transcript:\s*/, '').split(/\s+/).filter(Boolean).length
+    : null;
+  const evidence =
+    spokenWords !== null
+      ? `Spoken words in the source: ${spokenWords}. Over 40 spoken words is never a one clip kind.`
+      : 'No transcript was recovered. Judge from the caption and slide text; a caption that lists or counts several things is a list. Never pick a one clip kind without a transcript that is itself one or two sentences.';
   const system =
     mode === 'mirror'
       ? [
           'You identify which kind of short form post a source post already is.',
           'Answer with a single JSON object {"key": string} and nothing else. key must be one of the option keys exactly.',
           `Mirror the source exactly, never pick for variety: ${kinds}`,
+          evidence,
         ].join('\n')
       : [
           'You choose which kind of short form post a piece of source material should become.',
@@ -144,7 +153,13 @@ export async function pickPostType(
     const raw = await askClaude(system, user, 64);
     const parsed = parseClaudeJson<{ key?: unknown }>(raw);
     const chosen = types.find((t) => t.key === parsed.key);
-    return chosen ?? unparsedFallback;
+    if (!chosen) return unparsedFallback;
+    const tooLongForOneClip =
+      chosen.clip_structure === 'single_clip' && spokenWords !== null && spokenWords > 40;
+    if (tooLongForOneClip) {
+      return types.find((t) => t.clip_structure !== 'single_clip') ?? chosen;
+    }
+    return chosen;
   } catch (e) {
     console.warn('pickPostType fell back:', e instanceof Error ? e.message : e);
     return leastUsed;

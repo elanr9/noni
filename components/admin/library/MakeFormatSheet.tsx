@@ -1,10 +1,23 @@
-import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { BriefFormat } from '../../../lib/briefs-api';
-import { borderWidth, color, radiusAdmin, type } from '../../../theme/tokens';
+import type { BriefFormat, PostType } from '../../../lib/briefs-api';
+import { borderWidth, color, postTypeTone, radiusAdmin, space, type } from '../../../theme/tokens';
 import { Icon, type IconName } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { Sheet } from '../shared';
+
+/** "auto" lets the model pick the kind from the source. */
+export const AUTO_KIND = 'auto';
+
+function familyOf(postType: PostType): BriefFormat {
+  return postType.family === 'photo_carousel' ? 'photo_carousel' : 'video';
+}
+
+function toneFor(key: string): { bg: string; fg: string } {
+  return key in postTypeTone
+    ? postTypeTone[key as keyof typeof postTypeTone]
+    : { bg: color.fillQuiet, fg: color.slate500 };
+}
 
 export type FormatChoice = 'video' | 'photo_carousel' | 'both';
 
@@ -28,6 +41,11 @@ export interface MakeFormatSheetProps {
   /** null hides the field (ideas). A string shows it for references. */
   notes: string | null;
   onChangeNotes: (text: string) => void;
+  /** The company's post types; the kind row lists them after "You choose". */
+  postTypes: PostType[];
+  /** AUTO_KIND or a post_types.key. */
+  kind: string;
+  onChangeKind: (kind: string) => void;
   onPick: (choice: FormatChoice) => void;
   onClose: () => void;
 }
@@ -39,9 +57,26 @@ export function MakeFormatSheet({
   busy,
   notes,
   onChangeNotes,
+  postTypes,
+  kind,
+  onChangeKind,
   onPick,
   onClose,
 }: MakeFormatSheetProps) {
+  const pinned = kind === AUTO_KIND ? null : (postTypes.find((t) => t.key === kind) ?? null);
+  const pinnedFamily = pinned ? familyOf(pinned) : null;
+
+  function bodyFor(option: (typeof OPTIONS)[number]): string {
+    if (!pinned) return option.body;
+    const lanes = FAMILIES_FOR[option.id];
+    if (lanes.length === 1) {
+      return lanes[0] === pinnedFamily
+        ? `As a ${pinned.label.toLowerCase()}`
+        : `${option.body}. AI picks the kind`;
+    }
+    return `${pinned.label} here, AI picks the other kind`;
+  }
+
   return (
     <Sheet
       visible={visible}
@@ -65,6 +100,46 @@ export function MakeFormatSheet({
           />
         </>
       )}
+      <Text style={styles.notesLabel}>Kind of post</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.kindRow}
+        style={styles.kindScroll}
+      >
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityState={{ selected: kind === AUTO_KIND }}
+          disabled={busy}
+          onPress={() => onChangeKind(AUTO_KIND)}
+          style={[styles.kind, styles.kindAuto, kind === AUTO_KIND && styles.kindOn]}
+        >
+          <Icon name="sparkles" size={12} color={color.blue700} />
+          <Text style={[styles.kindText, { color: color.blue700 }]}>You choose</Text>
+        </PressableScale>
+        {postTypes.map((t) => {
+          const tone = toneFor(t.key);
+          const on = kind === t.key;
+          return (
+            <PressableScale
+              key={t.id}
+              accessibilityRole="button"
+              accessibilityLabel={t.label}
+              accessibilityState={{ selected: on }}
+              disabled={busy}
+              onPress={() => onChangeKind(t.key)}
+              style={[styles.kind, { backgroundColor: tone.bg }, on && styles.kindOn]}
+            >
+              <Icon
+                name={familyOf(t) === 'photo_carousel' ? 'images' : 'video'}
+                size={12}
+                color={tone.fg}
+              />
+              <Text style={[styles.kindText, { color: tone.fg }]}>{t.label}</Text>
+            </PressableScale>
+          );
+        })}
+      </ScrollView>
       <View style={styles.card}>
         {OPTIONS.map((option, i) => (
           <PressableScale
@@ -80,7 +155,7 @@ export function MakeFormatSheet({
             </View>
             <View style={styles.body}>
               <Text style={styles.title}>{option.title}</Text>
-              <Text style={styles.sub}>{option.body}</Text>
+              <Text style={styles.sub}>{bodyFor(option)}</Text>
             </View>
             {busy ? (
               <ActivityIndicator size="small" color={color.blue600} />
@@ -114,6 +189,35 @@ const styles = StyleSheet.create({
     color: color.ink,
     backgroundColor: color.white,
     marginBottom: 12,
+  },
+  kindScroll: {
+    marginHorizontal: -space.gutterAdmin,
+    marginBottom: 12,
+  },
+  kindRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: space.gutterAdmin,
+  },
+  kind: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 30,
+    paddingHorizontal: 11,
+    borderRadius: radiusAdmin.pill,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  kindAuto: {
+    backgroundColor: color.blue50,
+  },
+  kindOn: {
+    borderColor: color.ink,
+  },
+  kindText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   card: {
     backgroundColor: color.white,

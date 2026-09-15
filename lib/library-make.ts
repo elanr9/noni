@@ -158,11 +158,24 @@ export async function makeLibraryPosts(params: {
   source: LibraryMakeSource;
   families: BriefFormat[];
   postTypes: PostType[];
+  /** A post_types.key pins that kind for its lane; "auto" lets the model pick. */
+  postTypeKey?: string;
 }): Promise<LibraryMakeOutcome> {
-  const lanes = params.families.map((family) => ({
-    family,
-    postType: defaultPostTypeFor(params.postTypes, family),
-  }));
+  const pinned =
+    params.postTypeKey && params.postTypeKey !== 'auto'
+      ? (params.postTypes.find((t) => t.key === params.postTypeKey) ?? null)
+      : null;
+  const lanes = params.families.map((family) => {
+    const pinnedHere =
+      pinned && (pinned.family === 'photo_carousel' ? 'photo_carousel' : 'video') === family
+        ? pinned
+        : null;
+    return {
+      family,
+      postType: pinnedHere ?? defaultPostTypeFor(params.postTypes, family),
+      autoType: pinnedHere === null,
+    };
+  });
   const missing = lanes.find((lane) => lane.postType === null);
   if (missing) {
     throw new Error(
@@ -185,7 +198,7 @@ export async function makeLibraryPosts(params: {
           source: fillSourceOf(params.source),
           family: lane.family,
           postType: lane.postType,
-          autoType: true,
+          autoType: lane.autoType,
         });
         return { family: lane.family, ...made };
       } catch (e) {
