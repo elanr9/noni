@@ -43,7 +43,7 @@ export async function sendPush(
       data: message.data,
     })),
   );
-  if (error) throw new Error(`notification insert failed: ${error.message}`);
+  if (error) console.error('notification insert failed', error.message);
 
   const tokens = list
     .map((r) => r.token)

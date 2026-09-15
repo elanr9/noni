@@ -21,7 +21,7 @@ import {
   type CompanyNotification,
   type CompanyStatus,
 } from './companies-api';
-import { parseDeepLink, routeForDeepLink } from './deep-link';
+import { modeForDeepLink, parseDeepLink, routeForDeepLink } from './deep-link';
 import { attachForegroundPushRefresh, attachNotificationRouting } from './notifications';
 import { supabase } from './supabase';
 
@@ -68,6 +68,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     session,
     loading,
     activeMode,
+    setActiveMode,
     companies,
     activeCompany,
     switchCompany,
@@ -206,8 +207,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         if (typeof companyId !== 'string' || companyId.length === 0) return null;
         return switchTo(companyId);
       },
+      setActiveMode,
     );
-  }, [loading, session?.user, inModeGroup, companiesLoaded, activeMode, switchTo]);
+  }, [loading, session?.user, inModeGroup, companiesLoaded, activeMode, switchTo, setActiveMode]);
 
   // Foreground push from another company: banner shows, counts move, no switch.
   useEffect(() => {
@@ -236,12 +238,21 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     async (n: CompanyNotification) => {
       void markRead(n.id);
       const link = parseDeepLink(n.deepLink);
+      let mode: AppMode | null = null;
       if (n.companyId !== activeCompanyId) {
-        await switchTo(n.companyId);
+        try {
+          mode = await switchTo(n.companyId);
+        } catch (e) {
+          console.error('notification company switch failed', e);
+          return;
+        }
       }
-      if (link) router.push(routeForDeepLink(link) as never);
+      if (!link) return;
+      const wanted = modeForDeepLink(link);
+      if (wanted !== (mode ?? activeMode)) await setActiveMode(wanted);
+      router.push(routeForDeepLink(link) as never);
     },
-    [activeCompanyId, markRead, switchTo],
+    [activeCompanyId, activeMode, markRead, switchTo, setActiveMode],
   );
 
   const summary = useMemo(() => {

@@ -5,7 +5,7 @@ import { router, type ImperativeRouter as Router } from 'expo-router';
 import { Platform } from 'react-native';
 
 import type { AppMode } from './active-mode';
-import { parseDeepLink, routeForDeepLink } from './deep-link';
+import { modeForDeepLink, parseDeepLink, routeForDeepLink } from './deep-link';
 import { routeNotificationTap } from './notification-routing';
 import { supabase } from './supabase';
 
@@ -58,6 +58,8 @@ export function attachNotificationRouting(
       }
     }
     if (link) {
+      const wanted = modeForDeepLink(link);
+      if (wanted !== (mode ?? getMode()) && setMode) await setMode(wanted);
       nav.push(routeForDeepLink(link) as never);
       return;
     }
