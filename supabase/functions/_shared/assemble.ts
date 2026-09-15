@@ -63,9 +63,11 @@ async function executeFfmpegJob(params: {
     throw new Error(`ffmpeg ${label} command contains a forbidden character`);
   }
 
-  const jobRes = await fetch(
-    `${FFMPEG_JOBS_URL}/upload`,
-    {
+  // Upload-Post rate limits job creation; back off and retry on 429.
+  let jobJson: { success?: boolean; job_id?: string; message?: string; error?: string } = {};
+  let jobStatus = 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const jobRes = await fetch(`${FFMPEG_JOBS_URL}/upload`, {
       method: 'POST',
       headers: {
         Authorization: `Apikey ${apiKey}`,
@@ -76,20 +78,20 @@ async function executeFfmpegJob(params: {
         full_command: fullCommand,
         output_extension: outputExtension,
       }),
-    },
-  );
-  console.log(`ffmpeg ${label} job created`);
-  const jobJson = (await jobRes.json()) as {
-    success?: boolean;
-    job_id?: string;
-    message?: string;
-    error?: string;
-  };
-  if (!jobRes.ok || !jobJson.job_id) {
+    });
+    jobStatus = jobRes.status;
+    jobJson = (await jobRes.json().catch(() => ({}))) as typeof jobJson;
+    if (jobRes.ok && jobJson.job_id) break;
+    const throttled = jobRes.status === 429 || /too many requests/i.test(jobJson.message ?? '');
+    if (!throttled || attempt === 5) break;
+    await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+  }
+  if (!jobJson.job_id) {
     throw new Error(
-      `ffmpeg ${label} create failed: ${jobJson.message ?? jobJson.error ?? jobRes.status}`,
+      `ffmpeg ${label} create failed: ${jobJson.message ?? jobJson.error ?? jobStatus}`,
     );
   }
+  console.log(`ffmpeg ${label} job created`);
 
   let finished = false;
   for (let i = 0; i < 90; i++) {
@@ -985,17 +987,19 @@ async function runAssembly(params: {
     : null;
   let videoPath = editedPath;
   if (!stitched) {
-    const ranges = await Promise.all(
-      segmentPaths.map((clipPath: string, i: number) =>
-        detectSpeechRanges({
+    // One detection job at a time: Upload-Post throttles bursts.
+    const ranges: SpeechRanges[] = [];
+    for (let i = 0; i < segmentPaths.length; i++) {
+      ranges.push(
+        await detectSpeechRanges({
           admin,
           apiKey,
-          clipPath,
+          clipPath: segmentPaths[i],
           durationMs: durationsMs?.[i] ?? null,
           clipIndex: i,
         }),
-      ),
-    );
+      );
+    }
     clipCuts = durationsMs ? cutsFromRanges(ranges, durationsMs) : null;
     await stitchAndEditPass({
       admin,
