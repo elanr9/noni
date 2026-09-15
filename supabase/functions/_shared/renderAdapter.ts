@@ -9,6 +9,7 @@ import {
   type SegmentBox,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
+import { wrapOverlayLines } from './overlayTextMetrics.ts';
 
 const RENDERS_URL = 'https://api.creatomate.com/v1/renders';
 const POLL_INTERVAL_MS = 3000;
@@ -136,42 +137,73 @@ function classicOutlineColor(textColor: string): string {
   return lum !== null && lum < 0.5 ? '#FFFFFF' : '#000000';
 }
 
+/** Frame aspect: box.size is a fraction of the frame width, y is of height. */
+const FRAME_ASPECT = 1080 / 1920;
+
 /**
- * Creatomate props for one admin-placed box: exact position, exact size
- * (box.size is a fraction of the frame width, which equals vmin on a 9:16
- * frame) and the same look the composer previews.
+ * Elements for one admin-placed box, wrapped here with the font's own
+ * metrics so the lines break exactly where the app preview breaks them.
+ * Classic is a single hugging element with hard line breaks. A colored box
+ * is one hugging element per line, each with its own background, stacked at
+ * the line pitch so the bubbles overlap by the pad and read as one shape,
+ * the way TikTok draws it.
  */
-function boxTextProps(box: {
-  x: number;
-  size: number;
-  color: string;
-  bg: boolean;
-}): Record<string, string> {
+function boxElements(
+  box: { x: number; size: number; color: string; bg: boolean },
+  text: string,
+  yCenter: number,
+  timing: Record<string, number>,
+): CreatomateElement[] {
+  const maxEm = (OVERLAY_TEXT_SPEC.maxWidth - 2 * box.size * OVERLAY_TEXT_SPEC.boxPadX) / box.size;
+  const lines = wrapOverlayLines(text, maxEm);
   const sizeVmin = `${(box.size * 100).toFixed(2)} vmin`;
-  if (!box.bg) {
-    return {
-      ...TEXT_BASE,
-      x: `${box.x * 100}%`,
-      width: BOX_WIDTH,
-      font_size: sizeVmin,
-      fill_color: box.color,
-      stroke_color: classicOutlineColor(box.color),
-      stroke_width: `${(box.size * 100 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
-      shadow_color: 'rgba(0,0,0,0.35)',
-      shadow_blur: '0.8 vmin',
-    };
-  }
-  return {
+  const base = {
+    type: 'text',
     ...TEXT_BASE,
+    ...timing,
     x: `${box.x * 100}%`,
-    width: BOX_WIDTH,
     font_size: sizeVmin,
-    fill_color: overlayTextContrast(box.color),
+    text_wrap: false,
+  };
+  if (!box.bg) {
+    return [
+      {
+        ...base,
+        text: lines.join('\n'),
+        y: `${yCenter * 100}%`,
+        fill_color: box.color,
+        stroke_color: classicOutlineColor(box.color),
+        stroke_width: `${(box.size * 100 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
+        shadow_color: 'rgba(0,0,0,0.35)',
+        shadow_blur: '0.8 vmin',
+      },
+    ];
+  }
+  const pitch = box.size * OVERLAY_TEXT_SPEC.lineHeight * FRAME_ASPECT;
+  const firstY = yCenter - ((lines.length - 1) / 2) * pitch;
+  const rows = lines
+    .map((line, i) => ({ line, y: `${((firstY + i * pitch) * 100).toFixed(3)}%` }))
+    .filter(({ line }) => line.length > 0);
+  // Bubbles overlap by the pad, so every bubble goes down first (invisible
+  // letters size it) and the ink is drawn in a second pass on top. Otherwise
+  // a lower bubble would cover the descenders of the line above.
+  const bubbles = rows.map(({ line, y }) => ({
+    ...base,
+    text: line,
+    y,
+    fill_color: 'rgba(0,0,0,0)',
     background_color: overlayBoxFill(box.color),
     background_x_padding: BOX_PAD_X,
     background_y_padding: BOX_PAD_Y,
     background_border_radius: BOX_RADIUS,
-  };
+  }));
+  const ink = rows.map(({ line, y }) => ({
+    ...base,
+    text: line,
+    y,
+    fill_color: overlayTextContrast(box.color),
+  }));
+  return [...bubbles, ...ink];
 }
 
 /**
@@ -310,10 +342,11 @@ function toElements(params: {
   const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
   const legacyStyle = textProps(overlay);
   for (const t of timeline.texts) {
-    // One auto-wrapping element per box; newlines in the overlay text become
-    // line breaks inside the same bubble, like TikTok. Boxes from the new
-    // composer carry their own position, size and colors; legacy texts keep
-    // the brief-level style.
+    const timing = { time: t.start_ms / 1000, duration: t.duration_ms / 1000 };
+    if (t.box) {
+      elements.push(...boxElements(t.box, t.text, t.y ?? TEXT_Y, timing));
+      continue;
+    }
     elements.push({
       type: 'text',
       text: t.text
@@ -321,10 +354,9 @@ function toElements(params: {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .join('\n'),
-      time: t.start_ms / 1000,
-      duration: t.duration_ms / 1000,
+      ...timing,
       y: `${(t.y ?? TEXT_Y) * 100}%`,
-      ...(t.box ? boxTextProps(t.box) : legacyStyle),
+      ...legacyStyle,
     });
   }
 
@@ -467,16 +499,7 @@ export async function renderSlideImage(params: {
     });
   }
   for (const box of boxes) {
-    elements.push({
-      type: 'text',
-      text: box.text
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .join('\n'),
-      y: `${box.y * 100}%`,
-      ...boxTextProps(box),
-    });
+    elements.push(...boxElements(box, box.text, box.y, {}));
   }
   return runRender(apiKey, {
     output_format: 'jpg',

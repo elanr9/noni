@@ -1,28 +1,17 @@
 // One on-screen text box drawn the way TikTok's text tool draws it. Classic
 // is outlined letters; a colored box gives every wrapped line its own bubble
-// hugging that line, stacked with no gap. Lines are measured off a hidden
-// copy of the text so bubble widths match the real wrap.
-import { useState, type JSX, type ReactNode } from 'react';
-import {
-  Dimensions,
-  StyleSheet,
-  Text,
-  View,
-  type TextLayoutLine,
-  type TextStyle,
-} from 'react-native';
+// hugging that line. Lines are wrapped with the font's own advance widths
+// (lib/overlay-text-metrics) so the render breaks in the same places.
+import type { JSX, ReactNode } from 'react';
+import { Dimensions, StyleSheet, Text, View, type TextStyle } from 'react-native';
 
 import {
   OVERLAY_TEXT_SPEC,
   overlayBoxFill,
   overlayTextContrast,
 } from '../../lib/overlay-boxes';
+import { wrapOverlayLines } from '../../lib/overlay-text-metrics';
 import { OutlinedText } from './OutlinedText';
-
-type MeasuredLines = { key: string; lines: TextLayoutLine[] };
-
-/** Rows whose widths differ by less than this read as one rectangle. */
-const JOIN_TOLERANCE_EM = 0.35;
 
 export function overlayTextStyle(fontSize: number, fontLoaded = true): TextStyle {
   return {
@@ -47,7 +36,6 @@ export function OverlayTextBox(props: {
   children?: ReactNode;
 }): JSX.Element {
   const { text, color, bg, fontSize, maxWidth, fontLoaded = true, children } = props;
-  const [measured, setMeasured] = useState<MeasuredLines | null>(null);
 
   const padX = fontSize * OVERLAY_TEXT_SPEC.boxPadX;
   const padY = fontSize * OVERLAY_TEXT_SPEC.boxPadY;
@@ -56,11 +44,13 @@ export function OverlayTextBox(props: {
     maxWidth ?? Dimensions.get('window').width * OVERLAY_TEXT_SPEC.maxWidth;
   const wrapWidth = Math.max(0, boxWidth - 2 * padX);
   const textStyle = overlayTextStyle(fontSize, fontLoaded);
+  const lines = wrapOverlayLines(text, wrapWidth / fontSize);
+  const wrapped = lines.join('\n');
 
   if (!bg) {
     return (
       <View style={{ maxWidth: boxWidth }}>
-        <OutlinedText text={text} fontSize={fontSize} color={color} style={textStyle}>
+        <OutlinedText text={wrapped} fontSize={fontSize} color={color} style={textStyle}>
           {children}
         </OutlinedText>
       </View>
@@ -69,13 +59,8 @@ export function OverlayTextBox(props: {
 
   const fill = overlayBoxFill(color);
   const ink = overlayTextContrast(color);
-  const measureKey = `${text}|${fontSize}|${wrapWidth}`;
-  const lines =
-    children === undefined && measured !== null && measured.key === measureKey
-      ? measured.lines
-      : null;
 
-  if (lines === null) {
+  if (children !== undefined) {
     return (
       <View style={{ maxWidth: boxWidth }}>
         <View
@@ -86,59 +71,41 @@ export function OverlayTextBox(props: {
             borderRadius: radius,
           }}
         >
-          {children ?? <Text style={[textStyle, { color: ink }]}>{text}</Text>}
+          {children}
         </View>
-        {children === undefined ? (
-          <Text
-            pointerEvents="none"
-            style={[styles.measure, textStyle, { width: wrapWidth }]}
-            onTextLayout={(e) =>
-              setMeasured({ key: measureKey, lines: e.nativeEvent.lines })
-            }
-          >
-            {text}
-          </Text>
-        ) : null}
       </View>
     );
   }
 
-  const tolerance = fontSize * JOIN_TOLERANCE_EM;
-  const rowWidths = lines.map((l) => l.width + 2 * padX);
-  const joins = (a: number | undefined, b: number): boolean =>
-    a !== undefined && a >= b - tolerance;
-  const blank = (l: TextLayoutLine): boolean => l.text.trim().length === 0;
+  // Bubbles overlap by the pad, so they are laid down first with invisible
+  // letters sizing them and the ink is drawn on an identical layer on top.
+  // Otherwise a lower bubble would cover the descenders of the line above.
+  const layer = (withFill: boolean) =>
+    lines.map((line, i) =>
+      line.length === 0 ? (
+        <View key={i} style={{ height: fontSize * OVERLAY_TEXT_SPEC.lineHeight }} />
+      ) : (
+        <View
+          key={i}
+          style={{
+            backgroundColor: withFill ? fill : 'transparent',
+            paddingHorizontal: padX,
+            paddingVertical: padY,
+            borderRadius: radius,
+            marginTop: i === 0 ? 0 : -2 * padY,
+          }}
+        >
+          <Text style={[textStyle, { color: withFill ? 'transparent' : ink }]}>{line}</Text>
+        </View>
+      ),
+    );
 
   return (
     <View style={[styles.stack, { maxWidth: boxWidth }]}>
-      {lines.map((line, i) => {
-        if (blank(line)) {
-          return <View key={i} style={{ height: line.height }} />;
-        }
-        const width = rowWidths[i] ?? 0;
-        const prev = lines[i - 1];
-        const next = lines[i + 1];
-        const joinTop = prev !== undefined && !blank(prev) && joins(rowWidths[i - 1], width);
-        const joinBottom =
-          next !== undefined && !blank(next) && joins(rowWidths[i + 1], width);
-        return (
-          <View
-            key={i}
-            style={{
-              backgroundColor: fill,
-              paddingHorizontal: padX,
-              paddingTop: i === 0 ? padY : 0,
-              paddingBottom: i === lines.length - 1 ? padY : 0,
-              borderTopLeftRadius: joinTop ? 0 : radius,
-              borderTopRightRadius: joinTop ? 0 : radius,
-              borderBottomLeftRadius: joinBottom ? 0 : radius,
-              borderBottomRightRadius: joinBottom ? 0 : radius,
-            }}
-          >
-            <Text style={[textStyle, { color: ink }]}>{line.text.trimEnd()}</Text>
-          </View>
-        );
-      })}
+      {layer(true)}
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.stack]}>
+        {layer(false)}
+      </View>
     </View>
   );
 }
@@ -146,11 +113,5 @@ export function OverlayTextBox(props: {
 const styles = StyleSheet.create({
   stack: {
     alignItems: 'center',
-  },
-  measure: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    opacity: 0,
   },
 });

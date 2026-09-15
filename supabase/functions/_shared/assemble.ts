@@ -498,6 +498,18 @@ export async function assembleSubmission(params: {
   }
 }
 
+/** `{v}-slide-{n}-final.jpg` back to the uploaded `{v}-slide-{n}.{ext}`. */
+async function originalSlidePath(admin: AdminClient, path: string): Promise<string> {
+  const match = /^(.*\/)(\d+-slide-\d+)-final\.jpg$/.exec(path);
+  if (!match) return path;
+  const [, folder, stem] = match;
+  const { data } = await admin.storage
+    .from('videos')
+    .list(folder.replace(/\/$/, ''), { search: `${stem}.` });
+  const original = data?.find((o: { name: string }) => o.name.startsWith(`${stem}.`));
+  return original ? `${folder}${original.name}` : path;
+}
+
 /**
  * Photo carousel edit pass: for each submitted photo, bake the matching
  * slide's text boxes and inset picture into a final 1080x1920 JPEG. Slides
@@ -512,14 +524,19 @@ async function runSlideshowAssembly(params: {
   briefId: string | null;
 }): Promise<AssembleResult> {
   const { admin, submission, targetId, companyId, briefId } = params;
-  const rawPaths =
+  const storedPaths =
     submission.segment_paths && submission.segment_paths.length > 0
       ? submission.segment_paths
       : submission.video_path
         ? [submission.video_path]
         : [];
-  if (rawPaths.length === 0) throw new Error('submission has no slides');
+  if (storedPaths.length === 0) throw new Error('submission has no slides');
   const version = submission.version ?? 1;
+  // A re-run after a finished bake sees the -final files; go back to the
+  // creator's originals so text is never baked twice.
+  const rawPaths = await Promise.all(
+    storedPaths.map((p) => originalSlidePath(admin, p)),
+  );
 
   let slideSegments: BriefSegmentRow[] = [];
   if (briefId) {
