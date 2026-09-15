@@ -4,8 +4,18 @@
 
 export type TimelineClip = {
   slot_index: number;
-  /** Effective duration on the stitched output, after the head trim. */
+  /** Effective duration on the stitched output, after trimming. */
   duration_ms: number;
+  /** Source ranges [start, end] in ms that survived the silence trim. */
+  keep_ms?: Array<[number, number]>;
+  /** Untrimmed recording length in ms. */
+  source_duration_ms?: number;
+};
+
+/** Per-clip cut applied at stitch time; duration_ms is the sum of keep_ms. */
+export type ClipCut = {
+  source_duration_ms: number;
+  keep_ms: Array<[number, number]>;
 };
 
 export type TimelineText = {
@@ -174,7 +184,7 @@ export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
   ];
 }
 
-/** Matches the -ss 0.15 input seek on clip 0 in post-approved's FFmpeg pass. */
+/** Legacy head trim on clip 0, used when no silence detection ran. */
 export const HEAD_TRIM_MS = 150;
 /** Default rule: text shows for the first 3 seconds of its clip. */
 export const TEXT_HOLD_MS = 3000;
@@ -191,19 +201,20 @@ const IMAGE_WIDTH = 0.34;
  * Build the timeline from the brief's render manifest and the real clip
  * durations captured at submit time. brief_segments and clips are matched
  * by array order (both are slot order). Timing is absolute on the stitched
- * output: clip 0 loses HEAD_TRIM_MS to the head trim; the tail silence trim
- * only shortens the final clip and never shifts a start.
+ * output. With clipCuts each clip's effective length is the sum of its keep
+ * ranges; without them (legacy) clip 0 loses HEAD_TRIM_MS to the head trim.
  */
 export function buildRenderTimeline(params: {
   briefSegments: BriefSegmentRow[];
   durationsMs: number[];
+  clipCuts?: ClipCut[];
   textOverlay?: TimelineTextOverlay;
   subtitles?: boolean;
   subtitlesY?: number;
   width?: number;
   height?: number;
 }): RenderTimeline {
-  const { briefSegments, durationsMs } = params;
+  const { briefSegments, durationsMs, clipCuts } = params;
   const textOverlay = params.textOverlay ?? DEFAULT_TEXT_OVERLAY;
   const ordered = [...briefSegments].sort((a, b) => a.slot_index - b.slot_index);
 
@@ -211,10 +222,23 @@ export function buildRenderTimeline(params: {
   const texts: TimelineText[] = [];
   const images: TimelineImage[] = [];
 
+  const count = clipCuts ? clipCuts.length : durationsMs.length;
   let cursorMs = 0;
-  for (let i = 0; i < durationsMs.length; i++) {
-    const effectiveMs = Math.max(0, durationsMs[i] - (i === 0 ? HEAD_TRIM_MS : 0));
-    clips.push({ slot_index: i, duration_ms: effectiveMs });
+  for (let i = 0; i < count; i++) {
+    const cut = clipCuts?.[i];
+    const effectiveMs = cut
+      ? cut.keep_ms.reduce((sum, [start, end]) => sum + Math.max(0, end - start), 0)
+      : Math.max(0, durationsMs[i] - (i === 0 ? HEAD_TRIM_MS : 0));
+    clips.push(
+      cut
+        ? {
+            slot_index: i,
+            duration_ms: effectiveMs,
+            keep_ms: cut.keep_ms,
+            source_duration_ms: cut.source_duration_ms,
+          }
+        : { slot_index: i, duration_ms: effectiveMs },
+    );
 
     const segment = ordered[i];
     if (segment) {

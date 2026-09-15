@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import type { Json } from './types';
-import { parseStoredEdits, type StoredEdits } from './video-edit';
+import { emptyStoredEdits, parseStoredEdits, type StoredEdits } from './video-edit';
 
 export type DraftSegmentKind = 'hook' | 'point' | 'outro' | 'slide';
 
@@ -97,7 +97,7 @@ export async function loadDraftEdits(
     .eq('assignment_id', assignmentId)
     .maybeSingle();
   if (error) throw error;
-  return data ? parseStoredEdits(data.edits) : {};
+  return data ? parseStoredEdits(data.edits) : emptyStoredEdits();
 }
 
 /**

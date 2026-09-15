@@ -25,11 +25,38 @@ export type EditPiece = {
   crop: EditCrop | null;
 };
 
-export type EditTimeline = { pieces: EditPiece[] };
+/** `gain` is a post level multiplier the server applies after loudness
+ * normalization; the on device preview cannot go above 1 so it is not
+ * reflected there. */
+export type EditTimeline = { pieces: EditPiece[]; gain: number };
 
 /** Shortest source range a piece may keep. */
 export const MIN_PIECE_MS = 300;
 export const MAX_CROP_SCALE = 3;
+
+export const DEFAULT_GAIN = 2;
+export const MIN_GAIN = 0.5;
+export const MAX_GAIN = 3;
+/** Fader resolution in percent, plus the snap radius around 100 and 200. */
+const GAIN_STEP_PCT = 5;
+const GAIN_SNAP_PCT = 4;
+
+/** Clamp to the fader range, snap near 100 and 200 percent, then round to
+ * the step. Works in percent to keep the arithmetic exact. */
+export function clampGain(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_GAIN;
+  let pct = value * 100;
+  if (Math.abs(pct - 100) <= GAIN_SNAP_PCT) pct = 100;
+  else if (Math.abs(pct - 200) <= GAIN_SNAP_PCT) pct = 200;
+  else pct = Math.round(pct / GAIN_STEP_PCT) * GAIN_STEP_PCT;
+  pct = Math.max(MIN_GAIN * 100, Math.min(MAX_GAIN * 100, pct));
+  return pct / 100;
+}
+
+export function setGain(timeline: EditTimeline, gain: number): EditTimeline {
+  const next = clampGain(gain);
+  return next === timeline.gain ? timeline : { ...timeline, gain: next };
+}
 
 let nextId = 0;
 export function newPieceId(): string {
@@ -90,7 +117,16 @@ export function identityTimeline(
         muted: false,
         crop: null,
       })),
+    gain: DEFAULT_GAIN,
   };
+}
+
+/** The slot's single full length piece, or null once anything was cut. */
+export function untrimmedPiece(timeline: EditTimeline, slotIndex: number): EditPiece | null {
+  const pieces = slotPieces(timeline, slotIndex);
+  if (pieces.length !== 1) return null;
+  const p = pieces[0];
+  return p.inMs === 0 && p.outMs === p.sourceDurationMs ? p : null;
 }
 
 /** True when the slot plays back exactly as recorded, so no export is needed. */
@@ -129,6 +165,7 @@ export function splitAt(timeline: EditTimeline, timelineMs: number): EditTimelin
   const left: EditPiece = { ...piece, outMs: cut };
   const right: EditPiece = { ...piece, id: newPieceId(), inMs: cut };
   return {
+    ...timeline,
     pieces: timeline.pieces.flatMap((p) => (p.id === piece.id ? [left, right] : [p])),
   };
 }
@@ -143,7 +180,7 @@ export function canDeletePiece(timeline: EditTimeline, pieceId: string): boolean
 
 export function deletePiece(timeline: EditTimeline, pieceId: string): EditTimeline {
   if (!canDeletePiece(timeline, pieceId)) return timeline;
-  return { pieces: timeline.pieces.filter((p) => p.id !== pieceId) };
+  return { ...timeline, pieces: timeline.pieces.filter((p) => p.id !== pieceId) };
 }
 
 export function updatePiece(
@@ -152,12 +189,13 @@ export function updatePiece(
   patch: Partial<Pick<EditPiece, 'speed' | 'muted' | 'crop'>>,
 ): EditTimeline {
   return {
+    ...timeline,
     pieces: timeline.pieces.map((p) => (p.id === pieceId ? { ...p, ...patch } : p)),
   };
 }
 
 export function setAllMuted(timeline: EditTimeline, muted: boolean): EditTimeline {
-  return { pieces: timeline.pieces.map((p) => ({ ...p, muted })) };
+  return { ...timeline, pieces: timeline.pieces.map((p) => ({ ...p, muted })) };
 }
 
 /** Clamp a requested trim so the piece stays inside its source and keeps at
@@ -193,6 +231,7 @@ export function trimPiece(
   const next = clampTrim(piece, edges);
   if (next.inMs === piece.inMs && next.outMs === piece.outMs) return timeline;
   return {
+    ...timeline,
     pieces: timeline.pieces.map((p) => (p.id === pieceId ? { ...p, ...next } : p)),
   };
 }
@@ -210,7 +249,7 @@ export function replaceSlot(
     after === -1
       ? [...without, fresh]
       : [...without.slice(0, after), fresh, ...without.slice(after)];
-  return { pieces };
+  return { ...timeline, pieces };
 }
 
 /** Timeline position of the start of a source time inside a piece. */
@@ -247,13 +286,18 @@ export type StoredPiece = {
   crop: EditCrop | null;
 };
 
-export type StoredEdits = Record<string, StoredPiece[]>;
+export type StoredSlots = Record<string, StoredPiece[]>;
+export type StoredEdits = { slots: StoredSlots; gain: number };
+
+export function emptyStoredEdits(): StoredEdits {
+  return { slots: {}, gain: DEFAULT_GAIN };
+}
 
 export function serializeEdits(timeline: EditTimeline): StoredEdits {
-  const out: StoredEdits = {};
+  const slots: StoredSlots = {};
   for (const slot of slotIndices(timeline)) {
     if (slotIsUntouched(timeline, slot)) continue;
-    out[String(slot)] = slotPieces(timeline, slot).map((p) => ({
+    slots[String(slot)] = slotPieces(timeline, slot).map((p) => ({
       in_ms: p.inMs,
       out_ms: p.outMs,
       speed: p.speed,
@@ -261,7 +305,7 @@ export function serializeEdits(timeline: EditTimeline): StoredEdits {
       crop: p.crop,
     }));
   }
-  return out;
+  return { slots, gain: timeline.gain };
 }
 
 function isSpeed(value: unknown): value is EditSpeed {
@@ -285,12 +329,19 @@ function parseCrop(value: unknown): EditCrop | null {
   };
 }
 
+/** Reads both shapes: `{ slots, gain }` and the older flat slot map, which
+ * predates the fader and so gets the default gain. */
 export function parseStoredEdits(value: Json | null | undefined): StoredEdits {
   if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
+    return emptyStoredEdits();
   }
-  const out: StoredEdits = {};
-  for (const [slot, list] of Object.entries(value)) {
+  const raw = value as Record<string, unknown>;
+  const wrapped =
+    raw.slots !== null && typeof raw.slots === 'object' && !Array.isArray(raw.slots);
+  const gain = wrapped && typeof raw.gain === 'number' ? clampGain(raw.gain) : DEFAULT_GAIN;
+  const slotMap = wrapped ? (raw.slots as Record<string, unknown>) : raw;
+  const out: StoredSlots = {};
+  for (const [slot, list] of Object.entries(slotMap)) {
     if (!Array.isArray(list)) continue;
     const pieces: StoredPiece[] = [];
     for (const entry of list) {
@@ -314,7 +365,7 @@ export function parseStoredEdits(value: Json | null | undefined): StoredEdits {
     }
     if (pieces.length > 0) out[slot] = pieces;
   }
-  return out;
+  return { slots: out, gain };
 }
 
 /** Rebuild a timeline from recorded slots plus stored edits. Edits that no
@@ -325,7 +376,7 @@ export function timelineFromStored(
 ): EditTimeline {
   const pieces: EditPiece[] = [];
   for (const slot of [...slots].sort((a, b) => a.slotIndex - b.slotIndex)) {
-    const saved = stored[String(slot.slotIndex)];
+    const saved = stored.slots[String(slot.slotIndex)];
     const fits =
       saved !== undefined &&
       saved.every(
@@ -352,5 +403,5 @@ export function timelineFromStored(
       });
     }
   }
-  return { pieces };
+  return { pieces, gain: clampGain(stored.gain) };
 }

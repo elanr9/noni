@@ -17,6 +17,7 @@ import { ImagePlus } from 'lucide-react-native';
 
 import { FormatTag, TypeTag } from '../../../components/creator/Chips';
 import { scriptBlocks, usePostTypeMeta } from '../../../components/creator/PostCard';
+import { PostPreview } from '../../../components/creator/PostPreview';
 import { SlideNav } from '../../../components/creator/SlideNav';
 import { TextColorPicker } from '../../../components/creator/TextColorPicker';
 import { useCreatorToast } from '../../../components/creator/Toast';
@@ -36,6 +37,7 @@ import {
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
 import { type SlideInset } from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
@@ -149,9 +151,24 @@ export default function UploadScreen() {
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [placedOnce, setPlacedOnce] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [tiktokHandle, setTiktokHandle] = useState<string | null>(null);
   const reviewSheet = useRef(new Animated.Value(0)).current;
 
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
+
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    getCreatorAccount(profile.company_id, profile.id)
+      .then((account) => {
+        if (!cancelled) setTiktokHandle(account?.tiktok_handle ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
 
   useEffect(() => {
     if (!id || !profile?.company_id) return;
@@ -500,23 +517,54 @@ export default function UploadScreen() {
               </Text>
             </View>
           ) : null}
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Send for approval"
-            onPress={() => void sendForApproval()}
-            disabled={submitting}
-            style={[styles.sendBtn, submitting && styles.sendBtnOff]}
-          >
-            {submitting ? (
-              <ActivityIndicator color={color.white} />
-            ) : (
-              <Icon name="send" size={19} color={color.white} />
-            )}
-            <Text style={styles.sendText}>
-              {submitting ? 'Sending…' : 'Send for approval'}
-            </Text>
-          </PressableScale>
+          <View style={styles.actionRow}>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Preview post"
+              onPress={() => setPreviewVisible(true)}
+              disabled={submitting}
+              style={styles.previewBtn}
+            >
+              <Icon name="play" size={18} color={color.ink} />
+              <Text style={styles.previewText}>Preview</Text>
+            </PressableScale>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Send for approval"
+              onPress={() => void sendForApproval()}
+              disabled={submitting}
+              style={[styles.sendBtn, submitting && styles.sendBtnOff]}
+            >
+              {submitting ? (
+                <ActivityIndicator color={color.white} />
+              ) : (
+                <Icon name="send" size={19} color={color.white} />
+              )}
+              <Text style={styles.sendText}>
+                {submitting ? 'Sending…' : 'Send for approval'}
+              </Text>
+            </PressableScale>
+          </View>
         </Animated.View>
+
+        <PostPreview
+          visible={previewVisible}
+          onClose={() => setPreviewVisible(false)}
+          creatorName={profile?.full_name ?? ''}
+          handle={tiktokHandle}
+          typeLabel={typeMeta?.label ?? null}
+          caption={brief.caption ?? ''}
+          hashtags={brief.hashtags ?? []}
+          media={{
+            kind: 'slides',
+            slides: slides.map((s) => ({
+              photoUri: photos[s.slotIndex]?.uri,
+              boxes: s.boxes,
+              inset: undefined,
+              text: s.text,
+            })),
+          }}
+        />
 
         <SoftToast
           visible={errorToast !== null}
@@ -862,8 +910,31 @@ const styles = StyleSheet.create({
     lineHeight: type.size.meta * type.leading.body,
     color: color.slate500,
   },
-  sendBtn: {
+  actionRow: {
     marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  previewBtn: {
+    flex: 2,
+    height: 60,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: color.line,
+    backgroundColor: color.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  previewText: {
+    color: color.ink,
+    fontSize: type.size.action,
+    fontWeight: type.weight.heavy,
+  },
+  sendBtn: {
+    flex: 3,
     height: 60,
     borderRadius: radius.pill,
     backgroundColor: color.accent,

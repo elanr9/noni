@@ -173,6 +173,19 @@ public class VideoEditorModule: Module {
       }
     }
 
+    AsyncFunction("speechBounds") { (uri: String, promise: Promise) in
+      Task {
+        do {
+          let bounds = try await SpeechAnalyzer.bounds(uri: uri)
+          promise.resolve(bounds.dictionary)
+        } catch let exception as Exception {
+          promise.reject(exception)
+        } catch {
+          promise.reject(VideoEditorException(error.localizedDescription))
+        }
+      }
+    }
+
     View(VideoEditorPreviewView.self) {
       Events("onTime", "onReady", "onEnd", "onError")
 

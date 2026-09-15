@@ -11,6 +11,7 @@ export type ToolId =
   | 'delete'
   | 'speed'
   | 'crop'
+  | 'mute'
   | 'volume'
   | 'text-color';
 
@@ -42,12 +43,13 @@ export function EditorToolbar(props: {
     { id: 'speed', label: 'Speed', icon: 'gauge', enabled: hasSelection },
     { id: 'crop', label: 'Crop', icon: 'crop', enabled: hasSelection },
     {
-      id: 'volume',
+      id: 'mute',
       label: selectedMuted ? 'Unmute' : 'Mute',
-      icon: selectedMuted ? 'volume-x' : 'volume-2',
+      icon: 'volume-x',
       enabled: hasSelection,
       active: selectedMuted,
     },
+    { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
   ];
   return (
     <ScrollView

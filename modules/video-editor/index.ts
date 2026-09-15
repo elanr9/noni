@@ -23,6 +23,10 @@ export type NativeTimeline = { pieces: NativePiece[] };
 
 export type ExportResult = { uri: string; durationMs: number };
 
+/** Where speech starts and ends in a clip, in source milliseconds. Equals
+ * the whole clip when there is no audio track or nothing clear to trim. */
+export type SpeechBounds = { startMs: number; endMs: number; durationMs: number };
+
 export type PreviewTimeEvent = { nativeEvent: { positionMs: number } };
 export type PreviewReadyEvent = { nativeEvent: { durationMs: number } };
 export type PreviewErrorEvent = { nativeEvent: { message: string } };
@@ -48,6 +52,7 @@ export type VideoEditorPreviewHandle = {
 type NativeModuleShape = {
   exportTimeline(timeline: NativeTimeline): Promise<ExportResult>;
   thumbnails(uri: string, timesMs: number[], height: number): Promise<string[]>;
+  speechBounds(uri: string): Promise<SpeechBounds>;
   cancelExport(): Promise<void>;
 };
 
@@ -105,6 +110,11 @@ export async function thumbnails(
 ): Promise<string[]> {
   if (timesMs.length === 0) return [];
   return required().thumbnails(uri, timesMs, height);
+}
+
+/** Analyze the clip's audio on device and return the speech range. */
+export async function speechBounds(uri: string): Promise<SpeechBounds> {
+  return required().speechBounds(uri);
 }
 
 type NativeViewProps = VideoEditorPreviewProps & { ref?: Ref<VideoEditorPreviewHandle> };

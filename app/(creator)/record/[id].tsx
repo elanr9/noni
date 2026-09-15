@@ -49,20 +49,27 @@ import {
 import {
   exportTimeline,
   isVideoEditorAvailable,
+  speechBounds,
   toNativeTimeline,
+  type SpeechBounds,
 } from '../../../modules/video-editor';
 import {
   PostEditor,
   type EditorSlot,
 } from '../../../components/creator/editor/PostEditor';
 import { SheetShell } from '../../../components/ui/SheetShell';
+import { PostPreview, videoPreviewClips } from '../../../components/creator/PostPreview';
+import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import {
+  emptyStoredEdits,
   replaceSlot,
   serializeEdits,
   slotIndices,
   slotIsUntouched,
   slotPieces,
   timelineFromStored,
+  trimPiece,
+  untrimmedPiece,
   type EditTimeline,
   type StoredEdits,
 } from '../../../lib/video-edit';
@@ -386,10 +393,30 @@ export default function RecordScreen() {
   const [editorInitial, setEditorInitial] = useState<EditTimeline | null>(null);
   const [editorSession, setEditorSession] = useState(0);
   const [sendOpen, setSendOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [tiktokHandle, setTiktokHandle] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    getCreatorAccount(profile.company_id, profile.id)
+      .then((account) => {
+        if (!cancelled) setTiktokHandle(account?.tiktok_handle ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [subtitlesY, setSubtitlesY] = useState<number>(DEFAULT_SUBTITLES_Y);
   const editorTimelineRef = useRef<EditTimeline | null>(null);
-  const storedEditsRef = useRef<StoredEdits>({});
+  const storedEditsRef = useRef<StoredEdits>(emptyStoredEdits());
+  // Speech bounds per clip uri; a uri that is present was already handled
+  // this session, so re-entering the editor never re-trims it.
+  const speechBoundsRef = useRef<Record<string, SpeechBounds | null>>({});
+  const speechPillShownRef = useRef(false);
+  const [speechTrimmed, setSpeechTrimmed] = useState(false);
   const signedUrlCache = useRef<Record<string, string>>({});
   const editsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const returnToEditorRef = useRef(false);
@@ -506,7 +533,7 @@ export default function RecordScreen() {
               a.status === 'changes_requested'
                 ? listAssignmentReviewEvents(a.id)
                 : Promise.resolve([]),
-              loadDraftEdits(profile.company_id, a.id).catch(() => ({}) as StoredEdits),
+              loadDraftEdits(profile.company_id, a.id).catch(() => emptyStoredEdits()),
             ]);
             if (cancelled) return;
             storedEditsRef.current = edits;
@@ -984,9 +1011,36 @@ export default function RecordScreen() {
     throw new Error('A clip is missing. Record it again.');
   }
 
+  /** Trim every still untouched slot to where the creator speaks. Clips
+   * without a readable audio track (remote or silent) are left whole. */
+  async function trimToSpeech(
+    timeline: EditTimeline,
+  ): Promise<{ timeline: EditTimeline; trimmed: boolean }> {
+    let next = timeline;
+    let trimmed = false;
+    for (const slot of slotIndices(timeline)) {
+      const piece = untrimmedPiece(next, slot);
+      if (piece === null || piece.sourceUri in speechBoundsRef.current) continue;
+      let bounds: SpeechBounds | null = null;
+      try {
+        bounds = await speechBounds(piece.sourceUri);
+      } catch {
+        bounds = null;
+      }
+      speechBoundsRef.current[piece.sourceUri] = bounds;
+      if (bounds === null) continue;
+      const after = trimPiece(next, piece.id, { inMs: bounds.startMs, outMs: bounds.endMs });
+      if (after !== next) {
+        next = after;
+        trimmed = true;
+      }
+    }
+    return { timeline: next, trimmed };
+  }
+
   /** Build the editor's slots and reconcile the last timeline with the clips
    * that exist now: a re-recorded slot drops its old cuts, missing slots go. */
-  function prepareEditor(clips: KeptClip[], uris: string[]) {
+  async function prepareEditor(clips: KeptClip[], uris: string[]) {
     const inputs = clips.map((k, i) => ({
       slotIndex: k.slotIndex,
       sourceUri: uris[i],
@@ -1005,8 +1059,13 @@ export default function RecordScreen() {
         if (!same) timeline = replaceSlot(timeline, input);
       }
       const present = new Set(inputs.map((s) => s.slotIndex));
-      timeline = { pieces: timeline.pieces.filter((p) => present.has(p.slotIndex)) };
+      timeline = { ...timeline, pieces: timeline.pieces.filter((p) => present.has(p.slotIndex)) };
     }
+    const auto = await trimToSpeech(timeline);
+    timeline = auto.timeline;
+    const showPill = auto.trimmed && !speechPillShownRef.current;
+    if (showPill) speechPillShownRef.current = true;
+    setSpeechTrimmed(showPill);
     editorTimelineRef.current = timeline;
     setEditorClips(
       inputs.map((input) => ({
@@ -1036,7 +1095,7 @@ export default function RecordScreen() {
         await new Promise<void>((resolve) => setTimeout(resolve, waitLeft));
       }
       if (useEditor) {
-        prepareEditor(clips, uris);
+        await prepareEditor(clips, uris);
         setReviewUris([]);
       } else {
         setReviewUris(uris);
@@ -1121,7 +1180,7 @@ export default function RecordScreen() {
             : `Finishing clip ${i + 1} of ${edited.length}…`,
         );
         const result = await exportTimeline(
-          toNativeTimeline({ pieces: slotPieces(current, slot) }),
+          toNativeTimeline({ ...current, pieces: slotPieces(current, slot) }),
         );
         let storagePath = before.storagePath;
         if (assignment) {
@@ -1162,7 +1221,7 @@ export default function RecordScreen() {
         }
       }
       setBusyLabel('Sending for approval…');
-      await sendForApproval(keptNow);
+      await sendForApproval(keptNow, current.gain);
     } catch (e) {
       setErrorToast(e instanceof Error ? e.message : 'Could not finish the video. Try again.');
     } finally {
@@ -1170,7 +1229,7 @@ export default function RecordScreen() {
     }
   }
 
-  async function sendForApproval(keptOverride?: Record<number, KeptClip>) {
+  async function sendForApproval(keptOverride?: Record<number, KeptClip>, audioGain?: number) {
     if (!profile || submitting) return;
     const clips = keptOverride ?? kept;
     setSubmitting(true);
@@ -1194,6 +1253,7 @@ export default function RecordScreen() {
           companyId: profile.company_id,
           creatorId: profile.id,
           clips: uploaded,
+          audioGain,
         });
         try {
           await clearDraft(profile.company_id, assignment.id);
@@ -1368,6 +1428,7 @@ export default function RecordScreen() {
           key={editorSession}
           slots={editorSlots}
           initialTimeline={editorInitial}
+          trimmedToSpeech={speechTrimmed}
           overlay={parseTextOverlay(brief?.text_overlay)}
           subtitles={brief?.subtitles ? { y: subtitlesY } : null}
           onTimelineChange={persistEdits}
@@ -1929,16 +1990,47 @@ export default function RecordScreen() {
             <Text style={styles.captionText}>{reviewData.caption}</Text>
           </View>
         ) : null}
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Send for approval"
-          onPress={() => void sendEdited()}
-          style={styles.sendBtn}
-        >
-          <Icon name="send" size={19} color={color.white} />
-          <Text style={styles.sendText}>Send for approval</Text>
-        </PressableScale>
+        <View style={styles.sendRow}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Preview post"
+            onPress={() => setPreviewOpen(true)}
+            style={styles.previewBtn}
+          >
+            <Icon name="play" size={18} color={color.white} />
+            <Text style={styles.sendText}>Preview</Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Send for approval"
+            onPress={() => void sendEdited()}
+            style={[styles.sendBtn, styles.sendGrow]}
+          >
+            <Icon name="send" size={19} color={color.white} />
+            <Text style={styles.sendText}>Send for approval</Text>
+          </PressableScale>
+        </View>
       </SheetShell>
+
+      <PostPreview
+        visible={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        creatorName={profile?.full_name ?? ''}
+        handle={tiktokHandle}
+        typeLabel={typeMeta?.label ?? null}
+        caption={brief?.caption ?? ''}
+        hashtags={brief?.hashtags ?? []}
+        media={{
+          kind: 'video',
+          clips: videoPreviewClips({
+            plan: plan.map((c) => ({
+              slotIndex: c.slotIndex,
+              segment: briefSegments.find((s) => s.slot_index === c.slotIndex) ?? null,
+            })),
+            clips: kept,
+          }),
+        }}
+      />
 
       <SoftToast
         visible={errorToast !== null}
@@ -2491,6 +2583,24 @@ const styles = StyleSheet.create({
   },
   sendBtnOff: {
     opacity: 0.7,
+  },
+  sendRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  sendGrow: {
+    flex: 1,
+  },
+  previewBtn: {
+    marginTop: 4,
+    height: 60,
+    paddingHorizontal: 22,
+    borderRadius: radius.pill,
+    backgroundColor: color.ink,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   sendText: {
     color: color.white,

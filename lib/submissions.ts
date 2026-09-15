@@ -205,9 +205,19 @@ async function createAssignmentSubmission(params: {
   durationsMs: (number | null)[];
   durationSeconds: number | null;
   format: 'video' | 'photo';
+  /** Post level volume multiplier the stitcher applies; null keeps the column default. */
+  audioGain: number | null;
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId, version, paths, durationsMs, durationSeconds } =
-    params;
+  const {
+    assignment,
+    companyId,
+    creatorId,
+    version,
+    paths,
+    durationsMs,
+    durationSeconds,
+    audioGain,
+  } = params;
 
   const { data: submission, error: insertError } = await supabase
     .from('submissions')
@@ -218,6 +228,7 @@ async function createAssignmentSubmission(params: {
       segment_paths: paths,
       duration_seconds: durationSeconds,
       version,
+      ...(audioGain !== null ? { audio_gain: audioGain } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -275,8 +286,9 @@ export async function submitAssignmentClips(params: {
   companyId: string;
   creatorId: string;
   clips: UploadedClip[];
+  audioGain?: number;
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId } = params;
+  const { assignment, companyId, creatorId, audioGain } = params;
   const clips = [...params.clips].sort((a, b) => a.slotIndex - b.slotIndex);
   if (clips.length === 0) {
     throw new Error('Nothing recorded yet');
@@ -299,6 +311,7 @@ export async function submitAssignmentClips(params: {
     durationsMs,
     durationSeconds,
     format: 'video',
+    audioGain: audioGain ?? null,
   });
 }
 
@@ -365,5 +378,6 @@ export async function submitAssignmentPhotos(params: {
     durationsMs: paths.map(() => null),
     durationSeconds: null,
     format: 'photo',
+    audioGain: null,
   });
 }

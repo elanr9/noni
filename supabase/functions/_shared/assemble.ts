@@ -9,9 +9,11 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   buildRenderTimeline,
   DEFAULT_TEXT_OVERLAY,
+  HEAD_TRIM_MS,
   segmentBoxes,
   timelineHasOverlays,
   type BriefSegmentRow,
+  type ClipCut,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
 import {
@@ -30,6 +32,9 @@ export type SubmissionRow = {
   segment_paths: string[] | null;
   version: number | null;
   overlay_render_id?: string | null;
+  audio_gain?: number | null;
+  /** Manifest stored by the stitch invocation; reused when resuming at overlays. */
+  render_timeline?: unknown;
 };
 
 export function uploadPostKey(): string {
@@ -38,11 +43,90 @@ export function uploadPostKey(): string {
   return key;
 }
 
-// Run an FFmpeg job on Upload-Post (docs.upload-post.com/api/ffmpeg-editor),
-// download the result, and store it in the videos bucket.
+type FfmpegOutputExtension = 'mp4' | 'png' | 'txt';
+
+const FFMPEG_JOBS_URL = 'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs';
+
+// Create an FFmpeg job on Upload-Post (docs.upload-post.com/api/ffmpeg-editor),
+// poll it to completion and return the result as a byte stream.
 // Upload-Post rejects `;` `|` `&` `$` and backticks anywhere in the command,
-// so no filtergraph here may use `;` to separate chains. Each pass below is
-// one linear chain per -filter_complex (repeatable) or plain -vf/-af.
+// so no inline filtergraph may use `;` to separate chains.
+async function executeFfmpegJob(params: {
+  apiKey: string;
+  files: string[];
+  fullCommand: string;
+  outputExtension: FfmpegOutputExtension;
+  label: string;
+}): Promise<ReadableStream<Uint8Array>> {
+  const { apiKey, files, fullCommand, outputExtension, label } = params;
+  if (/[;|&$`]/.test(fullCommand)) {
+    throw new Error(`ffmpeg ${label} command contains a forbidden character`);
+  }
+
+  const jobRes = await fetch(
+    `${FFMPEG_JOBS_URL}/upload`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Apikey ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        files,
+        full_command: fullCommand,
+        output_extension: outputExtension,
+      }),
+    },
+  );
+  console.log(`ffmpeg ${label} job created`);
+  const jobJson = (await jobRes.json()) as {
+    success?: boolean;
+    job_id?: string;
+    message?: string;
+    error?: string;
+  };
+  if (!jobRes.ok || !jobJson.job_id) {
+    throw new Error(
+      `ffmpeg ${label} create failed: ${jobJson.message ?? jobJson.error ?? jobRes.status}`,
+    );
+  }
+
+  let finished = false;
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const statusRes = await fetch(`${FFMPEG_JOBS_URL}/${jobJson.job_id}`, {
+      headers: { Authorization: `Apikey ${apiKey}` },
+    });
+    const statusJson = (await statusRes.json()) as {
+      status?: string;
+      exc_info?: string | null;
+      result?: { stderr_tail?: string | null } | null;
+    };
+    const status = (statusJson.status ?? '').toLowerCase();
+    if (status === 'finished' || status === 'done') {
+      finished = true;
+      break;
+    }
+    if (status === 'failed' || status === 'error') {
+      const detail =
+        statusJson.result?.stderr_tail?.trim().split('\n').slice(-3).join(' ') ??
+        statusJson.exc_info?.trim().split('\n').pop() ??
+        '';
+      throw new Error(`ffmpeg ${label} job errored${detail ? `: ${detail}` : ''}`);
+    }
+  }
+  if (!finished) throw new Error(`ffmpeg ${label} timed out`);
+
+  const download = await fetch(`${FFMPEG_JOBS_URL}/${jobJson.job_id}/download`, {
+    headers: { Authorization: `Apikey ${apiKey}` },
+  });
+  if (!download.ok || !download.body) {
+    throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
+  }
+  return download.body;
+}
+
+// Run an FFmpeg job and store the media result in the videos bucket.
 async function runFfmpegJob(params: {
   admin: AdminClient;
   apiKey: string;
@@ -74,81 +158,200 @@ async function runFfmpegJob(params: {
     files = [...files, scriptUrl];
     fullCommand = fullCommand.replace('{graph}', inputPlaceholder(files.length - 1, files.length));
   }
-  if (/[;|&$`]/.test(fullCommand)) {
-    throw new Error(`ffmpeg ${label} command contains a forbidden character`);
-  }
 
-  const jobRes = await fetch(
-    'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/upload',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Apikey ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        files,
-        full_command: fullCommand,
-        output_extension: outputExtension,
-      }),
-    },
-  );
-  console.log(`ffmpeg ${label} job created`);
-  const jobJson = (await jobRes.json()) as {
-    success?: boolean;
-    job_id?: string;
-    message?: string;
-    error?: string;
-  };
-  if (!jobRes.ok || !jobJson.job_id) {
-    throw new Error(
-      `ffmpeg ${label} create failed: ${jobJson.message ?? jobJson.error ?? jobRes.status}`,
-    );
-  }
-
-  let finished = false;
-  for (let i = 0; i < 90; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const statusRes = await fetch(
-      `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}`,
-      { headers: { Authorization: `Apikey ${apiKey}` } },
-    );
-    const statusJson = (await statusRes.json()) as {
-      status?: string;
-      exc_info?: string | null;
-      result?: { stderr_tail?: string | null } | null;
-    };
-    const status = (statusJson.status ?? '').toLowerCase();
-    if (status === 'finished' || status === 'done') {
-      finished = true;
-      break;
-    }
-    if (status === 'failed' || status === 'error') {
-      const detail =
-        statusJson.result?.stderr_tail?.trim().split('\n').slice(-3).join(' ') ??
-        statusJson.exc_info?.trim().split('\n').pop() ??
-        '';
-      throw new Error(`ffmpeg ${label} job errored${detail ? `: ${detail}` : ''}`);
-    }
-  }
-  if (!finished) throw new Error(`ffmpeg ${label} timed out`);
-
-  const download = await fetch(
-    `https://api.upload-post.com/api/uploadposts/ffmpeg/jobs/${jobJson.job_id}/download`,
-    { headers: { Authorization: `Apikey ${apiKey}` } },
-  );
-  if (!download.ok || !download.body) {
-    throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
-  }
+  const body = await executeFfmpegJob({ apiKey, files, fullCommand, outputExtension, label });
   console.log(`ffmpeg ${label} finished, storing ${outputPath}`);
   await streamToVideos({
     path: outputPath,
     contentType: outputExtension === 'png' ? 'image/png' : 'video/mp4',
-    body: download.body,
+    body,
     label,
   });
   console.log(`ffmpeg ${label} stored ${outputPath}`);
   if (scriptPath) await admin.storage.from('videos').remove([scriptPath]);
+}
+
+// Run an FFmpeg job whose {output} is a text file and return its contents.
+async function runFfmpegTextJob(params: {
+  apiKey: string;
+  files: string[];
+  fullCommand: string;
+  label: string;
+}): Promise<string> {
+  const body = await executeFfmpegJob({ ...params, outputExtension: 'txt' });
+  return await new Response(body).text();
+}
+
+export type KeepRange = { startMs: number; endMs: number | null };
+/** Speech bounds of one clip; endMs null means the clip end is unknown. */
+export type SpeechRanges = { startMs: number; endMs: number | null; keep: KeepRange[] };
+
+type Cut = { startMs: number; endMs: number };
+
+const SILENCE_DETECT = 'silencedetect=n=-30dB:d=0.2';
+const SILENCE_MERGE_MS = 150;
+// A silence touching the first/last EDGE_WINDOW_MS of the clip is a lead/tail.
+const EDGE_WINDOW_MS = 350;
+const LEAD_PAD_MS = 120;
+const TAIL_PAD_MS = 250;
+// Interior silences longer than GAP_TIGHTEN_MS shrink to 2 * GAP_KEEP_MS.
+const GAP_TIGHTEN_MS = 1000;
+const GAP_KEEP_MS = 175;
+const MIN_CLIP_MS = 400;
+
+function parseSilences(text: string, durationMs: number): Cut[] {
+  const silences: Cut[] = [];
+  let pending: number | null = null;
+  for (const line of text.split('\n')) {
+    const start = /lavfi\.silence_start=(-?[\d.]+)/.exec(line);
+    if (start) {
+      pending = Math.max(0, Math.round(parseFloat(start[1]) * 1000));
+      continue;
+    }
+    const end = /lavfi\.silence_end=(-?[\d.]+)/.exec(line);
+    if (end && pending !== null) {
+      silences.push({ startMs: pending, endMs: Math.round(parseFloat(end[1]) * 1000) });
+      pending = null;
+    }
+  }
+  if (pending !== null) silences.push({ startMs: pending, endMs: durationMs });
+  return silences;
+}
+
+function wholeClip(durationMs: number): SpeechRanges {
+  return { startMs: 0, endMs: durationMs, keep: [{ startMs: 0, endMs: durationMs }] };
+}
+
+function speechRangesFromSilences(silences: Cut[], durationMs: number): SpeechRanges {
+  let startMs = 0;
+  let endMs = durationMs;
+  const gaps: Cut[] = [];
+  // A click or breath splits one pause into two; treat them as one.
+  const merged: Cut[] = [];
+  for (const s of silences) {
+    const last = merged[merged.length - 1];
+    if (last && s.startMs - last.endMs < SILENCE_MERGE_MS) last.endMs = s.endMs;
+    else merged.push({ ...s });
+  }
+  for (const s of merged) {
+    if (s.startMs <= EDGE_WINDOW_MS) {
+      startMs = Math.max(startMs, s.endMs - LEAD_PAD_MS);
+    } else if (s.endMs >= durationMs - EDGE_WINDOW_MS) {
+      endMs = Math.min(endMs, s.startMs + TAIL_PAD_MS);
+    } else if (s.endMs - s.startMs > GAP_TIGHTEN_MS) {
+      gaps.push(s);
+    }
+  }
+  startMs = Math.max(0, startMs);
+  endMs = Math.min(durationMs, endMs);
+
+  const keep: Cut[] = [];
+  let cursor = startMs;
+  for (const gap of gaps) {
+    const pieceEnd = gap.startMs + GAP_KEEP_MS;
+    const nextStart = gap.endMs - GAP_KEEP_MS;
+    if (pieceEnd <= cursor || nextStart >= endMs) continue;
+    keep.push({ startMs: cursor, endMs: pieceEnd });
+    cursor = nextStart;
+  }
+  keep.push({ startMs: cursor, endMs });
+
+  const total = keep.reduce((sum, r) => sum + (r.endMs - r.startMs), 0);
+  if (total < MIN_CLIP_MS) return wholeClip(durationMs);
+  return { startMs, endMs, keep };
+}
+
+// Whole clip, with the legacy 150 ms head trim on clip 0 only.
+function legacyRanges(durationMs: number | null, clipIndex: number): SpeechRanges {
+  const canTrim = durationMs === null || durationMs > HEAD_TRIM_MS + MIN_CLIP_MS;
+  const startMs = clipIndex === 0 && canTrim ? HEAD_TRIM_MS : 0;
+  return { startMs, endMs: durationMs, keep: [{ startMs, endMs: durationMs }] };
+}
+
+// Find where speech starts and ends in a clip (and long interior pauses) by
+// running silencedetect on Upload-Post and reading the metadata dump back.
+export async function detectSpeechRanges(params: {
+  admin: AdminClient;
+  apiKey: string;
+  clipPath: string;
+  durationMs: number | null;
+  clipIndex: number;
+}): Promise<SpeechRanges> {
+  const { admin, apiKey, clipPath, durationMs, clipIndex } = params;
+  if (durationMs === null) {
+    console.warn(`silence detect skipped for ${clipPath}: duration unknown`);
+    return legacyRanges(null, clipIndex);
+  }
+  try {
+    const [file] = await signVideoUrls(admin, [clipPath]);
+    const text = await runFfmpegTextJob({
+      apiKey,
+      files: [file],
+      fullCommand:
+        `ffmpeg -y -hide_banner -nostats -i {input} ` +
+        `-af ${SILENCE_DETECT},ametadata=mode=print:file={output} -f null -`,
+      label: `silence-${clipIndex}`,
+    });
+    return speechRangesFromSilences(parseSilences(text, durationMs), durationMs);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`silence detect failed for ${clipPath}: ${message}`);
+    return legacyRanges(durationMs, clipIndex);
+  }
+}
+
+function sec(ms: number): string {
+  return (ms / 1000).toFixed(3);
+}
+
+function trimFilter(name: 'trim' | 'atrim', range: KeepRange): string {
+  const end = range.endMs === null ? '' : `:end=${sec(range.endMs)}`;
+  return `${name}=start=${sec(range.startMs)}${end}`;
+}
+
+// submissions.audio_gain applied after loudnorm; the limiter catches peaks.
+function gainFilters(gain: number): string {
+  if (gain === 1) return '';
+  return `,volume=${gain.toFixed(2)},alimiter=limit=0.95:attack=5:release=50:level=false`;
+}
+
+function resolveAudioGain(raw: number | null | undefined): number {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 2;
+}
+
+function cutsFromRanges(ranges: SpeechRanges[], durationsMs: number[]): ClipCut[] {
+  return ranges.map((r, i) => ({
+    source_duration_ms: durationsMs[i],
+    keep_ms: r.keep.map((k): [number, number] => [k.startMs, k.endMs ?? durationsMs[i]]),
+  }));
+}
+
+// Cuts written to submissions.render_timeline by the invocation that
+// stitched, so a resumed overlay pass times text on the same cut.
+function storedClipCuts(raw: unknown, count: number): ClipCut[] | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const clips: unknown = (raw as { clips?: unknown }).clips;
+  if (!Array.isArray(clips) || clips.length !== count) return null;
+  const cuts: ClipCut[] = [];
+  for (const clip of clips as unknown[]) {
+    if (typeof clip !== 'object' || clip === null) return null;
+    const { keep_ms, source_duration_ms } = clip as {
+      keep_ms?: unknown;
+      source_duration_ms?: unknown;
+    };
+    if (typeof source_duration_ms !== 'number' || !Array.isArray(keep_ms)) return null;
+    const keep: Array<[number, number]> = [];
+    for (const pair of keep_ms as unknown[]) {
+      const cells: unknown[] = Array.isArray(pair) ? pair : [];
+      const [start, end] = cells;
+      if (cells.length !== 2 || typeof start !== 'number' || typeof end !== 'number') {
+        return null;
+      }
+      keep.push([start, end]);
+    }
+    cuts.push({ source_duration_ms, keep_ms: keep });
+  }
+  return cuts;
 }
 
 // Pipe a byte stream straight into the videos bucket. The body is handed to
@@ -205,25 +408,29 @@ function inputPlaceholder(index: number, total: number): string {
 
 // Conform one clip to fps 30, 1080x1920, 48k stereo AAC. A clip with no
 // audio track (muted in the editor) gets silence so the concat never sees a
-// missing stream. -shortest ends the silence with the video. Head trim
-// (-ss 0.15) is applied by the caller on the first clip only.
+// missing stream. -shortest ends the silence with the video. Only the
+// outer speech bounds are cut here; interior pauses are left alone.
 async function normalizeClipPass(params: {
   admin: AdminClient;
   apiKey: string;
   clipPath: string;
   outputPath: string;
-  headTrim: boolean;
+  range: SpeechRanges;
   loudnorm: boolean;
+  audioGain: number;
 }): Promise<void> {
-  const { admin, apiKey, clipPath, outputPath, headTrim, loudnorm } = params;
+  const { admin, apiKey, clipPath, outputPath, range, loudnorm, audioGain } = params;
   const [file] = await signVideoUrls(admin, [clipPath]);
+  const seek =
+    `-ss ${sec(range.startMs)} ` +
+    (range.endMs === null ? '' : `-t ${sec(range.endMs - range.startMs)} `);
   const fullCommand =
-    `ffmpeg -y -hide_banner ${headTrim ? '-ss 0.15 ' : ''}-i {input} ` +
+    `ffmpeg -y -hide_banner ${seek}-i {input} ` +
     `-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 ` +
     `-map 0:v -map 0:a? -map 1:a ` +
     `-vf fps=30,${CONFORM_1080x1920} ` +
-    `-af aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo` +
-    `${loudnorm ? ',loudnorm=I=-16:TP=-1.5:LRA=11' : ''} ` +
+    `-af ${AUDIO_CONFORM}` +
+    `${loudnorm ? `,${LOUDNORM}${gainFilters(audioGain)}` : ''} ` +
     `${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`;
 
   await runFfmpegJob({
@@ -239,30 +446,36 @@ async function normalizeClipPass(params: {
 const AUDIO_CONFORM = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
 const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11';
 
-// One job: every clip is conformed (fps 30, 1080x1920, 48k stereo) inside
-// the graph, concat joins them, loudnorm evens the audio. Head: -ss 0.15 on
-// input 0 only. Works for N=1.
+// One job: every keep range of every clip is trimmed and conformed (fps 30,
+// 1080x1920, 48k stereo) inside the graph, concat joins the pieces in order,
+// loudnorm evens the audio and the gain lifts it. Works for N=1.
 async function stitchGraphPass(params: {
   admin: AdminClient;
   apiKey: string;
   segmentPaths: string[];
+  ranges: SpeechRanges[];
+  audioGain: number;
   outputPath: string;
 }): Promise<void> {
-  const { admin, apiKey, segmentPaths, outputPath } = params;
+  const { admin, apiKey, segmentPaths, ranges, audioGain, outputPath } = params;
   const n = segmentPaths.length;
   const files = await signVideoUrls(admin, segmentPaths);
-  const inputs = segmentPaths
-    .map((_p, i) => `${i === 0 ? '-ss 0.15 ' : ''}-i ${inputPlaceholder(i, n + 1)}`)
-    .join(' ');
-  const conform = segmentPaths.flatMap((_p, i) => [
-    `[${i}:v]fps=30,${CONFORM_1080x1920}[v${i}]`,
-    `[${i}:a]${AUDIO_CONFORM}[a${i}]`,
-  ]);
-  const streams = segmentPaths.map((_p, i) => `[v${i}][a${i}]`).join('');
+  const inputs = segmentPaths.map((_p, i) => `-i ${inputPlaceholder(i, n + 1)}`).join(' ');
+  const pieces: string[] = [];
+  const streams: string[] = [];
+  ranges.forEach((range, i) => {
+    range.keep.forEach((keep, k) => {
+      pieces.push(
+        `[${i}:v]${trimFilter('trim', keep)},setpts=PTS-STARTPTS,fps=30,${CONFORM_1080x1920}[v${i}_${k}]`,
+        `[${i}:a]${trimFilter('atrim', keep)},asetpts=PTS-STARTPTS,${AUDIO_CONFORM}[a${i}_${k}]`,
+      );
+      streams.push(`[v${i}_${k}][a${i}_${k}]`);
+    });
+  });
   const filterGraph = [
-    ...conform,
-    `${streams}concat=n=${n}:v=1:a=1[cv][ca]`,
-    `[ca]${LOUDNORM}[outa]`,
+    ...pieces,
+    `${streams.join('')}concat=n=${streams.length}:v=1:a=1[cv][ca]`,
+    `[ca]${LOUDNORM}${gainFilters(audioGain)}[outa]`,
   ].join(';');
 
   await runFfmpegJob({
@@ -286,10 +499,12 @@ async function stitchNormalizedPass(params: {
   admin: AdminClient;
   apiKey: string;
   segmentPaths: string[];
+  ranges: SpeechRanges[];
+  audioGain: number;
   outputPath: string;
   scratchPrefix: string;
 }): Promise<void> {
-  const { admin, apiKey, segmentPaths, outputPath, scratchPrefix } = params;
+  const { admin, apiKey, segmentPaths, ranges, audioGain, outputPath, scratchPrefix } = params;
   const n = segmentPaths.length;
 
   if (n === 1) {
@@ -298,8 +513,9 @@ async function stitchNormalizedPass(params: {
       apiKey,
       clipPath: segmentPaths[0],
       outputPath,
-      headTrim: true,
+      range: ranges[0],
       loudnorm: true,
+      audioGain,
     });
     return;
   }
@@ -312,8 +528,9 @@ async function stitchNormalizedPass(params: {
         apiKey,
         clipPath,
         outputPath: normalizedPaths[i],
-        headTrim: i === 0,
+        range: ranges[i],
         loudnorm: false,
+        audioGain,
       }),
     ),
   );
@@ -325,7 +542,7 @@ async function stitchNormalizedPass(params: {
   const fullCommand =
     `ffmpeg -y -hide_banner ${inputs} ` +
     `-filter_complex "${videoStreams}concat=n=${n}:v=1:a=0[cv]" ` +
-    `-filter_complex "${audioStreams}concat=n=${n}:v=0:a=1,${LOUDNORM}[outa]" ` +
+    `-filter_complex "${audioStreams}concat=n=${n}:v=0:a=1,${LOUDNORM}${gainFilters(audioGain)}[outa]" ` +
     `-map "[cv]" -map "[outa]" ${VIDEO_CODEC} ${AUDIO_CODEC} -shortest {output}`;
 
   await runFfmpegJob({
@@ -344,6 +561,8 @@ async function stitchAndEditPass(params: {
   admin: AdminClient;
   apiKey: string;
   segmentPaths: string[];
+  ranges: SpeechRanges[];
+  audioGain: number;
   outputPath: string;
   scratchPrefix: string;
 }): Promise<void> {
@@ -757,13 +976,33 @@ async function runAssembly(params: {
     }
   }
 
-  // Conform every clip, concat, loudnorm, 1080x1920 (see stitchAndEditPass).
+  // Trim silence, conform every clip, concat, loudnorm, 1080x1920 (see
+  // stitchAndEditPass). Detection runs on the paths that get stitched, so a
+  // green screen composite is measured rather than its raw clip.
+  const audioGain = resolveAudioGain(submission.audio_gain);
+  let clipCuts: ClipCut[] | null = stitched
+    ? storedClipCuts(submission.render_timeline, segmentPaths.length)
+    : null;
   let videoPath = editedPath;
   if (!stitched) {
+    const ranges = await Promise.all(
+      segmentPaths.map((clipPath: string, i: number) =>
+        detectSpeechRanges({
+          admin,
+          apiKey,
+          clipPath,
+          durationMs: durationsMs?.[i] ?? null,
+          clipIndex: i,
+        }),
+      ),
+    );
+    clipCuts = durationsMs ? cutsFromRanges(ranges, durationsMs) : null;
     await stitchAndEditPass({
       admin,
       apiKey,
       segmentPaths,
+      ranges,
+      audioGain,
       outputPath: videoPath,
       scratchPrefix: `${companyId}/${targetId}/${version}`,
     });
@@ -791,6 +1030,7 @@ async function runAssembly(params: {
       const timeline = buildRenderTimeline({
         briefSegments: durationsMs ? briefSegments : [],
         durationsMs: durationsMs ?? [],
+        clipCuts: durationsMs && clipCuts ? clipCuts : undefined,
         textOverlay,
         subtitles,
         subtitlesY,

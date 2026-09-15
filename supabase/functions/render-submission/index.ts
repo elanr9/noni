@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     const { data: submission } = await admin
       .from('submissions')
       .select(
-        'id, video_path, segment_paths, version, creator_id, assignment_id, task_id, render_status, overlay_render_id',
+        'id, video_path, segment_paths, version, creator_id, assignment_id, task_id, render_status, overlay_render_id, audio_gain, render_timeline',
       )
       .eq('id', body.submission_id)
       .maybeSingle();

@@ -16,6 +16,7 @@ import {
   pieceDurationMs,
   pieceRanges,
   setAllMuted,
+  setGain,
   slotPieces,
   splitAt,
   timelineDurationMs,
@@ -39,7 +40,7 @@ import { clampCrop } from './CropGesture';
 import { EditorStage, type StageSize } from './EditorStage';
 import { EditorToolbar, type ToolId } from './EditorToolbar';
 import { Timeline } from './Timeline';
-import { SpeedOptions, ToolPanel } from './ToolPanel';
+import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
 import { useEditHistory } from './useEditHistory';
 
 export type EditorSlot = {
@@ -67,11 +68,15 @@ export type PostEditorProps = {
   /** Export or submit in flight; blocks every control and shows the label. */
   busyLabel: string | null;
   showPlaceHint: boolean;
+  /** The initial timeline was just auto trimmed to speech; show the pill briefly. */
+  trimmedToSpeech: boolean;
   topInset: number;
   bottomInset: number;
 };
 
-type OpenTool = 'speed' | 'crop' | 'text-color';
+type OpenTool = 'speed' | 'crop' | 'volume' | 'text-color';
+
+const SPEECH_PILL_MS = 2000;
 
 const NATIVE_MIN_GAP_MS = 80;
 const IDENTITY_CROP: EditCrop = { scale: 1, x: 0, y: 0 };
@@ -97,6 +102,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     onContinue,
     busyLabel,
     showPlaceHint,
+    trimmedToSpeech,
     topInset,
     bottomInset,
   } = props;
@@ -116,6 +122,13 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const previewRef = useRef<VideoEditorPreviewHandle>(null);
   const busy = busyLabel !== null;
+
+  const [speechPill, setSpeechPill] = useState(trimmedToSpeech);
+  useEffect(() => {
+    if (!trimmedToSpeech) return;
+    const timer = setTimeout(() => setSpeechPill(false), SPEECH_PILL_MS);
+    return () => clearTimeout(timer);
+  }, [trimmedToSpeech]);
 
   // Native rebuilds are throttled so trim drags do not thrash the player.
   const [nativeTimeline, setNativeTimeline] = useState<NativeTimeline>(() =>
@@ -249,8 +262,17 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     setTool('crop');
   }
 
+  function openVolume() {
+    pause();
+    setTool('volume');
+  }
+
+  function changeGain(value: number) {
+    setPreview(setGain(committed, value));
+  }
+
   function closeTool(save: boolean) {
-    if (tool === 'speed') {
+    if (tool === 'speed' || tool === 'volume') {
       if (save && preview !== null) history.commit(preview);
       setPreview(null);
     } else if (tool === 'crop' && selected !== null) {
@@ -285,8 +307,11 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       case 'crop':
         openCrop();
         return;
-      case 'volume':
+      case 'mute':
         toggleSelectedMuted();
+        return;
+      case 'volume':
+        openVolume();
         return;
       case 'text-color':
         if (currentBoxes.length === 0) return;
@@ -397,6 +422,11 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             <Text style={styles.hintText}>Pinch to zoom, drag to reframe</Text>
           </View>
         ) : null}
+        {speechPill ? (
+          <View style={[styles.speechPill, { top: topInset + 60 }]} pointerEvents="none">
+            <Text style={styles.hintText}>Trimmed to speech</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.transport}>
@@ -471,6 +501,10 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
               onChange={changeSpeed}
               caption={speedCaption}
             />
+          </ToolPanel>
+        ) : tool === 'volume' ? (
+          <ToolPanel title="Volume" onCancel={() => closeTool(false)} onDone={() => closeTool(true)}>
+            <GainFader value={shown.gain} onChange={changeGain} />
           </ToolPanel>
         ) : tool === 'crop' ? (
           <ToolPanel title="Crop" onCancel={() => closeTool(false)} onDone={() => closeTool(true)}>
@@ -577,6 +611,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 18,
+    alignItems: 'center',
+  },
+  speechPill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
   },
   hintText: {

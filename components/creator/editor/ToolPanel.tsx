@@ -1,6 +1,7 @@
-import type { JSX, ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useRef, useState, type JSX, type ReactNode } from 'react';
+import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 
+import { MAX_GAIN, MIN_GAIN, clampGain } from '../../../lib/video-edit';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { color, type } from '../../../theme/tokens';
@@ -72,6 +73,67 @@ export function SpeedOptions(props: {
   );
 }
 
+const KNOB = 22;
+const GAIN_TICKS = [1, 2];
+
+/** Horizontal fader for the post volume, 50 to 300 percent. */
+export function GainFader(props: {
+  value: number;
+  onChange: (gain: number) => void;
+}): JSX.Element {
+  const { value, onChange } = props;
+  const [width, setWidth] = useState(0);
+  // Where the touch started, in track x and in page x, so moves are deltas.
+  const grabRef = useRef({ trackX: 0, pageX: 0 });
+
+  function emitAt(x: number) {
+    if (width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, x / width));
+    onChange(clampGain(MIN_GAIN + ratio * (MAX_GAIN - MIN_GAIN)));
+  }
+
+  const ratio = (value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN);
+  const knobX = ratio * width - KNOB / 2;
+
+  return (
+    <View style={styles.faderRow}>
+      <View
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={(evt: GestureResponderEvent) => {
+          const { locationX, pageX } = evt.nativeEvent;
+          grabRef.current = { trackX: locationX, pageX };
+          emitAt(locationX);
+        }}
+        onResponderMove={(evt: GestureResponderEvent) => {
+          const grab = grabRef.current;
+          emitAt(grab.trackX + (evt.nativeEvent.pageX - grab.pageX));
+        }}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Volume"
+        accessibilityValue={{ text: `${Math.round(value * 100)}%` }}
+        style={styles.faderTouch}
+        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      >
+        <View style={styles.faderTrack} />
+        <View style={[styles.faderFill, { width: Math.max(0, ratio * width) }]} />
+        {GAIN_TICKS.map((tick) => (
+          <View
+            key={tick}
+            style={[
+              styles.faderTick,
+              { left: ((tick - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * width - 1 },
+            ]}
+          />
+        ))}
+        {width > 0 ? <View style={[styles.faderKnob, { left: knobX }]} /> : null}
+      </View>
+      <Text style={styles.faderValue}>{`${Math.round(value * 100)}%`}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   panel: {
     paddingHorizontal: 12,
@@ -128,5 +190,51 @@ const styles = StyleSheet.create({
     color: color.whiteA60,
     fontSize: type.size.label,
     textAlign: 'center',
+  },
+  faderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    height: 44,
+    paddingHorizontal: 6,
+  },
+  faderTouch: {
+    flex: 1,
+    height: 44,
+    justifyContent: 'center',
+  },
+  faderTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  faderFill: {
+    position: 'absolute',
+    left: 0,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: color.white,
+  },
+  faderTick: {
+    position: 'absolute',
+    width: 2,
+    height: 10,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  faderKnob: {
+    position: 'absolute',
+    width: KNOB,
+    height: KNOB,
+    borderRadius: KNOB / 2,
+    backgroundColor: color.white,
+  },
+  faderValue: {
+    width: 48,
+    textAlign: 'right',
+    color: color.white,
+    fontSize: type.size.meta,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
 });
