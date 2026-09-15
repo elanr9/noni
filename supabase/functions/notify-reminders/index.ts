@@ -3,7 +3,8 @@
 // concurrent runs cannot double-send. One push per creator per kind per day.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
-import { adminPushTokens, creatorPushTokens, sendExpoPush } from '../_shared/push.ts';
+import { adminRecipients, creatorRecipients, sendPush } from '../_shared/push.ts';
+import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 
 const INCOMPLETE = ['assigned', 'recorded', 'changes_requested'] as const;
 type ReminderKind = 'due_today' | 'overdue';
@@ -197,19 +198,21 @@ Deno.serve(async (req) => {
       claimed += 1;
 
       const streak = streakByPair.get(`${companyId}:${creatorId}`) ?? 0;
-      const tokens = await creatorPushTokens(admin, creatorId, companyId);
+      const recipients = await creatorRecipients(admin, creatorId, companyId);
       const title =
         kind === 'due_today' ? dueTitle(streak) : overdueTitle(streak);
       const body =
         kind === 'due_today'
           ? dueBody(list.length, briefTitle(first), streak)
           : overdueBody(list.length, streak);
-      pushes += await sendExpoPush(tokens, {
+      pushes += await sendPush(admin, recipients, {
         title,
         body,
         data: {
           event: kind,
+          company_id: companyId,
           assignment_id: first.id,
+          deep_link: creatorLink(companyId, 'assignment', first.id),
         },
       });
 
@@ -235,10 +238,15 @@ Deno.serve(async (req) => {
         .eq('id', creatorId)
         .maybeSingle();
       const name = (creator?.full_name as string | null)?.trim() || 'A creator';
-      pushes += await sendExpoPush(await adminPushTokens(admin, companyId), {
+      pushes += await sendPush(admin, await adminRecipients(admin, companyId), {
         title: `${name} is behind`,
         body: behindBody(list.length),
-        data: { event: 'creator_behind', creator_id: creatorId },
+        data: {
+          event: 'creator_behind',
+          company_id: companyId,
+          creator_id: creatorId,
+          deep_link: managerLink(companyId, 'chat', creatorId),
+        },
       });
     }
 

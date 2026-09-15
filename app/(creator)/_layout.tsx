@@ -57,7 +57,7 @@ export default function CreatorLayout() {
   const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
 
   // Managers see a green dot on the creator's inbox row while the app is open.
-  const presenceCompanyId = inCreatorMode ? profile.company_id : null;
+  const presenceCompanyId = inCreatorMode ? profile.active_company_id : null;
   const presenceProfileId = inCreatorMode ? profile.id : null;
   useEffect(() => {
     if (presenceCompanyId === null || presenceProfileId === null) return;

@@ -39,10 +39,10 @@ async function fillCompany(admin: SupabaseClient, companyId: string): Promise<nu
   const [{ data: company }, { data: creators }, brand] = await Promise.all([
     admin.from('companies').select('settings').eq('id', companyId).single(),
     admin
-      .from('profiles')
+      .from('company_roster')
       .select('id')
       .eq('company_id', companyId)
-      .or('role.eq.creator,can_create.eq.true')
+      .or('member_role.eq.creator,can_create.eq.true')
       .eq('onboarded', true),
     loadBrandContext(admin, companyId),
   ]);

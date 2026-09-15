@@ -15,10 +15,17 @@ import { PostPager, type PostPagerItem } from '../../components/creator/PostPage
 import { SlideNav } from '../../components/creator/SlideNav';
 import { TeleprompterOverlay } from '../../components/creator/TeleprompterOverlay';
 import { useCreatorToast } from '../../components/creator/Toast';
-import { WeekStrip, type WeekStripDay } from '../../components/creator/WeekStrip';
+import {
+  WeekStrip,
+  weekDates,
+  weekStartOf,
+  type WeekStripDay,
+} from '../../components/creator/WeekStrip';
 import { Button } from '../../components/ui/Button';
+import { Icon } from '../../components/ui/Icon';
 import { MediaCard } from '../../components/ui/MediaCard';
 import { StatusChip } from '../../components/ui/StatusChip';
+import { TabDot } from '../../components/ui/TabBar';
 import { dayKey, slotTimeLabel, statusDotColor } from '../../lib/creator-queue';
 import type { TaskStatus } from '../../lib/tasks';
 import { color, radius, space, type as typeTokens } from '../../theme/tokens';
@@ -52,7 +59,10 @@ function mockWeek(): WeekStripDay[] {
   return byOffset.map((statuses, i) => {
     const d = new Date();
     d.setDate(d.getDate() + (i - 3));
-    return { date: dayKey(d), statuses };
+    return {
+      date: dayKey(d),
+      statuses: statuses.map((status) => ({ status, overdue: false })),
+    };
   });
 }
 
@@ -107,8 +117,33 @@ export default function CreatorKitchenSink() {
         </View>
       </Section>
 
+      <Section title="Tab dot">
+        <View style={styles.row}>
+          <View style={styles.dotItem}>
+            <View>
+              <Icon name="house" size={22} color={color.slate400} />
+              <TabDot />
+            </View>
+            <Text style={styles.dotLabel}>waiting</Text>
+          </View>
+          <View style={styles.dotItem}>
+            <Icon name="house" size={22} color={color.slate400} />
+            <Text style={styles.dotLabel}>caught up</Text>
+          </View>
+        </View>
+      </Section>
+
       <Section title="WeekStrip">
-        <WeekStrip days={week} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <WeekStrip
+          weekStart={weekStartOf(week[3].date)}
+          daysForWeek={(start) =>
+            weekDates(start).map(
+              (date) => week.find((day) => day.date === date) ?? { date, statuses: [] },
+            )
+          }
+          selectedDate={selectedDate}
+          onSelectDate={setSelectedDate}
+        />
       </Section>
 
       <Section title="PostPager">

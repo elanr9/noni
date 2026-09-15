@@ -11,6 +11,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { AreaChart } from '../../../components/creator/AreaChart';
 import { Screen } from '../../../components/layout/Screen';
+import { CampaignPill } from '../../../components/shared';
 import { AnalyticsSkeleton, SoftToast } from '../../../components/states';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
@@ -92,11 +93,11 @@ export default function AnalyticsScreen() {
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.id || !profile.company_id) return;
+    if (!profile?.id || !profile.active_company_id) return;
     try {
       const [mine, rows] = await Promise.all([
-        listMyAssignments(profile.company_id, profile.id),
-        listLedger(profile.company_id, profile.id, 1000),
+        listMyAssignments(profile.active_company_id, profile.id),
+        listLedger(profile.active_company_id, profile.id, 1000),
       ]);
       setAssignments(mine);
       setLedger(rows);
@@ -106,7 +107,7 @@ export default function AnalyticsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile?.id, profile?.company_id]);
+  }, [profile?.id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -196,6 +197,7 @@ export default function AnalyticsScreen() {
 
   return (
     <Screen scroll={false} bg={color.white} contentStyle={styles.screenContent}>
+      <CampaignPill />
       <View style={styles.headerRow}>
         <Text style={styles.title}>Analytics</Text>
         <View style={styles.earnedBlock}>
@@ -376,7 +378,7 @@ export default function AnalyticsScreen() {
 
 const styles = StyleSheet.create({
   screenContent: {
-    paddingTop: space[5],
+    paddingTop: 6,
     paddingBottom: 0,
     gap: space[5],
     flex: 1,

@@ -100,15 +100,15 @@ export default function CreatorBalanceScreen() {
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.id || !profile.company_id) {
+    if (!profile?.id || !profile.active_company_id) {
       setLoading(false);
       setRefreshing(false);
       return;
     }
     try {
       const [w, rows] = await Promise.all([
-        getOrCreateWallet(profile.company_id, profile.id),
-        listLedger(profile.company_id, profile.id),
+        getOrCreateWallet(profile.active_company_id, profile.id),
+        listLedger(profile.active_company_id, profile.id),
       ]);
       setWallet(w);
       setLedger(rows);
@@ -120,7 +120,7 @@ export default function CreatorBalanceScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile?.id, profile?.company_id]);
+  }, [profile?.id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {

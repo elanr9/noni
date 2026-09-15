@@ -81,8 +81,8 @@ export default function ChangesRequestedScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!id || !profile?.company_id) return;
-    const companyId = profile.company_id;
+    if (!id || !profile?.active_company_id) return;
+    const companyId = profile.active_company_id;
     try {
       const a = await getAssignment(companyId, id);
       setAssignment(a);
@@ -97,7 +97,7 @@ export default function ChangesRequestedScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, profile?.company_id]);
+  }, [id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {

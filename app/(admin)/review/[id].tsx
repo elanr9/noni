@@ -261,7 +261,7 @@ export default function ReviewScreen() {
       }
       if (profile) {
         const account = await getCreatorAccount(
-          profile.company_id,
+          profile.active_company_id,
           current.assignment.creator_id,
         ).catch(() => null);
         if (!cancelled) setHandle(account?.tiktok_handle ?? null);

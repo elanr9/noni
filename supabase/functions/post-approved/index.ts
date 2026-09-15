@@ -5,8 +5,12 @@ import {
   uploadPostKey,
   type AdminClient,
 } from '../_shared/assemble.ts';
+import { isManagerOf } from '../_shared/membership.ts';
 
 type PostApprovedBody = { assignment_id?: string; task_id?: string };
+
+/** null means the cron caller: no tenant restriction. */
+type ManagerCaller = { userId: string; platformAdmin: boolean } | null;
 
 // What we post, independent of whether the caller keyed by assignment
 // (campaign-published) or by legacy content_task (backfilled rows).
@@ -59,11 +63,19 @@ async function pollStatus(
   throw new Error('Upload-Post status poll timed out');
 }
 
-/** `callerCompanyId` null means the cron caller: no tenant restriction. */
+async function callerManages(
+  admin: AdminClient,
+  caller: ManagerCaller,
+  companyId: string,
+): Promise<boolean> {
+  if (caller === null) return true;
+  return isManagerOf(admin, caller.userId, companyId, caller.platformAdmin);
+}
+
 async function resolveTarget(
   admin: AdminClient,
   body: PostApprovedBody,
-  callerCompanyId: string | null,
+  caller: ManagerCaller,
 ): Promise<PostTarget | Response> {
   if (body.assignment_id) {
     const { data: assignment } = await admin
@@ -73,7 +85,7 @@ async function resolveTarget(
       .maybeSingle();
     if (
       !assignment ||
-      (callerCompanyId !== null && assignment.company_id !== callerCompanyId)
+      !(await callerManages(admin, caller, assignment.company_id as string))
     ) {
       return jsonResponse({ error: 'assignment not found' }, 404);
     }
@@ -106,7 +118,7 @@ async function resolveTarget(
     .select('id, title, caption, platforms, company_id, status, assigned_to')
     .eq('id', body.task_id)
     .maybeSingle();
-  if (!task || (callerCompanyId !== null && task.company_id !== callerCompanyId)) {
+  if (!task || !(await callerManages(admin, caller, task.company_id as string))) {
     return jsonResponse({ error: 'task not found' }, 404);
   }
   if (task.status !== 'approved') {
@@ -206,7 +218,7 @@ Deno.serve(async (req) => {
     const cronHeader = req.headers.get('x-cron-secret');
     const isCron = Boolean(cronSecret && cronHeader && cronHeader === cronSecret);
 
-    let callerCompanyId: string | null = null;
+    let caller: ManagerCaller = null;
     if (!isCron) {
       const authHeader = req.headers.get('Authorization') ?? '';
       const { data: userData } = await admin.auth.getUser(
@@ -214,19 +226,16 @@ Deno.serve(async (req) => {
       );
       if (!userData?.user) return jsonResponse({ error: 'unauthorized' }, 401);
 
-      const { data: caller } = await admin
+      const { data: profile } = await admin
         .from('profiles')
-        .select('company_id, role')
+        .select('role')
         .eq('id', userData.user.id)
         .maybeSingle();
-      // Platform admin (role admin) inherits campaign manager powers.
-      if (!caller || (caller.role !== 'campaign_manager' && caller.role !== 'admin')) {
-        return jsonResponse({ error: 'forbidden' }, 403);
-      }
-      callerCompanyId = caller.company_id as string;
+      if (!profile) return jsonResponse({ error: 'forbidden' }, 403);
+      caller = { userId: userData.user.id, platformAdmin: profile.role === 'admin' };
     }
 
-    const resolved = await resolveTarget(admin, body, callerCompanyId);
+    const resolved = await resolveTarget(admin, body, caller);
     if (resolved instanceof Response) return resolved;
     const target = resolved;
 

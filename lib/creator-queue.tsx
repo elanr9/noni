@@ -40,11 +40,26 @@ export function statusDotColor(status: TaskStatus): string {
   }
 }
 
-/** Local-timezone YYYY-MM-DD, matching assignments.scheduled_date. */
+export const OVERDUE_DOT = '#F28C28';
+
+/** Open post scheduled before today (ET). */
+export function isOverdue(
+  a: Pick<Assignment, 'scheduled_date' | 'status'>,
+  todayKey: string,
+): boolean {
+  return a.scheduled_date < todayKey && OPEN_STATUSES.has(a.status);
+}
+
+const NY_DAY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** America/New_York YYYY-MM-DD, matching assignments.scheduled_date. */
 export function dayKey(d: Date): string {
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const dd = `${d.getDate()}`.padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${dd}`;
+  return NY_DAY.format(d);
 }
 
 /**
@@ -119,6 +134,10 @@ export type CreatorQueueState = {
   changesRequested: AssignmentWithBrief[];
   /** Today's open slots (assigned or changes_requested), sorted by slot_index. */
   openToday: AssignmentWithBrief[];
+  /** Open slots scheduled before today, oldest first then slot_index. */
+  overdue: AssignmentWithBrief[];
+  /** First overdue slot, else first open slot today. */
+  nextRequired: AssignmentWithBrief | null;
   counts: CreatorQueueCounts;
 };
 
@@ -135,7 +154,7 @@ function windowBounds(): { from: string; to: string } {
 export function CreatorQueueProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const creatorId = profile?.id ?? null;
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
 
   const [assignments, setAssignments] = useState<AssignmentWithBrief[]>([]);
   const [mediaPaths, setMediaPaths] = useState<Map<string, string>>(new Map());
@@ -238,6 +257,20 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
     [todayAssignments],
   );
 
+  const overdue = useMemo(
+    () =>
+      assignments
+        .filter((a) => isOverdue(a, todayKey))
+        .sort((a, b) =>
+          a.scheduled_date === b.scheduled_date
+            ? a.slot_index - b.slot_index
+            : a.scheduled_date.localeCompare(b.scheduled_date),
+        ),
+    [assignments, todayKey],
+  );
+
+  const nextRequired = overdue[0] ?? openToday[0] ?? null;
+
   const counts = useMemo<CreatorQueueCounts>(
     () => ({
       toFix: todayAssignments.filter((a) => a.status === 'changes_requested').length,
@@ -258,6 +291,8 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
       assignmentsForDate,
       changesRequested,
       openToday,
+      overdue,
+      nextRequired,
       counts,
     }),
     [
@@ -270,6 +305,8 @@ export function CreatorQueueProvider({ children }: { children: ReactNode }) {
       assignmentsForDate,
       changesRequested,
       openToday,
+      overdue,
+      nextRequired,
       counts,
     ],
   );

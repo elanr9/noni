@@ -1428,6 +1428,12 @@ export function briefWeekRangeLabel(dropDate: string): string {
   return `${startMonth} ${start.getDate()} to ${endMonth} ${end.getDate()}`;
 }
 
+/** Weekday the week ends on: "Sat" or "Saturday". */
+export function briefWeekEndsWeekday(dropDate: string, form: 'short' | 'long'): string {
+  const end = briefWeekAddDays(briefWeekStart(dropDate), BRIEF_WEEK_DAYS - 1);
+  return end.toLocaleDateString(undefined, { weekday: form });
+}
+
 /** "opens Monday", from the brief's chosen start day. */
 export function briefWeekOpensLabel(dropDate: string): string {
   const weekday = briefWeekStart(dropDate).toLocaleDateString(undefined, {
@@ -1809,14 +1815,14 @@ export async function listCampaignManagers(
   companyId: string,
 ): Promise<CampaignManager[]> {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('company_roster')
     .select('id, full_name')
     .eq('company_id', companyId)
-    .in('role', ['campaign_manager', 'company_admin'])
+    .in('member_role', ['campaign_manager', 'company_admin'])
     .order('full_name');
   if (error) throw error;
   return (data ?? []).map((p) => ({
-    id: p.id,
+    id: p.id ?? '',
     name: p.full_name?.trim() || 'Manager',
   }));
 }

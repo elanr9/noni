@@ -46,10 +46,10 @@ async function main(): Promise<void> {
   const admin = createClient(url, service);
   const { data: profile } = await admin
     .from('profiles')
-    .select('company_id')
+    .select('active_company_id')
     .eq('id', auth.user.id)
     .single();
-  const companyId = profile!.company_id as string;
+  const companyId = profile!.active_company_id as string;
 
   console.log('\n=== library-link: public page ===');
   const { data: preview, error: previewError } = await client.functions.invoke(

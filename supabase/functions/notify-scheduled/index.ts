@@ -6,7 +6,8 @@
 // it manually.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
-import { creatorPushTokens, sendExpoPush } from '../_shared/push.ts';
+import { creatorRecipients, sendPush } from '../_shared/push.ts';
+import { creatorLink } from '../_shared/deep-link.ts';
 
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
@@ -46,11 +47,16 @@ Deno.serve(async (req) => {
         .eq('campaign_id', campaign.id);
       const creatorIds = [...new Set((assignments ?? []).map((a) => a.creator_id))];
       for (const creatorId of creatorIds) {
-        const tokens = await creatorPushTokens(admin, creatorId, campaign.company_id);
-        pushes += await sendExpoPush(tokens, {
+        const recipients = await creatorRecipients(admin, creatorId, campaign.company_id);
+        pushes += await sendPush(admin, recipients, {
           title: 'New week is live',
           body: 'Your posts for this week are ready',
-          data: { campaign_id: campaign.id, event: 'published' },
+          data: {
+            campaign_id: campaign.id,
+            company_id: campaign.company_id,
+            event: 'published',
+            deep_link: creatorLink(campaign.company_id, 'home'),
+          },
         });
       }
     }

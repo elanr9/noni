@@ -17,7 +17,7 @@ export default function PostThreadScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      <PostThread companyId={profile.company_id} assignmentId={assignmentId} meId={profile.id} />
+      <PostThread companyId={profile.active_company_id} assignmentId={assignmentId} meId={profile.id} />
     </View>
   );
 }

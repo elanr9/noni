@@ -13,7 +13,7 @@ u as (
   where email = 'REPLACE_ME@example.com'
   limit 1
 )
-insert into public.profiles (id, company_id, role, full_name, onboarded)
+insert into public.profiles (id, active_company_id, role, full_name, onboarded)
 select
   u.user_id,
   fv.company_id,
@@ -23,6 +23,6 @@ select
 from u, fv
 on conflict (id) do update
 set
-  company_id = excluded.company_id,
+  active_company_id = excluded.active_company_id,
   role = excluded.role,
   onboarded = excluded.onboarded;

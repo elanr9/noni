@@ -1,15 +1,12 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import {
   Alert,
-  Animated,
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CampaignPill, CompanyMark, WAIT_RED, WaitBadge } from '../../../components/shared';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
@@ -30,7 +28,12 @@ import {
 } from '../../../lib/admin-api';
 import { modesForProfile } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
-import { getCompany, saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
+import {
+  fetchCreatorEarningsByCompany,
+  type CreatorCompanyEarnings,
+} from '../../../lib/companies-api';
+import { useCompany } from '../../../lib/company-context';
+import { saveCreatorBasics, uploadAvatar } from '../../../lib/onboarding';
 import {
   formatHandle,
   parseSocialAccount,
@@ -39,11 +42,10 @@ import {
 } from '../../../lib/social-accounts';
 import { contactSupport } from '../../../lib/support';
 import { supabase } from '../../../lib/supabase';
-import { formatCents, getOrCreateWallet } from '../../../lib/wallet-api';
+import { formatCents } from '../../../lib/wallet-api';
 import {
   borderWidth,
   color,
-  motion,
   radius,
   shadow,
   space,
@@ -110,16 +112,13 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { profile, refreshProfile, setActiveMode, signOut } = useAuth();
+  const { active, companies, summary, switchTo, switching } = useCompany();
 
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
-  const [companyName, setCompanyName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const [availableCents, setAvailableCents] = useState<number | null>(null);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
-
-  const pop = useRef(new Animated.Value(0)).current;
+  const [earnings, setEarnings] = useState<CreatorCompanyEarnings[]>([]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -131,36 +130,21 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  const loadWallet = useCallback(async () => {
-    if (!profile?.id || !profile.company_id) return;
+  const loadEarnings = useCallback(async () => {
+    if (!profile?.id) return;
     try {
-      const w = await getOrCreateWallet(profile.company_id, profile.id);
-      setAvailableCents(w.available_cents);
+      setEarnings(await fetchCreatorEarningsByCompany());
     } catch {
-      setAvailableCents(null);
+      setEarnings([]);
     }
-  }, [profile?.id, profile?.company_id]);
+  }, [profile?.id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {
       void loadStatus();
-      void loadWallet();
-    }, [loadStatus, loadWallet]),
+      void loadEarnings();
+    }, [loadStatus, loadEarnings]),
   );
-
-  useEffect(() => {
-    const companyId = profile?.company_id;
-    if (!companyId) return;
-    let cancelled = false;
-    void getCompany(companyId)
-      .then((company) => {
-        if (!cancelled) setCompanyName(company.name);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.company_id]);
 
   useEffect(() => {
     const path = profile?.avatar_path;
@@ -180,17 +164,6 @@ export default function ProfileScreen() {
     };
   }, [profile?.avatar_path]);
 
-  function openSwitcher() {
-    setSwitcherOpen(true);
-    pop.setValue(0);
-    Animated.timing(pop, {
-      toValue: 1,
-      duration: motion.fast,
-      easing: motion.easeOut,
-      useNativeDriver: true,
-    }).start();
-  }
-
   async function pickAvatar() {
     if (!profile || avatarBusy) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -207,7 +180,7 @@ export default function ProfileScreen() {
     if (result.canceled || !result.assets[0]) return;
     setAvatarBusy(true);
     try {
-      const path = await uploadAvatar(profile.company_id, profile.id, result.assets[0].uri);
+      const path = await uploadAvatar(profile.active_company_id, profile.id, result.assets[0].uri);
       await saveCreatorBasics(profile.id, profile.full_name ?? '', path);
       await refreshProfile();
     } catch (e) {
@@ -218,7 +191,6 @@ export default function ProfileScreen() {
   }
 
   async function switchToManager() {
-    setSwitcherOpen(false);
     try {
       await setActiveMode('admin');
     } catch (e) {
@@ -262,18 +234,14 @@ export default function ProfileScreen() {
   const initial = name.charAt(0).toUpperCase();
   const publicHandle = instagram.handle ?? tiktok.handle;
   const handle = publicHandle !== null ? formatHandle(publicHandle) : null;
-  const company = companyName ?? 'Your company';
-  const companyInitial = company.charAt(0).toUpperCase();
+  const company = active?.name ?? 'Your company';
+  const totalRow = earnings.find((e) => e.isTotal) ?? null;
+  const earnedByCompany = new Map(
+    earnings.filter((e) => e.companyId !== null).map((e) => [e.companyId as string, e.earnedCents]),
+  );
+  const campaignCount = companies.length;
   const canManage = modesForProfile(profile).includes('admin');
   const version = Constants.expoConfig?.version ?? '1.0.0';
-
-  const popStyle = {
-    opacity: pop,
-    transform: [
-      { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
-      { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) },
-    ],
-  };
 
   return (
     <View style={styles.screen}>
@@ -285,23 +253,7 @@ export default function ProfileScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Switch role"
-          onPress={openSwitcher}
-          style={styles.rolePill}
-        >
-          <View style={styles.roleTile}>
-            <Text style={styles.roleTileText}>{companyInitial}</Text>
-          </View>
-          <Text numberOfLines={1} style={styles.rolePillText}>
-            Creator
-          </Text>
-          <View style={styles.chevrons}>
-            <Icon name="chevron-up" size={11} color={color.slate400} />
-            <Icon name="chevron-down" size={11} color={color.slate400} />
-          </View>
-        </PressableScale>
+        <CampaignPill />
 
         <View style={styles.identity}>
           <PressableScale
@@ -347,16 +299,72 @@ export default function ProfileScreen() {
           style={styles.earningsCard}
         >
           <View style={styles.earningsText}>
-            <Text style={styles.earningsLabel}>CURRENT EARNINGS</Text>
+            <Text style={styles.earningsLabel}>TOTAL EARNINGS, ALL CAMPAIGNS</Text>
             <Text style={styles.earningsAmount}>
-              {availableCents !== null ? formatCents(availableCents) : '$0.00'}
+              {formatCents(totalRow?.earnedCents ?? 0)}
             </Text>
-            <Text style={styles.earningsSub}>Payments coming soon</Text>
+            <Text style={styles.earningsSub}>
+              {`${campaignCount} ${campaignCount === 1 ? 'campaign' : 'campaigns'} · payments coming soon`}
+            </Text>
           </View>
           <View style={styles.earningsChevron}>
             <Icon name="chevron-right" size={18} color={color.ink} />
           </View>
         </PressableScale>
+
+        <View style={styles.group}>
+          <Text style={styles.groupLabel}>Your campaigns</Text>
+          <GroupCard>
+            {companies.map((c, i) => {
+              const here = c.companyId === active?.companyId;
+              const status = summary[c.companyId];
+              const waiting = status?.waiting ?? 0;
+              const roleLabel = c.role === 'creator' ? 'Creator' : 'Campaign manager';
+              const line = status ? `${roleLabel} · ${status.line}` : roleLabel;
+              return (
+                <PressableScale
+                  key={c.companyId}
+                  accessibilityRole="button"
+                  accessibilityLabel={here ? `${c.name}, current campaign` : `Switch to ${c.name}`}
+                  disabled={here || switching}
+                  onPress={() => void switchTo(c.companyId)}
+                  style={[styles.row, i < companies.length - 1 && styles.rowBorder]}
+                >
+                  <CompanyMark
+                    companyId={c.companyId}
+                    name={c.name}
+                    logoPath={c.logoPath}
+                    size={40}
+                  />
+                  <View style={styles.rowText}>
+                    <View style={styles.campaignTitleRow}>
+                      <Text numberOfLines={1} style={styles.campaignName}>
+                        {c.name}
+                      </Text>
+                      {here && (
+                        <View style={styles.hereChip}>
+                          <Text style={styles.hereChipText}>Here</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.rowSub, waiting > 0 && styles.rowSubWaiting]}
+                    >
+                      {line}
+                    </Text>
+                  </View>
+                  <View style={styles.campaignRight}>
+                    <Text style={styles.campaignEarned}>
+                      {formatCents(earnedByCompany.get(c.companyId) ?? 0)}
+                    </Text>
+                    <WaitBadge count={waiting} size={18} />
+                  </View>
+                </PressableScale>
+              );
+            })}
+          </GroupCard>
+        </View>
 
         <View style={styles.group}>
           <Text style={styles.groupLabel}>Your accounts</Text>
@@ -473,54 +481,6 @@ export default function ProfileScreen() {
           {`Signed in as creator · ${company} · Noni ${version}`}
         </Text>
       </ScrollView>
-
-      {switcherOpen && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close role switcher"
-          style={styles.popScrim}
-          onPress={() => setSwitcherOpen(false)}
-        >
-          <Animated.View
-            style={[
-              styles.popover,
-              shadow.shadowRaised,
-              { top: insets.top + 56 },
-              popStyle,
-            ]}
-          >
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Creator, current role"
-              onPress={() => setSwitcherOpen(false)}
-              style={styles.popRow}
-            >
-              <View style={styles.roleTile}>
-                <Text style={styles.roleTileText}>{companyInitial}</Text>
-              </View>
-              <Text numberOfLines={1} style={styles.popRowText}>
-                Creator
-              </Text>
-              <Icon name="check" size={16} color={color.accent} />
-            </PressableScale>
-            {canManage && (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Switch to Campaign Manager"
-                onPress={() => void switchToManager()}
-                style={[styles.popRow, styles.popRowBorder]}
-              >
-                <View style={styles.roleTile}>
-                  <Text style={styles.roleTileText}>{companyInitial}</Text>
-                </View>
-                <Text numberOfLines={1} style={styles.popRowText}>
-                  Campaign Manager
-                </Text>
-              </PressableScale>
-            )}
-          </Animated.View>
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -537,40 +497,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingBottom: 130,
     gap: space[6],
-  },
-  rolePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: space[2],
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-    maxWidth: '86%',
-  },
-  roleTile: {
-    width: 24,
-    height: 24,
-    borderRadius: 7,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleTileText: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.heavy,
-    color: color.blue700,
-  },
-  rolePillText: {
-    flexShrink: 1,
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  chevrons: {
-    alignItems: 'center',
-    marginVertical: -2,
   },
   identity: {
     flexDirection: 'row',
@@ -720,6 +646,40 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.regular,
     color: color.slate500,
   },
+  rowSubWaiting: {
+    color: WAIT_RED,
+  },
+  campaignTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  campaignName: {
+    flexShrink: 1,
+    fontSize: 16,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  hereChip: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    backgroundColor: color.blue100,
+  },
+  hereChipText: {
+    fontSize: 11,
+    fontWeight: type.weight.bold,
+    color: color.blue700,
+  },
+  campaignRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  campaignEarned: {
+    fontSize: 15,
+    fontWeight: type.weight.bold,
+    color: color.green,
+  },
   badge: {
     minWidth: 22,
     height: 22,
@@ -771,36 +731,5 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.semibold,
     color: color.slate300,
     marginTop: -space[2],
-  },
-  popScrim: {
-    ...StyleSheet.absoluteFill,
-  },
-  popover: {
-    position: 'absolute',
-    left: space.gutter,
-    right: space.gutter + 40,
-    borderRadius: radius.md,
-    backgroundColor: color.white,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    overflow: 'hidden',
-  },
-  popRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-  },
-  popRowBorder: {
-    borderTopWidth: borderWidth.hair,
-    borderTopColor: color.line,
-  },
-  popRowText: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.ink,
   },
 });

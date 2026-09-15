@@ -211,15 +211,15 @@ export default function AssignmentDetailScreen() {
       setLoading(false);
       return;
     }
-    if (!profile?.company_id) return;
+    if (!profile?.active_company_id) return;
     try {
-      setAssignment(await getAssignment(profile.company_id, id));
+      setAssignment(await getAssignment(profile.active_company_id, id));
     } catch {
       setAssignment(null);
     } finally {
       setLoading(false);
     }
-  }, [id, profile?.company_id]);
+  }, [id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {

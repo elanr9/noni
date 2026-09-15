@@ -102,7 +102,7 @@ export default function CreatorChannelScreen() {
       await setChatMuted({
         chatId,
         profileId: profile.id,
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         muted: next,
       });
     } catch (e) {
@@ -116,9 +116,9 @@ export default function CreatorChannelScreen() {
     if (!profile || !chatId) return;
     try {
       const [info, rows, team] = await Promise.all([
-        getManagerChat(profile.company_id, profile.id, chatId),
+        getManagerChat(profile.active_company_id, profile.id, chatId),
         listManagerMessages(chatId),
-        listTeam(profile.company_id),
+        listTeam(profile.active_company_id),
       ]);
       setChat(info);
       setMessages(rows);
@@ -160,7 +160,7 @@ export default function CreatorChannelScreen() {
     setSending(true);
     try {
       await sendManagerMessage({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         authorId: profile.id,
         body,
@@ -187,14 +187,14 @@ export default function CreatorChannelScreen() {
     setSending(true);
     try {
       const mediaPath = await uploadManagerChatMedia({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         localUri,
         mime,
         ext,
       });
       await sendManagerMessage({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         authorId: profile.id,
         body: extra?.caption ?? '',

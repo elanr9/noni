@@ -177,7 +177,7 @@ export function LibraryPickerSheet({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType | null>(null);
 
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,7 +249,7 @@ export function LibraryPickerSheet({
       const marked =
         selected.kind === 'item'
           ? markLibraryItemUsed(selected.item)
-          : markOurPostUsed(profile.company_id, profile.id, selected.post);
+          : markOurPostUsed(profile.active_company_id, profile.id, selected.post);
       marked.catch(() => undefined);
     }
 

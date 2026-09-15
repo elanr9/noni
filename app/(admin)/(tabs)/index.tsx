@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AccountRow } from '../../../components/admin/AccountRow';
@@ -13,7 +13,10 @@ import {
   SkeletonLine,
 } from '../../../components/admin/shared';
 import { SubmissionRow } from '../../../components/admin/SubmissionRow';
+import { ContextRow, ElsewhereStrip, WaitBadge } from '../../../components/shared';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { Icon } from '../../../components/ui/Icon';
+import { PressableScale } from '../../../components/ui/PressableScale';
 import {
   latestSubmissionsByAssignment,
   submissionThumbPath,
@@ -26,18 +29,31 @@ import {
   type AccountApprovalItem,
 } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { toAssignmentQueueRow } from '../../../lib/admin-queue-map';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
-import { color, radiusAdmin, type } from '../../../theme/tokens';
+import { color, radiusAdmin, shadow, space } from '../../../theme/tokens';
 
-const SUBTITLE_DEFAULT = 'Approve posts and they will be posted automatically!';
-const SUBTITLE_ONE_LEFT = "One to clear, then you're done for today.";
-const SUBTITLE_CLEARED =
-  'Everything is cleared. Creators are recording the rest of the week.';
-const FOOTER_NOTE =
-  'Reject a single clip and only that clip goes back. The rest stay approved.';
-const MUSIC_INTRO =
-  "Slideshows only. Open the post, check the song is on it, approve. Approval unlocks that post's earnings.";
+/** Clears the floating tab bar (22 bottom + bar height). */
+const LIST_BOTTOM_PAD = 104;
+
+function BellButton({ count, onPress }: { count: number; onPress: () => void }) {
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
+      onPress={onPress}
+      style={[styles.bell, shadow.shadowCard]}
+    >
+      <Icon name="bell" size={19} color={color.ink} />
+      {count > 0 && (
+        <View style={styles.bellBadge}>
+          <WaitBadge count={count} size={18} />
+        </View>
+      )}
+    </PressableScale>
+  );
+}
 
 /** MockQueueItem plus the media-badge facts the row spec needs. */
 type SubmissionQueueRow = {
@@ -115,15 +131,14 @@ function useAdminQueue(companyId: string | undefined): {
 export default function ReviewScreen() {
   const router = useRouter();
   const { profile } = useAuth();
-  const { posts, music, musicMedia, accounts, loading } = useAdminQueue(profile?.company_id);
+  const { openNotifications, unreadNotifications } = useCompany();
+  const { posts, music, musicMedia, accounts, loading } = useAdminQueue(profile?.active_company_id);
   const [lane, setLane] = useState(0);
 
   const pendingAccounts = accounts.filter((a) => a.status !== 'needs_changes');
   const sentBackAccounts = accounts.filter((a) => a.status === 'needs_changes');
 
   const total = posts.length + music.length + pendingAccounts.length;
-  const subtitle =
-    total === 0 ? SUBTITLE_CLEARED : total === 1 ? SUBTITLE_ONE_LEFT : SUBTITLE_DEFAULT;
 
   const openAccount = (accountId: string) =>
     router.push({
@@ -132,48 +147,56 @@ export default function ReviewScreen() {
     });
 
   return (
-    <AdminScreen>
-      <AdminHeader
-        title="Review"
-        pill={
-          loading
-            ? undefined
-            : total === 0
-              ? { label: 'All clear', tone: 'green' }
-              : { label: `${total} waiting`, tone: 'accent' }
-        }
-        subtitle={loading ? undefined : subtitle}
-        trailing={loading ? <SkeletonLine width={84} height={30} /> : undefined}
-      />
+    <AdminScreen scroll={false} contentStyle={styles.screen}>
+      <View>
+        <ContextRow
+          right={<BellButton count={unreadNotifications} onPress={openNotifications} />}
+        />
+        <AdminHeader
+          title="Review"
+          pill={
+            loading
+              ? undefined
+              : total === 0
+                ? { label: 'All clear', tone: 'green' }
+                : { label: `${total} waiting`, tone: 'accent' }
+          }
+          trailing={loading ? <SkeletonLine width={84} height={30} /> : undefined}
+        />
+        <ElsewhereStrip style={styles.strip} />
+        <Segmented
+          options={[
+            { label: 'Posts', count: loading ? undefined : posts.length },
+            { label: 'Music', count: loading ? undefined : music.length },
+            { label: 'Accounts', count: loading ? undefined : pendingAccounts.length },
+          ]}
+          value={lane}
+          onChange={setLane}
+        />
+      </View>
 
-      <Segmented
-        options={[
-          { label: 'Posts', count: loading ? undefined : posts.length },
-          { label: 'Music', count: loading ? undefined : music.length },
-          { label: 'Accounts', count: loading ? undefined : pendingAccounts.length },
-        ]}
-        value={lane}
-        onChange={setLane}
-      />
-
-      {loading ? (
-        <View style={styles.list}>
-          <SkeletonCard height={96} radius={radiusAdmin.lg} />
-          <SkeletonCard height={96} radius={radiusAdmin.lg} />
-          <SkeletonCard height={96} radius={radiusAdmin.lg} />
-          <SkeletonCard height={96} radius={radiusAdmin.lg} />
-        </View>
-      ) : lane === 0 ? (
-        posts.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title="Nothing to review"
-            body="Creators are recording this week's posts. New submissions land here, newest first."
-            style={styles.empty}
-          />
-        ) : (
-          <View style={styles.list}>
-            {posts.map((row) => (
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading ? (
+          <>
+            <SkeletonCard height={96} radius={radiusAdmin.lg} />
+            <SkeletonCard height={96} radius={radiusAdmin.lg} />
+            <SkeletonCard height={96} radius={radiusAdmin.lg} />
+            <SkeletonCard height={96} radius={radiusAdmin.lg} />
+          </>
+        ) : lane === 0 ? (
+          posts.length === 0 ? (
+            <EmptyState
+              icon="inbox"
+              title="Nothing to review"
+              body="Nothing from your creators right now."
+              style={styles.empty}
+            />
+          ) : (
+            posts.map((row) => (
               <SubmissionRow
                 key={row.item.id}
                 item={row.item}
@@ -182,91 +205,96 @@ export default function ReviewScreen() {
                 unitCount={row.unitCount}
                 onPress={() => router.push(`/(admin)/review/${row.item.id}`)}
               />
-            ))}
-            <Text style={styles.footerNote}>{FOOTER_NOTE}</Text>
-          </View>
-        )
-      ) : lane === 1 ? (
-        music.length === 0 ? (
-          <EmptyState
-            icon="music-2"
-            title="No songs waiting"
-            body="Creators tap Music added once the track is on a live slideshow. It lands here."
-            style={styles.empty}
-          />
-        ) : (
-          <View style={styles.list}>
-            <Text style={styles.musicIntro}>{MUSIC_INTRO}</Text>
-            {music.map((item) => (
+            ))
+          )
+        ) : lane === 1 ? (
+          music.length === 0 ? (
+            <EmptyState
+              icon="music-2"
+              title="No songs waiting"
+              body="Nothing from your creators right now."
+              style={styles.empty}
+            />
+          ) : (
+            music.map((item) => (
               <MusicApprovalRow
                 key={item.assignment.id}
                 item={item}
                 mediaPath={musicMedia.get(item.assignment.id) ?? null}
                 onPress={() => router.push(`/(admin)/music/${item.assignment.id}`)}
               />
+            ))
+          )
+        ) : accounts.length === 0 ? (
+          <EmptyState
+            icon="circle-user-round"
+            title="No accounts to approve"
+            body="Every creator on the roster is linked."
+            style={styles.empty}
+          />
+        ) : (
+          <>
+            {pendingAccounts.map((account) => (
+              <AccountRow
+                key={account.id}
+                account={account}
+                onPress={() => openAccount(account.id)}
+              />
             ))}
-          </View>
-        )
-      ) : accounts.length === 0 ? (
-        <EmptyState
-          icon="circle-user-round"
-          title="No accounts to approve"
-          body="Every creator on the roster is linked. New creators show up here after they upload their warm-up proof."
-          style={styles.empty}
-        />
-      ) : (
-        <View style={styles.list}>
-          {pendingAccounts.map((account) => (
-            <AccountRow
-              key={account.id}
-              account={account}
-              onPress={() => openAccount(account.id)}
-            />
-          ))}
-          {sentBackAccounts.length > 0 && (
-            <>
-              <SectionLabel style={styles.sectionLabel}>Sent back</SectionLabel>
-              {sentBackAccounts.map((account) => (
-                <AccountRow
-                  key={account.id}
-                  account={account}
-                  onPress={() => openAccount(account.id)}
-                />
-              ))}
-            </>
-          )}
-        </View>
-      )}
+            {sentBackAccounts.length > 0 && (
+              <>
+                <SectionLabel style={styles.sectionLabel}>Sent back</SectionLabel>
+                {sentBackAccounts.map((account) => (
+                  <AccountRow
+                    key={account.id}
+                    account={account}
+                    onPress={() => openAccount(account.id)}
+                  />
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
     </AdminScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  list: {
+  screen: {
+    paddingHorizontal: space.gutterAdmin,
+  },
+  strip: {
+    marginBottom: 14,
+  },
+  scroll: {
+    flex: 1,
     marginTop: 14,
-    gap: 10,
+    marginHorizontal: -space.gutterAdmin,
+  },
+  list: {
+    gap: 12,
+    paddingHorizontal: space.gutterAdmin,
+    paddingBottom: LIST_BOTTOM_PAD,
   },
   sectionLabel: {
     marginTop: 10,
     marginBottom: 2,
   },
-  musicIntro: {
-    marginTop: 2,
-    marginHorizontal: 2,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * 1.45,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
+  bell: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.white,
   },
-  footerNote: {
-    marginTop: 6,
-    marginHorizontal: 2,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * 1.45,
-    fontWeight: type.weight.regular,
-    color: color.slate400,
+  bellBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
   },
   empty: {
-    marginTop: 40,
+    marginTop: 30,
   },
 });

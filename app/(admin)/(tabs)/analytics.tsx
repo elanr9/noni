@@ -36,6 +36,7 @@ import {
   Thumb,
 } from "../../../components/admin/shared";
 import { CreatorsPill } from "../../../components/admin/insights/CreatorsPill";
+import { ContextRow } from "../../../components/shared";
 import { Button } from "../../../components/ui/Button";
 import { Icon } from "../../../components/ui/Icon";
 import { PressableScale } from "../../../components/ui/PressableScale";
@@ -733,11 +734,11 @@ export default function AnalyticsScreen() {
     if (!profile) return;
     try {
       const [analytics, connectedAt, approved] = await Promise.all([
-        fetchCompanyAnalytics(profile.company_id),
+        fetchCompanyAnalytics(profile.active_company_id),
         // Managers without the billing permission fall back on the first
         // completed payout: money can only exist after Stripe connected.
         getStripeConnectedAt().catch(() => null),
-        listApprovedCreators(profile.company_id).catch(
+        listApprovedCreators(profile.active_company_id).catch(
           (): ApprovedCreator[] => [],
         ),
         refreshManagerAccess().catch(() => undefined),
@@ -953,6 +954,18 @@ export default function AnalyticsScreen() {
         />
       }
     >
+      <ContextRow
+        right={
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => router.push("/(admin)/(tabs)/settings")}
+            style={[styles.gearBtn, shadow.shadowCard]}
+          >
+            <Icon name="settings" size={19} color={color.slate500} />
+          </PressableScale>
+        }
+      />
       <AdminHeader
         title="Analytics"
         trailing={
@@ -986,14 +999,6 @@ export default function AnalyticsScreen() {
                 ))}
               </View>
             )}
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Settings"
-              onPress={() => router.push("/(admin)/(tabs)/settings")}
-              style={[styles.gearBtn, shadow.shadowCard]}
-            >
-              <Icon name="settings" size={19} color={color.slate500} />
-            </PressableScale>
           </View>
         }
       />

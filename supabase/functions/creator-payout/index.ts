@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
 
     const { data: profile } = await admin
       .from('profiles')
-      .select('id, company_id, role')
+      .select('id, active_company_id, role')
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!profile || profile.role !== 'creator') {
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     const { data: wallet } = await admin
       .from('creator_wallets')
       .select('*')
-      .eq('company_id', profile.company_id)
+      .eq('company_id', profile.active_company_id)
       .eq('creator_id', profile.id)
       .maybeSingle();
     if (!wallet) {
@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     const { data: payout, error: payoutError } = await admin
       .from('payouts')
       .insert({
-        company_id: profile.company_id,
+        company_id: profile.active_company_id,
         creator_id: profile.id,
         amount_cents: amountCents,
         status: 'pending',
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     if (payoutError) throw payoutError;
 
     const { error: holdError } = await admin.from('wallet_ledger').insert({
-      company_id: profile.company_id,
+      company_id: profile.active_company_id,
       creator_id: profile.id,
       kind: 'payout_hold',
       amount_cents: -amountCents,
@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
         destination: wallet.stripe_connect_account_id,
         metadata: {
           payout_id: payout.id,
-          company_id: profile.company_id,
+          company_id: profile.active_company_id,
           creator_id: profile.id,
         },
       });
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
         })
         .eq('id', wallet.id);
       await admin.from('wallet_ledger').insert({
-        company_id: profile.company_id,
+        company_id: profile.active_company_id,
         creator_id: profile.id,
         kind: 'payout_failed',
         amount_cents: amountCents,

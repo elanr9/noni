@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../../lib/tasks-api';
 import { color, radius, type } from '../../theme/tokens';
 import { usePostThumb } from '../admin/creator/useVideoThumb';
-import { Button } from '../ui/Button';
+import { Button, type ButtonProps } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { MediaCard } from '../ui/MediaCard';
 import { PressableScale } from '../ui/PressableScale';
@@ -111,6 +111,24 @@ export interface PostCardProps {
   onFix: () => void;
   /** Changes-requested chip and See feedback both land in messages. */
   onFeedback: () => void;
+  /** When set, Record/Fix renders disabled with this note; the press still reaches onRecord/onFix. */
+  lockedReason?: string | null;
+}
+
+function LockableButton({
+  locked,
+  onPress,
+  style,
+  ...button
+}: Omit<ButtonProps, 'disabled'> & { locked: boolean }) {
+  if (!locked) return <Button {...button} onPress={onPress} style={style} />;
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={style}>
+      <View style={styles.passThrough}>
+        <Button {...button} disabled style={styles.passThroughButton} />
+      </View>
+    </Pressable>
+  );
 }
 
 function StatusPill({ label, fg, bg }: { label: string; fg: string; bg: string }) {
@@ -136,7 +154,9 @@ export function PostCard({
   onSee,
   onFix,
   onFeedback,
+  lockedReason = null,
 }: PostCardProps) {
+  const locked = lockedReason !== null;
   const brief = assignment.briefs;
   const slideshow = brief.format === 'photo_carousel';
   const typeMeta = usePostTypeMeta(brief.post_type_id);
@@ -169,21 +189,25 @@ export function PostCard({
       onPress={onOpen}
     >
       {assigned && (
-        <View style={styles.footerRow}>
-          <Button
-            variant="primary"
-            size="lg"
-            icon={slideshow ? 'images' : 'video'}
-            onPress={onRecord}
-            style={styles.grow}
-          >
-            {slideshow ? 'Create' : 'Record'}
-          </Button>
-          {showSwap && (
-            <Button variant="tint" size="lg" icon="rotate-ccw" onPress={onSwap}>
-              Swap
-            </Button>
-          )}
+        <View style={styles.changesCol}>
+          <View style={styles.footerRow}>
+            <LockableButton
+              locked={locked}
+              variant="primary"
+              size="lg"
+              icon={slideshow ? 'images' : 'video'}
+              onPress={onRecord}
+              style={styles.grow}
+            >
+              {slideshow ? 'Create' : 'Record'}
+            </LockableButton>
+            {showSwap && (
+              <Button variant="tint" size="lg" icon="rotate-ccw" onPress={onSwap}>
+                Swap
+              </Button>
+            )}
+          </View>
+          {locked ? <Text style={styles.lockedNote}>{lockedReason}</Text> : null}
         </View>
       )}
 
@@ -241,9 +265,15 @@ export function PostCard({
             </PressableScale>
           </View>
           <View style={styles.footerRow}>
-            <Button variant="primary" size="md" onPress={onFix} style={styles.grow}>
+            <LockableButton
+              locked={locked}
+              variant="primary"
+              size="md"
+              onPress={onFix}
+              style={styles.grow}
+            >
               Fix it
-            </Button>
+            </LockableButton>
             <Button
               variant="tint"
               size="md"
@@ -254,6 +284,7 @@ export function PostCard({
               See feedback
             </Button>
           </View>
+          {locked ? <Text style={styles.lockedNote}>{lockedReason}</Text> : null}
         </View>
       )}
     </MediaCard>
@@ -300,5 +331,17 @@ const styles = StyleSheet.create({
     fontSize: type.size.chip,
     fontWeight: type.weight.semibold,
     color: color.slate500,
+  },
+  lockedNote: {
+    fontSize: type.size.chip,
+    fontWeight: type.weight.semibold,
+    color: color.slate500,
+    textAlign: 'center',
+  },
+  passThrough: {
+    pointerEvents: 'none',
+  },
+  passThroughButton: {
+    alignSelf: 'stretch',
   },
 });

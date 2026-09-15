@@ -93,7 +93,7 @@ export default function ManagerSetupScreen() {
     if (!profile || alreadyComplete) return;
     await refreshManagerAccess();
     const next = await fetchManagerSetupState(
-      profile.company_id,
+      profile.active_company_id,
       profile.onboarding_answers,
     );
     setState(next);
@@ -120,7 +120,7 @@ export default function ManagerSetupScreen() {
     if (!profile) return;
     setInviteSending(true);
     try {
-      await inviteCreator(profile.company_id, name, email);
+      await inviteCreator(profile.active_company_id, name, email);
       await markCreatorInvited(profile.id).catch(() => undefined);
       setInviteOpen(false);
       Alert.alert('Invite sent', `${name} will get an email at ${email}.`);

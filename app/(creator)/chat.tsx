@@ -108,7 +108,7 @@ export default function CreatorChat() {
   const scrollRef = useRef<ScrollView>(null);
   const didInitialScroll = useRef(false);
 
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
   const creatorId = profile?.id ?? null;
 
   const threadSeq = useRef(0);
@@ -204,13 +204,13 @@ export default function CreatorChat() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
     try {
       await sendMessage({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         creatorId: profile.id,
         authorId: profile.id,
         body,
       });
       threadSeq.current += 1;
-      setMessages(await listThread(profile.company_id, profile.id));
+      setMessages(await listThread(profile.active_company_id, profile.id));
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setDraft(body);

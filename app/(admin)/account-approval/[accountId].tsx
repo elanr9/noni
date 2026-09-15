@@ -61,7 +61,7 @@ export default function AccountApprovalScreen() {
   const load = useCallback(async () => {
     if (!profile || !accountId) return;
     try {
-      const row = await fetchAccountApprovalItem(profile.company_id, accountId);
+      const row = await fetchAccountApprovalItem(profile.active_company_id, accountId);
       const sign = (path: string | null) =>
         path !== null ? signedVerificationUrl(path).catch(() => null) : Promise.resolve(null);
       const [instagramRecording, tiktokRecording, instagramScreenshot, tiktokScreenshot] =
@@ -160,7 +160,7 @@ export default function AccountApprovalScreen() {
       setBusy(true);
       try {
         await decideAccount({
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           accountId: account.id,
           adminId: profile.id,
           status,

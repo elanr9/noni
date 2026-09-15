@@ -37,12 +37,12 @@ export default function AdminCreatorChat() {
     void (async () => {
       const [{ data: creator }, account, muted] = await Promise.all([
         supabase
-          .from('profiles')
+          .from('company_roster')
           .select('full_name')
-          .eq('company_id', profile.company_id)
+          .eq('company_id', profile.active_company_id)
           .eq('id', creatorId)
           .maybeSingle(),
-        getCreatorAccount(profile.company_id, creatorId).catch(() => null),
+        getCreatorAccount(profile.active_company_id, creatorId).catch(() => null),
         isCreatorThreadMuted(creatorId, profile.id).catch(() => false),
       ]);
       if (cancelled) return;
@@ -65,7 +65,7 @@ export default function AdminCreatorChat() {
       await setCreatorThreadMuted({
         creatorId,
         profileId: profile.id,
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         muted: next,
       });
     } catch (e) {
@@ -81,7 +81,7 @@ export default function AdminCreatorChat() {
       <Stack.Screen options={{ headerShown: false }} />
       {header !== null && (
         <CreatorThread
-          companyId={profile.company_id}
+          companyId={profile.active_company_id}
           creatorId={creatorId}
           meId={profile.id}
           creatorName={header.name}

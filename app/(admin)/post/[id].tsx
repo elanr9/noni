@@ -170,14 +170,14 @@ export default function PostEditorScreen() {
 
   /* Shared library and Company Brain shots load once so the picker opens instantly. */
   useEffect(() => {
-    if (!profile?.company_id) return;
-    void listNoniLibrary(profile.company_id)
+    if (!profile?.active_company_id) return;
+    void listNoniLibrary(profile.active_company_id)
       .then(setNoniLibrary)
       .catch(() => setNoniLibrary([]));
-    void listMediaLibrary(profile.company_id)
+    void listMediaLibrary(profile.active_company_id)
       .then(setMediaLibrary)
       .catch(() => setMediaLibrary([]));
-  }, [profile?.company_id]);
+  }, [profile?.active_company_id]);
 
   const [title, setTitle] = useState('');
   /** The type on the row or picked here; null on a fresh stamped row. */
@@ -647,7 +647,7 @@ export default function PostEditorScreen() {
     if (!profile || !id || !pointMedia.some(Boolean)) return rows;
     pendingPointMedia.current = [];
     const placed = await applyPointMedia({
-      companyId: profile.company_id,
+      companyId: profile.active_company_id,
       briefId: id,
       rows,
       pointMedia,
@@ -680,7 +680,7 @@ export default function PostEditorScreen() {
     setPortBusyId(targetTypeId);
     try {
       const slotId = await ensureSlot({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         createdBy: profile.id,
         campaignId,
         family: targetFamily,
@@ -692,7 +692,7 @@ export default function PostEditorScreen() {
         postTypeKey: target.key,
         family: targetFamily,
         source: { kind: 'port', sourceBriefId: id },
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
       });
       if (result.kind === 'kill') {
         Alert.alert('Generation refused', result.kill_reason);
@@ -722,7 +722,7 @@ export default function PostEditorScreen() {
         postTypeKey: currentType.key,
         family,
         source,
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         keep: {
           title,
           searchPhrase,
@@ -737,7 +737,7 @@ export default function PostEditorScreen() {
       }
       if (source.kind === 'idea') {
         void saveTypedIdea({
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           userId: profile.id,
           text: source.text,
           briefId: id,
@@ -918,7 +918,7 @@ export default function PostEditorScreen() {
     }
     setShotBusyIndex(pointIndex);
     try {
-      const target = { companyId: profile.company_id, briefId: id, segmentId: segment.id };
+      const target = { companyId: profile.active_company_id, briefId: id, segmentId: segment.id };
       let path: string;
       if (pick.source === 'library') {
         path = await placeLibraryItemOnSegment({ ...target, item: pick.item });
@@ -928,7 +928,7 @@ export default function PostEditorScreen() {
         path = await uploadSegmentMedia({ ...target, media: pick.media });
         if (pick.saveToLibrary) {
           void copySegmentMediaToLibrary({
-            companyId: profile.company_id,
+            companyId: profile.active_company_id,
             createdBy: profile.id,
             segmentPath: path,
             media: pick.media,
@@ -1622,7 +1622,7 @@ export default function PostEditorScreen() {
       {profile ? (
         <CameraRollSheet
           visible={shotPickerIndex !== null}
-          companyId={profile.company_id}
+          companyId={profile.active_company_id}
           userId={profile.id}
           allowRecordings={family === 'video'}
           screenshotsOnly={family === 'photo_carousel'}

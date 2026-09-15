@@ -78,8 +78,8 @@ export default function AccountSetupScreen() {
     if (!profile) return;
     try {
       const [row, tpl] = await Promise.all([
-        getCreatorAccount(profile.company_id, profile.id),
-        getAccountTemplate(profile.company_id).catch(() => null),
+        getCreatorAccount(profile.active_company_id, profile.id),
+        getAccountTemplate(profile.active_company_id).catch(() => null),
       ]);
       setAccount(row);
       setTemplate(tpl);
@@ -159,7 +159,7 @@ export default function AccountSetupScreen() {
         paths[slot.kind] =
           local !== undefined
             ? await uploadVerificationAsset({
-                companyId: profile.company_id,
+                companyId: profile.active_company_id,
                 creatorId: profile.id,
                 kind: slot.kind,
                 localUri: local,
@@ -168,7 +168,7 @@ export default function AccountSetupScreen() {
             : existingPath(account, slot.kind) ?? '';
       }
       await saveCreatorAccountDraft({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         creatorId: profile.id,
         tiktokHandle: tiktokHandle.trim().replace(/^@/, ''),
         instagramHandle: instagramHandle.trim().replace(/^@/, ''),

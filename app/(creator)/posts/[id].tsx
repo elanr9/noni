@@ -87,9 +87,9 @@ export default function PostDetailScreen() {
       setLoading(false);
       return;
     }
-    if (!profile?.company_id) return;
+    if (!profile?.active_company_id) return;
     try {
-      const row = await getAssignment(profile.company_id, id);
+      const row = await getAssignment(profile.active_company_id, id);
       setAssignment(row);
       if (row !== null) {
         const account = await getCreatorAccount(row.company_id, profile.id);
@@ -103,7 +103,7 @@ export default function PostDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, profile?.id, profile?.company_id]);
+  }, [id, profile?.id, profile?.active_company_id]);
 
   useFocusEffect(
     useCallback(() => {

@@ -66,7 +66,7 @@ export default function AdminCreatorPostDetail() {
   const load = useCallback(async () => {
     if (!profile || !assignmentId) return;
     try {
-      const detail = await fetchAssignmentPostDetail(profile.company_id, assignmentId);
+      const detail = await fetchAssignmentPostDetail(profile.active_company_id, assignmentId);
       setData(detail);
       if (detail.assignment.briefs.format === 'video' && detail.submission) {
         setVideoUri(await signedVideoUrl(detail.submission.video_path));

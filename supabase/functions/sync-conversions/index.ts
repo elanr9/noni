@@ -15,6 +15,7 @@ import {
   handleCors,
   jsonResponse,
 } from '../_shared/wp8.ts';
+import { isManagerOf } from '../_shared/membership.ts';
 
 const PAGE_SIZE = 1000;
 
@@ -215,7 +216,10 @@ Deno.serve(async (req) => {
     }
 
     const companyId = await resolveCompanyId();
-    if (caller.kind === 'user' && caller.companyId !== companyId) {
+    if (
+      caller.kind === 'user' &&
+      !(await isManagerOf(admin, caller.userId, companyId, caller.platformAdmin))
+    ) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 

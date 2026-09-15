@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,10 @@ export interface SheetProps {
   footer?: ReactNode;
   /** Pins the panel top this far from the top of the screen (tall sheets). */
   pinnedTop?: number;
+  /** Fires once the close animation has finished and the panel is gone. */
+  onClosed?: () => void;
+  /** Header content rendered instead of title/subtitle. Drag to dismiss works on it too. */
+  header?: ReactNode;
 }
 
 /**
@@ -41,15 +46,47 @@ export function Sheet({
   children,
   footer,
   pinnedTop,
+  onClosed,
+  header,
 }: SheetProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const [shown, setShown] = useState(visible);
   const progress = useRef(new Animated.Value(0)).current;
+  const drag = useRef(new Animated.Value(0)).current;
+  const onCloseRef = useRef(onClose);
+  const onClosedRef = useRef(onClosed);
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    onClosedRef.current = onClosed;
+  }, [onClose, onClosed]);
+
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_e, g) => drag.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_e, g) => {
+        if (g.dy > 90 || g.vy > 1.2) {
+          drag.setValue(0);
+          onCloseRef.current();
+          return;
+        }
+        Animated.timing(drag, {
+          toValue: 0,
+          duration: motion.fast,
+          easing: motion.easeOut,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => drag.setValue(0),
+    }),
+  ).current;
 
   useEffect(() => {
     if (visible) {
+      wasVisible.current = true;
       setShown(true);
       Animated.timing(progress, {
         toValue: 1,
@@ -58,21 +95,32 @@ export function Sheet({
         useNativeDriver: true,
       }).start();
     } else {
+      if (!wasVisible.current) return;
       Animated.timing(progress, {
         toValue: 0,
         duration: motion.base,
         easing: motion.easeOut,
         useNativeDriver: true,
       }).start(({ finished }) => {
-        if (finished) setShown(false);
+        if (finished) {
+          setShown(false);
+          onClosedRef.current?.();
+        }
       });
     }
   }, [visible, progress]);
 
-  const translateY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [height, 0],
-  });
+  const translateY = Animated.add(
+    progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [height, 0],
+    }),
+    drag,
+  );
+  const scrimOpacity = Animated.multiply(
+    progress,
+    drag.interpolate({ inputRange: [0, 400], outputRange: [1, 0.4], extrapolate: 'clamp' }),
+  );
 
   // The panel sits above the keyboard and never grows past the top safe area.
   const available = height - keyboardHeight - insets.top;
@@ -84,7 +132,7 @@ export function Sheet({
   return (
     <Modal visible={shown} transparent statusBarTranslucent animationType="none">
       <View style={styles.root}>
-        <Animated.View style={[styles.scrim, { opacity: progress }]}>
+        <Animated.View style={[styles.scrim, { opacity: scrimOpacity }]}>
           <Pressable
             accessibilityLabel="Close sheet"
             style={StyleSheet.absoluteFill}
@@ -104,8 +152,11 @@ export function Sheet({
             },
           ]}
         >
-          <View style={styles.grabberWrap}>
-            <View style={styles.grabber} />
+          <View {...pan.panHandlers}>
+            <View style={styles.grabberWrap}>
+              <View style={styles.grabber} />
+            </View>
+            {header}
           </View>
 
           {title !== undefined && (
@@ -127,7 +178,10 @@ export function Sheet({
           )}
 
           <ScrollView
-            contentContainerStyle={[styles.body, title === undefined && styles.bodyNoHeader]}
+            contentContainerStyle={[
+              styles.body,
+              title === undefined && header === undefined && styles.bodyNoHeader,
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >

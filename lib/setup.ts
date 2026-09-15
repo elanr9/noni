@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-import { CREATOR_PROFILE_OR } from './active-mode';
+import { CREATOR_ROSTER_OR } from './active-mode';
 import { getSocialConnectStatus, type SocialConnectStatus } from './admin-api';
 import { getCreatorAccount, type CreatorAccount } from './creator-accounts-api';
 import { parseSocialAccount } from './social-accounts';
@@ -106,11 +106,11 @@ export async function refreshSetupState(
 }
 
 export function useSetupState(
-  profile: { id: string; company_id: string } | null,
+  profile: { id: string; active_company_id: string } | null,
 ): { state: SetupState | null; loading: boolean; refresh: () => Promise<void> } {
   const snap = useSyncExternalStore(subscribe, getSnapshot);
   const creatorId = profile?.id ?? null;
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
 
   const refresh = useCallback(async () => {
     if (creatorId === null || companyId === null) return;
@@ -191,10 +191,10 @@ export async function fetchManagerSetupState(
       .eq('company_id', companyId)
       .is('library_item_id', null),
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
-      .or(CREATOR_PROFILE_OR),
+      .or(CREATOR_ROSTER_OR),
   ]);
   return {
     brief: (briefs.count ?? 0) > 0,

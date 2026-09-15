@@ -11,10 +11,11 @@ import {
   spendCompanyCreditsForEarning,
 } from '../_shared/credits.ts';
 import {
-  adminPushTokens,
-  creatorPushTokens,
-  sendExpoPush,
+  adminRecipients,
+  creatorRecipients,
+  sendPush,
 } from '../_shared/push.ts';
+import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -149,11 +150,15 @@ async function notifyCreditsLow(
   companyId: string,
 ): Promise<void> {
   try {
-    const tokens = await adminPushTokens(admin, companyId);
-    await sendExpoPush(tokens, {
+    const recipients = await adminRecipients(admin, companyId);
+    await sendPush(admin, recipients, {
       title: 'Credits low',
       body: 'Add credits to keep paying bounties.',
-      data: { event: 'credits_low', company_id: companyId },
+      data: {
+        event: 'credits_low',
+        company_id: companyId,
+        deep_link: managerLink(companyId, 'settings'),
+      },
     });
   } catch (e) {
     console.error(`credits_low push ${companyId}:`, e);
@@ -171,16 +176,20 @@ async function notifyBountyEarned(
   },
 ): Promise<void> {
   try {
-    const tokens = await creatorPushTokens(
+    const recipients = await creatorRecipients(
       admin,
       params.creatorId,
       params.companyId,
     );
-    await sendExpoPush(tokens, {
+    await sendPush(admin, recipients, {
       title: 'Bounty earned',
       body: `You hit the views goal and earned ${formatCentsDollars(params.creatorNet)}.`,
       data: {
         event: 'bounty_earned',
+        company_id: params.companyId,
+        deep_link: params.assignmentId
+          ? creatorLink(params.companyId, 'assignment', params.assignmentId)
+          : creatorLink(params.companyId, 'home'),
         assignment_id: params.assignmentId,
         post_id: params.postId,
         amount_cents: String(params.creatorNet),
@@ -252,16 +261,18 @@ async function notifyCreatorMilestones(
       body = `Your post just hit ${milestoneLabel(claim.threshold)} views. You earned ${formatCentsDollars(earned)}.`;
     }
     try {
-      const creatorTokens = await creatorPushTokens(
+      const creatorRecipientList = await creatorRecipients(
         admin,
         claim.creatorId,
         companyId,
       );
-      await sendExpoPush(creatorTokens, {
+      await sendPush(admin, creatorRecipientList, {
         title: 'Views milestone',
         body,
         data: {
           event: 'milestone',
+          company_id: companyId,
+          deep_link: creatorLink(companyId, 'posts'),
           post_id: claim.postId,
           assignment_id: claim.assignmentId,
           threshold: String(claim.threshold),
@@ -697,20 +708,24 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
         creatorName.set(c.id as string, (c.full_name as string | null) ?? 'A creator');
       }
     }
-    const tokens = await adminPushTokens(admin, companyId);
+    const recipients = await adminRecipients(admin, companyId);
     for (const claim of topByPost.values()) {
       const name = claim.creatorId
         ? (creatorName.get(claim.creatorId) ?? 'A creator')
         : 'A creator';
       const where = claim.platform ? ` on ${claim.platform}` : '';
       try {
-        await sendExpoPush(tokens, {
+        await sendPush(admin, recipients, {
           title: 'Milestone',
           body: `${name}'s post crossed ${milestoneLabel(claim.threshold)} views${where}.`,
           data: {
             post_id: claim.postId,
             assignment_id: claim.assignmentId,
+            company_id: companyId,
             event: 'milestone',
+            deep_link: claim.assignmentId
+              ? managerLink(companyId, 'review', claim.assignmentId)
+              : managerLink(companyId, 'analytics'),
           },
         });
       } catch (e) {

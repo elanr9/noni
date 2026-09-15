@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   RefreshControl,
   ScrollView,
@@ -10,6 +10,12 @@ import { useRouter, type Href } from 'expo-router';
 import { LayoutGrid } from 'lucide-react-native';
 
 import { MonthGrid } from '../../../components/creator/MonthGrid';
+import {
+  WeekStrip,
+  weekDates,
+  weekStartOf,
+  type WeekStripDay,
+} from '../../../components/creator/WeekStrip';
 import { PostRow } from '../../../components/creator/PostRow';
 import {
   fetchCampaignNames,
@@ -23,14 +29,17 @@ import {
   type CreatorWeek,
 } from '../../../components/creator/posts-shared';
 import { Screen } from '../../../components/layout/Screen';
+import { CampaignPill } from '../../../components/shared';
 import { PostsSkeleton } from '../../../components/states';
 import { Dropdown } from '../../../components/ui/Dropdown';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import {
+  OVERDUE_DOT,
   countOnDate,
   dayKey,
+  isOverdue,
   publishTimeLabel,
   statusDotColor,
   useCreatorQueue,
@@ -124,7 +133,16 @@ export default function PostsScreen() {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
-  const [selectedKey, setSelectedKey] = useState(dayKey(new Date()));
+  const todayKey = dayKey(new Date());
+  const [selectedKey, setSelectedKey] = useState(todayKey);
+  const [weekStart, setWeekStart] = useState(() => weekStartOf(todayKey));
+  const [monthExpanded, setMonthExpanded] = useState(false);
+
+  const selectDate = (date: string) => {
+    setSelectedKey(date);
+    setWeekStart(weekStartOf(date));
+    setCursor(new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, 1));
+  };
   const [campaignNames, setCampaignNames] = useState<Map<string, string>>(
     new Map(),
   );
@@ -179,10 +197,24 @@ export default function PostsScreen() {
     for (const a of assignments) {
       if (!a.scheduled_date.startsWith(monthPrefix)) continue;
       const day = Number(a.scheduled_date.slice(8, 10));
-      (out[day] ??= []).push(statusDotColor(a.status));
+      (out[day] ??= []).push(
+        isOverdue(a, todayKey) ? OVERDUE_DOT : statusDotColor(a.status),
+      );
     }
     return out;
-  }, [assignments, monthPrefix]);
+  }, [assignments, monthPrefix, todayKey]);
+
+  const daysForWeek = useCallback(
+    (start: string): WeekStripDay[] =>
+      weekDates(start).map((date) => ({
+        date,
+        statuses: assignmentsForDate(date).map((a) => ({
+          status: a.status,
+          overdue: isOverdue(a, todayKey),
+        })),
+      })),
+    [assignmentsForDate, todayKey],
+  );
 
   const selectedDayNumber = Number(selectedKey.slice(8, 10));
   const dayItems = assignmentsForDate(selectedKey);
@@ -252,6 +284,7 @@ export default function PostsScreen() {
 
   return (
     <Screen scroll={false} bg={color.offWhite} contentStyle={styles.screenContent}>
+      <CampaignPill />
       <View style={styles.headerRow}>
         <Text style={styles.title}>Posts</Text>
         <ViewToggle view={view} onChange={setView} />
@@ -329,29 +362,40 @@ export default function PostsScreen() {
           <PostsSkeleton />
         ) : view === 'calendar' ? (
           <>
-            <MonthGrid
-              year={year}
-              month={month}
-              dotsByDay={dotsByDay}
-              selectedDay={
-                selectedKey.startsWith(monthPrefix) ? selectedDayNumber : 0
-              }
-              onSelectDay={(day) =>
-                setSelectedKey(dayKey(new Date(year, month, day)))
-              }
-              onPrevMonth={() =>
-                setCursor(new Date(year, month - 1, 1))
-              }
-              onNextMonth={() =>
-                setCursor(new Date(year, month + 1, 1))
-              }
-            />
+            {monthExpanded ? (
+              <MonthGrid
+                year={year}
+                month={month}
+                dotsByDay={dotsByDay}
+                selectedDay={
+                  selectedKey.startsWith(monthPrefix) ? selectedDayNumber : 0
+                }
+                onSelectDay={(day) =>
+                  selectDate(`${monthPrefix}-${`${day}`.padStart(2, '0')}`)
+                }
+                onPrevMonth={() =>
+                  setCursor(new Date(year, month - 1, 1))
+                }
+                onNextMonth={() =>
+                  setCursor(new Date(year, month + 1, 1))
+                }
+                onCollapse={() => setMonthExpanded(false)}
+              />
+            ) : (
+              <WeekStrip
+                weekStart={weekStart}
+                daysForWeek={daysForWeek}
+                selectedDate={selectedKey}
+                onSelectDate={selectDate}
+                onWeekChange={setWeekStart}
+                onExpand={() => setMonthExpanded(true)}
+              />
+            )}
             <Text style={styles.sectionHeading}>{dayHeading}</Text>
             {dayItems.length === 0 ? (
               <EmptyState
                 icon="calendar-days"
                 title="Nothing this day"
-                body="Pick another day, or wait for the next campaign drop."
                 compact
               />
             ) : (
@@ -436,7 +480,7 @@ export default function PostsScreen() {
 
 const styles = StyleSheet.create({
   screenContent: {
-    paddingTop: space[5],
+    paddingTop: 6,
     paddingBottom: 0,
     gap: space[4],
     flex: 1,

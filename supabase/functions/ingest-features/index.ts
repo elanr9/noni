@@ -10,6 +10,7 @@ import {
   parseClaudeJson,
 } from '../_shared/wp8.ts';
 import { crawlSite } from '../_shared/crawlSite.ts';
+import { isManagerOf } from '../_shared/membership.ts';
 
 const INSERT_CAP = 15;
 const BUCKET = 'feature-screenshots';
@@ -263,7 +264,7 @@ Deno.serve(async (req) => {
   if (!companyId) {
     return jsonResponse({ error: 'expected { company_id, image_urls? , page_url? }' }, 400);
   }
-  if (companyId !== caller.companyId) {
+  if (!(await isManagerOf(admin, caller.userId, companyId, caller.platformAdmin))) {
     return jsonResponse({ error: 'company_id mismatch' }, 403);
   }
   if (imageUrls.length === 0 && !pageUrl) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
@@ -8,13 +8,19 @@ import { PostPager } from '../../../components/creator/PostPager';
 import { opensPostDetail } from '../../../components/creator/posts-shared';
 import { SwapSheet } from '../../../components/creator/SwapSheet';
 import { useCreatorToast } from '../../../components/creator/Toast';
-import { WeekStrip } from '../../../components/creator/WeekStrip';
+import {
+  WeekStrip,
+  weekDates,
+  weekStartOf,
+  type WeekStripDay,
+} from '../../../components/creator/WeekStrip';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
-import { Wordmark } from '../../../components/ui/Wordmark';
+import { CampaignPill, ElsewhereStrip, WAIT_RED } from '../../../components/shared';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { unreadCreatorInboxCount } from '../../../lib/creator-inbox-api';
 import { dayKey, useCreatorQueue, publishTimeLabel } from '../../../lib/creator-queue';
 import { isSetupCompleteFlag, useSetupState } from '../../../lib/setup';
@@ -29,24 +35,14 @@ import { color, space, type } from '../../../theme/tokens';
 import { CreatorSetupChecklist } from '../setup';
 
 const OPEN = new Set<TaskStatus>(['assigned', 'changes_requested']);
-
-/** Monday-first week around today, as YYYY-MM-DD keys. */
-function weekDates(todayKey: string): string[] {
-  const today = new Date(`${todayKey}T12:00:00`);
-  const start = new Date(today);
-  start.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    return dayKey(d);
-  });
-}
+const LOCKED_REASON = 'Finish your missed posts first';
 
 export default function HomeScreen() {
   const { profile } = useAuth();
   const router = useRouter();
   const queue = useCreatorQueue();
   const toast = useCreatorToast();
+  const { unreadNotifications, openNotifications } = useCompany();
 
   const setupFlagged =
     profile !== null && isSetupCompleteFlag(profile.onboarding_answers);
@@ -55,9 +51,26 @@ export default function HomeScreen() {
     !setupFlagged && (setup.state === null || !setup.state.complete);
 
   const todayKey = dayKey(new Date());
-  const [selectedDate, setSelectedDate] = useState(todayKey);
+  // Until the creator picks a date, land on the oldest missed post, else today.
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const [pickedWeek, setPickedWeek] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [unreadAdmin, setUnreadAdmin] = useState(false);
+
+  const hasOverdue = queue.overdue.length > 0;
+  const landing = pickedDate === null && hasOverdue ? queue.nextRequired : null;
+  const selectedDate = pickedDate ?? landing?.scheduled_date ?? todayKey;
+  const weekStart = pickedWeek ?? weekStartOf(selectedDate);
+
+  const setSelectedDate = (date: string) => {
+    setPickedDate(date);
+    setPickedWeek(weekStartOf(date));
+  };
+
+  const jumpTo = (a: AssignmentWithBrief) => {
+    setSelectedDate(a.scheduled_date);
+    setSelectedId(a.id);
+  };
 
   const [swapFor, setSwapFor] = useState<AssignmentWithBrief | null>(null);
   const [pool, setPool] = useState<Brief[]>([]);
@@ -66,28 +79,38 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       void queue.refetch();
-      if (profile?.company_id && profile.id) {
-        unreadCreatorInboxCount(profile.company_id, profile.id).then(
+      if (profile?.active_company_id && profile.id) {
+        unreadCreatorInboxCount(profile.active_company_id, profile.id).then(
           (count) => setUnreadAdmin(count > 0),
           () => undefined,
         );
       }
       // refetch identity churns with the queue; focus is the real trigger.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [profile?.company_id, profile?.id]),
+    }, [profile?.active_company_id, profile?.id]),
   );
 
-  const days = useMemo(
-    () =>
-      weekDates(todayKey).map((date) => ({
+  const daysForWeek = useCallback(
+    (start: string): WeekStripDay[] =>
+      weekDates(start).map((date) => ({
         date,
-        statuses: queue.assignmentsForDate(date).map((a) => a.status),
+        statuses: queue.assignmentsForDate(date).map((a) => ({
+          status: a.status,
+          overdue: a.scheduled_date < todayKey && OPEN.has(a.status),
+        })),
       })),
-    [todayKey, queue],
+    [queue, todayKey],
   );
 
   const dayList = queue.assignmentsForDate(selectedDate);
   const selected = dayList.find((a) => a.id === selectedId) ?? null;
+
+  const locked =
+    selected !== null &&
+    hasOverdue &&
+    OPEN.has(selected.status) &&
+    queue.nextRequired !== null &&
+    selected.id !== queue.nextRequired.id;
 
   // Keep a valid selection: default to the first open slot today, first slot
   // on other days.
@@ -97,19 +120,21 @@ export default function HomeScreen() {
       return;
     }
     if (dayList.some((a) => a.id === selectedId)) return;
+    const required = dayList.find((a) => a.id === queue.nextRequired?.id);
     const firstOpen = dayList.find((a) => OPEN.has(a.status));
     setSelectedId(
-      (selectedDate === todayKey && firstOpen ? firstOpen : dayList[0]).id,
+      (required ??
+        (selectedDate === todayKey && firstOpen ? firstOpen : dayList[0])).id,
     );
-  }, [dayList, selectedId, selectedDate, todayKey]);
+  }, [dayList, selectedId, selectedDate, todayKey, queue.nextRequired]);
 
   // Auto-advance (SCREENS §1.6): when the visible slot flips from open to
-  // not-open, jump to the first open slot.
+  // not-open, jump to the next required slot.
   const statusRef = useRef<Map<string, TaskStatus>>(new Map());
   useEffect(() => {
     const prev = statusRef.current;
     const next = new Map(queue.assignments.map((a) => [a.id, a.status]));
-    if (selectedId !== null && selectedDate === todayKey) {
+    if (selectedId !== null) {
       const was = prev.get(selectedId);
       const now = next.get(selectedId);
       if (
@@ -118,25 +143,19 @@ export default function HomeScreen() {
         OPEN.has(was) &&
         !OPEN.has(now)
       ) {
-        const firstOpen = queue.openToday.find((a) => a.id !== selectedId);
-        if (firstOpen !== undefined) setSelectedId(firstOpen.id);
+        const target = queue.nextRequired;
+        if (target !== null && target.id !== selectedId) {
+          setPickedDate(target.scheduled_date);
+          setPickedWeek(weekStartOf(target.scheduled_date));
+          setSelectedId(target.id);
+        }
       }
     }
     statusRef.current = next;
-  }, [queue.assignments, queue.openToday, selectedId, selectedDate, todayKey]);
+  }, [queue.assignments, queue.nextRequired, selectedId]);
 
   const loading = queue.loading && queue.assignments.length === 0;
   const firstName = profile?.full_name?.split(' ')[0] ?? 'there';
-
-  const subCopy = (() => {
-    if (loading) return 'Building your day…';
-    if (selectedDate !== todayKey) return `${dayList.length} planned.`;
-    const { toFix, toShoot, totalToday } = queue.counts;
-    if (toFix > 0) return `${toFix} to fix, ${toShoot} left to shoot.`;
-    if (toShoot > 0) return `${toShoot} left to shoot today.`;
-    if (totalToday > 0) return 'All shot for today.';
-    return 'Nothing planned today.';
-  })();
 
   const openMessages = () => {
     router.navigate('/(creator)/(tabs)/messages');
@@ -150,6 +169,15 @@ export default function HomeScreen() {
       return;
     }
     router.push(`/(creator)/record/${a.id}?assignment=1`);
+  };
+
+  const recordOrCatchUp = (a: AssignmentWithBrief) => {
+    if (locked && queue.nextRequired !== null) {
+      jumpTo(queue.nextRequired);
+      toast.show('Catch up on your missed posts first.');
+      return;
+    }
+    recordRoute(a);
   };
 
   const openSwap = (a: AssignmentWithBrief) => {
@@ -185,7 +213,7 @@ export default function HomeScreen() {
   return (
     <Screen bg={color.white} contentStyle={styles.body}>
       <View style={styles.headerRow}>
-        <Wordmark size={19} />
+        <CampaignPill />
         <View style={styles.headerActions}>
           <PressableScale
             accessibilityRole="button"
@@ -199,24 +227,42 @@ export default function HomeScreen() {
             <Icon name="message-circle" size={23} color={color.ink} />
             {unreadAdmin ? <View style={styles.unreadDot} /> : null}
           </PressableScale>
-          <View style={styles.iconBtn}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={
+              unreadNotifications > 0
+                ? `Notifications, ${unreadNotifications} unread`
+                : 'Notifications'
+            }
+            onPress={openNotifications}
+            hitSlop={10}
+            style={styles.iconBtn}
+          >
             <Icon name="bell" size={23} color={color.ink} />
-          </View>
+            {unreadNotifications > 0 ? (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </Text>
+              </View>
+            ) : null}
+          </PressableScale>
         </View>
       </View>
 
-      <View style={styles.welcome}>
-        <Text style={styles.greeting}>Welcome back, {firstName}.</Text>
-        <Text style={styles.sub}>{subCopy}</Text>
-      </View>
+      <Text style={styles.greeting}>Welcome back, {firstName}.</Text>
+
+      <ElsewhereStrip />
 
       <WeekStrip
-        days={days}
+        weekStart={weekStart}
+        daysForWeek={daysForWeek}
         selectedDate={selectedDate}
         onSelectDate={(date) => {
           setSelectedDate(date);
           setSelectedId(null);
         }}
+        onWeekChange={setPickedWeek}
       />
 
       {dayList.length > 0 ? (
@@ -244,7 +290,8 @@ export default function HomeScreen() {
                 params: { id: selected.id },
               })
             }
-            onRecord={() => recordRoute(selected)}
+            lockedReason={locked ? LOCKED_REASON : null}
+            onRecord={() => recordOrCatchUp(selected)}
             onSwap={() => openSwap(selected)}
             onSee={() =>
               router.push({
@@ -256,7 +303,7 @@ export default function HomeScreen() {
                 params: { id: selected.id },
               })
             }
-            onFix={() => recordRoute(selected)}
+            onFix={() => recordOrCatchUp(selected)}
             onFeedback={openMessages}
           />
         ) : loading ? (
@@ -289,7 +336,7 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     paddingHorizontal: space.gutter,
-    paddingTop: 14,
+    paddingTop: 6,
     paddingBottom: 108,
     gap: 14,
   },
@@ -317,8 +364,24 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: color.white,
   },
-  welcome: {
-    gap: 4,
+  bellBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 999,
+    backgroundColor: WAIT_RED,
+    borderWidth: 2,
+    borderColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    color: color.white,
+    fontSize: 10.5,
+    fontWeight: '800',
   },
   greeting: {
     fontSize: 28,
@@ -326,11 +389,6 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.bold,
     letterSpacing: type.tracking.title,
     color: color.ink,
-  },
-  sub: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
   },
   hero: {
     flex: 1,

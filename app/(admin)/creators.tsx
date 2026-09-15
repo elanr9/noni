@@ -43,10 +43,10 @@ async function fetchCreatorExtras(
 ): Promise<Map<string, CreatorExtras>> {
   const [{ data: profiles }, { data: accounts }] = await Promise.all([
     supabase
-      .from("profiles")
+      .from("company_roster")
       .select("id, avatar_path")
       .eq("company_id", companyId)
-      .or("role.eq.creator,can_create.eq.true"),
+      .or("member_role.eq.creator,can_create.eq.true"),
     supabase
       .from("creator_accounts")
       .select("creator_id, tiktok_handle, instagram_handle")
@@ -76,6 +76,7 @@ async function fetchCreatorExtras(
 
   const extras = new Map<string, CreatorExtras>();
   for (const p of profiles ?? []) {
+    if (p.id === null) continue;
     extras.set(p.id, {
       handle: handleByCreator.get(p.id) ?? null,
       avatarUri:
@@ -100,8 +101,8 @@ export default function CreatorsScreen() {
     if (!profile) return;
     try {
       const [next, approved] = await Promise.all([
-        fetchCreatorLeaderboard(profile.company_id),
-        listApprovedCreators(profile.company_id),
+        fetchCreatorLeaderboard(profile.active_company_id),
+        listApprovedCreators(profile.active_company_id),
         refreshManagerAccess(),
       ]);
       setRows(next);
@@ -116,7 +117,7 @@ export default function CreatorsScreen() {
       setRefreshing(false);
     }
     // Handles and photos arrive after the roster; cards fall back gracefully.
-    void fetchCreatorExtras(profile.company_id)
+    void fetchCreatorExtras(profile.active_company_id)
       .then(setExtras)
       .catch(() => undefined);
   }, [profile, refreshManagerAccess]);

@@ -74,7 +74,7 @@ export default function ManagerOnboarding() {
   useEffect(() => {
     if (!profile) return;
     setName((v) => v || profile.full_name || '');
-    void getCompany(profile.company_id)
+    void getCompany(profile.active_company_id)
       .then((c) => setCompanyName(c.name))
       .catch(() => undefined);
   }, [profile]);

@@ -1,14 +1,20 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import {
-  adminPushTokens,
-  creatorPushTokens,
+  adminRecipients,
+  creatorRecipients,
   mutedProfileIds,
-  sendExpoPush,
-  tokensForProfiles,
+  sendPush,
+  recipientsForProfiles,
   MANAGER_ROLES,
   type PushMessage,
 } from '../_shared/push.ts';
+import { creatorLink, managerLink } from '../_shared/deep-link.ts';
+import {
+  isManagerOf,
+  isMemberOf,
+  MANAGER_MEMBER_ROLES,
+} from '../_shared/membership.ts';
 
 type NotifyEvent =
   | 'submitted'
@@ -121,6 +127,7 @@ type Caller = {
   userId: string;
   companyId: string;
   role: string;
+  platformAdmin: boolean;
   name: string | null;
 };
 
@@ -154,7 +161,10 @@ async function resolveSubject(
       creator_id: assignment.creator_id as string,
       publish_at: (assignment.publish_at as string | null) ?? null,
       format: (brief?.format as string | undefined) ?? null,
-      data: { assignment_id: assignment.id as string },
+      data: {
+        assignment_id: assignment.id as string,
+        company_id: assignment.company_id as string,
+      },
     };
   }
   const { data: task } = await admin
@@ -169,8 +179,15 @@ async function resolveSubject(
     creator_id: task.assigned_to as string | null,
     publish_at: null,
     format: null,
-    data: { task_id: task.id as string },
+    data: { task_id: task.id as string, company_id: task.company_id as string },
   };
+}
+
+/** Creator side link for a subject: assignment when present, else legacy task. */
+function subjectCreatorLink(subject: Subject): string {
+  return subject.data.assignment_id
+    ? creatorLink(subject.company_id, 'assignment', subject.data.assignment_id)
+    : creatorLink(subject.company_id, 'post', subject.data.task_id);
 }
 
 async function profileName(
@@ -187,11 +204,10 @@ async function profileName(
   return (data?.full_name as string | null) ?? fallback;
 }
 
-/** post_live: platform deep links ride in the data payload. */
-async function postLiveMessage(
+async function postPlatformUrls(
   admin: SupabaseClient,
   subject: Subject,
-): Promise<PushMessage> {
+): Promise<Record<string, string>> {
   let query = admin.from('posts').select('platform, post_url');
   if (subject.data.assignment_id) {
     query = query.eq('assignment_id', subject.data.assignment_id);
@@ -206,6 +222,14 @@ async function postLiveMessage(
       urls[`${post.platform}_url`] = post.post_url as string;
     }
   }
+  return urls;
+}
+
+/** post_live: platform deep links ride in the data payload. */
+function postLiveMessage(
+  subject: Subject,
+  urls: Record<string, string>,
+): PushMessage {
   const needsMusic = subject.format === 'photo_carousel';
   return {
     title: 'Your post is live',
@@ -216,6 +240,11 @@ async function postLiveMessage(
       ...subject.data,
       ...urls,
       event: 'post_live',
+      company_id: subject.company_id,
+      deep_link: subject.data.assignment_id
+        ? creatorLink(subject.company_id, 'posts', subject.data.assignment_id)
+        : subjectCreatorLink(subject),
+      creator_id: subject.creator_id,
       ...(needsMusic ? { music: '1' } : {}),
     },
   };
@@ -248,10 +277,10 @@ async function managerChatRecipients(
 
   if (chat.kind === 'brief') {
     const { data: managers } = await admin
-      .from('profiles')
+      .from('company_roster')
       .select('id')
       .eq('company_id', chat.company_id)
-      .in('role', MANAGER_ROLES);
+      .in('member_role', MANAGER_MEMBER_ROLES);
     for (const m of managers ?? []) ids.add(m.id as string);
 
     let title = 'Brief chat';
@@ -277,7 +306,7 @@ async function managerChatRecipients(
 
   if (chat.is_general) {
     const { data: everyone } = await admin
-      .from('profiles')
+      .from('company_roster')
       .select('id')
       .eq('company_id', chat.company_id);
     for (const p of everyone ?? []) ids.add(p.id as string);
@@ -293,11 +322,11 @@ async function managerChatRecipients(
   if (chat.created_by) ids.add(chat.created_by);
 
   const { data: profiles } = await admin
-    .from('profiles')
-    .select('id, role, can_create')
+    .from('company_roster')
+    .select('id, member_role, can_create')
     .eq('company_id', chat.company_id);
   for (const p of profiles ?? []) {
-    const role = p.role as string;
+    const role = p.member_role as string;
     const canCreate = Boolean(p.can_create);
     if (role === 'company_admin') ids.add(p.id as string);
     if (chat.all_creators && (role === 'creator' || canCreate)) {
@@ -340,7 +369,7 @@ Deno.serve(async (req) => {
     }
     const { data: profile } = await admin
       .from('profiles')
-      .select('company_id, role, full_name')
+      .select('active_company_id, role, full_name')
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!profile) return jsonResponse({ error: 'forbidden' }, 403);
@@ -349,8 +378,9 @@ Deno.serve(async (req) => {
     const role = profile.role as string;
     caller = {
       userId: userData.user.id,
-      companyId: profile.company_id as string,
+      companyId: profile.active_company_id as string,
       role: MANAGER_ROLES.includes(role) ? 'campaign_manager' : role,
+      platformAdmin: role === 'admin',
       name: (profile.full_name as string | null) ?? null,
     };
   } else if (!SERVICE_EVENTS.includes(body.event)) {
@@ -368,16 +398,23 @@ Deno.serve(async (req) => {
       if (!companyId) {
         return jsonResponse({ error: `${body.event} expects { company_id }` }, 400);
       }
-      if (caller && caller.companyId !== companyId) {
+      if (
+        caller &&
+        !(await isMemberOf(admin, caller.userId, companyId, caller.platformAdmin))
+      ) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
 
       if (body.event === 'credits_low') {
-        const tokens = await adminPushTokens(admin, companyId);
-        const sent = await sendExpoPush(tokens, {
+        const recipients = await adminRecipients(admin, companyId);
+        const sent = await sendPush(admin, recipients, {
           title: 'Credits low',
           body: 'Add credits to keep paying bounties.',
-          data: { event: body.event, company_id: companyId },
+          data: {
+            event: body.event,
+            company_id: companyId,
+            deep_link: managerLink(companyId, 'settings'),
+          },
         });
         return jsonResponse({ sent });
       }
@@ -385,8 +422,8 @@ Deno.serve(async (req) => {
       if (body.event === 'company_topup') {
         const amountCents =
           typeof body.amount_cents === 'number' ? body.amount_cents : 0;
-        const tokens = await adminPushTokens(admin, companyId);
-        const sent = await sendExpoPush(tokens, {
+        const recipients = await adminRecipients(admin, companyId);
+        const sent = await sendPush(admin, recipients, {
           title: 'Credits added',
           body:
             amountCents > 0
@@ -395,6 +432,7 @@ Deno.serve(async (req) => {
           data: {
             event: body.event,
             company_id: companyId,
+            deep_link: managerLink(companyId, 'settings'),
             amount_cents: String(amountCents),
           },
         });
@@ -408,12 +446,16 @@ Deno.serve(async (req) => {
       }
       const amountCents =
         typeof body.amount_cents === 'number' ? body.amount_cents : 0;
-      const tokens = await creatorPushTokens(admin, creatorId, companyId);
-      const sent = await sendExpoPush(tokens, {
+      const recipients = await creatorRecipients(admin, creatorId, companyId);
+      const sent = await sendPush(admin, recipients, {
         title: 'Bounty paid',
         body: `${formatCentsLabel(amountCents)} just hit your wallet.`,
         data: {
           event: body.event,
+          company_id: companyId,
+          deep_link: body.assignment_id
+            ? creatorLink(companyId, 'assignment', body.assignment_id)
+            : creatorLink(companyId, 'home'),
           creator_id: creatorId,
           assignment_id: body.assignment_id ?? null,
           amount_cents: String(amountCents),
@@ -442,18 +484,22 @@ Deno.serve(async (req) => {
         .eq('id', body.campaign_id)
         .maybeSingle();
       if (!campaign) return jsonResponse({ error: 'campaign not found' }, 404);
-      if (caller.companyId !== campaign.company_id || caller.role !== 'campaign_manager') {
+      const campaignCompanyId = campaign.company_id as string;
+      if (
+        !(await isManagerOf(admin, caller.userId, campaignCompanyId, caller.platformAdmin))
+      ) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
-      const tokens = await creatorPushTokens(
-        admin,
-        body.creator_id,
-        campaign.company_id as string,
-      );
-      const sent = await sendExpoPush(tokens, {
+      const recipients = await creatorRecipients(admin, body.creator_id, campaignCompanyId);
+      const sent = await sendPush(admin, recipients, {
         title: 'New week is live',
         body: 'Your posts for this week are ready.',
-        data: { campaign_id: campaign.id, event: body.event },
+        data: {
+          campaign_id: campaign.id,
+          company_id: campaignCompanyId,
+          event: body.event,
+          deep_link: creatorLink(campaignCompanyId, 'home'),
+        },
       });
       return jsonResponse({ sent });
     }
@@ -473,7 +519,9 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (!chatRow) return jsonResponse({ error: 'chat not found' }, 404);
       const chat = chatRow as ManagerChat;
-      if (chat.company_id !== caller.companyId) {
+      if (
+        !(await isMemberOf(admin, caller.userId, chat.company_id, caller.platformAdmin))
+      ) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
 
@@ -484,21 +532,52 @@ Deno.serve(async (req) => {
       ids.delete(caller.userId);
       for (const id of muted) ids.delete(id);
 
-      const message: PushMessage =
+      const recipients = await recipientsForProfiles(admin, [...ids]);
+      const { data: roster } = await admin
+        .from('company_roster')
+        .select('id, member_role')
+        .eq('company_id', chat.company_id)
+        .in('id', [...ids]);
+      const managerIds = new Set(
+        (roster ?? [])
+          .filter((r) => MANAGER_MEMBER_ROLES.includes(r.member_role as string))
+          .map((r) => r.id as string),
+      );
+      const managers = recipients.filter((r) => managerIds.has(r.profileId));
+      const creators = recipients.filter((r) => !managerIds.has(r.profileId));
+      const messageFor = (deepLink: string): PushMessage =>
         chat.kind === 'dm'
           ? {
               title: sender,
               body: preview ?? 'Sent you a message.',
-              data: { event: body.event, chat_id: chat.id },
+              data: {
+                event: body.event,
+                chat_id: chat.id,
+                company_id: chat.company_id,
+                deep_link: deepLink,
+              },
             }
           : {
               title,
               body: preview ? `${sender}: ${preview}` : `${sender} sent a message.`,
-              data: { event: body.event, chat_id: chat.id },
+              data: {
+                event: body.event,
+                chat_id: chat.id,
+                company_id: chat.company_id,
+                deep_link: deepLink,
+              },
             };
-      const tokens = await tokensForProfiles(admin, [...ids]);
-      const sent = await sendExpoPush(tokens, message);
-      return jsonResponse({ sent });
+      const managerSent = await sendPush(
+        admin,
+        managers,
+        messageFor(managerLink(chat.company_id, 'messages', chat.id)),
+      );
+      const creatorSent = await sendPush(
+        admin,
+        creators,
+        messageFor(creatorLink(chat.company_id, 'channel', chat.id)),
+      );
+      return jsonResponse({ sent: managerSent + creatorSent });
     }
 
     // Creator-level: messaging, account approval, streak rewards.
@@ -520,23 +599,28 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       const { data: creator } = await admin
-        .from('profiles')
-        .select('id, full_name, company_id')
+        .from('company_roster')
+        .select('id, full_name')
         .eq('id', creatorId)
+        .eq('company_id', caller.companyId)
         .maybeSingle();
-      if (!creator || creator.company_id !== caller.companyId) {
+      if (!creator) {
         return jsonResponse({ error: 'creator not found' }, 404);
       }
       const name = (creator.full_name as string | null) ?? 'A creator';
 
       if (body.event === 'account_submitted') {
-        const tokens = await adminPushTokens(admin, caller.companyId);
-        const sent = await sendExpoPush(tokens, {
+        const recipients = await adminRecipients(admin, caller.companyId);
+        const sent = await sendPush(admin, recipients, {
           title: 'Accounts ready to review',
           body: `${name} submitted their TikTok and Instagram.`,
           data: {
             creator_id: creatorId,
+            company_id: caller.companyId,
             event: body.event,
+            deep_link: body.account_id
+              ? managerLink(caller.companyId, 'account-approval', body.account_id)
+              : managerLink(caller.companyId, 'creator', creatorId),
             ...(body.account_id ? { account_id: body.account_id } : {}),
           },
         });
@@ -549,13 +633,18 @@ Deno.serve(async (req) => {
           return jsonResponse({ error: 'forbidden' }, 403);
         }
         const approved = body.status === 'approved';
-        const tokens = await creatorPushTokens(admin, creatorId, caller.companyId);
-        const sent = await sendExpoPush(tokens, {
+        const recipients = await creatorRecipients(admin, creatorId, caller.companyId);
+        const sent = await sendPush(admin, recipients, {
           title: approved ? 'Accounts approved' : 'Accounts need changes',
           body: approved
             ? 'You are all set. Posts will start showing up.'
             : 'Open account setup to see what to fix.',
-          data: { creator_id: creatorId, event: body.event },
+          data: {
+            creator_id: creatorId,
+            company_id: caller.companyId,
+            event: body.event,
+            deep_link: creatorLink(caller.companyId, 'home'),
+          },
         });
         return jsonResponse({ sent });
       }
@@ -564,15 +653,20 @@ Deno.serve(async (req) => {
         const amountCents =
           typeof body.amount_cents === 'number' ? body.amount_cents : 0;
         const amountLabel = formatCentsLabel(amountCents);
-        const tokens = await creatorPushTokens(admin, creatorId, caller.companyId);
+        const recipients = await creatorRecipients(admin, creatorId, caller.companyId);
+        const streakLink = body.assignment_id
+          ? creatorLink(caller.companyId, 'assignment', body.assignment_id)
+          : creatorLink(caller.companyId, 'home');
         if (body.event === 'streak_bonus') {
           const streak = typeof body.streak === 'number' ? body.streak : 0;
-          const sent = await sendExpoPush(tokens, {
+          const sent = await sendPush(admin, recipients, {
             title: `${amountLabel} streak bonus`,
             body: `${streak} day streak locked in. It is in your wallet.`,
             data: {
               creator_id: creatorId,
+              company_id: caller.companyId,
               event: body.event,
+              deep_link: streakLink,
               streak: String(streak),
               amount_cents: String(amountCents),
             },
@@ -580,12 +674,14 @@ Deno.serve(async (req) => {
           return jsonResponse({ sent });
         }
         const days = typeof body.days === 'number' ? body.days : 0;
-        const sent = await sendExpoPush(tokens, {
+        const sent = await sendPush(admin, recipients, {
           title: `${amountLabel} almost yours`,
           body: `Post tomorrow to lock in your ${days} day streak bonus.`,
           data: {
             creator_id: creatorId,
+            company_id: caller.companyId,
             event: body.event,
+            deep_link: streakLink,
             days: String(days),
             amount_cents: String(amountCents),
           },
@@ -596,17 +692,24 @@ Deno.serve(async (req) => {
       // message: creator -> managers (minus mutes); manager -> that creator.
       const preview = previewText(body.preview);
       const fromManager = caller.role === 'campaign_manager';
-      const tokens = fromManager
-        ? await creatorPushTokens(admin, creatorId, caller.companyId)
-        : await adminPushTokens(
+      const recipients = fromManager
+        ? await creatorRecipients(admin, creatorId, caller.companyId)
+        : await adminRecipients(
             admin,
             caller.companyId,
             await mutedProfileIds(admin, { creatorId }),
           );
-      const sent = await sendExpoPush(tokens, {
+      const sent = await sendPush(admin, recipients, {
         title: fromManager ? (caller.name ?? 'Your manager') : name,
         body: preview ?? 'Sent you a message.',
-        data: { creator_id: creatorId, event: body.event },
+        data: {
+          creator_id: creatorId,
+          company_id: caller.companyId,
+          event: body.event,
+          deep_link: fromManager
+            ? creatorLink(caller.companyId, 'chat')
+            : managerLink(caller.companyId, 'chat', creatorId),
+        },
       });
       return jsonResponse({ sent });
     }
@@ -620,7 +723,10 @@ Deno.serve(async (req) => {
     }
     const subject = await resolveSubject(admin, body);
     if (!subject) return jsonResponse({ error: 'subject not found' }, 404);
-    if (caller && caller.companyId !== subject.company_id) {
+    if (
+      caller &&
+      !(await isMemberOf(admin, caller.userId, subject.company_id, caller.platformAdmin))
+    ) {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 
@@ -630,77 +736,145 @@ Deno.serve(async (req) => {
       body.event === 'music_pending' ||
       (body.event === 'comment' && caller?.role !== 'campaign_manager')
     ) {
-      const tokens = await adminPushTokens(admin, subject.company_id);
+      const recipients = await adminRecipients(admin, subject.company_id);
+      const reviewLink = subject.data.assignment_id
+        ? managerLink(subject.company_id, 'review', subject.data.assignment_id)
+        : managerLink(subject.company_id, 'home');
       let message: PushMessage;
       if (body.event === 'submitted') {
         const creatorName = await profileName(admin, subject.creator_id, 'A creator');
         message = {
           title: 'New post to review',
           body: `${creatorName} submitted ${subject.title}.`,
-          data: { ...subject.data, event: body.event },
+          data: {
+            ...subject.data,
+            event: body.event,
+            company_id: subject.company_id,
+            deep_link: reviewLink,
+          },
         };
       } else if (body.event === 'music_pending') {
         const creatorName = await profileName(admin, subject.creator_id, 'A creator');
         message = {
           title: 'Music ready to review',
           body: `${creatorName} added music to ${subject.title}.`,
-          data: { ...subject.data, event: body.event },
+          data: {
+            ...subject.data,
+            event: body.event,
+            company_id: subject.company_id,
+            deep_link: subject.data.assignment_id
+              ? managerLink(subject.company_id, 'music', subject.data.assignment_id)
+              : managerLink(subject.company_id, 'home'),
+          },
         };
       } else {
         message = {
           title: 'New comment',
           body: `${subject.title} has a new comment.`,
-          data: { ...subject.data, event: body.event },
+          data: {
+            ...subject.data,
+            event: body.event,
+            company_id: subject.company_id,
+            deep_link: reviewLink,
+          },
         };
       }
-      const sent = await sendExpoPush(tokens, message);
+      const sent = await sendPush(admin, recipients, message);
       return jsonResponse({ sent });
     }
 
     // Creator-bound events.
     if (!subject.creator_id) return jsonResponse({ sent: 0 });
-    const tokens = await creatorPushTokens(
+    const recipients = await creatorRecipients(
       admin,
       subject.creator_id,
       subject.company_id,
     );
 
-    let message: PushMessage;
     if (body.event === 'post_live') {
-      message = await postLiveMessage(admin, subject);
-    } else if (body.event === 'music_approved') {
+      const urls = await postPlatformUrls(admin, subject);
+      const creatorSent = await sendPush(admin, recipients, postLiveMessage(subject, urls));
+      const creatorName = await profileName(admin, subject.creator_id, 'A creator');
+      const managerRecipients = await adminRecipients(admin, subject.company_id);
+      const managerSent = await sendPush(admin, managerRecipients, {
+        title: 'Post is live',
+        body: `${creatorName} just posted ${subject.title}.`,
+        data: {
+          ...subject.data,
+          ...urls,
+          event: 'post_live',
+          company_id: subject.company_id,
+          deep_link: subject.data.assignment_id
+            ? managerLink(subject.company_id, 'review', subject.data.assignment_id)
+            : managerLink(subject.company_id, 'home'),
+          creator_id: subject.creator_id,
+        },
+      });
+      return jsonResponse({ sent: creatorSent + managerSent });
+    }
+
+    const postsLink = subject.data.assignment_id
+      ? creatorLink(subject.company_id, 'posts', subject.data.assignment_id)
+      : subjectCreatorLink(subject);
+    let message: PushMessage;
+    if (body.event === 'music_approved') {
       message = {
         title: 'Music approved',
         body: 'Your music got approved, time to start earning!',
-        data: { ...subject.data, event: body.event },
+        data: {
+          ...subject.data,
+          event: body.event,
+          company_id: subject.company_id,
+          deep_link: postsLink,
+        },
       };
     } else if (body.event === 'music_changes') {
       message = {
         title: 'Music needs changes',
         body: `Open ${subject.title} to see what to fix.`,
-        data: { ...subject.data, event: body.event },
+        data: {
+          ...subject.data,
+          event: body.event,
+          company_id: subject.company_id,
+          deep_link: postsLink,
+        },
       };
     } else if (body.event === 'approved') {
       message = {
         title: 'Post approved',
         body: approvedBody(subject.title, subject.publish_at),
-        data: { ...subject.data, event: body.event },
+        data: {
+          ...subject.data,
+          event: body.event,
+          company_id: subject.company_id,
+          deep_link: subjectCreatorLink(subject),
+        },
       };
     } else if (body.event === 'changes_requested') {
       message = {
         title: 'Changes requested',
         body: `${subject.title} needs another take. Open it to see the notes.`,
-        data: { ...subject.data, event: body.event },
+        data: {
+          ...subject.data,
+          event: body.event,
+          company_id: subject.company_id,
+          deep_link: subjectCreatorLink(subject),
+        },
       };
     } else {
       message = {
         title: 'New comment',
         body: `${subject.title} has a new comment.`,
-        data: { ...subject.data, event: body.event },
+        data: {
+          ...subject.data,
+          event: body.event,
+          company_id: subject.company_id,
+          deep_link: subjectCreatorLink(subject),
+        },
       };
     }
 
-    const sent = await sendExpoPush(tokens, message);
+    const sent = await sendPush(admin, recipients, message);
     return jsonResponse({ sent });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

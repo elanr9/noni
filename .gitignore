@@ -21,6 +21,9 @@ expo-env.d.ts
 *.orig.*
 .DS_Store
 
+# gradle
+.gradle/
+
 # typescript
 *.tsbuildinfo
 

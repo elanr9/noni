@@ -101,10 +101,10 @@ export async function listCreatorInbox(
     { data: reads, error: readsError },
   ] = await Promise.all([
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('id, full_name')
       .eq('company_id', companyId)
-      .or('role.eq.creator,can_create.eq.true'),
+      .or('member_role.eq.creator,can_create.eq.true'),
     supabase
       .from('messages')
       .select('creator_id, author_id, body, created_at')
@@ -141,7 +141,8 @@ export async function listCreatorInbox(
     unreadByCreator.set(row.creator_id, (unreadByCreator.get(row.creator_id) ?? 0) + 1);
   }
 
-  const rows = (creators ?? []).map((c): CreatorInboxRow => {
+  const rows = (creators ?? []).map((row): CreatorInboxRow => {
+    const c = { id: row.id ?? '', full_name: row.full_name };
     const last = latest.get(c.id);
     const { media, text } = last ? parseMessageMedia(last.body) : { media: null, text: '' };
     const bit = text.trim() || (media ? (media.media === 'video' ? 'Video' : 'Photo') : '');

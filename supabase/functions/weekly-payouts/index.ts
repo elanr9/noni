@@ -13,6 +13,7 @@
 
 import Stripe from 'npm:stripe@17';
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { isManagerOf } from '../_shared/membership.ts';
 
 function stripeClient(): Stripe {
   const key = Deno.env.get('STRIPE_SECRET_KEY');
@@ -295,7 +296,9 @@ Deno.serve(async (req) => {
 
     let companyIds: string[];
     if (caller.kind === 'user' && body.company_id) {
-      if (body.company_id !== caller.companyId) {
+      if (
+        !(await isManagerOf(admin, caller.userId, body.company_id, caller.platformAdmin))
+      ) {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       companyIds = [body.company_id];

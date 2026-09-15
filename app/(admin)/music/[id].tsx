@@ -85,13 +85,13 @@ export default function MusicApprovalScreen() {
   const load = useCallback(async () => {
     if (!profile || !id) return;
     try {
-      const queue = await listMusicApprovalQueue(profile.company_id);
+      const queue = await listMusicApprovalQueue(profile.active_company_id);
       const found = queue.find((entry) => entry.assignment.id === id) ?? null;
       setItem(found);
       if (found !== null) {
         const [brief, creatorAccount, live] = await Promise.all([
           getBrief(found.assignment.brief_id).catch(() => null),
-          getCreatorAccount(profile.company_id, found.assignment.creator_id).catch(
+          getCreatorAccount(profile.active_company_id, found.assignment.creator_id).catch(
             () => null,
           ),
           getAssignmentLiveAt(found.assignment.id).catch(() => null),
@@ -131,7 +131,7 @@ export default function MusicApprovalScreen() {
     setBusy(true);
     try {
       await approveMusic({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         assignmentId: item.assignment.id,
         adminId: profile.id,
       });
@@ -148,7 +148,7 @@ export default function MusicApprovalScreen() {
     setBusy(true);
     try {
       await requestMusicChanges({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         assignmentId: item.assignment.id,
         adminId: profile.id,
         reasons,

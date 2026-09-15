@@ -5,6 +5,7 @@ import { router, type ImperativeRouter as Router } from 'expo-router';
 import { Platform } from 'react-native';
 
 import type { AppMode } from './active-mode';
+import { parseDeepLink, routeForDeepLink } from './deep-link';
 import { routeNotificationTap } from './notification-routing';
 import { supabase } from './supabase';
 
@@ -37,23 +38,64 @@ let handledColdStart = false;
  */
 export function attachNotificationRouting(
   getMode: () => AppMode,
+  prepare?: (data: Record<string, unknown>) => Promise<AppMode | null>,
+  setMode?: (mode: AppMode) => Promise<void>,
   nav: Router = router,
 ): () => void {
   // Push notifications don't exist on web; every Notifications call throws.
   if (Platform.OS === 'web') return () => {};
 
-  const handle = (response: Notifications.NotificationResponse) => {
-    routeNotificationTap(nav, dataFromResponse(response), getMode());
+  const handle = async (response: Notifications.NotificationResponse) => {
+    const data = dataFromResponse(response);
+    const link = parseDeepLink(data.deep_link);
+    let mode: AppMode | null = null;
+    if (prepare) {
+      try {
+        mode = await prepare(data);
+      } catch (e) {
+        console.error('notification company switch failed', e);
+        if (link) return;
+      }
+    }
+    if (link) {
+      nav.push(routeForDeepLink(link) as never);
+      return;
+    }
+    routeNotificationTap(nav, data, mode ?? getMode());
   };
 
   if (!handledColdStart) {
     handledColdStart = true;
     void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) handle(response);
+      if (response) void handle(response);
     });
   }
 
-  const sub = Notifications.addNotificationResponseReceivedListener(handle);
+  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    void handle(response);
+  });
+  return () => sub.remove();
+}
+
+/**
+ * Foreground push for a company other than the active one: the OS banner
+ * already shows; refresh counts so the bell and dot move. Never auto-switch.
+ */
+export function attachForegroundPushRefresh(
+  getActiveCompanyId: () => string | null,
+  onOtherCompany: () => void,
+): () => void {
+  if (Platform.OS === 'web') return () => {};
+  const sub = Notifications.addNotificationReceivedListener((notification) => {
+    const raw = notification.request.content.data;
+    const companyId =
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>).company_id
+        : undefined;
+    if (typeof companyId === 'string' && companyId !== getActiveCompanyId()) {
+      onOtherCompany();
+    }
+  });
   return () => sub.remove();
 }
 

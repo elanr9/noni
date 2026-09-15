@@ -68,7 +68,7 @@ export default function AccountTemplateScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      const saved = await getAccountTemplate(profile.company_id);
+      const saved = await getAccountTemplate(profile.active_company_id);
       if (saved !== null) {
         setTemplate(saved);
         if (saved.exampleScreenshotPath !== null) {
@@ -95,7 +95,7 @@ export default function AccountTemplateScreen() {
 
   const persist = async (next: AccountTemplate) => {
     if (!profile) return;
-    await saveAccountTemplate(profile.company_id, next);
+    await saveAccountTemplate(profile.active_company_id, next);
   };
 
   const replaceScreenshot = async () => {
@@ -105,7 +105,7 @@ export default function AccountTemplateScreen() {
     setBusy(true);
     try {
       const path = await uploadTemplateAsset(
-        profile.company_id,
+        profile.active_company_id,
         'example-screenshot',
         uri,
       );

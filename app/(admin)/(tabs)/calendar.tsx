@@ -13,12 +13,14 @@ import {
   SkeletonCard,
   TypeChip,
 } from '../../../components/admin/shared';
+import { ContextRow } from '../../../components/shared';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { formatMetric } from '../../../lib/analytics';
 import { useAuth } from '../../../lib/auth';
 import {
+  briefWeekEndsWeekday,
   briefWeekOpensLabel,
   briefWeekRangeLabel,
   listBriefWeeks,
@@ -27,6 +29,7 @@ import {
   type BriefWeekSummary,
   type WeekPostItem,
 } from '../../../lib/briefs-api';
+import { useCompany } from '../../../lib/company-context';
 import { unreadManagerMessageCount } from '../../../lib/manager-messages-api';
 import { color, radiusAdmin, shadow } from '../../../theme/tokens';
 
@@ -69,8 +72,18 @@ function notPlannedLine(startDay: string | null): string {
   return `Not planned yet. ${opensSentence(startDay)}. Tap to start it.`;
 }
 
-function statusChip(card: WeekCardData) {
-  if (card.status === 'next') return <TypeChip tone="brand">Next week</TypeChip>;
+/** The live week's start day; drives the amber "Plan by" state on the next card. */
+type CurrentWeek = { label: string; startDay: string };
+
+function statusChip(card: WeekCardData, due: CurrentWeek | null) {
+  if (card.status === 'next') {
+    if (due !== null) {
+      return (
+        <TypeChip tone="warn">{`Plan by ${briefWeekEndsWeekday(due.startDay, 'short')}`}</TypeChip>
+      );
+    }
+    return <TypeChip tone="brand">Next week</TypeChip>;
+  }
   if (card.status === 'current') {
     return <TypeChip tone="good">{`Day ${card.dayOfWeek ?? 1} of 7`}</TypeChip>;
   }
@@ -91,7 +104,11 @@ function ProgressRail({ icon, lane }: { icon: IconName; lane: LaneProgress }) {
 }
 
 export default function BriefsWeeksScreen() {
-  const { refreshManagerAccess } = useAuth();
+  const { refreshManagerAccess, profile } = useAuth();
+  const { summary } = useCompany();
+  const briefDue =
+    profile?.active_company_id !== undefined &&
+    (summary[profile.active_company_id]?.briefDue ?? false);
   const [weeks, setWeeks] = useState<BriefWeekSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,6 +166,14 @@ export default function BriefsWeeksScreen() {
     return list;
   }, [weeks]);
 
+  const due = useMemo<CurrentWeek | null>(() => {
+    if (!briefDue) return null;
+    const current = cards.find((c) => c.status === 'current' && c.startDay !== null);
+    return current && current.startDay !== null
+      ? { label: current.label, startDay: current.startDay }
+      : null;
+  }, [briefDue, cards]);
+
   const defaultWi = Math.max(
     0,
     cards.findIndex((c) => c.status !== 'next'),
@@ -199,6 +224,7 @@ export default function BriefsWeeksScreen() {
         />
       }
     >
+      <ContextRow style={styles.context} />
       <View style={styles.headerRow}>
         <Text style={styles.h1}>Briefs</Text>
         <View style={styles.spacer} />
@@ -332,12 +358,16 @@ export default function BriefsWeeksScreen() {
                     </Text>
                   ) : null}
                 </View>
-                {statusChip(card)}
+                {statusChip(card, due)}
                 <Icon name="chevron-right" size={16} color={color.slate300} />
               </View>
 
               {!card.planned ? (
-                <Text style={styles.notPlanned}>{notPlannedLine(card.startDay)}</Text>
+                <Text style={styles.notPlanned}>
+                  {card.status === 'next' && due !== null
+                    ? `${due.label} ends ${briefWeekEndsWeekday(due.startDay, 'long')}. Not planned yet.`
+                    : notPlannedLine(card.startDay)}
+                </Text>
               ) : (
                 <View style={styles.railsRow}>
                   <ProgressRail icon="video" lane={card.video} />
@@ -353,6 +383,9 @@ export default function BriefsWeeksScreen() {
 }
 
 const styles = StyleSheet.create({
+  context: {
+    marginBottom: 6,
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

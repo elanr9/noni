@@ -17,7 +17,7 @@
 // invited email creates the creator on the inviting company.
 //
 // Existing accounts accept from https://www.usenoni.app/invite/[token] while
-// signed in, which runs on the service role and overrides their profile.
+// signed in, which adds a membership without changing their active company.
 
 import type { SupabaseClient, User } from 'npm:@supabase/supabase-js@2';
 import { adminClient, handleCors, hasPermission, jsonResponse } from '../_shared/wp8.ts';
@@ -177,15 +177,41 @@ async function companyName(
   return data?.name ?? null;
 }
 
+async function activeMembership(
+  admin: SupabaseClient,
+  profileId: string,
+  companyId: string,
+): Promise<{ role: string } | null> {
+  if (!companyId) return null;
+  const { data } = await admin
+    .from('company_members')
+    .select('role')
+    .eq('company_id', companyId)
+    .eq('profile_id', profileId)
+    .is('removed_at', null)
+    .maybeSingle();
+  return data ? { role: data.role as string } : null;
+}
+
+async function userIdForEmail(email: string): Promise<string | null> {
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const url = `${Deno.env.get('SUPABASE_URL')}/auth/v1/admin/users?filter=${encodeURIComponent(email)}&per_page=50`;
+  const res = await fetch(url, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+  if (!res.ok) throw new Error(`auth admin users ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { users?: { id: string; email?: string }[] };
+  return json.users?.find((u) => (u.email ?? '').toLowerCase() === email)?.id ?? null;
+}
+
 async function companyHasAdmin(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<boolean> {
   const { data: existing } = await admin
-    .from('profiles')
+    .from('company_roster')
     .select('id')
     .eq('company_id', companyId)
-    .eq('role', 'company_admin')
+    .eq('member_role', 'company_admin')
+    .limit(1)
     .maybeSingle();
   if (existing) return true;
   const { data: pending } = await admin
@@ -217,6 +243,11 @@ async function handleInvite(
 
   if (role === 'company_admin' && (await companyHasAdmin(admin, body.company_id))) {
     return jsonResponse({ error: 'this company already has an admin or a pending admin invite' }, 400);
+  }
+
+  const existingUserId = await userIdForEmail(email);
+  if (existingUserId && (await activeMembership(admin, existingUserId, body.company_id))) {
+    return jsonResponse({ error: 'this person is already a member of this company' }, 400);
   }
 
   const { data: invite, error } = await admin
@@ -295,8 +326,6 @@ async function handleAccept(
     return jsonResponse({ error: 'this company already has an admin' }, 400);
   }
 
-  // Override the signup trigger: the invitee may already have a creator
-  // profile, or no profile at all.
   const { data: profile } = await admin
     .from('profiles')
     .select('id, role, onboarded')
@@ -305,17 +334,11 @@ async function handleAccept(
   if (profile?.role === 'admin') {
     return jsonResponse({ error: 'platform admin cannot accept invites' }, 400);
   }
-  if (profile) {
-    const { error } = await admin
-      .from('profiles')
-      .update({ company_id: row.company_id, role: row.role })
-      .eq('id', user.id);
-    if (error) throw error;
-  } else {
+  if (!profile) {
     const fullName = (user.user_metadata?.full_name as string | undefined) ?? null;
     const { error } = await admin.from('profiles').insert({
       id: user.id,
-      company_id: row.company_id,
+      active_company_id: row.company_id,
       role: row.role,
       full_name: fullName,
       onboarded: false,
@@ -323,26 +346,14 @@ async function handleAccept(
     if (error) throw error;
   }
 
-  // Company admins have every permission implicitly; campaign managers get the
-  // invite's preset toggles (all off unless the admin chose otherwise).
-  // Creators carry no permission toggles, so they get no member row.
-  if (row.role !== 'creator') {
-    const { error: memberError } = await admin.from('company_members').upsert(
-      {
-        company_id: row.company_id,
-        profile_id: user.id,
-        permissions: row.role === 'company_admin' ? {} : row.permissions ?? {},
-      },
-      { onConflict: 'company_id,profile_id' },
-    );
-    if (memberError) throw memberError;
+  const { data: applied, error: applyError } = await admin.rpc('apply_invite_membership', {
+    p_profile_id: user.id,
+    p_invite_id: row.id,
+  });
+  if (applyError) throw applyError;
+  if (applied !== true) {
+    return jsonResponse({ error: 'invite could not be applied' }, 400);
   }
-
-  const { error: acceptError } = await admin
-    .from('company_invites')
-    .update({ accepted_at: new Date().toISOString() })
-    .eq('id', row.id);
-  if (acceptError) throw acceptError;
 
   return jsonResponse({
     ok: true,
@@ -375,12 +386,12 @@ Deno.serve(async (req) => {
     if (action === 'accept') return await handleAccept(admin, user, body ?? {});
 
     // Platform admin invites anywhere (any role). Company admins invite
-    // campaign managers and creators into their own company. Campaign
-    // managers holding invite_members can invite other managers; creator
+    // campaign managers and creators into a company they administer. Campaign
+    // managers holding invite_members there can invite other managers; creator
     // invites also need companies.settings.manager_access.invite_creators.
     const { data: callerProfile } = await admin
       .from('profiles')
-      .select('role, company_id')
+      .select('role')
       .eq('id', user.id)
       .maybeSingle();
     const platformAdmin = callerProfile?.role === 'admin';
@@ -388,8 +399,7 @@ Deno.serve(async (req) => {
       if (body?.role === 'company_admin') {
         return jsonResponse({ error: 'only Noni ops can invite a company admin' }, 403);
       }
-      const companyAdmin = callerProfile?.role === 'company_admin';
-      const companyId = callerProfile?.company_id ?? '';
+      let companyId = body?.company_id ?? '';
       let inviteRole: InviteRole | undefined = body?.role;
       if (action === 'resend') {
         const { data: target } = await admin
@@ -397,19 +407,16 @@ Deno.serve(async (req) => {
           .select('company_id, role')
           .eq('id', body?.invite_id ?? '')
           .maybeSingle();
-        if (target?.company_id !== companyId) {
-          return jsonResponse({ error: 'forbidden' }, 403);
-        }
-        inviteRole = target?.role as InviteRole | undefined;
+        if (!target) return jsonResponse({ error: 'forbidden' }, 403);
+        companyId = target.company_id as string;
+        inviteRole = target.role as InviteRole | undefined;
       }
+      const membership = await activeMembership(admin, user.id, companyId);
       const allowed =
-        companyAdmin ||
-        (callerProfile?.role === 'campaign_manager' &&
+        membership?.role === 'company_admin' ||
+        (membership?.role === 'campaign_manager' &&
           (await managerMayInvite(admin, user.id, companyId, inviteRole)));
       if (!allowed) return jsonResponse({ error: 'forbidden' }, 403);
-      if (action === 'invite' && body?.company_id !== companyId) {
-        return jsonResponse({ error: 'can only invite into your own company' }, 403);
-      }
     }
 
     if (action === 'invite') return await handleInvite(admin, user, body ?? {});

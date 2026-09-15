@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Tabs, useFocusEffect } from 'expo-router';
 
-import { TabBar } from '../../../components/ui/TabBar';
+import { TabBar, type TabBarItem } from '../../../components/ui/TabBar';
 import type { IconName } from '../../../components/ui/Icon';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { unreadCreatorInboxCount } from '../../../lib/creator-inbox-api';
 import { isSetupCompleteFlag, useSetupState } from '../../../lib/setup';
 import { color, screenTransition } from '../../../theme/tokens';
@@ -34,9 +35,15 @@ export default function CreatorTabsLayout() {
   const onboarding =
     !flagged && (setup.state === null || !setup.state.complete);
 
-  const companyId = profile?.company_id;
+  const { anyWaiting } = useCompany();
+  const companyId = profile?.active_company_id;
   const meId = profile?.id;
   const [unread, setUnread] = useState(0);
+
+  const items = useMemo<Record<string, TabBarItem>>(() => {
+    const base = onboarding ? ONBOARDING_ITEMS : CREATOR_ITEMS;
+    return { ...base, index: { ...base.index, dot: anyWaiting } };
+  }, [onboarding, anyWaiting]);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,7 +64,7 @@ export default function CreatorTabsLayout() {
       tabBar={(props) => (
         <TabBar
           {...props}
-          items={onboarding ? ONBOARDING_ITEMS : CREATOR_ITEMS}
+          items={items}
           locked={onboarding}
           lockedRoutes={['posts', 'analytics']}
         />

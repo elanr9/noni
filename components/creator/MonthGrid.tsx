@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { dayKey } from '../../lib/creator-queue';
 import { color, radius, shadow, space, type } from '../../theme/tokens';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
@@ -39,6 +40,8 @@ export interface MonthGridProps {
   onSelectDay: (day: number) => void;
   onPrevMonth?: () => void;
   onNextMonth?: () => void;
+  /** Renders a small collapse button that returns to the week view. */
+  onCollapse?: () => void;
 }
 
 export function MonthGrid({
@@ -49,12 +52,13 @@ export function MonthGrid({
   onSelectDay,
   onPrevMonth,
   onNextMonth,
+  onCollapse,
 }: MonthGridProps) {
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const now = new Date();
-  const today =
-    now.getFullYear() === year && now.getMonth() === month ? now.getDate() : 0;
+  const todayKey = dayKey(new Date());
+  const monthPrefix = `${year}-${`${month + 1}`.padStart(2, '0')}`;
+  const today = todayKey.startsWith(monthPrefix) ? Number(todayKey.slice(8, 10)) : 0;
 
   const cells: Array<number | null> = [
     ...Array.from({ length: firstWeekday }, () => null),
@@ -82,6 +86,16 @@ export function MonthGrid({
           >
             <Icon name="chevron-right" size={20} color={color.ink} />
           </PressableScale>
+          {onCollapse ? (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Show this week"
+              onPress={onCollapse}
+              style={styles.navBtn}
+            >
+              <Icon name="chevron-up" size={20} color={color.slate500} />
+            </PressableScale>
+          ) : null}
         </View>
       </View>
 

@@ -65,18 +65,21 @@ export function inboxAge(iso: string | null): string {
 /** Campaign managers and the company admin, with role labels. */
 export async function listTeam(companyId: string): Promise<TeamMember[]> {
   const { data, error } = await supabase
-    .from('profiles')
-    .select('id, full_name, role')
+    .from('company_roster')
+    .select('id, full_name, member_role')
     .eq('company_id', companyId)
-    .in('role', ['campaign_manager', 'company_admin'])
+    .in('member_role', ['campaign_manager', 'company_admin'])
     .order('full_name');
   if (error) throw error;
-  return (data ?? []).map((p) => ({
-    id: p.id,
-    name: p.full_name?.trim() || 'Manager',
-    role: p.role,
-    roleLabel: roleLabel(p.role),
-  }));
+  return (data ?? []).map((p) => {
+    const role = p.member_role ?? 'campaign_manager';
+    return {
+      id: p.id ?? '',
+      name: p.full_name?.trim() || 'Manager',
+      role,
+      roleLabel: roleLabel(role),
+    };
+  });
 }
 
 async function loadQueue(companyId: string): Promise<QueueInboxRow[]> {
@@ -126,10 +129,10 @@ export async function loadInbox(
     listManagerInbox(companyId, meId),
     listTeam(companyId),
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
-      .or('role.eq.creator,can_create.eq.true'),
+      .or('member_role.eq.creator,can_create.eq.true'),
   ]);
 
   const creatorDms: DmInboxRow[] = creators.map((c) => ({

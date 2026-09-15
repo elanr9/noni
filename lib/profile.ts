@@ -10,8 +10,8 @@ import type { Database, Json } from './types';
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 
 // Sign-in is invite only, and the signup trigger stamps the inviting company
-// onto the profile, so every profile has a company from creation.
-export type Profile = ProfileRow & { company_id: string };
+// onto the profile, so every profile has an active company from creation.
+export type Profile = ProfileRow & { active_company_id: string };
 export type Role = Profile['role'];
 export type { AppMode };
 
@@ -54,7 +54,7 @@ export function destinationForProfile(
     return '/platform-admin';
   }
   // Old unattached creator rows (pre invite-only trigger) have no company.
-  if (!profile.company_id) return '/(auth)/invite-required';
+  if (!profile.active_company_id) return '/(auth)/invite-required';
   if (!profile.onboarded) return '/(onboarding)';
   const active = mode ?? defaultMode(profile);
   if (

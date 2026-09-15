@@ -55,7 +55,7 @@ export async function authenticate(
   if (!data?.user) return null;
   const { data: profile } = await admin
     .from('profiles')
-    .select('company_id, role')
+    .select('active_company_id, role')
     .eq('id', data.user.id)
     .maybeSingle();
   if (!profile) return null;
@@ -65,7 +65,7 @@ export async function authenticate(
   return {
     kind: 'user',
     userId: data.user.id,
-    companyId: profile.company_id,
+    companyId: profile.active_company_id,
     role:
       profile.role === 'admin' || profile.role === 'company_admin'
         ? 'campaign_manager'

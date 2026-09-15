@@ -3,18 +3,31 @@ import { BlurView } from 'expo-blur';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { color, shadow } from '../../theme/tokens';
+import { WAIT_RED } from '../shared/WaitBadge';
 import { Icon, type IconName } from './Icon';
 import { PressableScale } from './PressableScale';
 
-const ITEMS: Record<string, { icon: IconName; label: string }> = {
+export type TabBarItem = {
+  icon: IconName;
+  label: string;
+  /** Something is waiting in any company. Ignored when the route has a badge. */
+  dot?: boolean;
+};
+
+const ITEMS: Record<string, TabBarItem> = {
   index: { icon: 'house', label: 'Home' },
   posts: { icon: 'layout-list', label: 'Posts' },
   analytics: { icon: 'chart-column', label: 'Analytics' },
   profile: { icon: 'circle-user-round', label: 'Profile' },
 };
 
+/** 7px red dot pinned to the top right of a tab icon. */
+export function TabDot() {
+  return <View accessibilityLabel="Something waiting" style={styles.dot} />;
+}
+
 type TabBarProps = BottomTabBarProps & {
-  items?: Record<string, { icon: IconName; label: string }>;
+  items?: Record<string, TabBarItem>;
   /**
    * Setup gate (1c): dim and disable only `lockedRoutes`.
    * Other tabs (e.g. Profile) stay tappable.
@@ -82,13 +95,15 @@ export function TabBar({
                           : color.slate400
                     }
                   />
-                  {badge !== undefined && (
+                  {badge !== undefined ? (
                     <View style={styles.badge}>
                       <Text style={styles.badgeText}>
                         {typeof badge === 'number' && badge > 99 ? '99+' : badge}
                       </Text>
                     </View>
-                  )}
+                  ) : item.dot ? (
+                    <TabDot />
+                  ) : null}
                 </View>
                 <Text
                   numberOfLines={1}
@@ -169,6 +184,15 @@ const styles = StyleSheet.create({
     color: color.white,
     fontSize: 10,
     fontWeight: '800',
+  },
+  dot: {
+    position: 'absolute',
+    top: -1,
+    right: -3,
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: WAIT_RED,
   },
   label: {
     width: '100%',

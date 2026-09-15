@@ -82,7 +82,7 @@ export default function WarmupScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     try {
-      setAccount(await getCreatorAccount(profile.company_id, profile.id));
+      setAccount(await getCreatorAccount(profile.active_company_id, profile.id));
     } catch {
       setAccount(null);
     } finally {
@@ -181,7 +181,7 @@ export default function WarmupScreen() {
     // The upload keeps running after this screen closes, so the creator is not
     // held on a spinner while a screen recording goes up.
     startAccountSubmission({
-      companyId: profile.company_id,
+      companyId: profile.active_company_id,
       creatorId: profile.id,
       tiktokHandle,
       instagramHandle,

@@ -129,12 +129,12 @@ export default function CreatorSettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const companyId = profile?.company_id;
+      const companyId = profile?.active_company_id;
       if (!companyId) return;
       void getCompany(companyId)
         .then((company) => setCompanyName(company.name))
         .catch(() => undefined);
-    }, [profile?.company_id]),
+    }, [profile?.active_company_id]),
   );
 
   const company = companyName ?? 'your company';

@@ -39,7 +39,7 @@ async function requireCreator(req: Request) {
 
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, company_id, role, full_name')
+    .select('id, active_company_id, role, full_name')
     .eq('id', userData.user.id)
     .maybeSingle();
   if (!profile || profile.role !== 'creator') {
@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
       { error: Response }
     >;
 
-    const wallet = await ensureWallet(admin, profile.company_id, profile.id);
+    const wallet = await ensureWallet(admin, profile.active_company_id, profile.id);
     let accountId = wallet.stripe_connect_account_id as string | null;
 
     if (!accountId) {
@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
         },
         business_type: 'individual',
         metadata: {
-          company_id: profile.company_id,
+          company_id: profile.active_company_id,
           creator_id: profile.id,
         },
       });

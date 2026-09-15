@@ -399,7 +399,7 @@ export default function RecordScreen() {
   useEffect(() => {
     if (!profile) return;
     let cancelled = false;
-    getCreatorAccount(profile.company_id, profile.id)
+    getCreatorAccount(profile.active_company_id, profile.id)
       .then((account) => {
         if (!cancelled) setTiktokHandle(account?.tiktok_handle ?? null);
       })
@@ -506,7 +506,7 @@ export default function RecordScreen() {
 
   useEffect(() => {
     if (!id || !profile) return;
-    const companyId = profile.company_id;
+    const companyId = profile.active_company_id;
     let cancelled = false;
     async function load() {
       try {
@@ -529,11 +529,11 @@ export default function RecordScreen() {
           if (a && profile) {
             const [segs, draft, events, edits] = await Promise.all([
               listBriefSegments(a.briefs.id),
-              loadDraftSegments(profile.company_id, a.id),
+              loadDraftSegments(profile.active_company_id, a.id),
               a.status === 'changes_requested'
                 ? listAssignmentReviewEvents(a.id)
                 : Promise.resolve([]),
-              loadDraftEdits(profile.company_id, a.id).catch(() => emptyStoredEdits()),
+              loadDraftEdits(profile.active_company_id, a.id).catch(() => emptyStoredEdits()),
             ]);
             if (cancelled) return;
             storedEditsRef.current = edits;
@@ -584,7 +584,7 @@ export default function RecordScreen() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isAssignment, profile?.id, profile?.company_id]);
+  }, [id, isAssignment, profile?.id, profile?.active_company_id]);
 
   useEffect(() => {
     if (loading || initialized || plan.length === 0) return;
@@ -936,7 +936,7 @@ export default function RecordScreen() {
       let storagePath: string | null = null;
       if (assignment) {
         storagePath = draftClipPath(
-          profile.company_id,
+          profile.active_company_id,
           assignment.id,
           activeClip.slotIndex,
         );
@@ -949,7 +949,7 @@ export default function RecordScreen() {
           duration_ms: durationMs,
         };
         await saveDraftSegment({
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           assignmentId: assignment.id,
           creatorId: profile.id,
           segment,
@@ -1121,7 +1121,7 @@ export default function RecordScreen() {
       editsSaveTimer.current = setTimeout(() => {
         editsSaveTimer.current = null;
         saveDraftEdits({
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           assignmentId: assignment.id,
           creatorId: profile.id,
           edits,
@@ -1184,10 +1184,10 @@ export default function RecordScreen() {
         );
         let storagePath = before.storagePath;
         if (assignment) {
-          storagePath = draftClipPath(profile.company_id, assignment.id, slot);
+          storagePath = draftClipPath(profile.active_company_id, assignment.id, slot);
           await uploadClip(result.uri, storagePath);
           await saveDraftSegment({
-            companyId: profile.company_id,
+            companyId: profile.active_company_id,
             assignmentId: assignment.id,
             creatorId: profile.id,
             segment: {
@@ -1213,7 +1213,7 @@ export default function RecordScreen() {
         setKept({ ...keptNow });
         if (assignment) {
           await saveDraftEdits({
-            companyId: profile.company_id,
+            companyId: profile.active_company_id,
             assignmentId: assignment.id,
             creatorId: profile.id,
             edits: serializeEdits(current),
@@ -1250,13 +1250,13 @@ export default function RecordScreen() {
           });
         const updated = await submitAssignmentClips({
           assignment,
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           creatorId: profile.id,
           clips: uploaded,
           audioGain,
         });
         try {
-          await clearDraft(profile.company_id, assignment.id);
+          await clearDraft(profile.active_company_id, assignment.id);
         } catch {
           // submission is in; stale draft is harmless
         }
@@ -1273,7 +1273,7 @@ export default function RecordScreen() {
           });
         await submitRecording({
           task,
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           creatorId: profile.id,
           segments,
         });

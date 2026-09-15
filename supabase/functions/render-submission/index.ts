@@ -7,6 +7,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import { assembleSubmission, type SubmissionRow } from '../_shared/assemble.ts';
+import { MANAGER_MEMBER_ROLES, memberRole } from '../_shared/membership.ts';
 
 declare const EdgeRuntime:
   | { waitUntil(promise: Promise<unknown>): void }
@@ -41,18 +42,17 @@ Deno.serve(async (req) => {
       : (await admin.auth.getUser(token)).data?.user?.id ?? null;
     if (!internal && !userId) return jsonResponse({ error: 'unauthorized' }, 401);
 
-    let callerCompanyId: string | null = null;
+    let platformAdmin = false;
     let isManager = internal;
     if (userId) {
       const { data: caller } = await admin
         .from('profiles')
-        .select('company_id, role')
+        .select('role')
         .eq('id', userId)
         .maybeSingle();
       if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
-      callerCompanyId = caller.company_id as string;
-      // Platform admin (role admin) inherits campaign manager powers.
-      isManager = caller.role === 'campaign_manager' || caller.role === 'admin';
+      platformAdmin = caller.role === 'admin';
+      isManager = platformAdmin;
     }
 
     const { data: submission } = await admin
@@ -90,8 +90,13 @@ Deno.serve(async (req) => {
         targetId = task.id as string;
       }
     }
-    if (!companyId || !targetId || (!internal && companyId !== callerCompanyId)) {
+    if (!companyId || !targetId) {
       return jsonResponse({ error: 'submission not found' }, 404);
+    }
+    if (userId && !platformAdmin) {
+      const role = await memberRole(admin, userId, companyId);
+      if (!role) return jsonResponse({ error: 'submission not found' }, 404);
+      isManager = MANAGER_MEMBER_ROLES.includes(role);
     }
     const isOwner = userId !== null && submission.creator_id === userId;
     if (!isOwner && !isManager) {

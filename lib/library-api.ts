@@ -352,13 +352,13 @@ export async function listCreatorOptions(
   companyId: string,
 ): Promise<{ id: string; full_name: string | null }[]> {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('company_roster')
     .select('id, full_name')
     .eq('company_id', companyId)
-    .or('role.eq.creator,can_create.eq.true')
+    .or('member_role.eq.creator,can_create.eq.true')
     .order('full_name');
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((p) => ({ id: p.id ?? '', full_name: p.full_name }));
 }
 
 /** Increment usage and remember the post it became; never deletes. */

@@ -8,6 +8,7 @@ import {
   jsonResponse,
   parseClaudeJson,
 } from '../_shared/wp8.ts';
+import { isManagerOf } from '../_shared/membership.ts';
 
 const MAX_FILE_BYTES = 100 * 1024;
 const CHUNK_CHAR_BUDGET = 80_000;
@@ -290,7 +291,7 @@ Deno.serve(async (req) => {
   if (!companyId || !repoUrl) {
     return jsonResponse({ error: 'expected { company_id, repo_url }' }, 400);
   }
-  if (companyId !== caller.companyId) {
+  if (!(await isManagerOf(admin, caller.userId, companyId, caller.platformAdmin))) {
     return jsonResponse({ error: 'company_id mismatch' }, 403);
   }
 

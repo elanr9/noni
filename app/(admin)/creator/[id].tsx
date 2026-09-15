@@ -64,7 +64,7 @@ async function fetchProfileExtras(
 ): Promise<ProfileExtras> {
   const [{ data: p }, { data: account }] = await Promise.all([
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('avatar_path, credential_line')
       .eq('company_id', companyId)
       .eq('id', creatorId)
@@ -112,7 +112,7 @@ export default function AdminCreatorProfile() {
   const load = useCallback(async () => {
     if (!profile || !id) return;
     try {
-      const detail = await fetchCreatorDetail(profile.company_id, id);
+      const detail = await fetchCreatorDetail(profile.active_company_id, id);
       const subs = await latestSubmissionsByAssignment(
         detail.assignments.map((a) => a.id),
       );
@@ -128,7 +128,7 @@ export default function AdminCreatorProfile() {
       setLoading(false);
       setRefreshing(false);
     }
-    void fetchProfileExtras(profile.company_id, id)
+    void fetchProfileExtras(profile.active_company_id, id)
       .then(setExtras)
       .catch(() => undefined);
   }, [profile, id]);

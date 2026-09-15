@@ -160,7 +160,7 @@ export default function UploadScreen() {
   useEffect(() => {
     if (!profile) return;
     let cancelled = false;
-    getCreatorAccount(profile.company_id, profile.id)
+    getCreatorAccount(profile.active_company_id, profile.id)
       .then((account) => {
         if (!cancelled) setTiktokHandle(account?.tiktok_handle ?? null);
       })
@@ -171,8 +171,8 @@ export default function UploadScreen() {
   }, [profile]);
 
   useEffect(() => {
-    if (!id || !profile?.company_id) return;
-    const companyId = profile.company_id;
+    if (!id || !profile?.active_company_id) return;
+    const companyId = profile.active_company_id;
     let cancelled = false;
     async function load() {
       try {
@@ -212,7 +212,7 @@ export default function UploadScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, profile?.company_id]);
+  }, [id, profile?.active_company_id]);
 
   useEffect(() => {
     if (phase !== 'review') {
@@ -324,7 +324,7 @@ export default function UploadScreen() {
       });
       const updated = await submitAssignmentPhotos({
         assignment,
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         creatorId: profile.id,
         photos: ordered,
       });

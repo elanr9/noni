@@ -1,11 +1,9 @@
 import { useCallback, useState } from 'react';
 import { Tabs, useFocusEffect } from 'expo-router';
 
-import { TabBar } from '../../../components/ui/TabBar';
-import type { IconName } from '../../../components/ui/Icon';
-import { listAssignmentQueue, listMusicApprovalQueue } from '../../../lib/admin-api';
-import { listAccountApprovalQueue } from '../../../lib/creator-accounts-api';
+import { TabBar, type TabBarItem } from '../../../components/ui/TabBar';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { unreadInboxCount } from '../../../lib/inbox-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, screenTransition } from '../../../theme/tokens';
@@ -14,9 +12,9 @@ import { color, screenTransition } from '../../../theme/tokens';
 // Analytics; the Briefs tab is the calendar route (week list + calendar view
 // toggle per the design handoff). Hidden routes stay in the folder so they
 // remain navigable.
-const QUEUE_POLL_MS = 45_000;
+const UNREAD_POLL_MS = 45_000;
 
-const ADMIN_ITEMS: Record<string, { icon: IconName; label: string }> = {
+const ADMIN_ITEMS: Record<string, TabBarItem> = {
   index: { icon: 'inbox', label: 'Review' },
   calendar: { icon: 'layout-list', label: 'Briefs' },
   library: { icon: 'images', label: 'Library' },
@@ -26,7 +24,7 @@ const ADMIN_ITEMS: Record<string, { icon: IconName; label: string }> = {
 
 // Fresh campaign managers get Onboarding on the left in place of Messages.
 // The tab retires once the checklist is done. The platform admin never sees it.
-const ONBOARDING_ITEMS: Record<string, { icon: IconName; label: string }> = {
+const ONBOARDING_ITEMS: Record<string, TabBarItem> = {
   setup: { icon: 'sparkles', label: 'Onboarding' },
   index: { icon: 'inbox', label: 'Review' },
   calendar: { icon: 'layout-list', label: 'Briefs' },
@@ -36,50 +34,38 @@ const ONBOARDING_ITEMS: Record<string, { icon: IconName; label: string }> = {
 
 export default function AdminTabsLayout() {
   const { profile } = useAuth();
-  const [queueCount, setQueueCount] = useState(0);
+  const { anyWaiting } = useCompany();
   const [unreadCount, setUnreadCount] = useState(0);
 
   const showSetup =
     profile?.role === 'campaign_manager' &&
     !isManagerSetupCompleteFlag(profile.onboarding_answers);
 
-  const companyId = profile?.company_id;
+  const companyId = profile?.active_company_id;
 
-  // Mirrors the total the Review screen shows. Polled because the tabs layout
-  // does not refocus when a manager moves between tabs, and an account waiting
-  // for review is the only in-app signal that a creator has applied.
   useFocusEffect(
     useCallback(() => {
       if (companyId === undefined) return;
       const read = () => {
-        void Promise.all([
-          listAssignmentQueue(),
-          listMusicApprovalQueue(companyId),
-          listAccountApprovalQueue(companyId),
-        ])
-          .then(([assignments, music, accounts]) =>
-            setQueueCount(
-              assignments.length +
-                music.length +
-                accounts.filter((a) => a.status !== 'needs_changes').length,
-            ),
-          )
-          .catch(() => undefined);
         void unreadInboxCount()
           .then(setUnreadCount)
           .catch(() => undefined);
       };
       read();
-      const timer = setInterval(read, QUEUE_POLL_MS);
+      const timer = setInterval(read, UNREAD_POLL_MS);
       return () => clearInterval(timer);
     }, [companyId]),
   );
 
+  const base = showSetup ? ONBOARDING_ITEMS : ADMIN_ITEMS;
+  const items: Record<string, TabBarItem> = {
+    ...base,
+    index: { ...base.index, dot: anyWaiting },
+  };
+
   return (
     <Tabs
-      tabBar={(props) => (
-        <TabBar {...props} items={showSetup ? ONBOARDING_ITEMS : ADMIN_ITEMS} />
-      )}
+      tabBar={(props) => <TabBar {...props} items={items} />}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: color.offWhite },
@@ -90,13 +76,7 @@ export default function AdminTabsLayout() {
         name="setup"
         options={{ title: 'Onboarding', href: showSetup ? undefined : null }}
       />
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Review',
-          tabBarBadge: queueCount > 0 ? queueCount : undefined,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Review' }} />
       <Tabs.Screen name="calendar" options={{ title: 'Briefs' }} />
       <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
       <Tabs.Screen name="library" options={{ title: 'Library' }} />

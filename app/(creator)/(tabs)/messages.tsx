@@ -3,10 +3,12 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native
 import { router, useFocusEffect } from 'expo-router';
 
 import { Screen } from '../../../components/layout/Screen';
+import { CampaignPill, CompanyMark } from '../../../components/shared';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonCard } from '../../../components/ui/Skeleton';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { listCampaignManagers } from '../../../lib/briefs-api';
 import { loadCreatorInbox, type CreatorInbox } from '../../../lib/creator-inbox-api';
 import { inboxTimeLabel } from '../../../lib/manager-messages-api';
@@ -71,7 +73,8 @@ function InboxRow(props: {
 
 export default function CreatorMessagesScreen() {
   const { profile } = useAuth();
-  const companyId = profile?.company_id ?? null;
+  const { active: activeCompany } = useCompany();
+  const companyId = profile?.active_company_id ?? null;
   const meId = profile?.id ?? null;
 
   const [inbox, setInbox] = useState<CreatorInbox | null>(null);
@@ -131,6 +134,7 @@ export default function CreatorMessagesScreen() {
 
   return (
     <Screen scroll={false} bg={color.offWhite} contentStyle={styles.content}>
+      <CampaignPill />
       <Text style={styles.title}>Messages</Text>
       <ScrollView
         style={styles.flex}
@@ -172,9 +176,17 @@ export default function CreatorMessagesScreen() {
               )}
               <InboxRow
                 lead={
-                  <View style={styles.companyAvatar}>
-                    <Text style={styles.companyAvatarText}>{company.charAt(0).toUpperCase()}</Text>
-                  </View>
+                  companyId !== null ? (
+                    <CompanyMark
+                      companyId={companyId}
+                      name={company}
+                      logoPath={activeCompany?.logoPath}
+                      size={44}
+                      radius={999}
+                    />
+                  ) : (
+                    <View style={styles.companyAvatar} />
+                  )
                 }
                 title={company}
                 sub={team?.preview || `Campaign manager · ${managersLine(managerNames)}`}
@@ -243,7 +255,7 @@ export default function CreatorMessagesScreen() {
 
 const styles = StyleSheet.create({
   content: {
-    paddingTop: space[5],
+    paddingTop: 6,
     paddingBottom: 0,
     gap: space[4],
     flex: 1,
@@ -360,11 +372,6 @@ const styles = StyleSheet.create({
     backgroundColor: color.blue100,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  companyAvatarText: {
-    fontSize: type.size.body,
-    fontWeight: type.weight.heavy,
-    color: color.blue700,
   },
   personAvatar: {
     width: 44,

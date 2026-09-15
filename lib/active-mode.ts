@@ -20,6 +20,9 @@ export function profileCanCreate(profile: Profile): boolean {
 /** PostgREST filter: pure creators + dual-role campaign managers. */
 export const CREATOR_PROFILE_OR = 'role.eq.creator,can_create.eq.true';
 
+/** Same filter against the company_roster view, where the membership role is member_role. */
+export const CREATOR_ROSTER_OR = 'member_role.eq.creator,can_create.eq.true';
+
 /** Company power: campaign managers and company admins who also run
  *  campaigns (self-as-manager) share the admin product surface. Matches
  *  SQL is_campaign_manager(), which already includes company_admin. */

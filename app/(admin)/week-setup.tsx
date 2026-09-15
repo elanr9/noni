@@ -72,7 +72,7 @@ export default function WeekSetupScreen() {
     setSubmitting(true);
     try {
       const campaign = await createWeek({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         createdBy: profile.id,
         name: `Week of ${formatDropDate(dropDate)}`,
         dropDate,

@@ -91,7 +91,7 @@ export function CalendarView(props: {
       const end = isoDate(addDays(weekStart, 6));
       const [a, c] = await Promise.all([
         listWeekAssignments(start, end),
-        listCreators(profile.company_id),
+        listCreators(profile.active_company_id),
       ]);
       setAssignments(a);
       setCreators(

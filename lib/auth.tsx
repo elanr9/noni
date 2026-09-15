@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { router, useSegments } from 'expo-router';
+import { router } from 'expo-router';
 
 import {
   getStoredAccount,
@@ -27,9 +27,11 @@ import {
   type AppMode,
 } from './active-mode';
 import {
-  attachNotificationRouting,
-  registerPushToken,
-} from './notifications';
+  fetchMyCompanies,
+  setActiveCompany,
+  type CompanyMembership,
+} from './companies-api';
+import { registerPushToken } from './notifications';
 import { destinationForProfile, type Profile } from './profile';
 import { supabase } from './supabase';
 
@@ -104,10 +106,14 @@ type AuthState = {
   managerAccess: ManagerAccess;
   loading: boolean;
   accounts: StoredAccount[];
+  companies: CompanyMembership[];
+  activeCompany: CompanyMembership | null;
   activeMode: AppMode;
   refreshProfile: () => Promise<void>;
   refreshManagerAccess: () => Promise<void>;
   refreshAccounts: () => Promise<void>;
+  refreshCompanies: () => Promise<void>;
+  switchCompany: (companyId: string) => Promise<AppMode | null>;
   setActiveMode: (mode: AppMode) => Promise<void>;
   enableCreatorMode: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -150,13 +156,13 @@ async function fetchPermissions(
   if (profile.role === 'admin' || profile.role === 'company_admin') {
     return ALL_PERMISSIONS;
   }
-  if (profile.role !== 'campaign_manager' || !profile.company_id) {
+  if (profile.role !== 'campaign_manager' || !profile.active_company_id) {
     return NO_PERMISSIONS;
   }
   const { data, error } = await supabase
     .from('company_members')
     .select('permissions')
-    .eq('company_id', profile.company_id)
+    .eq('company_id', profile.active_company_id)
     .eq('profile_id', profile.id)
     .maybeSingle();
   if (error || !data) {
@@ -181,11 +187,11 @@ export async function fetchManagerAccess(
   if (profile.role === 'admin' || profile.role === 'company_admin') {
     return FULL_MANAGER_ACCESS;
   }
-  if (!profile.company_id) return DEFAULT_MANAGER_ACCESS;
+  if (!profile.active_company_id) return DEFAULT_MANAGER_ACCESS;
   const { data, error } = await supabase
     .from('companies')
     .select('settings')
-    .eq('id', profile.company_id)
+    .eq('id', profile.active_company_id)
     .maybeSingle();
   if (error || !data) {
     if (error) console.error('manager access lookup failed', error.message);
@@ -230,12 +236,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     DEFAULT_MANAGER_ACCESS,
   );
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
+  const [companies, setCompanies] = useState<CompanyMembership[]>([]);
   const [activeMode, setActiveModeState] = useState<AppMode>('admin');
   const [loading, setLoading] = useState(true);
 
   const refreshAccounts = useCallback(async () => {
     setAccounts(await listStoredAccounts());
   }, []);
+
+  const refreshCompanies = useCallback(async () => {
+    try {
+      setCompanies(await fetchMyCompanies());
+    } catch (e) {
+      console.error('companies lookup failed', e);
+    }
+  }, []);
+
+  const activeCompany = useMemo(
+    () =>
+      companies.find((c) => c.companyId === profile?.active_company_id) ??
+      companies.find((c) => c.isActive) ??
+      null,
+    [companies, profile?.active_company_id],
+  );
 
   const applyProfileMode = useCallback(async (next: Profile | null) => {
     if (!next) {
@@ -350,16 +373,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void registerPushToken(userId, { ask });
   }, [session?.user?.id, profile?.id, profile?.onboarded, profile?.role]);
 
-  // Wait until the auth redirects have landed inside a mode group, otherwise
-  // the initial <Redirect> to the home tab replaces the notification route.
-  const segments = useSegments();
-  const inModeGroup = segments[0] === '(admin)' || segments[0] === '(creator)';
-
-  useEffect(() => {
-    if (loading || !session?.user || !inModeGroup) return;
-    return attachNotificationRouting(() => activeMode);
-  }, [loading, session?.user?.id, activeMode, inModeGroup]);
-
   const setActiveMode = useCallback(
     async (mode: AppMode) => {
       if (!profile) return;
@@ -403,6 +416,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveModeState('creator');
     router.replace(destinationForProfile(next, true, 'creator'));
   }, [profile, session, refreshAccounts]);
+
+  useEffect(() => {
+    if (!profile) {
+      setCompanies([]);
+      return;
+    }
+    void refreshCompanies();
+  }, [profile?.id, profile?.active_company_id, refreshCompanies]);
+
+  const switchCompany = useCallback(
+    async (companyId: string) => {
+      if (!profile || profile.active_company_id === companyId) return null;
+      await setActiveCompany(companyId);
+      const next = await fetchProfile(profile.id);
+      if (!next) throw new Error('profile missing after company switch');
+      setProfile(next);
+      const [perms, access] = await Promise.all([
+        fetchPermissions(next),
+        fetchManagerAccess(next),
+      ]);
+      setPermissions(perms);
+      setManagerAccess(access);
+      if (session) await upsertStoredAccount(session, next);
+      const mode = await resolveMode(next);
+      try {
+        await setStoredMode(next.id, mode);
+      } catch (e) {
+        console.error('active mode persist failed', e);
+      }
+      setActiveModeState(mode);
+      // Same side of the app: screens keyed on active_company_id refetch in place.
+      if (mode !== activeMode) router.replace(destinationForProfile(next, true, mode));
+      return mode;
+    },
+    [profile, session, activeMode],
+  );
 
   const switchAccount = useCallback(
     async (userId: string) => {
@@ -476,10 +525,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       managerAccess,
       loading,
       accounts,
+      companies,
+      activeCompany,
       activeMode,
       refreshProfile,
       refreshManagerAccess,
       refreshAccounts,
+      refreshCompanies,
+      switchCompany,
       setActiveMode,
       enableCreatorMode,
       signOut,
@@ -493,10 +546,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       managerAccess,
       loading,
       accounts,
+      companies,
+      activeCompany,
       activeMode,
       refreshProfile,
       refreshManagerAccess,
       refreshAccounts,
+      refreshCompanies,
+      switchCompany,
       setActiveMode,
       enableCreatorMode,
       signOut,

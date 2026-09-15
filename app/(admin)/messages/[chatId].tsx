@@ -115,7 +115,7 @@ export default function ManagerChatScreen() {
       await setChatMuted({
         chatId,
         profileId: profile.id,
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         muted: next,
       });
     } catch (e) {
@@ -124,7 +124,7 @@ export default function ManagerChatScreen() {
     }
   };
 
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
   const loadSummaries = useCallback(async (rows: ManagerMessage[]) => {
     if (companyId === null) return;
     const known = summaryIdsRef.current;
@@ -142,9 +142,9 @@ export default function ManagerChatScreen() {
     if (!profile || !chatId) return;
     try {
       const [info, rows, people] = await Promise.all([
-        getManagerChat(profile.company_id, profile.id, chatId),
+        getManagerChat(profile.active_company_id, profile.id, chatId),
         listManagerMessages(chatId),
-        listTeam(profile.company_id),
+        listTeam(profile.active_company_id),
       ]);
       setChat(info);
       setMessages(rows);
@@ -163,11 +163,11 @@ export default function ManagerChatScreen() {
     if (!chatId || !chat) return;
     try {
       if (chat.isGeneral && profile) {
-        setMembers(await listGeneralMembers(profile.company_id));
+        setMembers(await listGeneralMembers(profile.active_company_id));
       } else if (chat.kind === 'channel') {
         setMembers(await listChannelMembers(chatId));
       } else if (chat.kind === 'brief' && chat.campaignId && profile) {
-        setMembers(await listBriefChatMembers(profile.company_id, chat.campaignId));
+        setMembers(await listBriefChatMembers(profile.active_company_id, chat.campaignId));
       } else {
         setMembers(team.map((t) => ({ id: t.id, name: t.name, role: t.role })));
       }
@@ -199,7 +199,7 @@ export default function ManagerChatScreen() {
     setSending(true);
     try {
       await sendManagerMessage({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         authorId: profile.id,
         body,
@@ -226,14 +226,14 @@ export default function ManagerChatScreen() {
     setSending(true);
     try {
       const mediaPath = await uploadManagerChatMedia({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         localUri,
         mime,
         ext,
       });
       await sendManagerMessage({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         chatId,
         authorId: profile.id,
         body: extra?.caption ?? '',

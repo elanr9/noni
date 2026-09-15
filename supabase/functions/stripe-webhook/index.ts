@@ -23,7 +23,8 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
-import { adminPushTokens, sendExpoPush } from '../_shared/push.ts';
+import { adminRecipients, sendPush } from '../_shared/push.ts';
+import { managerLink } from '../_shared/deep-link.ts';
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -226,13 +227,14 @@ async function handleCompanyCreditTopup(
     const label = Number.isInteger(dollars)
       ? `$${dollars}`
       : `$${dollars.toFixed(2)}`;
-    const tokens = await adminPushTokens(admin, companyId);
-    await sendExpoPush(tokens, {
+    const recipients = await adminRecipients(admin, companyId);
+    await sendPush(admin, recipients, {
       title: 'Credits added',
       body: `${label} added to your UGC credits`,
       data: {
         event: 'company_topup',
         company_id: companyId,
+        deep_link: managerLink(companyId, 'settings'),
         amount_cents: String(amountCents),
       },
     });

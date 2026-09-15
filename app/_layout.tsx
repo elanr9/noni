@@ -10,7 +10,9 @@ import {
 } from '@expo-google-fonts/tiktok-sans';
 
 import { ConfigErrorScreen } from '../components/Screen';
+import { CompanyOverlays } from '../components/shared';
 import { AuthProvider } from '../lib/auth';
+import { CompanyProvider } from '../lib/company-context';
 import {
   createSessionFromUrl,
   getInitialAuthUrl,
@@ -49,14 +51,17 @@ function App() {
   return (
     <ShareIntentProvider>
       <AuthProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: screenTransition.fade,
-            animationDuration: motion.base,
-          }}
-        />
+        <CompanyProvider>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              animation: screenTransition.fade,
+              animationDuration: motion.base,
+            }}
+          />
+          <CompanyOverlays />
+        </CompanyProvider>
       </AuthProvider>
     </ShareIntentProvider>
   );

@@ -30,6 +30,7 @@ import {
   EmptyState,
   SkeletonCard,
 } from '../../../components/admin/shared';
+import { ContextRow } from '../../../components/shared';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
@@ -45,7 +46,7 @@ const POLL_MS = 20_000;
 
 export default function MessagesScreen() {
   const { profile } = useAuth();
-  const companyId = profile?.company_id ?? null;
+  const companyId = profile?.active_company_id ?? null;
   const meId = profile?.id ?? null;
 
   const [inbox, setInbox] = useState<Inbox | null>(null);
@@ -120,10 +121,7 @@ export default function MessagesScreen() {
 
   const subtitle = (() => {
     if (loading || inbox === null) return undefined;
-    const unread = inbox.unreadTotal;
-    const queue = inbox.queue.length;
-    if (unread === 0 && queue === 0) return 'All caught up';
-    return `${unread} unread \u00b7 ${queue} to review`;
+    return `${inbox.unreadTotal} unread \u00b7 ${inbox.queue.length} to review`;
   })();
 
   const openDm = (row: DmInboxRow) => {
@@ -150,10 +148,8 @@ export default function MessagesScreen() {
         />
       }
     >
-      <AdminHeader
-        title="Messages"
-        subtitle={subtitle}
-        trailing={
+      <ContextRow
+        right={
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="New message"
@@ -164,6 +160,7 @@ export default function MessagesScreen() {
           </PressableScale>
         }
       />
+      <AdminHeader title="Messages" subtitle={subtitle} />
 
       {loading && (
         <View style={styles.skeletons}>

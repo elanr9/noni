@@ -222,7 +222,7 @@ export function CreatorSetupChecklist() {
   );
 
   useEffect(() => {
-    const companyId = profile?.company_id;
+    const companyId = profile?.active_company_id;
     if (!companyId) return;
     let cancelled = false;
     void getCompany(companyId)
@@ -233,7 +233,7 @@ export function CreatorSetupChecklist() {
     return () => {
       cancelled = true;
     };
-  }, [profile?.company_id]);
+  }, [profile?.active_company_id]);
 
   // F1: invites are claimed implicitly at sign-in (handle_new_user), so the
   // accept modal shows once per creator on their first landing here.

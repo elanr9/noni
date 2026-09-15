@@ -51,7 +51,7 @@ export default function TrendsScreen() {
     try {
       const [t, c] = await Promise.all([
         listTrends(),
-        listCreators(profile.company_id),
+        listCreators(profile.active_company_id),
       ]);
       setTrends(t);
       setCreators(c.filter((p) => p.role === 'creator' || p.can_create));
@@ -90,7 +90,7 @@ export default function TrendsScreen() {
       const due = new Date();
       due.setDate(due.getDate() + 1);
       await createTask({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         createdBy: profile.id,
         assignedTo: assignee,
         title: draft.title,

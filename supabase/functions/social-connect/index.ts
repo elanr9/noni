@@ -218,7 +218,7 @@ Deno.serve(async (req) => {
 
     const { data: caller } = await admin
       .from('profiles')
-      .select('id, company_id, role, upload_post_profile, full_name')
+      .select('id, active_company_id, role, upload_post_profile, full_name')
       .eq('id', userData.user.id)
       .maybeSingle();
     if (!caller) return jsonResponse({ error: 'forbidden' }, 403);
@@ -235,10 +235,10 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'forbidden' }, 403);
       }
       const { data: creators } = await admin
-        .from('profiles')
-        .select('id, full_name, role, upload_post_profile')
-        .eq('company_id', caller.company_id)
-        .or('role.eq.creator,can_create.eq.true')
+        .from('company_roster')
+        .select('id, full_name, member_role, upload_post_profile')
+        .eq('company_id', caller.active_company_id)
+        .or('member_role.eq.creator,can_create.eq.true')
         .order('full_name');
 
       const members = [];
@@ -260,11 +260,12 @@ Deno.serve(async (req) => {
     let targetId = caller.id;
     if (isManager && body.creator_id) {
       const { data: target } = await admin
-        .from('profiles')
-        .select('id, company_id, upload_post_profile')
+        .from('company_roster')
+        .select('id, upload_post_profile')
         .eq('id', body.creator_id)
+        .eq('company_id', caller.active_company_id)
         .maybeSingle();
-      if (!target || target.company_id !== caller.company_id) {
+      if (!target) {
         return jsonResponse({ error: 'creator not found' }, 404);
       }
       targetId = target.id;

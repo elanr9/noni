@@ -162,10 +162,15 @@ export async function reviewAssignment(params: {
   const updated = await transitionAssignment(assignment.id, assignment.status, action);
 
   if (action === 'approved') {
-    const { error: scheduleError } = await supabase.rpc('schedule_assignment_publish', {
-      p_assignment_id: assignment.id,
-    });
+    const { data: scheduled, error: scheduleError } = await supabase.rpc(
+      'schedule_assignment_publish',
+      { p_assignment_id: assignment.id },
+    );
     if (scheduleError) throw scheduleError;
+    const publishAt = typeof scheduled === 'string' ? scheduled : null;
+    if (publishAt && new Date(publishAt).getTime() <= Date.now()) {
+      void supabase.functions.invoke('publish-due', { body: { source: 'approve' } });
+    }
   }
 
   void supabase.functions.invoke('notify', {
@@ -413,13 +418,23 @@ export async function inviteCreator(
 
 export async function listCreators(companyId: string): Promise<Profile[]> {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('company_roster')
     .select('*')
     .eq('company_id', companyId)
     .order('full_name');
   if (error) throw error;
-  // Rows are filtered to this company, so company_id is never null here.
-  return (data ?? []) as Profile[];
+  // Membership rows carry the company role as member_role; map back to the Profile shape.
+  return (data ?? []).map(
+    ({
+      member_role,
+      member_permissions: _permissions,
+      joined_at: _joinedAt,
+      last_active_at: _lastActiveAt,
+      company_id: _companyId,
+      active_role: _activeRole,
+      ...p
+    }) => ({ ...p, role: member_role ?? 'creator', active_company_id: companyId }) as Profile,
+  );
 }
 
 export type ApprovedCreator = { id: string; name: string };
@@ -769,10 +784,10 @@ export async function fetchCreatorLeaderboard(
     { data: ledger, error: ledgerError },
   ] = await Promise.all([
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('id, full_name')
       .eq('company_id', companyId)
-      .or('role.eq.creator,can_create.eq.true')
+      .or('member_role.eq.creator,can_create.eq.true')
       .order('full_name'),
     supabase
       .from('assignments')
@@ -790,9 +805,9 @@ export async function fetchCreatorLeaderboard(
 
   const rows = new Map<string, CreatorLeaderboardRow>(
     (creators ?? []).map((p) => [
-      p.id,
+      p.id ?? '',
       {
-        creatorId: p.id,
+        creatorId: p.id ?? '',
         creatorName: p.full_name?.trim() || 'Creator',
         views: 0,
         postsCompleted: 0,
@@ -876,7 +891,7 @@ export async function fetchBriefAnalytics(
       .eq('company_id', companyId)
       .eq('kind', 'bounty_credit'),
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('id, full_name')
       .eq('company_id', companyId),
     fetchRevenueMaps(companyId),
@@ -997,7 +1012,7 @@ export async function fetchCreatorDetail(
     { data: ledger, error: ledgerError },
   ] = await Promise.all([
     supabase
-      .from('profiles')
+      .from('company_roster')
       .select('full_name')
       .eq('company_id', companyId)
       .eq('id', creatorId)

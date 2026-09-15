@@ -71,6 +71,10 @@ export function routeNotificationTap(
       router.push('/(admin)/(tabs)/analytics');
       return;
     }
+    if (event === 'post_live' && assignmentId) {
+      router.push(`/(admin)/review/${assignmentId}`);
+      return;
+    }
     if (campaignId) {
       router.push(`/(admin)/week/${campaignId}`);
       return;

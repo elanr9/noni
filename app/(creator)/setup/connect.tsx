@@ -170,7 +170,7 @@ export default function ConnectAccountsScreen() {
   useEffect(() => {
     if (!allConnected || celebrated.current) return;
     if (profile !== null) {
-      void refreshSetupState(profile.company_id, profile.id).catch(() => undefined);
+      void refreshSetupState(profile.active_company_id, profile.id).catch(() => undefined);
     }
     // Only a link that just happened deserves the celebration; arriving here
     // already connected should not replay it.

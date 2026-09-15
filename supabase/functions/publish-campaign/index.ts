@@ -106,10 +106,10 @@ Deno.serve(async (req) => {
   }
 
   const { data: allCreators, error: creatorsError } = await db
-    .from('profiles')
+    .from('company_roster')
     .select('id')
     .eq('company_id', campaign.company_id)
-    .or('role.eq.creator,can_create.eq.true');
+    .or('member_role.eq.creator,can_create.eq.true');
   if (creatorsError) {
     return jsonResponse({ error: creatorsError.message }, 500);
   }

@@ -2,10 +2,9 @@
 // support, sign out, delete. Company brain, billing and team live on the
 // web admin console.
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
-import { AccountSwitcherSheet } from '../../../components/AccountSwitcherSheet';
 import {
   AdminScreen,
   Card,
@@ -18,7 +17,6 @@ import { Icon, type IconName } from '../../../components/ui/Icon';
 import { OutlinedText } from '../../../components/ui/OutlinedText';
 import { TextField } from '../../../components/ui/TextField';
 import { inviteCreator } from '../../../lib/admin-api';
-import { modesForProfile, switchAccountRowLabel } from '../../../lib/active-mode';
 import { useAuth } from '../../../lib/auth';
 import { saveOverlayThemeColor } from '../../../lib/briefs-api';
 import {
@@ -103,13 +101,10 @@ export default function SettingsScreen() {
     managerAccess,
     refreshManagerAccess,
     signOut,
-    activeMode,
-    setActiveMode,
   } = useAuth();
   const router = useRouter();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [open, setOpen] = useState<OpenSheet>(null);
-  const [switcher, setSwitcher] = useState(false);
   const [ended, setEnded] = useState<Ended>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -147,7 +142,7 @@ export default function SettingsScreen() {
     setSavingTheme(true);
     setThemeError(null);
     try {
-      await saveOverlayThemeColor(profile.company_id, hex);
+      await saveOverlayThemeColor(profile.active_company_id, hex);
       setThemeColor(hex);
       setOpen(null);
     } catch (e) {
@@ -160,29 +155,12 @@ export default function SettingsScreen() {
   const company = companyName ?? 'your company';
   const inviteValid = name.trim().length > 0 && EMAIL_RE.test(email.trim());
 
-  // Same one-tap switch creators get; the sheet is only the fallback for
-  // managers who have not turned on creator mode yet.
-  async function onSwitchRole() {
-    if (profile && modesForProfile(profile).includes('creator')) {
-      try {
-        await setActiveMode('creator');
-      } catch (e) {
-        Alert.alert(
-          'Could not switch',
-          e instanceof Error ? e.message : 'Try again',
-        );
-      }
-      return;
-    }
-    setSwitcher(true);
-  }
-
   async function sendInvite() {
     if (!profile || !managerAccess.inviteCreators) return;
     setSending(true);
     setInviteError(null);
     try {
-      await inviteCreator(profile.company_id, name.trim(), email.trim().toLowerCase());
+      await inviteCreator(profile.active_company_id, name.trim(), email.trim().toLowerCase());
       setSent(true);
     } catch (e) {
       setInviteError(e instanceof Error ? e.message : 'Could not send. Try again.');
@@ -221,11 +199,6 @@ export default function SettingsScreen() {
 
         <View style={styles.stack}>
         <Card pad={0}>
-          <NavRow
-            icon="arrow-left-right"
-            label={switchAccountRowLabel(profile, activeMode)}
-            onPress={() => void onSwitchRole()}
-          />
           {managerAccess.inviteCreators ? (
             <NavRow
               icon="plus"
@@ -532,11 +505,6 @@ export default function SettingsScreen() {
           and sign-in are gone for good.
         </Text>
       </Sheet>
-
-      <AccountSwitcherSheet
-        visible={switcher}
-        onClose={() => setSwitcher(false)}
-      />
 
       {ended === 'signedout' && (
         <ConfirmationTakeover

@@ -36,6 +36,7 @@ import {
 import { SourceChips, type LibraryLane } from '../../../components/admin/library/SourceChips';
 import { SubTabs } from '../../../components/admin/library/SubTabs';
 import { AdminHeader, AdminScreen } from '../../../components/admin/shared';
+import { ContextRow } from '../../../components/shared';
 import { SoftToast } from '../../../components/states/SoftToast';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon, type IconName } from '../../../components/ui/Icon';
@@ -100,7 +101,7 @@ const EMPTY: Record<ItemLane, Record<UsedTab, { icon: IconName; title: string; b
     unused: {
       icon: 'zap',
       title: 'No ideas yet',
-      body: 'Type one line above, pick video or slideshow, and the whole post is written and saved here ready.',
+      body: 'Type one line above and the whole post is written and saved here.',
     },
     used: {
       icon: 'zap',
@@ -261,7 +262,7 @@ export default function LibraryScreen() {
     }, []),
   );
 
-  const companyId = profile?.company_id;
+  const companyId = profile?.active_company_id;
   useEffect(() => {
     if (!companyId) return;
     void listCreatorOptions(companyId).then(setCreators).catch(() => undefined);
@@ -392,7 +393,7 @@ export default function LibraryScreen() {
       for (const [i, source] of sources.entries()) {
         setMaking({ done: i, total: sources.length, label: makeSourceLabel([source]) });
         const outcome = await makeLibraryPosts({
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
           userId: profile.id,
           source,
           families,
@@ -517,7 +518,7 @@ export default function LibraryScreen() {
           postTypeKey: postType.key,
           family: slot.family,
           source,
-          companyId: profile.company_id,
+          companyId: profile.active_company_id,
         });
         if (result.kind === 'kill') {
           setMakeFrom(null);
@@ -539,7 +540,7 @@ export default function LibraryScreen() {
         }
         void refreshCounts(row.item.source === 'reference' ? 'reference' : 'idea');
       } else {
-        markOurPostUsed(profile.company_id, profile.id, row.post, slot.briefId).catch(
+        markOurPostUsed(profile.active_company_id, profile.id, row.post, slot.briefId).catch(
           () => undefined,
         );
         patchPost(row.post.post_id, { used_count: (row.post.used_count ?? 0) + 1 });
@@ -582,7 +583,7 @@ export default function LibraryScreen() {
   function onNeedThumbnail(post: OurPost) {
     if (!profile || enriching.current.has(post.post_id)) return;
     enriching.current.add(post.post_id);
-    enrichOurPostThumbnail(profile.company_id, profile.id, post)
+    enrichOurPostThumbnail(profile.active_company_id, profile.id, post)
       .then((url) => {
         if (url) patchPost(post.post_id, { thumbnail_url: url });
       })
@@ -607,7 +608,7 @@ export default function LibraryScreen() {
     setCreatingOtherId(item.id);
     try {
       const outcome = await makeOtherFormat({
-        companyId: profile.company_id,
+        companyId: profile.active_company_id,
         userId: profile.id,
         item,
         family: target,
@@ -759,6 +760,7 @@ export default function LibraryScreen() {
   return (
     <AdminScreen scroll={false}>
       <View style={styles.header}>
+        <ContextRow />
         <AdminHeader title="Library" />
         <SourceChips value={lane} onChange={switchLane} />
 
@@ -845,7 +847,7 @@ export default function LibraryScreen() {
       {lane === 'media' ? (
         profile ? (
           <MediaLane
-            companyId={profile.company_id}
+            companyId={profile.active_company_id}
             userId={profile.id}
             bottomPadding={bottomPadding}
             onToast={flash}

@@ -303,12 +303,12 @@ async function currentProfile(): Promise<{ id: string; company_id: string } | nu
   if (!user) return null;
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id, company_id')
+    .select('id, active_company_id')
     .eq('id', user.id)
     .maybeSingle();
   if (profileError) throw profileError;
-  if (!profile?.company_id) return null;
-  return { id: profile.id, company_id: profile.company_id };
+  if (!profile?.active_company_id) return null;
+  return { id: profile.id, company_id: profile.active_company_id };
 }
 
 export async function getOrCreateDm(
@@ -722,17 +722,20 @@ export async function listChannelMembers(chatId: string): Promise<ChannelMember[
 /** Everyone in the company: the General chat's members. */
 export async function listGeneralMembers(companyId: string): Promise<ChannelMember[]> {
   const { data, error } = await supabase
-    .from('profiles')
-    .select('id, full_name, role')
+    .from('company_roster')
+    .select('id, full_name, member_role')
     .eq('company_id', companyId)
-    .in('role', ['company_admin', 'campaign_manager', 'creator']);
+    .in('member_role', ['company_admin', 'campaign_manager', 'creator']);
   if (error) throw error;
   return (data ?? [])
-    .map((p) => ({
-      id: p.id,
-      name: p.full_name?.trim() || (p.role === 'creator' ? 'Creator' : 'Manager'),
-      role: p.role,
-    }))
+    .map((p) => {
+      const role = p.member_role ?? 'creator';
+      return {
+        id: p.id ?? '',
+        name: p.full_name?.trim() || (role === 'creator' ? 'Creator' : 'Manager'),
+        role,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
