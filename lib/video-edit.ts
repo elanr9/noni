@@ -287,13 +287,98 @@ export type StoredPiece = {
 };
 
 export type StoredSlots = Record<string, StoredPiece[]>;
-export type StoredEdits = { slots: StoredSlots; gain: number };
+
+/** One transcribed word; `s`/`e` are ms in the clip file it was read from. */
+export type TranscriptWord = { w: string; s: number; e: number };
+
+/**
+ * When the on-screen text and the screenshot / recording enter on one slot.
+ * All ms are in that slot's clip file (source ms in the editor, exported clip
+ * ms once submitted). null means the default: text at clip start with the
+ * standard hold, media at clip start until the clip ends.
+ */
+export type SlotCue = {
+  text_start_ms: number | null;
+  text_hold_ms: number | null;
+  media_start_ms: number | null;
+  media_end_ms: number | null;
+  /** 'ai' = suggested from the transcript, 'creator' = dragged in the editor. */
+  source: 'ai' | 'creator';
+};
+
+export type StoredCues = Record<string, SlotCue>;
+export type StoredWords = Record<string, TranscriptWord[]>;
+
+export type StoredEdits = {
+  slots: StoredSlots;
+  gain: number;
+  /** Cue timing per slot index; absent slots use the defaults. */
+  cues: StoredCues;
+  /** Transcript per slot index, cached so the editor can show cue suggestions offline. */
+  words: StoredWords;
+};
+
+/** A cue as written to submissions.cues at submit time. */
+export type SubmissionCue = SlotCue & { slot_index: number };
 
 export function emptyStoredEdits(): StoredEdits {
-  return { slots: {}, gain: DEFAULT_GAIN };
+  return { slots: {}, gain: DEFAULT_GAIN, cues: {}, words: {} };
 }
 
-export function serializeEdits(timeline: EditTimeline): StoredEdits {
+function msOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+}
+
+export function parseSlotCue(value: unknown): SlotCue | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    text_start_ms: msOrNull(raw.text_start_ms),
+    text_hold_ms: msOrNull(raw.text_hold_ms),
+    media_start_ms: msOrNull(raw.media_start_ms),
+    media_end_ms: msOrNull(raw.media_end_ms),
+    source: raw.source === 'creator' ? 'creator' : 'ai',
+  };
+}
+
+export function parseTranscriptWords(value: unknown): TranscriptWord[] {
+  if (!Array.isArray(value)) return [];
+  const words: TranscriptWord[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.w !== 'string' || typeof raw.s !== 'number' || typeof raw.e !== 'number') continue;
+    words.push({ w: raw.w, s: raw.s, e: raw.e });
+  }
+  return words;
+}
+
+/** Stored edits with one slot's cue and transcript replaced. */
+export function withSlotCue(
+  stored: StoredEdits,
+  slotIndex: number,
+  cue: SlotCue | null,
+  words?: TranscriptWord[],
+): StoredEdits {
+  const key = String(slotIndex);
+  const cues = { ...stored.cues };
+  if (cue === null) delete cues[key];
+  else cues[key] = cue;
+  const next = { ...stored, cues };
+  if (words !== undefined) next.words = { ...stored.words, [key]: words };
+  return next;
+}
+
+/** Flattens stored cues for submissions.cues, in slot order. */
+export function submissionCues(stored: StoredEdits): SubmissionCue[] {
+  return Object.entries(stored.cues)
+    .map(([slot, cue]) => ({ ...cue, slot_index: Number(slot) }))
+    .filter((c) => Number.isInteger(c.slot_index))
+    .sort((a, b) => a.slot_index - b.slot_index);
+}
+
+/** Pieces and gain from the timeline; cues and words carry over from `prior`. */
+export function serializeEdits(timeline: EditTimeline, prior?: StoredEdits): StoredEdits {
   const slots: StoredSlots = {};
   for (const slot of slotIndices(timeline)) {
     if (slotIsUntouched(timeline, slot)) continue;
@@ -305,7 +390,7 @@ export function serializeEdits(timeline: EditTimeline): StoredEdits {
       crop: p.crop,
     }));
   }
-  return { slots, gain: timeline.gain };
+  return { slots, gain: timeline.gain, cues: prior?.cues ?? {}, words: prior?.words ?? {} };
 }
 
 function isSpeed(value: unknown): value is EditSpeed {
@@ -365,7 +450,25 @@ export function parseStoredEdits(value: Json | null | undefined): StoredEdits {
     }
     if (pieces.length > 0) out[slot] = pieces;
   }
-  return { slots: out, gain };
+  const cues: StoredCues = {};
+  const words: StoredWords = {};
+  if (wrapped) {
+    const rawCues = raw.cues;
+    if (rawCues !== null && typeof rawCues === 'object' && !Array.isArray(rawCues)) {
+      for (const [slot, value] of Object.entries(rawCues as Record<string, unknown>)) {
+        const cue = parseSlotCue(value);
+        if (cue) cues[slot] = cue;
+      }
+    }
+    const rawWords = raw.words;
+    if (rawWords !== null && typeof rawWords === 'object' && !Array.isArray(rawWords)) {
+      for (const [slot, value] of Object.entries(rawWords as Record<string, unknown>)) {
+        const list = parseTranscriptWords(value);
+        if (list.length > 0) words[slot] = list;
+      }
+    }
+  }
+  return { slots: out, gain, cues, words };
 }
 
 /** Rebuild a timeline from recorded slots plus stored edits. Edits that no

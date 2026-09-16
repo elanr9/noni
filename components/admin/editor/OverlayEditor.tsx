@@ -90,7 +90,7 @@ export type OverlaySavePatch = {
 };
 
 const DEFAULT_SHOT = { x: 0.72, y: 0.56, w: 0.34 };
-const DEFAULT_SUBTITLES_Y = 0.78;
+const DEFAULT_SUBTITLES_Y = 0.72;
 
 /** Drag-to-delete: how close the fingers must get to the trash to drop. */
 const TRASH_RADIUS = 64;
@@ -710,7 +710,12 @@ export function OverlayEditor(props: {
         ) : null}
 
         {subtitles ? (
-          <SubtitlePreview top={subtitlesY * stage.h} dimmed={editing} />
+          <SubtitlePreview
+            top={subtitlesY * stage.h}
+            dimmed={editing}
+            stageWidth={stage.w}
+            stageHeight={stage.h}
+          />
         ) : null}
 
         {!editing ? (

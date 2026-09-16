@@ -4,6 +4,8 @@ import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
 import type { Assignment, ContentTask, TaskStatus } from './tasks';
+import type { Json } from './types';
+import type { SubmissionCue } from './video-edit';
 
 async function nextVersion(column: 'task_id' | 'assignment_id', id: string): Promise<number> {
   const { data, error } = await supabase
@@ -207,6 +209,7 @@ async function createAssignmentSubmission(params: {
   format: 'video' | 'photo';
   /** Post level volume multiplier the stitcher applies; null keeps the column default. */
   audioGain: number | null;
+  cues?: SubmissionCue[] | null;
 }): Promise<Assignment> {
   const {
     assignment,
@@ -217,6 +220,7 @@ async function createAssignmentSubmission(params: {
     durationsMs,
     durationSeconds,
     audioGain,
+    cues,
   } = params;
 
   const { data: submission, error: insertError } = await supabase
@@ -229,6 +233,7 @@ async function createAssignmentSubmission(params: {
       duration_seconds: durationSeconds,
       version,
       ...(audioGain !== null ? { audio_gain: audioGain } : {}),
+      ...(cues && cues.length > 0 ? { cues: cues as unknown as Json } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -287,8 +292,10 @@ export async function submitAssignmentClips(params: {
   creatorId: string;
   clips: UploadedClip[];
   audioGain?: number;
+  /** Cue timing the creator saw or set in the editor, ms in the uploaded clips. */
+  cues?: SubmissionCue[];
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId, audioGain } = params;
+  const { assignment, companyId, creatorId, audioGain, cues } = params;
   const clips = [...params.clips].sort((a, b) => a.slotIndex - b.slotIndex);
   if (clips.length === 0) {
     throw new Error('Nothing recorded yet');
@@ -312,6 +319,7 @@ export async function submitAssignmentClips(params: {
     durationSeconds,
     format: 'video',
     audioGain: audioGain ?? null,
+    cues: cues ?? null,
   });
 }
 

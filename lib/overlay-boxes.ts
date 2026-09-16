@@ -64,7 +64,7 @@ export const OVERLAY_TEXT_SPEC = {
     pairHueTolerance: 25,
   },
   /** Widest a box may wrap, as a fraction of the stage width. */
-  maxWidth: 0.86,
+  maxWidth: 0.9,
 } as const;
 
 /**
@@ -96,21 +96,21 @@ export const DEFAULT_OVERLAY_FILL = '#EB4C89';
 
 /** The editor stage the legacy px sizes were designed on. */
 export const LEGACY_STAGE_WIDTH = 390;
-export const DEFAULT_BOX_SIZE = 26 / LEGACY_STAGE_WIDTH;
+export const DEFAULT_BOX_SIZE = 34 / LEGACY_STAGE_WIDTH;
 export const MIN_BOX_SIZE = 13 / LEGACY_STAGE_WIDTH;
 export const MAX_BOX_SIZE = 72 / LEGACY_STAGE_WIDTH;
-export const DEFAULT_TEXT_Y = 0.45;
+export const DEFAULT_TEXT_Y = 0.22;
 
 /** Auto placement (mirrored in supabase/functions/_shared/renderTimeline.ts). */
-const AUTO_MIN_SIZE = 14 / LEGACY_STAGE_WIDTH;
-const AUTO_MAX_SIZE = 28 / LEGACY_STAGE_WIDTH;
-const AUTO_MAX_LINES = 5;
+const AUTO_MIN_SIZE = 20 / LEGACY_STAGE_WIDTH;
+const AUTO_MAX_SIZE = 40 / LEGACY_STAGE_WIDTH;
+const AUTO_MAX_LINES = 4;
 /** Average bold sans glyph width as a fraction of the font size. */
 const AUTO_GLYPH_WIDTH = 0.55;
-const BOX_MAX_WIDTH = 0.86;
-/** First box sits in the upper third so the face stays clear, the second
+const BOX_MAX_WIDTH = OVERLAY_TEXT_SPEC.maxWidth;
+/** First box sits below TikTok's top tabs so the face stays clear, the second
  * above the subtitle band, any further box mid frame. */
-const AUTO_Y_BY_INDEX = [0.3, 0.7, 0.5];
+const AUTO_Y_BY_INDEX = [0.22, 0.68, 0.45];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

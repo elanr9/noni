@@ -4,11 +4,14 @@
 
 import {
   DEFAULT_TEXT_OVERLAY,
+  SUBTITLE_MAX_CHARS,
   TEXT_Y,
   type RenderTimeline,
   type SegmentBox,
+  type TimelineEnter,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
+import type { SubtitleLine } from './cues.ts';
 import { measureOverlayLine, wrapOverlayLines } from './overlayTextMetrics.ts';
 import { bubbleGeometry } from './overlayBubblePath.ts';
 
@@ -50,7 +53,7 @@ const OVERLAY_TEXT_SPEC = {
     pairs: [{ hue: 210, fill: '#80B6F4', ink: '#000590' }],
     pairHueTolerance: 25,
   },
-  maxWidth: 0.86,
+  maxWidth: 0.9,
 } as const;
 
 function fontUrl(file: string): string {
@@ -217,7 +220,7 @@ function boxElements(
   box: { x: number; size: number; color: string; bg: boolean },
   text: string,
   yCenter: number,
-  timing: Record<string, number>,
+  timing: CreatomateElement,
 ): CreatomateElement[] {
   const sizeVmin = box.size * 100;
   const fontPx = box.size * FRAME_WIDTH;
@@ -337,44 +340,128 @@ type CreatomateElement = {
   [key: string]: string | number | boolean | CreatomateElement[];
 };
 
+const FADE_OUT: CreatomateElement = {
+  type: 'fade',
+  time: 'end',
+  duration: 0.2,
+  reversed: true,
+};
+
+/** Text pops in: a short scale up from 85% with a fade, then fades out. */
+function popAnimations(): CreatomateElement[] {
+  return [
+    {
+      type: 'scale',
+      time: 0,
+      duration: 0.25,
+      easing: 'quadratic-out',
+      start_scale: '85%',
+      fade: true,
+    },
+    FADE_OUT,
+  ];
+}
+
+/**
+ * Creatomate bearings: 0° moves right, 90° up, 180° left, 270° down. An
+ * element near the right edge enters moving left, and so on.
+ */
+function slideDirectionFromNearestSide(x: number, y: number): string {
+  const sides: Array<{ distance: number; direction: string }> = [
+    { distance: x, direction: '0°' },
+    { distance: 1 - x, direction: '180°' },
+    { distance: y, direction: '270°' },
+    { distance: 1 - y, direction: '90°' },
+  ];
+  sides.sort((a, b) => a.distance - b.distance);
+  return sides[0].direction;
+}
+
+/** `distance` is relative to the animated element's own size. */
+function slideAnimations(x: number, y: number, distance: string): CreatomateElement[] {
+  return [
+    {
+      type: 'slide',
+      time: 0,
+      duration: 0.35,
+      easing: 'quadratic-out',
+      direction: slideDirectionFromNearestSide(x, y),
+      distance,
+      fade: true,
+    },
+    FADE_OUT,
+  ];
+}
+
+function enterAnimations(
+  enter: TimelineEnter | undefined,
+  x: number,
+  y: number,
+  slideDistance = '100%',
+): { animations: CreatomateElement[] } | Record<never, never> {
+  if (enter === 'pop') return { animations: popAnimations() };
+  if (enter === 'slide') return { animations: slideAnimations(x, y, slideDistance) };
+  return {};
+}
+
 /** Name Creatomate uses to link the subtitle element to the stitched video. */
 const STITCHED_VIDEO_NAME = 'stitched';
 
-// Caption geometry measured from native posts on a 9:16 frame: block
-// centered at 78% of the height, about 62% of the width, 4.8 vmin in the
-// condensed TikTok look (solid white, black stroke, no shadow). Short chunks
-// (about 40 characters) wrap to exactly two lines at that width, and the
-// fixed two-line height pins the block in place whether a chunk fills one
-// line or two; a rare third line is clipped instead of moving the block.
-const SUBTITLE_FONT_SIZE_VMIN = 4.8;
-const SUBTITLE_MAX_CHARS = 40;
-const SUBTITLE_WIDTH = 0.62;
-const SUBTITLE_Y = 0.78;
+// Caption geometry on a 9:16 frame: block centered at 72% of the height,
+// above TikTok's caption area, 80% of the width, 6.2 vmin in the condensed
+// TikTok look (solid white, black stroke, soft shadow). Short chunks (about
+// 30 characters) wrap to at most two lines at that width, and the fixed
+// two-line height pins the block in place whether a chunk fills one line or
+// two; a rare third line is clipped instead of moving the block.
+const SUBTITLE_FONT_SIZE_VMIN = 6.2;
+const SUBTITLE_WIDTH = 0.8;
+const SUBTITLE_Y = 0.72;
+const SUBTITLE_LINES = 2;
 
-/**
- * Talking-head subtitles: auto-transcribed by Creatomate from the stitched
- * video's audio, styled like the on-screen text. No word highlight: the
- * effect color matches the fill so every word reads the same.
- */
-function subtitleElement(y: number = SUBTITLE_Y): CreatomateElement {
+/** Shared look and geometry of every subtitle element, ours or auto-transcribed. */
+function subtitleStyle(y: number): CreatomateElement {
   const fill = '#FFFFFF';
   const lineHeight = OVERLAY_TEXT_SPEC.condensed.lineHeight;
   return {
     type: 'text',
-    transcript_source: STITCHED_VIDEO_NAME,
-    transcript_effect: 'color',
-    transcript_color: fill,
-    transcript_split: 'line',
-    transcript_placement: 'static',
-    transcript_maximum_length: SUBTITLE_MAX_CHARS,
     ...CONDENSED_BASE,
     y: `${y * 100}%`,
     width: `${SUBTITLE_WIDTH * 100}%`,
-    height: `${(SUBTITLE_FONT_SIZE_VMIN * lineHeight * 2).toFixed(2)} vmin`,
+    height: `${(SUBTITLE_FONT_SIZE_VMIN * lineHeight * SUBTITLE_LINES).toFixed(2)} vmin`,
     text_clip: true,
     font_size: `${SUBTITLE_FONT_SIZE_VMIN} vmin`,
     fill_color: fill,
     ...condensedStroke(SUBTITLE_FONT_SIZE_VMIN, fill),
+    shadow_color: 'rgba(0,0,0,0.6)',
+    shadow_blur: '1 vmin',
+  };
+}
+
+/**
+ * Talking-head subtitles: auto-transcribed by Creatomate from the stitched
+ * video's audio, styled like the on-screen text. No word highlight: the
+ * effect color matches the fill so every word reads the same. Fallback for
+ * timelines without their own subtitle_lines.
+ */
+function subtitleElement(y: number = SUBTITLE_Y): CreatomateElement {
+  return {
+    transcript_source: STITCHED_VIDEO_NAME,
+    transcript_effect: 'color',
+    transcript_color: '#FFFFFF',
+    transcript_split: 'line',
+    transcript_placement: 'static',
+    transcript_maximum_length: SUBTITLE_MAX_CHARS,
+    ...subtitleStyle(y),
+  };
+}
+
+/** One of our own subtitle lines, timed from the clip transcripts. */
+function subtitleLineElement(line: SubtitleLine, y: number): CreatomateElement {
+  return {
+    ...subtitleStyle(y),
+    text: line.text,
+    time: line.start_ms / 1000,
+    duration: line.duration_ms / 1000,
   };
 }
 
@@ -420,16 +507,26 @@ function toElements(params: {
     { type: 'video', track: 1, name: STITCHED_VIDEO_NAME, source: videoUrl },
   ];
 
-  if (timeline.subtitles) {
-    elements.push(subtitleElement(timeline.subtitles_y ?? SUBTITLE_Y));
+  const subtitlesY = timeline.subtitles_y ?? SUBTITLE_Y;
+  if (timeline.subtitle_lines) {
+    for (const line of timeline.subtitle_lines) {
+      elements.push(subtitleLineElement(line, subtitlesY));
+    }
+  } else if (timeline.subtitles) {
+    elements.push(subtitleElement(subtitlesY));
   }
 
   const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
   const legacyStyle = textProps(overlay);
   for (const t of timeline.texts) {
-    const timing = { time: t.start_ms / 1000, duration: t.duration_ms / 1000 };
+    const y = t.y ?? TEXT_Y;
+    const timing = {
+      time: t.start_ms / 1000,
+      duration: t.duration_ms / 1000,
+      ...enterAnimations(t.enter, t.box?.x ?? 0.5, y),
+    };
     if (t.box) {
-      elements.push(...boxElements(t.box, t.text, t.y ?? TEXT_Y, timing));
+      elements.push(...boxElements(t.box, t.text, y, timing));
       continue;
     }
     elements.push({
@@ -440,7 +537,7 @@ function toElements(params: {
         .filter((line) => line.length > 0)
         .join('\n'),
       ...timing,
-      y: `${(t.y ?? TEXT_Y) * 100}%`,
+      y: `${y * 100}%`,
       ...legacyStyle,
     });
   }
@@ -463,7 +560,8 @@ function toElements(params: {
     // Screen recordings play muted once from the clip's start and vanish at
     // their natural end (no duration = source length). The wrapping
     // composition owns the clip window, so a recording longer than the clip
-    // is cut where the clip ends; the creator's audio stays.
+    // is cut where the clip ends; the creator's audio stays. The composition
+    // is full frame, so its slide distance is scaled down to the recording.
     elements.push(
       isVideoSource(img.screenshot_path)
         ? {
@@ -474,11 +572,18 @@ function toElements(params: {
             y: '50%',
             width: '100%',
             height: '100%',
+            ...enterAnimations(img.enter, img.x, img.y, `${(img.width * 100).toFixed(1)}%`),
             elements: [
               { type: 'video', ...placement, time: 0, loop: false, volume: '0%' },
             ],
           }
-        : { type: 'image', ...placement, time, duration },
+        : {
+            type: 'image',
+            ...placement,
+            time,
+            duration,
+            ...enterAnimations(img.enter, img.x, img.y),
+          },
     );
   }
 

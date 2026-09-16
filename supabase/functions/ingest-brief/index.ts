@@ -23,6 +23,9 @@ import {
 } from '../_shared/wp8.ts';
 import {
   brandDocBlocks,
+  brandSystemOptions,
+  brandValidationCtx,
+  retryMessage,
   buildBriefSystem,
   generateValidated,
   isKill,
@@ -283,11 +286,11 @@ async function generateOnce(
   const lines = [...sourceLines];
   if (priorFailures.length) {
     lines.push(
-      `Your previous draft failed validation. Fix every one of these and return the corrected JSON:\n${priorFailures.map((f) => `- ${f}`).join('\n')}`,
+      retryMessage(priorFailures, 'draft'),
     );
   }
   const raw = await askClaude(
-    buildBriefSystem(postType, fallbackFormat, brand.bannedPhrases),
+    buildBriefSystem(postType, fallbackFormat, brandSystemOptions(brand)),
     [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
     4096,
   );
@@ -351,10 +354,7 @@ Deno.serve(async (req) => {
   if (query) {
     try {
       const brand = await loadBrandContext(admin, caller.companyId);
-      const validationCtx = {
-        hashtagBank: brand.hashtagBank,
-        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
-      };
+      const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
       const sourceLines = [
         'There is no source post. Draft a brief that answers this search phrase a target viewer types with a deadline in mind:',
@@ -435,10 +435,7 @@ Deno.serve(async (req) => {
         ];
       }
       const brand: BrandContext = { ...loaded, features };
-      const validationCtx = {
-        hashtagBank: brand.hashtagBank,
-        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
-      };
+      const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
       const sourceLines = featureSourceLines(feature, context);
       const postType = await resolvePostType(sourceLines, 'video');
@@ -490,10 +487,7 @@ Deno.serve(async (req) => {
       const media = mediaRow as MediaLibraryRow;
 
       const brand = await loadBrandContext(admin, caller.companyId);
-      const validationCtx = {
-        hashtagBank: brand.hashtagBank,
-        approvedClaimIds: brand.approvedClaims.map((c) => c.id),
-      };
+      const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
       const sourceLines = mediaSourceLines(media, context);
       const postType = await resolvePostType(sourceLines, 'video');
@@ -573,10 +567,7 @@ Deno.serve(async (req) => {
     }
 
     const brand = await loadBrandContext(admin, caller.companyId);
-    const validationCtx = {
-      hashtagBank: brand.hashtagBank,
-      approvedClaimIds: brand.approvedClaims.map((c) => c.id),
-    };
+    const validationCtx = brandValidationCtx(brand);
 
     const sourceLines = [
       `Base the brief on this ${post.platform} ${post.format === 'photo_carousel' ? 'photo slideshow' : 'video'} the admin pasted as a reference:`,
@@ -592,7 +583,7 @@ Deno.serve(async (req) => {
             `Admin angle / context (follow this closely when rewriting — keep the source structure but shift the story to this angle):\n${context.slice(0, 1500)}`,
           ]
         : []),
-      'Take the hook style and structure, then rewrite the body entirely for this brand and its product. Do not mention the original creator.',
+      `Take ONLY the hook shape, the structure and the pacing from this reference. Every fact, example and beat is rewritten for this brand's audience from the brand documents; nothing from the reference's niche survives unless it is true for this brand too. The plug names ${brand.productName} out loud; the reference's product is never mentioned. Do not mention the original creator.`,
     ];
 
     // Nothing is saved yet, so brief_id stays null; generation_id joins the

@@ -35,6 +35,9 @@ export type EditorStageProps = {
   segment: BriefSegment | null;
   shot: ShotPreview | null;
   overlay: TextOverlay;
+  /** Cue gates: the playhead is inside the text or media window of the segment. */
+  showText: boolean;
+  showMedia: boolean;
   subtitles: { y: number } | null;
   onMoveBox: (boxId: string, x: number, y: number) => void;
   onMoveCard: (x: number, y: number) => void;
@@ -61,6 +64,8 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
       segment,
       shot,
       overlay,
+      showText,
+      showMedia,
       subtitles,
       onMoveBox,
       onMoveCard,
@@ -71,6 +76,7 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
       onCropCommit,
     } = props;
     const [area, setArea] = useState<StageSize | null>(null);
+    const gatedOverlay = showText ? overlay : { ...overlay, enabled: false };
 
     // Fit a 9:16 card inside the available area with a little breathing room.
     let card: StageSize | null = null;
@@ -131,10 +137,10 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
             {!cropping && segment !== null && cardSize !== null && segment.layout !== 'green_screen' ? (
               <SegmentOverlayPreview
                 segment={segment}
-                shot={shot}
+                shot={showMedia ? shot : null}
                 stageWidth={cardSize.w}
                 stageHeight={cardSize.h}
-                overlay={overlay}
+                overlay={gatedOverlay}
                 onMoveBox={onMoveBox}
                 onMoveCard={onMoveCard}
                 onDragStart={onDragStart}

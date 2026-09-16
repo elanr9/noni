@@ -1,5 +1,5 @@
 // Stand in for the auto transcribed subtitles the render pass burns in.
-// Mirrors renderAdapter.ts: two centred lines, 4.8 vmin, 62% wide, in the
+// Mirrors renderAdapter.ts: two centred lines, 6.2 vmin, 80% wide, in the
 // condensed TikTok look. The creator can only move it up or down.
 import type { JSX } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -8,8 +8,8 @@ import { CLASSIC_TEXT_COLOR, OVERLAY_TEXT_SPEC } from '../../../lib/overlay-boxe
 import { OutlinedText } from '../../ui/OutlinedText';
 import { DragPlacement } from '../DragPlacement';
 
-const FONT_VMIN = 4.8;
-const WIDTH = 0.62;
+const FONT_VMIN = 6.2;
+const WIDTH = 0.8;
 
 export function SubtitlePlacement(props: {
   y: number;

@@ -77,6 +77,7 @@ Deno.serve(async (req) => {
       hashtagBank: brand.hashtagBank,
       approvedClaimIds: brand.approvedClaims.map((c) => c.id),
       postType: postType ? toPostTypeShape(postType) : null,
+      productNames: [brand.productName, brand.companyName],
     });
 
     const [tier2Raw, tier3Raw] = await Promise.all([

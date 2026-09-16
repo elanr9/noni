@@ -29,11 +29,11 @@ import { color, motion, radius, shadow, space, type } from '../../../theme/token
 import { useAuth } from '../../../lib/auth';
 import {
   creatorPlaceSegment,
-  creatorStyleSegmentBox,
+  creatorStyleBriefBoxes,
   listBriefSegments,
   parseTalkingPoints,
   segmentWithBoxMoved,
-  segmentWithBoxStyled,
+  segmentWithBoxesStyled,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
@@ -368,15 +368,11 @@ export default function UploadScreen() {
     persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
   }
 
-  function styleSlideBox(slideIndex: number, boxId: string, boxColor: string, bg: boolean) {
-    const segment = slideSegment(slideIndex);
-    if (!segment) return;
-    setBriefSegments((prev) =>
-      prev.map((s) =>
-        s.id === segment.id ? segmentWithBoxStyled(s, boxId, boxColor, bg) : s,
-      ),
-    );
-    creatorStyleSegmentBox({ segmentId: segment.id, boxId, color: boxColor, bg }).catch(() =>
+  // One look for the whole post: a pick on any slide restyles every slide.
+  function styleSlideBox(boxColor: string, bg: boolean) {
+    if (!brief) return;
+    setBriefSegments((prev) => prev.map((s) => segmentWithBoxesStyled(s, boxColor, bg)));
+    creatorStyleBriefBoxes({ briefId: brief.id, color: boxColor, bg }).catch(() =>
       setErrorToast('Could not save that color. Try again.'),
     );
   }
@@ -476,9 +472,7 @@ export default function UploadScreen() {
             <TextColorPicker
               key={reviewSegmentId}
               boxes={reviewBoxes}
-              onChange={(boxId, pick) =>
-                styleSlideBox(reviewIndex, boxId, pick.color, pick.bg)
-              }
+              onChange={(_boxId, pick) => styleSlideBox(pick.color, pick.bg)}
             />
           </View>
         ) : null}

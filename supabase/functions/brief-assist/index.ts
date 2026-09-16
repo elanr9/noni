@@ -14,6 +14,11 @@
 //   the client writes the draft into an empty slot in the target lane, so the
 //   source post is never touched.
 //
+// { action: "revise", draft, feedback, post_type?, history?, example_transcript? }
+//   Chat revise: rewrites the whole brief against the manager's plain
+//   language feedback and returns a draft in the ingest-brief shape plus
+//   revision_note (what changed, addressed to the manager). Nothing is saved.
+//
 // { action: "derive_segments", brief_id, overlay_labels? }
 //   Derives or re-derives the render manifest for a saved brief through the
 //   sync_brief_segments RPC (transactional; survivors matched by
@@ -32,8 +37,12 @@ import {
 } from '../_shared/wp8.ts';
 import {
   brandDocBlocks,
+  brandSystemOptions,
+  brandValidationCtx,
+  retryMessage,
   buildFieldSystem,
   buildPortSystem,
+  buildReviseSystem,
   deriveSegments,
   generateValidated,
   isKill,
@@ -55,9 +64,11 @@ import {
   type TalkingPoint,
 } from '../_shared/validateBrief.ts';
 
+type ReviseTurn = { role: 'manager' | 'ai'; text: string };
+
 type Body = {
-  action?: 'regenerate_field' | 'derive_segments' | 'port_format';
-  // regenerate_field
+  action?: 'regenerate_field' | 'derive_segments' | 'port_format' | 'revise';
+  // regenerate_field, revise
   field?: RegenField;
   index?: number;
   post_type?: string;
@@ -67,7 +78,29 @@ type Body = {
   overlay_labels?: (string | null)[];
   // port_format
   target_post_type?: string;
+  // revise
+  feedback?: string;
+  history?: ReviseTurn[];
+  example_transcript?: string | null;
 };
+
+const MAX_REVISE_HISTORY = 8;
+const MAX_REVISE_TURN_CHARS = 2000;
+
+function parseHistory(value: unknown): ReviseTurn[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (t): t is ReviseTurn =>
+        t !== null &&
+        typeof t === 'object' &&
+        ((t as ReviseTurn).role === 'manager' || (t as ReviseTurn).role === 'ai') &&
+        typeof (t as ReviseTurn).text === 'string' &&
+        (t as ReviseTurn).text.trim().length > 0,
+    )
+    .slice(-MAX_REVISE_HISTORY)
+    .map((t) => ({ role: t.role, text: t.text.trim().slice(0, MAX_REVISE_TURN_CHARS) }));
+}
 
 const POST_TYPE_COLUMNS =
   'id, key, label, family, min_points, max_points, clip_structure, requires_plug, requires_credential, target_words_min, target_words_max';
@@ -283,7 +316,7 @@ Deno.serve(async (req) => {
       const system = buildPortSystem(
         targetType,
         targetType.family,
-        brand.bannedPhrases,
+        brandSystemOptions(brand),
       );
       const askLine = `Port this ${source.format === 'photo_carousel' ? 'slideshow' : 'video'} into a ${targetType.label} ${targetType.family === 'photo_carousel' ? 'slideshow' : 'video'}.`;
 
@@ -296,7 +329,7 @@ Deno.serve(async (req) => {
           const lines = [...sourceBriefLines(source), '', askLine];
           if (priorFailures.length) {
             lines.push(
-              `Your previous draft failed validation. Fix every one of these and return the corrected JSON:\n${priorFailures.map((f) => `- ${f}`).join('\n')}`,
+              retryMessage(priorFailures, 'draft'),
             );
           }
           const raw = await askClaude(
@@ -311,10 +344,7 @@ Deno.serve(async (req) => {
             new Set(brand.features.map((f) => f.id)),
           );
         },
-        {
-          hashtagBank: brand.hashtagBank,
-          approvedClaimIds: brand.approvedClaims.map((c) => c.id),
-        },
+        brandValidationCtx(brand),
       );
       if (isKill(outcome)) {
         return jsonResponse({
@@ -375,11 +405,98 @@ Deno.serve(async (req) => {
       return jsonResponse({ segments: rows });
     }
 
+    // Chat revise: the manager says what is wrong in plain language and the
+    // whole brief is rewritten against that feedback. Nothing is saved; the
+    // client applies the returned draft the same way it applies ingest-brief.
+    if (body.action === 'revise') {
+      const feedback = body.feedback?.trim();
+      if (!feedback) return jsonResponse({ error: 'feedback required' }, 400);
+      if (!body.draft || typeof body.draft !== 'object') {
+        return jsonResponse({ error: 'draft required' }, 400);
+      }
+      const draft = parseClientDraft(body.draft);
+      let postType: PostTypeRow | null = null;
+      if (body.post_type?.trim()) {
+        postType = await loadPostType(admin, caller.companyId, body.post_type.trim());
+        if (!postType) {
+          return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
+        }
+      }
+      const brand = await loadBrandContext(admin, caller.companyId);
+      const generationId = crypto.randomUUID();
+      const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
+      const history = parseHistory(body.history);
+      const exampleTranscript = body.example_transcript?.trim() || null;
+      let revisionNote = '';
+
+      const { outcome, warnings } = await generateValidated(
+        admin,
+        caller.companyId,
+        generationId,
+        postType,
+        async (priorFailures) => {
+          const lines = [...draftContext(draft)];
+          if (exampleTranscript) {
+            lines.push(
+              `Reference post this brief was modeled on (structure and hook shape only, never its niche or product):\n${exampleTranscript.slice(0, 2000)}`,
+            );
+          }
+          if (history.length) {
+            lines.push(
+              `Conversation so far:\n${history
+                .map((t) => `${t.role === 'manager' ? 'Manager' : 'You'}: ${t.text.trim()}`)
+                .join('\n')}`,
+            );
+          }
+          lines.push(`Newest feedback from the manager (apply all of it):\n${feedback.slice(0, 3000)}`);
+          if (priorFailures.length) {
+            lines.push(
+              retryMessage(priorFailures, 'revision'),
+            );
+          }
+          const raw = await askClaude(
+            system,
+            [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
+            4096,
+          );
+          const parsed = parseClaudeJson<RawGenerated>(raw);
+          revisionNote =
+            typeof parsed.revision_note === 'string' ? parsed.revision_note.trim() : '';
+          return normalizeGenerated(
+            parsed,
+            postType ? postType.family : draft.format,
+            postType?.key ?? null,
+            new Set(brand.features.map((f) => f.id)),
+          );
+        },
+        brandValidationCtx(brand),
+      );
+      if (isKill(outcome)) {
+        return jsonResponse({ kill_reason: outcome.kill_reason, generation_id: generationId });
+      }
+      return jsonResponse({
+        ...outcome.draft,
+        revision_note: revisionNote || 'Revised the post against your feedback.',
+        overlay_labels: outcome.overlayLabels,
+        point_media: await resolvePointMedia(
+          admin,
+          caller.companyId,
+          brand.features,
+          outcome.featureIds,
+          outcome.draft.talking_points,
+          postType?.family ?? draft.format,
+        ),
+        post_type_id: postType?.id ?? null,
+        generation_id: generationId,
+        warnings,
+      });
+    }
+
     if (body.action !== 'regenerate_field') {
       return jsonResponse(
         {
           error:
-            'expected action "regenerate_field", "derive_segments" or "port_format"',
+            'expected action "regenerate_field", "derive_segments", "port_format" or "revise"',
         },
         400,
       );
@@ -410,11 +527,10 @@ Deno.serve(async (req) => {
     }
     const brand = await loadBrandContext(admin, caller.companyId);
     const validationCtx = {
-      hashtagBank: brand.hashtagBank,
-      approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+      ...brandValidationCtx(brand),
       postType: postType ? toPostTypeShape(postType) : null,
     };
-    const system = buildFieldSystem(field, postType, draft.format, brand.bannedPhrases);
+    const system = buildFieldSystem(field, postType, draft.format, brandSystemOptions(brand));
     const knownFeatureIds = new Set(brand.features.map((f) => f.id));
 
     const askLines: string[] = [];
@@ -436,7 +552,7 @@ Deno.serve(async (req) => {
       const lines = [...draftContext(draft), '', ...askLines];
       if (priorFailures.length) {
         lines.push(
-          `Your previous answer failed validation. Fix every one of these:\n${priorFailures.map((f) => `- ${f}`).join('\n')}`,
+          retryMessage(priorFailures, 'answer'),
         );
       }
       const raw = await askClaude(

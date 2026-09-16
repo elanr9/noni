@@ -24,6 +24,10 @@ import {
   updatePiece,
   type EditCrop,
   type EditTimeline,
+  type SlotCue,
+  type StoredCues,
+  type StoredWords,
+  type TranscriptWord,
 } from '../../../lib/video-edit';
 import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
 import {
@@ -37,6 +41,16 @@ import { PressableScale } from '../../ui/PressableScale';
 import type { ShotPreview } from '../SegmentOverlayPreview';
 import { TextColorPicker } from '../TextColorPicker';
 import { clampCrop } from './CropGesture';
+import {
+  DEFAULT_TEXT_HOLD_MS,
+  MIN_TEXT_HOLD_MS,
+  slotSourceToTimelineMs,
+  slotTimelineRange,
+  type CueDrag,
+  type CueSelection,
+  type CueSlot,
+} from './CueMarkers';
+import { CuePanel } from './CuePanel';
 import { EditorStage, type StageSize } from './EditorStage';
 import { EditorToolbar, type ToolId } from './EditorToolbar';
 import { Timeline } from './Timeline';
@@ -62,6 +76,13 @@ export type PostEditorProps = {
   onStyleBox: (segment: BriefSegment, boxId: string, color: string, bg: boolean) => void;
   onMoveCard: (segment: BriefSegment, x: number, y: number) => void;
   onMoveSubtitles: (y: number) => void;
+  /** Cue timing per slot index (source ms) and the cached transcripts. */
+  cues: StoredCues;
+  words: StoredWords;
+  /** Slots whose cue suggestion is still being fetched. */
+  cuePendingSlots: number[];
+  onCueChange: (slotIndex: number, cue: SlotCue | null) => void;
+  onResetCue: (slotIndex: number) => void;
   onBack: () => void;
   onReplaceSlot: (slotIndex: number) => void;
   onContinue: (timeline: EditTimeline) => void;
@@ -74,9 +95,39 @@ export type PostEditorProps = {
   bottomInset: number;
 };
 
-type OpenTool = 'speed' | 'crop' | 'volume' | 'text-color';
+type OpenTool = 'speed' | 'crop' | 'volume' | 'text-color' | 'cue';
 
 const SPEECH_PILL_MS = 2000;
+
+const EMPTY_CUE: SlotCue = {
+  text_start_ms: null,
+  text_hold_ms: null,
+  media_start_ms: null,
+  media_end_ms: null,
+  source: 'creator',
+};
+
+function cueAfterDrag(base: SlotCue, drag: CueDrag): SlotCue {
+  switch (drag.kind) {
+    case 'text':
+      return { ...base, text_start_ms: drag.sourceMs, source: 'creator' };
+    case 'media':
+      return { ...base, media_start_ms: drag.sourceMs, source: 'creator' };
+    case 'hold': {
+      const start = base.text_start_ms ?? 0;
+      return {
+        ...base,
+        text_hold_ms: Math.max(MIN_TEXT_HOLD_MS, drag.sourceMs - start),
+        source: 'creator',
+      };
+    }
+  }
+}
+
+function cueStartMs(cue: SlotCue | null, kind: CueSelection['kind']): number {
+  if (kind === 'text') return cue?.text_start_ms ?? 0;
+  return cue?.media_start_ms ?? 0;
+}
 
 const NATIVE_MIN_GAP_MS = 80;
 const IDENTITY_CROP: EditCrop = { scale: 1, x: 0, y: 0 };
@@ -97,6 +148,11 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     onStyleBox,
     onMoveCard,
     onMoveSubtitles,
+    cues,
+    words,
+    cuePendingSlots,
+    onCueChange,
+    onResetCue,
     onBack,
     onReplaceSlot,
     onContinue,
@@ -120,8 +176,16 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const [liveCrop, setLiveCrop] = useState<EditCrop | null>(null);
   const [cardSize, setCardSize] = useState<StageSize | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCue, setSelectedCue] = useState<CueSelection | null>(null);
+  const [cuePreview, setCuePreview] = useState<{ slotIndex: number; cue: SlotCue } | null>(null);
+  const cueAtOpen = useRef<SlotCue | null>(null);
   const previewRef = useRef<VideoEditorPreviewHandle>(null);
   const busy = busyLabel !== null;
+
+  const shownCues = useMemo<StoredCues>(
+    () => (cuePreview ? { ...cues, [String(cuePreview.slotIndex)]: cuePreview.cue } : cues),
+    [cues, cuePreview],
+  );
 
   const [speechPill, setSpeechPill] = useState(trimmedToSpeech);
   useEffect(() => {
@@ -189,6 +253,52 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const canSplit = !busy && tool === null && canSplitAt(shown, positionMs);
   const canDelete =
     selected !== null && slotPieces(shown, selected.slotIndex).length > 1;
+
+  const cueSlots = useMemo<CueSlot[]>(
+    () =>
+      slots
+        .map((s) => ({
+          slotIndex: s.slotIndex,
+          label: s.label,
+          hasText: s.segment !== null && s.segment.show_on_screen && overlay.enabled,
+          hasMedia: s.segment !== null && s.segment.screenshot_url !== null,
+          cue: shownCues[String(s.slotIndex)] ?? null,
+          pending: cuePendingSlots.includes(s.slotIndex),
+        }))
+        .filter((s) => s.hasText || s.hasMedia),
+    [slots, overlay.enabled, shownCues, cuePendingSlots],
+  );
+
+  // The stage shows the segment's text and screenshot only inside their cue windows.
+  const cueGate = useMemo(() => {
+    if (!currentSlot) return { showText: true, showMedia: true };
+    const slot = currentSlot.slotIndex;
+    const cue = shownCues[String(slot)] ?? null;
+    const range = slotTimelineRange(shown, slot);
+    if (!range) return { showText: true, showMedia: true };
+    const textStart = cue?.text_start_ms ?? 0;
+    const textFrom = slotSourceToTimelineMs(shown, slot, textStart);
+    const textTo = slotSourceToTimelineMs(
+      shown,
+      slot,
+      textStart + (cue?.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS),
+    );
+    const mediaFrom = slotSourceToTimelineMs(shown, slot, cue?.media_start_ms ?? 0);
+    const mediaTo =
+      cue?.media_end_ms !== null && cue?.media_end_ms !== undefined
+        ? slotSourceToTimelineMs(shown, slot, cue.media_end_ms)
+        : range.endMs;
+    const t = positionMs;
+    return {
+      showText: t >= textFrom && (t < textTo || textTo >= range.endMs),
+      showMedia: t >= mediaFrom && (t < mediaTo || mediaTo >= range.endMs),
+    };
+  }, [currentSlot, shownCues, shown, positionMs]);
+
+  const selectedCueValue =
+    selectedCue !== null ? shownCues[String(selectedCue.slotIndex)] ?? null : null;
+  const selectedCueWords: TranscriptWord[] =
+    selectedCue !== null ? words[String(selectedCue.slotIndex)] ?? [] : [];
 
   function togglePlay() {
     if (busy || tool === 'crop') return;
@@ -271,8 +381,59 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     setPreview(setGain(committed, value));
   }
 
+  function cueToolBlocked(): boolean {
+    return busy || (tool !== null && tool !== 'cue');
+  }
+
+  function selectCue(selection: CueSelection) {
+    if (cueToolBlocked()) return;
+    pause();
+    setSelectedId(null);
+    if (tool !== 'cue' || selectedCue?.slotIndex !== selection.slotIndex) {
+      cueAtOpen.current = cues[String(selection.slotIndex)] ?? null;
+    }
+    setSelectedCue(selection);
+    setTool('cue');
+    const start = cueStartMs(cues[String(selection.slotIndex)] ?? null, selection.kind);
+    seek(slotSourceToTimelineMs(committed, selection.slotIndex, start), true);
+  }
+
+  function cueSeekMs(drag: CueDrag): number {
+    const at = slotSourceToTimelineMs(shown, drag.slotIndex, drag.sourceMs);
+    return drag.kind === 'hold' ? Math.max(0, at - 40) : at;
+  }
+
+  function previewCueDrag(drag: CueDrag) {
+    if (cueToolBlocked()) return;
+    const cue = cueAfterDrag(cues[String(drag.slotIndex)] ?? EMPTY_CUE, drag);
+    setCuePreview({ slotIndex: drag.slotIndex, cue });
+    seek(cueSeekMs(drag), false);
+  }
+
+  function commitCueDrag(drag: CueDrag) {
+    if (cueToolBlocked()) return;
+    const cue = cueAfterDrag(cues[String(drag.slotIndex)] ?? EMPTY_CUE, drag);
+    setCuePreview(null);
+    onCueChange(drag.slotIndex, cue);
+    seek(cueSeekMs(drag), true);
+  }
+
+  function pickCueWord(word: TranscriptWord) {
+    if (!selectedCue) return;
+    commitCueDrag({ slotIndex: selectedCue.slotIndex, kind: selectedCue.kind, sourceMs: word.s });
+  }
+
   function closeTool(save: boolean) {
-    if (tool === 'speed' || tool === 'volume') {
+    if (tool === 'cue') {
+      if (!save && selectedCue !== null) {
+        const now = cues[String(selectedCue.slotIndex)] ?? null;
+        if (JSON.stringify(now) !== JSON.stringify(cueAtOpen.current)) {
+          onCueChange(selectedCue.slotIndex, cueAtOpen.current);
+        }
+      }
+      setCuePreview(null);
+      setSelectedCue(null);
+    } else if (tool === 'speed' || tool === 'volume') {
       if (save && preview !== null) history.commit(preview);
       setPreview(null);
     } else if (tool === 'crop' && selected !== null) {
@@ -361,6 +522,22 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     return `This clip plays for ${formatSeconds(pieceDurationMs(selected))}`;
   }, [selected]);
 
+  const cueCaption = useMemo(() => {
+    if (!selectedCue) return '';
+    const range = slotTimelineRange(shown, selectedCue.slotIndex);
+    if (!range) return '';
+    const start = cueStartMs(selectedCueValue, selectedCue.kind);
+    const at = slotSourceToTimelineMs(shown, selectedCue.slotIndex, start) - range.startMs;
+    if (selectedCue.kind === 'media') return `Screenshot shows at ${formatSeconds(at)}`;
+    const holdEnd =
+      slotSourceToTimelineMs(
+        shown,
+        selectedCue.slotIndex,
+        start + (selectedCueValue?.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS),
+      ) - range.startMs;
+    return `Text shows at ${formatSeconds(at)} for ${formatSeconds(holdEnd - at)}`;
+  }, [selectedCue, selectedCueValue, shown]);
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { top: topInset + 8 }]} pointerEvents="box-none">
@@ -399,6 +576,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           segment={currentSlot?.segment ?? null}
           shot={currentSlot?.shot ?? null}
           overlay={overlay}
+          showText={cueGate.showText}
+          showMedia={cueGate.showMedia}
           subtitles={subtitles}
           onMoveBox={(boxId, x, y) => {
             if (currentSlot?.segment) onMoveBox(currentSlot.segment, boxId, x, y);
@@ -490,6 +669,11 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         onTrimCommit={onTrimCommit}
         allMuted={allMuted}
         onToggleAllMuted={() => history.commit(setAllMuted(committed, !allMuted))}
+        cueSlots={cueSlots}
+        selectedCue={tool === 'cue' ? selectedCue : null}
+        onSelectCue={selectCue}
+        onCuePreview={previewCueDrag}
+        onCueCommit={commitCueDrag}
       />
 
       <View style={[styles.tools, { paddingBottom: Math.max(bottomInset, 12) }]}>
@@ -535,6 +719,22 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
               onChange={(boxId, pick) =>
                 onStyleBox(currentSegment, boxId, pick.color, pick.bg)
               }
+            />
+          </ToolPanel>
+        ) : tool === 'cue' && selectedCue !== null ? (
+          <ToolPanel
+            title="When it shows"
+            onCancel={() => closeTool(false)}
+            onDone={() => closeTool(true)}
+          >
+            <CuePanel
+              words={selectedCueWords}
+              sourceMs={cueStartMs(selectedCueValue, selectedCue.kind)}
+              kindLabel={cueCaption}
+              pending={cuePendingSlots.includes(selectedCue.slotIndex)}
+              canReset={selectedCueValue === null || selectedCueValue.source === 'creator'}
+              onPickWord={pickCueWord}
+              onReset={() => onResetCue(selectedCue.slotIndex)}
             />
           </ToolPanel>
         ) : (

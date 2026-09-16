@@ -337,6 +337,8 @@ export async function loadLearnings(
 
 export type BrandContext = {
   companyName: string;
+  /** What creators call the product out loud. settings.product_name, else the company name. */
+  productName: string;
   tone: string | null;
   audience: string | null;
   products: string | null;
@@ -433,6 +435,7 @@ export async function loadBrandContext(
     handles?: { instagram?: string; tiktok?: string };
     vertical?: string;
     ugc_reference_handles?: string[];
+    product_name?: string;
   };
   const products = brand?.products as { description?: string } | null;
   const brandDocs: BrandDocs = {
@@ -446,8 +449,10 @@ export async function loadBrandContext(
     if (key) brandDocs[key] = (row.content as string) ?? '';
   }
   const sourcing = (brand?.sourcing ?? {}) as { terms?: SourcingTerm[] };
+  const companyName = company?.name ?? 'the brand';
   return {
-    companyName: company?.name ?? 'the brand',
+    companyName,
+    productName: settings.product_name?.trim() || companyName,
     tone: brand?.tone ?? null,
     audience: brand?.audience ?? null,
     products: products?.description ?? null,

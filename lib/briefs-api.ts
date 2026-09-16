@@ -434,6 +434,51 @@ export async function assistRegenerateField(params: {
   }
 }
 
+export type ReviseTurn = { role: 'manager' | 'ai'; text: string };
+
+export type ReviseResult =
+  | { kind: 'draft'; draft: BriefDraft; revisionNote: string }
+  | { kind: 'kill'; kill_reason: string };
+
+/**
+ * Rewrites the whole draft against plain feedback from the manager. Each
+ * turn revises from the draft passed in, so callers send the latest editor
+ * state. Nothing is saved.
+ */
+export async function assistRevise(params: {
+  draft: RegenDraftPayload;
+  feedback: string;
+  postTypeKey?: string;
+  history?: ReviseTurn[];
+  exampleTranscript?: string | null;
+}): Promise<ReviseResult> {
+  const { data, error } = await supabase.functions.invoke('brief-assist', {
+    body: {
+      action: 'revise',
+      draft: params.draft,
+      feedback: params.feedback,
+      post_type: params.postTypeKey,
+      history: params.history,
+      example_transcript: params.exampleTranscript ?? null,
+    },
+  });
+  if (error) throw error;
+  const raw = data as RawDraftResponse & { revision_note?: string };
+  const result = toDraftResult(raw, '');
+  if (result.kind === 'kill') {
+    return { kind: 'kill', kill_reason: result.kill_reason };
+  }
+  return {
+    kind: 'draft',
+    draft: {
+      ...result.draft,
+      example_transcript:
+        result.draft.example_transcript ?? params.exampleTranscript ?? null,
+    },
+    revisionNote: raw.revision_note ?? '',
+  };
+}
+
 /**
  * Derive or re-derive brief_segments for a SAVED brief through the
  * sync_brief_segments RPC. Call after createBrief/save and after any edit
@@ -551,7 +596,7 @@ export async function creatorPlaceSegment(params: {
 }
 
 /** Default centre of the burned-in subtitle block, as a fraction of frame height. */
-export const DEFAULT_SUBTITLES_Y = 0.78;
+export const DEFAULT_SUBTITLES_Y = 0.72;
 
 /** Creator side: move the subtitle block up or down. Position only. */
 export async function creatorPlaceSubtitles(params: {
@@ -599,18 +644,35 @@ export async function creatorStyleSegmentBox(params: {
   if (error) throw error;
 }
 
-/** The same segment with one text box restyled; text, size and position untouched. */
-export function segmentWithBoxStyled(
+/**
+ * Creator side: one text look for the whole post. Recolors every text box
+ * on every clip or slide of the brief. Color and bg only.
+ */
+export async function creatorStyleBriefBoxes(params: {
+  briefId: string;
+  color: string;
+  bg: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc('creator_style_brief_boxes', {
+    p_brief_id: params.briefId,
+    p_color: params.color,
+    p_bg: params.bg,
+  });
+  if (error) throw error;
+}
+
+/** The same segment with every text box restyled; text, size and position untouched. */
+export function segmentWithBoxesStyled(
   segment: BriefSegment,
-  boxId: string,
   color: string,
   bg: boolean,
 ): BriefSegment {
   const boxes = parseOverlayBoxes(segment.overlay_style, {
     text: segment.overlay_text,
     textY: segment.text_y,
-  }).map((b) => (b.id === boxId ? { ...b, color, bg } : b));
-  const next = serializeOverlayBoxes(boxes);
+  });
+  if (boxes.length === 0) return segment;
+  const next = serializeOverlayBoxes(boxes.map((b) => ({ ...b, color, bg })));
   return { ...segment, overlay_style: next.overlay_style, text_y: next.text_y };
 }
 

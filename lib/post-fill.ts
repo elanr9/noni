@@ -156,7 +156,7 @@ async function draftFor(
  * boxes (survivors of a re-derive, possibly hand placed) are left alone.
  */
 /** Top band: seeded text stays off a talking head's face. */
-const SEED_TEXT_Y = 0.12;
+const SEED_TEXT_Y = 0.22;
 
 export async function seedOverlayBoxes(
   rows: BriefSegment[],
@@ -262,7 +262,10 @@ export async function applyPointMedia(params: {
           });
           row.screenshot_url = path;
           return true;
-        } catch {
+        } catch (error) {
+          console.warn(
+            `applyPointMedia: could not place media on segment ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
           return false;
         }
       }),

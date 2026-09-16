@@ -67,12 +67,20 @@ import {
   slotIndices,
   slotIsUntouched,
   slotPieces,
+  submissionCues,
   timelineFromStored,
   trimPiece,
   untrimmedPiece,
+  withSlotCue,
+  type EditPiece,
   type EditTimeline,
+  type SlotCue,
   type StoredEdits,
+  type SubmissionCue,
+  type TranscriptWord,
 } from '../../../lib/video-edit';
+import { requestClipCue } from '../../../lib/cues-api';
+import { sourceToSlotOutputMs } from '../../../components/creator/editor/CueMarkers';
 import { useCreatorToast } from '../../../components/creator/Toast';
 import { parseChangesNote } from '../../../components/ReviewThread';
 import { SoftToast } from '../../../components/states';
@@ -85,13 +93,13 @@ import {
   DEFAULT_SUBTITLES_Y,
   creatorPlaceSegment,
   creatorPlaceSubtitles,
-  creatorStyleSegmentBox,
+  creatorStyleBriefBoxes,
   listBriefSegments,
   parseHookOptions,
   parseTalkingPoints,
   parseTextOverlay,
   segmentWithBoxMoved,
-  segmentWithBoxStyled,
+  segmentWithBoxesStyled,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
@@ -166,6 +174,39 @@ const RECORD_ARM_MS = 350;
 /** Time for the capture session to settle after a lens or facing swap. */
 const SWITCH_SETTLE_MS = 450;
 const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
+
+/** One slot's cue and transcript rewritten from source ms to exported clip ms. */
+function remapSlotEditsToExport(
+  stored: StoredEdits,
+  slotIndex: number,
+  pieces: EditPiece[],
+): StoredEdits {
+  const key = String(slotIndex);
+  const cue = stored.cues[key];
+  const words = stored.words[key];
+  if (cue === undefined && words === undefined) return stored;
+  const map = (ms: number) => sourceToSlotOutputMs(pieces, ms);
+  let nextCue: SlotCue | null = null;
+  if (cue !== undefined) {
+    const textStart = cue.text_start_ms ?? 0;
+    nextCue = {
+      text_start_ms: cue.text_start_ms === null ? null : map(cue.text_start_ms),
+      text_hold_ms:
+        cue.text_hold_ms === null
+          ? null
+          : Math.max(0, map(textStart + cue.text_hold_ms) - map(textStart)),
+      media_start_ms: cue.media_start_ms === null ? null : map(cue.media_start_ms),
+      media_end_ms: cue.media_end_ms === null ? null : map(cue.media_end_ms),
+      source: cue.source,
+    };
+  }
+  const nextWords: TranscriptWord[] | undefined = words?.map((w) => ({
+    w: w.w,
+    s: map(w.s),
+    e: map(w.e),
+  }));
+  return withSlotCue(stored, slotIndex, nextCue, nextWords);
+}
 
 function splitScriptParts(script: string): string[] {
   const byMarker = script
@@ -412,6 +453,12 @@ export default function RecordScreen() {
   const [subtitlesY, setSubtitlesY] = useState<number>(DEFAULT_SUBTITLES_Y);
   const editorTimelineRef = useRef<EditTimeline | null>(null);
   const storedEditsRef = useRef<StoredEdits>(emptyStoredEdits());
+  const [storedEdits, setStoredEdits] = useState<StoredEdits>(emptyStoredEdits());
+  // Cue suggestions: one request token per slot so a retake ignores a stale
+  // reply, plus the last AI cue so Reset to AI needs no second round trip.
+  const cueTokensRef = useRef<Record<number, number>>({});
+  const aiCuesRef = useRef<Record<number, SlotCue>>({});
+  const [cuePendingSlots, setCuePendingSlots] = useState<number[]>([]);
   // Speech bounds per clip uri; a uri that is present was already handled
   // this session, so re-entering the editor never re-trims it.
   const speechBoundsRef = useRef<Record<string, SpeechBounds | null>>({});
@@ -537,6 +584,7 @@ export default function RecordScreen() {
             ]);
             if (cancelled) return;
             storedEditsRef.current = edits;
+            setStoredEdits(edits);
             setBriefSegments(segs);
             const derivedPlan = briefPlan(a.briefs, segs);
             let skipSlots = new Set<number>();
@@ -954,6 +1002,11 @@ export default function RecordScreen() {
           creatorId: profile.id,
           segment,
         });
+        if (saveTokenRef.current !== token) return;
+        // A new clip means the old cue and transcript no longer apply.
+        delete aiCuesRef.current[activeClip.slotIndex];
+        commitStoredEdits(withSlotCue(storedEditsRef.current, activeClip.slotIndex, null, []));
+        fetchClipCue(activeClip.slotIndex, storagePath, false);
       }
       if (saveTokenRef.current !== token) return;
       setKept((prev) => ({
@@ -1111,13 +1164,11 @@ export default function RecordScreen() {
     }
   }
 
-  const persistEdits = useCallback(
-    (timeline: EditTimeline) => {
-      editorTimelineRef.current = timeline;
+  /** Debounced draft save of the full edit map. */
+  const scheduleEditsSave = useCallback(
+    (edits: StoredEdits) => {
       if (!profile || !assignment) return;
       if (editsSaveTimer.current) clearTimeout(editsSaveTimer.current);
-      const edits = serializeEdits(timeline);
-      storedEditsRef.current = edits;
       editsSaveTimer.current = setTimeout(() => {
         editsSaveTimer.current = null;
         saveDraftEdits({
@@ -1130,6 +1181,73 @@ export default function RecordScreen() {
     },
     [profile, assignment],
   );
+
+  const commitStoredEdits = useCallback(
+    (edits: StoredEdits) => {
+      storedEditsRef.current = edits;
+      setStoredEdits(edits);
+      scheduleEditsSave(edits);
+    },
+    [scheduleEditsSave],
+  );
+
+  const persistEdits = useCallback(
+    (timeline: EditTimeline) => {
+      editorTimelineRef.current = timeline;
+      if (!profile || !assignment) return;
+      commitStoredEdits(serializeEdits(timeline, storedEditsRef.current));
+    },
+    [profile, assignment, commitStoredEdits],
+  );
+
+  /** Ask cue-clip for one uploaded clip in the background. Best effort: a
+   * failure leaves the slot on defaults. A creator adjusted cue is kept
+   * unless the creator asked for the AI suggestion back. */
+  const fetchClipCue = useCallback(
+    (slotIndex: number, storagePath: string, overwriteCreator: boolean) => {
+      if (!assignment) return;
+      const token = (cueTokensRef.current[slotIndex] ?? 0) + 1;
+      cueTokensRef.current[slotIndex] = token;
+      setCuePendingSlots((prev) => (prev.includes(slotIndex) ? prev : [...prev, slotIndex]));
+      requestClipCue({ assignmentId: assignment.id, slotIndex, storagePath })
+        .then((result) => {
+          if (cueTokensRef.current[slotIndex] !== token) return;
+          aiCuesRef.current[slotIndex] = result.cue;
+          const existing = storedEditsRef.current.cues[String(slotIndex)];
+          const keepCreator =
+            !overwriteCreator && existing !== undefined && existing.source === 'creator';
+          commitStoredEdits(
+            withSlotCue(
+              storedEditsRef.current,
+              slotIndex,
+              keepCreator ? existing : result.cue,
+              result.words,
+            ),
+          );
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (cueTokensRef.current[slotIndex] !== token) return;
+          setCuePendingSlots((prev) => prev.filter((s) => s !== slotIndex));
+        });
+    },
+    [assignment, commitStoredEdits],
+  );
+
+  function changeCue(slotIndex: number, cue: SlotCue | null) {
+    commitStoredEdits(withSlotCue(storedEditsRef.current, slotIndex, cue));
+  }
+
+  function resetCueToAi(slotIndex: number) {
+    const ai = aiCuesRef.current[slotIndex];
+    if (ai !== undefined) {
+      changeCue(slotIndex, ai);
+      return;
+    }
+    const clip = kept[slotIndex];
+    if (clip === undefined || clip.storagePath === null) return;
+    fetchClipCue(slotIndex, clip.storagePath, true);
+  }
 
   useEffect(() => {
     return () => {
@@ -1169,6 +1287,7 @@ export default function RecordScreen() {
     const edited = slotIndices(timeline).filter((s) => !slotIsUntouched(timeline, s));
     const keptNow: Record<number, KeptClip> = { ...kept };
     let current = timeline;
+    let stored = storedEditsRef.current;
     try {
       for (let i = 0; i < edited.length; i++) {
         const slot = edited[i];
@@ -1204,6 +1323,11 @@ export default function RecordScreen() {
           storagePath,
           localUri: result.uri,
         };
+        // The exported file is the slot's clip now, so its cue and transcript
+        // move from source ms to exported ms.
+        stored = remapSlotEditsToExport(stored, slot, slotPieces(timeline, slot));
+        storedEditsRef.current = stored;
+        setStoredEdits(stored);
         current = replaceSlot(current, {
           slotIndex: slot,
           sourceUri: result.uri,
@@ -1216,12 +1340,12 @@ export default function RecordScreen() {
             companyId: profile.active_company_id,
             assignmentId: assignment.id,
             creatorId: profile.id,
-            edits: serializeEdits(current),
+            edits: serializeEdits(current, stored),
           }).catch(() => undefined);
         }
       }
       setBusyLabel('Sending for approval…');
-      await sendForApproval(keptNow, current.gain);
+      await sendForApproval(keptNow, current.gain, submissionCues(stored));
     } catch (e) {
       setErrorToast(e instanceof Error ? e.message : 'Could not finish the video. Try again.');
     } finally {
@@ -1229,12 +1353,19 @@ export default function RecordScreen() {
     }
   }
 
-  async function sendForApproval(keptOverride?: Record<number, KeptClip>, audioGain?: number) {
+  async function sendForApproval(
+    keptOverride?: Record<number, KeptClip>,
+    audioGain?: number,
+    cues?: SubmissionCue[],
+  ) {
     if (!profile || submitting) return;
     const clips = keptOverride ?? kept;
     setSubmitting(true);
     try {
       if (assignment) {
+        const slotCues = (cues ?? submissionCues(storedEditsRef.current)).filter(
+          (c) => clips[c.slot_index] !== undefined,
+        );
         const uploaded = plan
           .filter((c) => clips[c.slotIndex] !== undefined)
           .map((c) => {
@@ -1254,6 +1385,7 @@ export default function RecordScreen() {
           creatorId: profile.id,
           clips: uploaded,
           audioGain,
+          cues: slotCues.length > 0 ? slotCues : undefined,
         });
         try {
           await clearDraft(profile.active_company_id, assignment.id);
@@ -1320,13 +1452,11 @@ export default function RecordScreen() {
     );
   }
 
-  function styleBox(segmentId: string, boxId: string, boxColor: string, bg: boolean) {
-    setBriefSegments((prev) =>
-      prev.map((s) =>
-        s.id === segmentId ? segmentWithBoxStyled(s, boxId, boxColor, bg) : s,
-      ),
-    );
-    creatorStyleSegmentBox({ segmentId, boxId, color: boxColor, bg }).catch(() =>
+  // One look for the whole post: a pick on any clip restyles every clip.
+  function styleBox(boxColor: string, bg: boolean) {
+    if (!brief) return;
+    setBriefSegments((prev) => prev.map((s) => segmentWithBoxesStyled(s, boxColor, bg)));
+    creatorStyleBriefBoxes({ briefId: brief.id, color: boxColor, bg }).catch(() =>
       setErrorToast('Could not save that color. Try again.'),
     );
   }
@@ -1440,8 +1570,8 @@ export default function RecordScreen() {
             );
             persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
           }}
-          onStyleBox={(segment, boxId, boxColor, bg) =>
-            styleBox(segment.id, boxId, boxColor, bg)
+          onStyleBox={(_segment, _boxId, boxColor, bg) =>
+            styleBox(boxColor, bg)
           }
           onMoveCard={(segment, x, y) => {
             setBriefSegments((prev) =>
@@ -1452,6 +1582,11 @@ export default function RecordScreen() {
             persistPlacement({ segmentId: segment.id, screenshot: { x, y } });
           }}
           onMoveSubtitles={moveSubtitles}
+          cues={storedEdits.cues}
+          words={storedEdits.words}
+          cuePendingSlots={cuePendingSlots}
+          onCueChange={changeCue}
+          onResetCue={resetCueToAi}
           onBack={retakeFromReview}
           onReplaceSlot={replaceSlotFromEditor}
           onContinue={(timeline) => {

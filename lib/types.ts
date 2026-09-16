@@ -4157,6 +4157,7 @@ export type Database = {
           audio_gain: number
           created_at: string | null
           creator_id: string
+          cues: Json | null
           duration_seconds: number | null
           id: string
           overlay_render_id: string | null
@@ -4165,6 +4166,7 @@ export type Database = {
           render_timeline: Json | null
           segment_paths: string[] | null
           task_id: string | null
+          transcript: Json | null
           version: number | null
           video_path: string
         }
@@ -4173,6 +4175,7 @@ export type Database = {
           audio_gain?: number
           created_at?: string | null
           creator_id: string
+          cues?: Json | null
           duration_seconds?: number | null
           id?: string
           overlay_render_id?: string | null
@@ -4181,6 +4184,7 @@ export type Database = {
           render_timeline?: Json | null
           segment_paths?: string[] | null
           task_id?: string | null
+          transcript?: Json | null
           version?: number | null
           video_path: string
         }
@@ -4189,6 +4193,7 @@ export type Database = {
           audio_gain?: number
           created_at?: string | null
           creator_id?: string
+          cues?: Json | null
           duration_seconds?: number | null
           id?: string
           overlay_render_id?: string | null
@@ -4197,6 +4202,7 @@ export type Database = {
           render_timeline?: Json | null
           segment_paths?: string[] | null
           task_id?: string | null
+          transcript?: Json | null
           version?: number | null
           video_path?: string
         }
@@ -4758,6 +4764,10 @@ export type Database = {
       }
       creator_place_subtitles: {
         Args: { p_brief_id: string; p_y: number }
+        Returns: undefined
+      }
+      creator_style_brief_boxes: {
+        Args: { p_bg: boolean; p_brief_id: string; p_color: string }
         Returns: undefined
       }
       creator_style_segment_box: {

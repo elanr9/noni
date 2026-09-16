@@ -14,6 +14,7 @@ import {
   timelineHasOverlays,
   type BriefSegmentRow,
   type ClipCut,
+  type ClipWords,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
 import {
@@ -23,6 +24,15 @@ import {
   renderSlideImage,
 } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
+import {
+  placeCue,
+  speechRangesFromWords,
+  transcribeClip,
+  type CueContext,
+  type SubmissionCue,
+  type TranscriptWord,
+} from './cues.ts';
+import { askClaude } from './wp8.ts';
 
 export type AdminClient = ReturnType<typeof createClient>;
 
@@ -35,6 +45,10 @@ export type SubmissionRow = {
   audio_gain?: number | null;
   /** Manifest stored by the stitch invocation; reused when resuming at overlays. */
   render_timeline?: unknown;
+  /** `{ clips: [{ slot_index, words }] }`, ms in each uploaded clip file. */
+  transcript?: unknown | null;
+  /** SubmissionCue[] for the slots the creator adjusted in the editor. */
+  cues?: unknown | null;
 };
 
 export function uploadPostKey(): string {
@@ -354,6 +368,213 @@ function storedClipCuts(raw: unknown, count: number): ClipCut[] | null {
     cuts.push({ source_duration_ms, keep_ms: keep });
   }
   return cuts;
+}
+
+// ---- Transcript and overlay cues ----
+
+const TRANSCRIBE_CONCURRENCY = 3;
+const CUE_CONCURRENCY = 3;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function parseWords(raw: unknown): TranscriptWord[] | null {
+  if (!Array.isArray(raw)) return null;
+  const words: TranscriptWord[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) return null;
+    const { w, s, e } = item as { w?: unknown; s?: unknown; e?: unknown };
+    if (typeof w !== 'string' || typeof s !== 'number' || typeof e !== 'number') return null;
+    words.push({ w, s, e });
+  }
+  return words;
+}
+
+// Transcript stored by an earlier invocation; null unless every clip has words.
+function storedTranscript(raw: unknown, count: number): ClipWords[] | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const clips: unknown = (raw as { clips?: unknown }).clips;
+  if (!Array.isArray(clips)) return null;
+  const bySlot = new Map<number, TranscriptWord[]>();
+  for (const clip of clips as unknown[]) {
+    if (typeof clip !== 'object' || clip === null) return null;
+    const { slot_index, words } = clip as { slot_index?: unknown; words?: unknown };
+    const parsed = parseWords(words);
+    if (typeof slot_index !== 'number' || !parsed) return null;
+    bySlot.set(slot_index, parsed);
+  }
+  const result: ClipWords[] = [];
+  for (let i = 0; i < count; i++) {
+    const words = bySlot.get(i);
+    if (!words || words.length === 0) return null;
+    result.push({ slot_index: i, words });
+  }
+  return result;
+}
+
+function optionalMs(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function parseSubmissionCues(raw: unknown): SubmissionCue[] {
+  if (!Array.isArray(raw)) return [];
+  const cues: SubmissionCue[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const c = item as Record<string, unknown>;
+    if (typeof c.slot_index !== 'number') continue;
+    cues.push({
+      slot_index: c.slot_index,
+      text_start_ms: optionalMs(c.text_start_ms),
+      text_hold_ms: optionalMs(c.text_hold_ms),
+      media_start_ms: optionalMs(c.media_start_ms),
+      media_end_ms: optionalMs(c.media_end_ms),
+      source: c.source === 'ai' ? 'ai' : 'creator',
+    });
+  }
+  return cues;
+}
+
+// Words of four letters or more: the ones Deepgram would otherwise misspell.
+function contentWords(text: string | null): string[] {
+  if (!text) return [];
+  return text.split(/[^\p{L}\p{N}']+/u).filter((w) => w.length >= 4);
+}
+
+function transcriptKeyterms(
+  productName: string | null,
+  segments: BriefSegmentRow[],
+): string[] {
+  const terms = new Set<string>();
+  if (productName) terms.add(productName);
+  for (const segment of segments) {
+    for (const word of contentWords(segment.overlay_text)) terms.add(word);
+  }
+  return [...terms];
+}
+
+async function transcribeClips(params: {
+  admin: AdminClient;
+  segmentPaths: string[];
+  keyterms: string[];
+}): Promise<ClipWords[]> {
+  const { admin, segmentPaths, keyterms } = params;
+  const apiKey = Deno.env.get('DEEPGRAM_API_KEY');
+  if (!apiKey) {
+    console.warn('transcription skipped: DEEPGRAM_API_KEY is not set');
+    return segmentPaths.map((_p, i) => ({ slot_index: i, words: [] }));
+  }
+  const urls = await signVideoUrls(admin, segmentPaths);
+  return mapWithConcurrency(urls, TRANSCRIBE_CONCURRENCY, async (url, i) => {
+    try {
+      const words = await transcribeClip({ url, apiKey, keyterms });
+      return { slot_index: i, words };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`transcription failed for ${segmentPaths[i]}: ${message}`);
+      return { slot_index: i, words: [] };
+    }
+  });
+}
+
+function pathStem(path: string): string {
+  const base = path.split('/').pop() ?? path;
+  return base.replace(/\.[^.]+$/, '');
+}
+
+function mediaKindFromPath(path: string | null): CueContext['media_kind'] {
+  if (!path) return null;
+  return isVideoFile(path) ? 'recording' : 'screenshot';
+}
+
+// Titles the admin gave library media, keyed by file stem so a path copied
+// into a brief still matches.
+async function loadMediaTitles(
+  admin: AdminClient,
+  companyId: string,
+): Promise<Map<string, string>> {
+  const { data } = await admin
+    .from('media_library')
+    .select('path, title')
+    .eq('company_id', companyId)
+    .not('title', 'is', null);
+  const titles = new Map<string, string>();
+  for (const row of data ?? []) {
+    const title = row.title as string;
+    if (title.trim().length > 0) titles.set(pathStem(row.path as string), title);
+  }
+  return titles;
+}
+
+function talkingPointText(points: unknown, index: number | null | undefined): string | null {
+  if (typeof index !== 'number' || !Array.isArray(points)) return null;
+  const point: unknown = points[index];
+  if (typeof point !== 'object' || point === null) return null;
+  const text = (point as { text?: unknown }).text;
+  return typeof text === 'string' ? text : null;
+}
+
+function segmentNeedsCue(segment: BriefSegmentRow): boolean {
+  const hasText = segment.show_on_screen && segmentBoxes(segment).length > 0;
+  const hasMedia = segment.screenshot_url !== null && segment.layout !== 'green_screen';
+  return hasText || hasMedia;
+}
+
+// One cue per slot with an overlay: the creator's when the editor stored one,
+// otherwise placed from the transcript.
+async function resolveCues(params: {
+  admin: AdminClient;
+  companyId: string;
+  submissionCues: SubmissionCue[];
+  briefSegments: BriefSegmentRow[];
+  transcripts: ClipWords[];
+  durationsMs: number[];
+  talkingPoints: unknown;
+  productName: string | null;
+}): Promise<SubmissionCue[]> {
+  const { admin, companyId, submissionCues, briefSegments, transcripts, durationsMs } = params;
+  const slots = briefSegments
+    .map((segment, i) => ({ segment, i }))
+    .filter(({ segment, i }) => i < durationsMs.length && segmentNeedsCue(segment));
+  const mediaTitles = slots.some(({ segment }) => segment.screenshot_url)
+    ? await loadMediaTitles(admin, companyId)
+    : new Map<string, string>();
+  return mapWithConcurrency(slots, CUE_CONCURRENCY, async ({ segment, i }) => {
+    const stored = submissionCues.find((c) => c.slot_index === i);
+    if (stored) {
+      console.log(`cue slot ${i}: submission (${stored.source})`);
+      return stored;
+    }
+    const ctx: CueContext = {
+      kind: segment.kind,
+      label: segment.overlay_text,
+      point_text: talkingPointText(params.talkingPoints, segment.talking_point_index),
+      media_title: segment.screenshot_url
+        ? mediaTitles.get(pathStem(segment.screenshot_url)) ?? null
+        : null,
+      media_kind: mediaKindFromPath(segment.screenshot_url),
+      product_name: params.productName,
+      duration_ms: durationsMs[i],
+    };
+    const words = transcripts.find((t) => t.slot_index === i)?.words ?? [];
+    const cue = await placeCue(words, ctx, askClaude);
+    console.log(`cue slot ${i}: placed (${cue.source})`);
+    return { ...cue, slot_index: i };
+  });
 }
 
 // Pipe a byte stream straight into the videos bucket. The body is handed to
@@ -871,11 +1092,12 @@ async function runAssembly(params: {
   let textOverlay: TimelineTextOverlay = DEFAULT_TEXT_OVERLAY;
   let subtitles = false;
   let subtitlesY: number | undefined;
+  let talkingPoints: unknown = null;
   if (briefId) {
     const { data: segmentRows } = await admin
       .from('brief_segments')
       .select(
-        'slot_index, kind, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+        'slot_index, kind, talking_point_index, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
       )
       .eq('brief_id', briefId)
       .eq('company_id', companyId)
@@ -884,9 +1106,10 @@ async function runAssembly(params: {
 
     const { data: briefRow } = await admin
       .from('briefs')
-      .select('text_overlay, subtitles, subtitles_y')
+      .select('text_overlay, subtitles, subtitles_y, talking_points')
       .eq('id', briefId)
       .maybeSingle();
+    talkingPoints = briefRow?.talking_points ?? null;
     subtitles = briefRow?.subtitles === true;
     if (typeof briefRow?.subtitles_y === 'number') {
       subtitlesY = briefRow.subtitles_y;
@@ -907,6 +1130,36 @@ async function runAssembly(params: {
       };
     }
   }
+
+  const { data: companyRow } = await admin
+    .from('companies')
+    .select('name')
+    .eq('id', companyId)
+    .maybeSingle();
+  const productName = typeof companyRow?.name === 'string' ? companyRow.name : null;
+
+  // Word timestamps per clip drive the silence cut, the overlay cues and our
+  // own subtitle lines. Measured on the uploaded clips, before any green
+  // screen composite replaces them; a resumed overlay pass reuses the stored
+  // transcript when it covers every clip.
+  const storedWords = stitched
+    ? storedTranscript(submission.transcript, segmentPaths.length)
+    : null;
+  const transcripts =
+    storedWords ??
+    (await transcribeClips({
+      admin,
+      segmentPaths,
+      keyterms: transcriptKeyterms(productName, briefSegments),
+    }));
+  if (!storedWords) {
+    await admin
+      .from('submissions')
+      .update({ transcript: { clips: transcripts } })
+      .eq('id', submission.id);
+  }
+  const wordsForClip = (i: number): TranscriptWord[] =>
+    transcripts.find((t) => t.slot_index === i)?.words ?? [];
 
   // Green screen pre-pass, TikTok style: the screenshot becomes the full
   // frame background and the creator is cut out over it (Robust Video
@@ -987,17 +1240,25 @@ async function runAssembly(params: {
     : null;
   let videoPath = editedPath;
   if (!stitched) {
-    // One detection job at a time: Upload-Post throttles bursts.
+    // Word timestamps place the cut; silencedetect covers clips without
+    // them, one detection job at a time since Upload-Post throttles bursts.
     const ranges: SpeechRanges[] = [];
     for (let i = 0; i < segmentPaths.length; i++) {
+      const durationMs = durationsMs?.[i] ?? null;
+      const words = wordsForClip(i);
+      const fromWords =
+        words.length > 0 && durationMs !== null
+          ? speechRangesFromWords(words, durationMs)
+          : null;
       ranges.push(
-        await detectSpeechRanges({
-          admin,
-          apiKey,
-          clipPath: segmentPaths[i],
-          durationMs: durationsMs?.[i] ?? null,
-          clipIndex: i,
-        }),
+        fromWords ??
+          (await detectSpeechRanges({
+            admin,
+            apiKey,
+            clipPath: segmentPaths[i],
+            durationMs,
+            clipIndex: i,
+          })),
       );
     }
     clipCuts = durationsMs ? cutsFromRanges(ranges, durationsMs) : null;
@@ -1031,6 +1292,19 @@ async function runAssembly(params: {
         overlayWarning =
           'overlays skipped: this submission has no per-clip durations, subtitles still applied';
       }
+      const cues =
+        durationsMs && briefSegments.length > 0
+          ? await resolveCues({
+              admin,
+              companyId,
+              submissionCues: parseSubmissionCues(submission.cues),
+              briefSegments,
+              transcripts,
+              durationsMs,
+              talkingPoints,
+              productName,
+            })
+          : [];
       const timeline = buildRenderTimeline({
         briefSegments: durationsMs ? briefSegments : [],
         durationsMs: durationsMs ?? [],
@@ -1038,6 +1312,8 @@ async function runAssembly(params: {
         textOverlay,
         subtitles,
         subtitlesY,
+        cues,
+        words: transcripts,
       });
       await admin
         .from('submissions')

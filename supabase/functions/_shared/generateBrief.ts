@@ -184,36 +184,56 @@ export function toPostTypeShape(row: PostTypeRow): PostTypeShape {
 const JSON_CONTRACT =
   '{"claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
 
-const KILL_RULE = `KILL ONLY AS LAST RESORT: almost never kill. If the topic is thin, still write the best concrete brief you can from product truth and audience. Do NOT kill because the topic is a competitor, a comparison, or feels awkward for a plug — pick the closest approved claim and angle the plug as what to do instead. Only answer {"kill_reason": string} if the search phrase is empty or pure gibberish with zero usable topic.`;
+const KILL_RULE = `KILL ONLY AS LAST RESORT: almost never kill. If the topic is thin, still write the best concrete brief you can from product truth and audience. Do NOT kill because the topic is a competitor, a comparison, or feels awkward for a plug; pick the closest approved claim and angle the plug as what to do instead. Only answer {"kill_reason": string} if the search phrase is empty or pure gibberish with zero usable topic.`;
 
-const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, background claim, or playing history into the hook or any talking point. "As a former D1 player, here are five tips" is forbidden. One brief serves the whole roster; each creator's credential renders at record time from their profile, so a written one doubles up. The hook starts at the content.`;
+const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, background claim, or playing history into the hook or any talking point. "As a former D1 player, here are five tips" is forbidden. One brief serves the whole roster; each creator's credential renders at record time from their profile, so a written one doubles up. Write the hook so it lands right after that credential line: the credential supplies the authority, the hook supplies the promise.`;
 
 const SECOND_PERSON_RULE = `SECOND PERSON: aim for 5 to 6 uses of "you" or "your" per 100 words. Every strong post talks straight at one person.`;
 
-const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points): hook_options is 8 to 10 variants, each 9 words or fewer. At least one restates the search phrase so a searcher knows they landed right; include contradiction and curiosity angles. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever.`;
+const EXPERT_CREATOR_RULE = `EXPERT CREATORS: every creator on the roster has lived this topic and has their own stories. Write points as cues with one concrete anchor each, not scripts; the creator adds their own example on camera. At least two non plug points end with a short bracketed nudge like "[your own example]" or "[what happened when you did this]" so the creator knows to bring their experience. Never bracket the plug point; the plug is said as written and a bracket on it fails validation.`;
 
-const CAPTION_RULES = `CAPTION (after the hooks): under 200 characters, no hashtags inside it, and the search phrase appears in the first sentence. HASHTAGS: 3 to 5 tags chosen from the hashtag bank in the message by topical fit, not the same set every time.`;
+const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points). The hook is the first line the creator says AND the title card on screen for the first two seconds, so it must read as a headline. hook_options is 8 to 10 variants, each 9 words or fewer (count them; 10 is a hard fail), and EVERY variant must:
+- name the viewer's specific high-stakes moment (the round, the deadline, the email, the tryout), never the general topic;
+- carry one specificity marker: a number, an absolute ("WILL", "never", "stop", "every"), or a named thing (the platform, the round, the person who judges you);
+- promise or threaten a concrete outcome for "you" (what you will be asked, why you got dropped, what you are doing wrong).
+Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email coaches always answer"), COUNTED VALUE ("3 things that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email college soccer coaches" is banned, "the 4 line email college soccer coaches answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever.`;
 
-const POINT_RULES = `TALKING POINTS: beats, not lines. Under 25 words each. A creator reads a point and starts talking; they do not recite it. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label: the on-screen label for its clip, 5 words or fewer, numbered when the type is a list ("4. Great thumbnail").`;
+function captionRules(requiresPlug: boolean): string {
+  const product = requiresPlug
+    ? ', and the product is named exactly once with a nudge on where to find it ("link in bio", "search it"); the nudge never repeats the name (the caption is the second place a viewer looks for the product after hearing it). No dashes of any kind in the caption'
+    : ', and the product is not mentioned';
+  return `CAPTION (after the hooks): exactly two sentences and under 200 characters (about 30 words, count them). Sentence one carries the search phrase verbatim and the promise of the post; sentence two is ${requiresPlug ? 'the product sentence with its nudge' : 'the one line moral'}. Never list or summarize the talking points in the caption. No hashtags inside it${product}. HASHTAGS: 3 to 5 tags chosen from the hashtag bank in the message by topical fit, not the same set every time.`;
+}
+
+const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to 22 words; 25 is the ceiling and 30 is a hard fail (the plug point may run to 40, hard fail at 45). Count the words of every point before you answer and cut the rationale clause first when over. A creator reads a point and starts talking; they do not recite it. Every point carries ONE concrete anchor the viewer can screenshot or repeat: an exact phrase to say or type, a named example, a number, or a two-second scenario ("even in freshman orientation you never know who is in your group"). A point with no anchor is filler; cut it or replace it. Each point is what to do plus why it works in one breath; "keep it short" alone is not a point, "keep it short: GPA, club team, one line on why their program, coaches read on their phone" is. THE MORAL: the post ends on one sentence that is a general truth about the viewer's situation, written fresh for this exact topic ("be kind to everyone and you will be totally okay" closes a post on getting dropped during rush; "the resume you send everywhere is the one nobody reads" closes a job hunt post); it is never the same sentence across two posts; it is never a step, never an instruction, never a stat, never a recap, and it has no verb of instruction (send, end with, lock in, email). It is 12 words or fewer. When the count is fixed by the source or title ("5 mistakes"), the final item is its anchor in one short clause plus the moral sentence; otherwise the final talking point is the moral alone. When the final point must be shortened, the instruction clause goes and the moral stays. No hedge words anywhere in spoken lines: really, truly, actually, honestly, simply, just, very. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label: the on-screen title card for its clip, 2 to 5 words, the noun phrase a viewer would screenshot, numbered when the type is a list ("4. Great thumbnail"); the plug point's label names the product.`;
 
 const FEATURE_ID_RULE = `FEATURE ID: every talking point carries feature_id. On a product point it is the id of the one entry in the Feature library (in the message) that the point is about, copied exactly; null when the point is not about a specific feature. Non product points are always null. If the message says the Feature library is empty, feature_id is null on every point.`;
 
 const SEARCH_PHRASE_RULE = `SEARCH PHRASE: the search string a target viewer actually types with a deadline in mind, e.g. "why am i not getting recruited for college soccer".`;
 
-function plugRule(requiresPlug: boolean): string {
+function plugRule(requiresPlug: boolean, productName: string, hasApprovedClaims: boolean): string {
   if (!requiresPlug) {
-    return `PLUG: this type takes NO plug and NO credential. claim_id null, cta null, is_product false on every point. Do not mention the product.`;
+    return `PLUG: this type takes NO plug. claim_id null, cta null, is_product false on every point. Do not mention the product.`;
   }
-  return `CLAIM AND PLUG (settle this first): pick the one approved claim from the message that fits this topic best (or the closest useful one) and put its id in the top-level claim_id. Competitor or comparison topics still get a plug — angle it as the practical next step using a real approved capability (emails, school list, film, price), never invent competitor facts or fake positioning. The plug is ONE sentence composed from that claim — mechanism, not benefit: "writes and sends the emails and follows up", never "streamlines your outreach". Put that exact sentence in cta AND inside exactly one talking point, riding with that point's advice (set is_product true and claim_id on that point). Never the first point, never the last, never a standalone plug point.`;
+  const claimSource = hasApprovedClaims
+    ? `pick the one approved claim from the message that fits this topic best (or the closest useful one) and put its id in the top-level claim_id and on the plug point. Compose the plug from that claim as mechanism, not benefit`
+    : `no approved claims exist yet, so claim_id is null everywhere and the plug is composed from the Product truth document in the message: one real thing ${productName} does, stated as mechanism, not benefit. Never invent a capability the Product truth does not describe`;
+  return `CLAIM AND PLUG (settle this first, it is the whole reason the post exists): ${claimSource}: mechanism means the concrete thing it does (drafts, sends, tracks, matches, practices with you), never a benefit word like "streamlines" or "saves time". Competitor or comparison topics still get a plug; angle it as the practical next step, never invent competitor facts or fake positioning.
+The plug (cta) is ONE plain sentence of 8 to 20 words in the first person, no colon, no semicolon, nothing before or after it inside cta; it MUST contain the product name "${productName}" spoken out loud, and a plug that does not say "${productName}" is a failed brief. The creator owns it, in the shape of "I have ${productName} <verb> my <named thing> for me" or "I asked ${productName} for <named thing>" (off niche example of the shape: "I have Bidly quiz me on rush questions every night"), written fresh for this post. The cta makes sense read alone: it names the thing the product acts on, never a dangling "them", "it" or "this". The advice beat before it is what the viewer does by hand and never mentions ${productName}; the product appears in the plug sentence and the nudge only. The beat, the cta and the nudge are three separate sentences in the point text. Never the third person ad line "${productName} writes the emails for you"; that reads as a sponsor read and dies. No numbers, savings or outcomes about the product unless the Product truth or an approved claim states them. Put that exact sentence in cta AND inside exactly one talking point (set is_product true on that point).
+The plug point is spoken as the creator's own tool, first person. Three shapes top performing UGC uses (these are structures to follow, never wording to copy; write the sentence fresh in the creator's voice every time):
+1. RESOURCE FRAMING, right after the hook: the creator names ${productName} as the tool they lean on, with one mechanism. Best for lists of mistakes or questions.
+2. I ASKED IT: the creator got the content of this post from ${productName}, then the content follows. Best for question or idea lists.
+3. THE FIX for a pain point: one action the viewer takes in ${productName} and the mechanism that follows. Best for contrarian or problem posts.
+The plug point is one of the counted items, numbered like the others (its overlay_label is "N. ${productName}" when the list is numbered), never an extra unnumbered beat squeezed between items. Its text opens with one advice beat of 8 to 15 words (the thing the viewer does) and ends with the plug sentence plus a short nudge on where to find it ("search ${productName}", "it is in my bio"); a plug point that is only the plug sentence fails validation. The whole point stays under 40 words and never carries a bracketed nudge. It is never an ad read on its own. Position: early, while retention is high, in the first half of the points and never the last point. Vague plugs are banned: "there are tools that help", "use a recruiting app", "check out the app" all fail. Never write "It is my biggest tip" or "I use it constantly"; those were examples, not lines.`;
 }
 
 const POINT_COUNT_RULE =
-  `POINT COUNT: if the source material, title, idea or search phrase names a number of items ("5 tips", "3 things", "7 mistakes"), point_count MUST equal that number exactly, talking_points MUST have exactly that many entries, and the title MUST lead with that same number. Never add or drop a point to fit a plug — the plug rides inside one of those points. Otherwise 3 to 10, pick the count the topic actually supports, default 4.`;
+  `POINT COUNT: if the source material, title, idea or search phrase names a number of items ("5 tips", "3 things", "7 mistakes"), point_count MUST equal that number exactly, talking_points MUST have exactly that many entries, and the title MUST lead with that same number. Never add or drop a point to fit a plug; the plug rides inside one of those points. Otherwise 3 to 10, pick the count the topic actually supports, default 4.`;
 
 function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | 'photo_carousel'): string {
   if (!postType) {
     return [
-      `FORMAT: ${fallbackFormat === 'photo_carousel' ? 'photo carousel — each talking point becomes one slide, read not spoken' : 'video — hook clip, then one clip per talking point, nothing after; the plug rides inside one point clip, never a separate outro clip'}.`,
+      `FORMAT: ${fallbackFormat === 'photo_carousel' ? 'photo carousel; each talking point becomes one slide, read not spoken' : 'video; hook clip, then one clip per talking point, nothing after; the plug rides inside one point clip, never a separate outro clip'}.`,
       POINT_COUNT_RULE,
       `TARGET WORDS: set target_words to your honest estimate of spoken words for the finished post. There is no length target.`,
     ].join('\n');
@@ -226,7 +246,7 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
         ? 'one single clip'
         : 'photo carousel, one slide per talking point';
   lines.push(
-    `POST TYPE: ${postType.label} (${postType.family}). Structure: ${structure}. Talking points: ${postType.min_points} to ${postType.max_points} — pick the count this topic actually supports.`,
+    `POST TYPE: ${postType.label} (${postType.family}). Structure: ${structure}. Talking points: ${postType.min_points} to ${postType.max_points}; pick the count this topic actually supports.`,
     POINT_COUNT_RULE,
   );
   if (postType.key === 'contrast') {
@@ -249,7 +269,7 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
     case 'numbered_list':
     case 'numbered_tips':
       lines.push(
-        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic — e.g. "5 tips for a perfect highlight video", "8 things I wish I knew about college recruiting", "7 mistakes killing your film". Never paste the search phrase as the title.`,
+        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic; e.g. "5 tips for a perfect highlight video", "8 things I wish I knew about college recruiting", "7 mistakes killing your film". Never paste the search phrase as the title.`,
       );
       break;
     case 'talking_head':
@@ -305,33 +325,66 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
   return lines.join('\n');
 }
 
+/**
+ * The anatomy shared by the highest converting expert-creator UGC we have
+ * measured (12% engagement on a 900 follower account). Every brief is built
+ * against it.
+ */
+function winningPattern(requiresPlug: boolean): string {
+  const plugStep = requiresPlug
+    ? `3. Product as the creator's own tool, named out loud, with one mechanism and one nudge, inside the first half of the post.`
+    : `3. No product step for this post; the beats carry it alone.`;
+  const plugFailure = requiresPlug
+    ? ' the product is mentioned without its name or without saying where to find it,'
+    : '';
+  return `THE PATTERN THAT CONVERTS (built from the top performing expert UGC for products like this one):
+1. Title card hook: a specific promise or fear, on screen and spoken, in the first two seconds.
+2. Credential: rendered per creator, not written by you.
+${plugStep}
+4. Numbered concrete beats: each is a named example plus why it matters plus what to do, said like advice to a friend, with room for the creator's own story.
+5. One-line moral to close, no recap, no "follow for more".
+The posts that underperform break this pattern in known ways: the hook is spoken with no on-screen text,${plugFailure} the beats are generic advice with no example, or the whole video reads as an ad with no proof. Avoid every one of those.`;
+}
+
+/** Options that shape the system prompt; the brand supplies the product name. */
+export type BriefSystemOptions = {
+  bannedPhrases: string[];
+  productName: string;
+  /** False when no approved claims exist; the plug is then skipped regardless of type. */
+  hasApprovedClaims: boolean;
+};
+
 function briefSystemBlocks(
   postType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
-  bannedPhrases: string[],
+  options: BriefSystemOptions,
   preamble: string,
   portRule: string | null,
+  contract: string = JSON_CONTRACT,
 ): string {
   const requiresPlug = postType ? postType.requires_plug : true;
   return [
     preamble,
     KILL_RULE,
-    `Otherwise answer with a single JSON object, no markdown fences, no preamble. Generate the keys IN THIS EXACT ORDER — the order is the method: the claim and search phrase anchor the body, the hooks are written last against the finished body, the caption after the hooks:\n${JSON_CONTRACT}`,
+    `Otherwise answer with a single JSON object, no markdown fences, no preamble. Inside string values use single quotes for any quoted phrase ('2026 center mid, 4.1 GPA'); an unescaped double quote breaks the JSON. Generate the keys IN THIS EXACT ORDER; the order is the method: the claim and search phrase anchor the body, the hooks are written last against the finished body, the caption after the hooks:\n${contract}`,
+    `EXAMPLES IN THESE RULES are from other niches (sorority rush, job hunting) and exist to show shape only. Never reuse an example line, hook, plug or moral from these rules in the brief, and never write anything about sororities or job boards unless the brand is in that niche.`,
+    winningPattern(requiresPlug),
     postTypeBlock(postType, fallbackFormat),
     portRule,
     `Rules, measured against real high performing posts. Follow the numbers exactly.`,
-    plugRule(requiresPlug),
+    plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
     SEARCH_PHRASE_RULE,
     POINT_RULES,
+    EXPERT_CREATOR_RULE,
     FEATURE_ID_RULE,
     CREDENTIAL_RULE,
     SECOND_PERSON_RULE,
     HOOK_RULES,
-    `TITLE: the admin-facing name of THIS post format — never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs); when the source names a number, that digit is the source's number and talking_points has exactly that many entries. Other types follow TITLE SHAPE above. Keep it under 12 words.`,
-    CAPTION_RULES,
+    `TITLE: the admin-facing name of THIS post format; never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs); when the source names a number, that digit is the source's number and talking_points has exactly that many entries. Other types follow TITLE SHAPE above. Keep it under 12 words.`,
+    captionRules(requiresPlug),
     `WHY IT WORKS: one punchy sentence a content strategist would say about why this concept performs.`,
-    bannedPhrases.length
-      ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${bannedPhrases.join(' | ')}`
+    options.bannedPhrases.length
+      ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${options.bannedPhrases.join(' | ')}`
       : null,
   ]
     .filter((l): l is string => l !== null)
@@ -341,14 +394,35 @@ function briefSystemBlocks(
 export function buildBriefSystem(
   postType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
-  bannedPhrases: string[],
+  options: BriefSystemOptions,
 ): string {
   return briefSystemBlocks(
     postType,
     fallbackFormat,
-    bannedPhrases,
+    options,
     `You write structured UGC content briefs for creators posting on TikTok and Instagram from their own accounts.`,
     null,
+  );
+}
+
+const REVISE_CONTRACT =
+  '{"revision_note": string, "claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
+
+const REVISE_PREAMBLE = `You revise a structured UGC content brief after the campaign manager reviewed it and gave feedback in plain language. The current brief, the conversation so far and the newest feedback are in the message. The feedback is law: rewrite every part it touches and fix the root cause across the whole brief (if the manager says the product was never mentioned, the plug, the caption and the plug point's on-screen label all change). Parts the manager did not complain about stay as close to the current brief as the feedback allows, so the manager recognizes their post. Never argue with the feedback and never ask a question back; make the change. Product mechanisms come only from the approved claims or the Product truth in the message, never invented. When feedback targets the hook, EVERY hook option is rewritten to that angle as a fresh grammatical headline; carrying over old hooks or bolting the feedback's keywords onto existing lines is a failed revision. Start the JSON with revision_note: two or three plain sentences to the manager about the post itself, naming exactly what changed and why it is stronger; never mention validation, rules, claims tables, hashtag banks or anything about how you work, no bullet points, no markdown.`;
+
+/** Full-brief rewrite driven by manager feedback (chat revise). */
+export function buildReviseSystem(
+  postType: PostTypeRow | null,
+  fallbackFormat: 'video' | 'photo_carousel',
+  options: BriefSystemOptions,
+): string {
+  return briefSystemBlocks(
+    postType,
+    fallbackFormat,
+    options,
+    REVISE_PREAMBLE,
+    null,
+    REVISE_CONTRACT,
   );
 }
 
@@ -368,12 +442,12 @@ function portRule(
 export function buildPortSystem(
   targetPostType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
-  bannedPhrases: string[],
+  options: BriefSystemOptions,
 ): string {
   return briefSystemBlocks(
     targetPostType,
     fallbackFormat,
-    bannedPhrases,
+    options,
     PORT_PREAMBLE,
     portRule(targetPostType, fallbackFormat),
   );
@@ -437,12 +511,12 @@ export function buildFieldSystem(
   field: RegenField,
   postType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
-  bannedPhrases: string[],
+  options: BriefSystemOptions,
 ): string {
   const requiresPlug = postType ? postType.requires_plug : true;
   const preamble = `You revise one part of a structured UGC content brief for creators posting on TikTok and Instagram. The current brief is in the message; regenerate ONLY what is asked and keep it consistent with the parts the admin is keeping. Answer with a single JSON object, no markdown fences, no preamble.`;
-  const banned = bannedPhrases.length
-    ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${bannedPhrases.join(' | ')}`
+  const banned = options.bannedPhrases.length
+    ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${options.bannedPhrases.join(' | ')}`
     : null;
   const blocks: (string | null)[] = [preamble];
   switch (field) {
@@ -456,9 +530,11 @@ export function buildFieldSystem(
       blocks.push(
         KILL_RULE,
         `Otherwise answer with the keys IN THIS EXACT ORDER: {"claim_id": string | null, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number}`,
+        winningPattern(requiresPlug),
         postTypeBlock(postType, fallbackFormat),
-        plugRule(requiresPlug),
+        plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
         POINT_RULES,
+        EXPERT_CREATOR_RULE,
         FEATURE_ID_RULE,
         CREDENTIAL_RULE,
         SECOND_PERSON_RULE,
@@ -469,8 +545,9 @@ export function buildFieldSystem(
       blocks.push(
         KILL_RULE,
         `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}}`,
-        `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim (the same sentence stays in cta, so keep it a single plug sentence riding with the point's advice).`,
+        `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim, naming "${options.productName}" out loud (the same sentence stays in cta, so keep it a single plug sentence riding with the point's advice).`,
         POINT_RULES,
+        EXPERT_CREATOR_RULE,
         FEATURE_ID_RULE,
         CREDENTIAL_RULE,
         SECOND_PERSON_RULE,
@@ -488,7 +565,7 @@ export function buildFieldSystem(
     case 'caption':
       blocks.push(
         `JSON: {"caption": string, "hashtags": string[]}`,
-        CAPTION_RULES,
+        captionRules(requiresPlug),
         banned,
       );
       break;
@@ -496,8 +573,47 @@ export function buildFieldSystem(
   return blocks.filter((b): b is string => b !== null).join('\n\n');
 }
 
+/**
+ * The corrective message for attempt two. Retries were trimming a word or
+ * merging points instead of compressing, so the fix method is spelled out.
+ */
+export function retryMessage(priorFailures: string[], what: 'draft' | 'revision' | 'answer'): string {
+  return [
+    `Your previous ${what} failed validation. Fix every one of these and return the corrected JSON:`,
+    ...priorFailures.map((f) => `- ${f}`),
+    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and its bracketed nudge stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. Everything not flagged stays exactly as it was.`,
+  ].join('\n');
+}
+
+export function brandSystemOptions(brand: BrandContext): BriefSystemOptions {
+  return {
+    bannedPhrases: brand.bannedPhrases,
+    productName: brand.productName,
+    hasApprovedClaims: brand.approvedClaims.length > 0,
+  };
+}
+
+/** Validation context every generation path shares. */
+export function brandValidationCtx(brand: BrandContext): {
+  hashtagBank: string[];
+  approvedClaimIds: string[];
+  productNames: string[];
+} {
+  const names = [brand.productName, brand.companyName].filter(
+    (n, i, all) => n.trim().length > 0 && all.indexOf(n) === i,
+  );
+  return {
+    hashtagBank: brand.hashtagBank,
+    approvedClaimIds: brand.approvedClaims.map((c) => c.id),
+    productNames: names,
+  };
+}
+
 export function brandDocBlocks(brand: BrandContext): string[] {
-  const docBlocks: string[] = [`Brand: ${brand.companyName}`];
+  const docBlocks: string[] = [
+    `Brand: ${brand.companyName}`,
+    `Product name, said out loud in the plug and written in the caption: ${brand.productName}`,
+  ];
   if (brand.docs.productTruth.trim()) {
     docBlocks.push(`Product truth:\n${brand.docs.productTruth.trim()}`);
   }
@@ -514,14 +630,14 @@ export function brandDocBlocks(brand: BrandContext): string[] {
       ? `Approved claims (the ONLY source for the plug; reference by id):\n${brand.approvedClaims
           .map((c) => `- id ${c.id}: ${c.claim} (${c.what_it_does})`)
           .join('\n')}`
-      : 'Approved claims: none exist yet. Write the brief without a product plug (cta null, is_product false).',
+      : `Approved claims: none exist yet. Compose the plug from the Product truth above (claim_id null); it still names ${brand.productName} out loud.`,
   );
   if (brand.features.length) {
     docBlocks.push(
       `Feature library (pick feature_id per product talking point; null when the point is not about a specific feature):\n${brand.features
         .map(
           (f) =>
-            `- feature_id ${f.id}: ${f.name}${f.sentence ? ` — ${f.sentence}` : ''} (${f.screenshots.length} screenshot${f.screenshots.length === 1 ? '' : 's'})`,
+            `- feature_id ${f.id}: ${f.name}${f.sentence ? `: ${f.sentence}` : ''} (${f.screenshots.length} screenshot${f.screenshots.length === 1 ? '' : 's'})`,
         )
         .join('\n')}`,
     );
@@ -531,7 +647,7 @@ export function brandDocBlocks(brand: BrandContext): string[] {
   docBlocks.push(
     brand.hashtagBank.length
       ? `Hashtag bank (pick 3 to 5): ${brand.hashtagBank.join(' ')}`
-      : 'Hashtag bank: empty.',
+      : 'Hashtag bank: empty. Pick 3 to 5 topical tags yourself, the niche community tags a real creator in this space uses.',
   );
   const learned = learningBlocks(brand.learnings);
   if (learned) docBlocks.push(learned);
@@ -578,6 +694,8 @@ type RawHook = { text?: string; score?: number } | string;
 
 export type RawGenerated = {
   kill_reason?: string;
+  /** Chat revise only: what changed, addressed to the manager. */
+  revision_note?: string;
   claim_id?: string | null;
   search_phrase?: string;
   point_count?: number;
@@ -613,14 +731,35 @@ export type PointMedia = {
   library_kind?: 'screenshot' | 'recording';
 };
 
-type LibraryRow = { id: string; kind: 'screenshot' | 'recording'; path: string; title: string };
+type LibraryRow = {
+  id: string;
+  kind: 'screenshot' | 'recording';
+  path: string;
+  title: string;
+  description: string | null;
+};
 
-const MEDIA_MATCH_SYSTEM = `You attach on-screen media to the talking points of a short social video or slideshow. You get the company's media library (each item has a title the manager wrote; videos may get screen recordings and screenshots, slideshows are offered screenshots only) and the talking points in order. Pick, for each talking point, the one library item whose title clearly shows what that point talks about. Rules: a point with is_product true is the product plug and must get an item when any item shows the product; other points get an item only on a clear title match; use each item at most once; never invent indexes. Answer ONLY with JSON: {"picks": [{"point_index": number, "media_index": number}]}. An empty picks array is a valid answer.`;
+const MEDIA_MATCH_SYSTEM = `You attach on-screen media to the talking points of a short social video or slideshow. You get the company's media library (each item has a title the manager wrote and sometimes a description of what it shows; videos may get screen recordings and screenshots, slideshows are offered screenshots only) and the talking points in order. Every library item is a screenshot or screen recording of the company's own product. Pick, for each talking point, the one library item that best shows what that point talks about. Rules: a point with is_product true is the product plug and MUST get an item, pick the one that best matches its wording (emails, follow-ups, school list, film, inbox, campaigns); other points get an item only on a clear match; use each item at most once; never invent indexes. Answer ONLY with JSON: {"picks": [{"point_index": number, "media_index": number}]}.`;
+
+/** The item to show on the plug when the matcher picked none: newest recording for video, newest screenshot otherwise. */
+function fallbackPlugMedia(
+  library: LibraryRow[],
+  used: ReadonlySet<number>,
+  family: 'video' | 'photo_carousel',
+): LibraryRow | null {
+  const free = library.filter((_, i) => !used.has(i));
+  if (family === 'video') {
+    const recording = free.find((m) => m.kind === 'recording');
+    if (recording) return recording;
+  }
+  return free.find((m) => m.kind === 'screenshot') ?? free[0] ?? null;
+}
 
 /**
  * Asks Claude to match labeled library media to talking points and layers
  * the picks over the feature screenshots. Untitled media is never offered.
- * Any failure falls back to the feature screenshots alone.
+ * The product plug always ends up with media when the library has any: a
+ * failed or empty match falls back to the newest fitting item.
  */
 export async function resolvePointMedia(
   admin: SupabaseClient,
@@ -633,7 +772,7 @@ export async function resolvePointMedia(
   const base = buildPointMedia(features, featureIds);
   const { data } = await admin
     .from('media_library')
-    .select('id, kind, path, title')
+    .select('id, kind, path, title, description')
     .eq('company_id', companyId)
     .not('title', 'is', null)
     .order('created_at', { ascending: false });
@@ -644,7 +783,7 @@ export async function resolvePointMedia(
   if (library.length === 0 || points.length === 0) return base;
 
   const user = [
-    `Media library${family === 'photo_carousel' ? ' (slideshow: screenshots only)' : ''}:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}`).join('\n')}`,
+    `Media library${family === 'photo_carousel' ? ' (slideshow: screenshots only)' : ''}:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}${m.description?.trim() ? `: ${m.description.trim()}` : ''}`).join('\n')}`,
     `Talking points:\n${points.map((p, i) => `- point_index ${i}${p.is_product ? ' [is_product]' : ''}: ${p.text}`).join('\n')}`,
   ].join('\n\n');
 
@@ -660,9 +799,20 @@ export async function resolvePointMedia(
           Number.isInteger((p as { media_index?: unknown }).media_index),
       );
     }
-  } catch {
-    return base;
+  } catch (error) {
+    console.warn(`media match failed, falling back: ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  const attach = (pointIndex: number, item: LibraryRow) => {
+    const prior = base[pointIndex];
+    base[pointIndex] = {
+      feature_id: prior?.feature_id ?? null,
+      screenshot_url: prior?.screenshot_url ?? null,
+      shape: prior?.shape ?? null,
+      library_path: item.path,
+      library_kind: item.kind,
+    };
+  };
 
   const used = new Set<number>();
   for (const pick of picks) {
@@ -670,15 +820,19 @@ export async function resolvePointMedia(
     if (!item || used.has(pick.media_index)) continue;
     if (pick.point_index < 0 || pick.point_index >= points.length) continue;
     used.add(pick.media_index);
-    const prior = base[pick.point_index];
-    base[pick.point_index] = {
-      feature_id: prior?.feature_id ?? null,
-      screenshot_url: prior?.screenshot_url ?? null,
-      shape: prior?.shape ?? null,
-      library_path: item.path,
-      library_kind: item.kind,
-    };
+    attach(pick.point_index, item);
   }
+
+  // The plug is the one point that must show the product. Never leave it bare.
+  points.forEach((point, i) => {
+    if (!point.is_product) return;
+    const current = base[i];
+    if (current?.library_path || current?.screenshot_url) return;
+    const item = fallbackPlugMedia(library, used, family);
+    if (!item) return;
+    used.add(library.indexOf(item));
+    attach(i, item);
+  });
   return base;
 }
 
@@ -803,8 +957,59 @@ export function normalizeGenerated(
   };
 }
 
+const LENGTH_CHECK = /^(talking point|plug point) is \d+ words, over the hard cap|^hook option over 9 words/;
+
+const COMPRESS_POINT_SYSTEM = `You shorten one talking point of a UGC brief. Answer with the rewritten point text only, no quotes, no JSON, no commentary. Keep its concrete anchor (the number, named example or exact phrase), keep any [bracketed nudge] word for word, and cut the rationale clause first. If the message marks it as the plug point, the sentence given as cta stays inside it verbatim and the product name is never added anywhere else. Target the word budget in the message exactly.`;
+
+const COMPRESS_HOOK_SYSTEM = `You shorten one hook line of a UGC brief to 9 words or fewer. Answer with the hook only. Keep its angle, its specificity marker (number, absolute or named thing) and make it read as a headline a person would type; never end on a preposition or conjunction.`;
+
 /**
- * One draft, validated, with a single corrective retry. Every attempt is
+ * Per-item compression for the length failures a full retry leaves behind.
+ * Returns null when nothing in the failures is about length.
+ */
+async function compressOverLongItems(
+  outcome: GeneratedDraft,
+  failures: string[],
+): Promise<GeneratedDraft | null> {
+  if (!failures.some((f) => LENGTH_CHECK.test(f))) return null;
+  const draft = outcome.draft;
+  const points = await Promise.all(
+    draft.talking_points.map(async (point) => {
+      if (!point.text) return point;
+      const budget = point.is_product ? 40 : 22;
+      const cap = point.is_product ? 45 : 30;
+      if (point.text.split(/\s+/).filter(Boolean).length <= cap) return point;
+      const user = [
+        `Talking point (${point.is_product ? 'the plug point' : 'a regular point'}), rewrite to ${budget} words or fewer:`,
+        point.text,
+        ...(point.is_product && draft.cta ? [`cta sentence that must stay verbatim: ${draft.cta}`] : []),
+      ].join('\n');
+      try {
+        const text = (await askClaude(COMPRESS_POINT_SYSTEM, user, 200)).trim();
+        return text ? { ...point, text } : point;
+      } catch (error) {
+        console.warn('point compression failed:', error instanceof Error ? error.message : error);
+        return point;
+      }
+    }),
+  );
+  const hooks = await Promise.all(
+    draft.hook_options.map(async (hook) => {
+      if (hook.split(/\s+/).filter(Boolean).length <= 9) return hook;
+      try {
+        const text = (await askClaude(COMPRESS_HOOK_SYSTEM, hook, 60)).trim();
+        return text || hook;
+      } catch {
+        return hook;
+      }
+    }),
+  );
+  return { ...outcome, draft: { ...draft, talking_points: points, hook_options: hooks } };
+}
+
+/**
+ * One draft, validated, with a single corrective retry and a per-item
+ * compression pass for what the retry leaves over length. Every attempt is
  * logged to brief_validations against the generation_id, which joins to the
  * brief once the client saves it.
  */
@@ -814,7 +1019,7 @@ export async function generateValidated(
   generationId: string,
   postType: PostTypeRow | null,
   draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
-  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[] },
+  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[]; productNames?: string[] },
 ): Promise<{ outcome: GenOutcome; warnings: string[] }> {
   const ctx = {
     ...validationCtx,
@@ -832,16 +1037,50 @@ export async function generateValidated(
     if (error) console.error('brief_validations insert failed:', error.message);
   };
 
-  let outcome = await draftOnce([]);
+  let outcome: GenOutcome;
+  try {
+    outcome = await draftOnce([]);
+  } catch (error) {
+    // Malformed JSON from the model is a retryable failure, not a 500.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/json|unexpected token|position \d+/i.test(message)) throw error;
+    outcome = await draftOnce([
+      `your previous answer was not valid JSON (${message.slice(0, 160)}); answer with one JSON object only, no markdown fences, no commentary`,
+    ]);
+  }
   if (isKill(outcome)) return { outcome, warnings: [] };
   let result = validateBrief(outcome.draft, ctx);
   await logAttempt(1, result);
   if (!result.passed) {
-    const retry = await draftOnce(result.failures);
+    let retry: GenOutcome;
+    try {
+      retry = await draftOnce(result.failures);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/json|unexpected token|position \d+/i.test(message)) throw error;
+      retry = await draftOnce([
+        ...result.failures,
+        `your previous answer was not valid JSON (${message.slice(0, 160)}); answer with one JSON object only and use single quotes for any quoted phrase inside a string value`,
+      ]);
+    }
     if (isKill(retry)) return { outcome: retry, warnings: [] };
     outcome = retry;
     result = validateBrief(outcome.draft, ctx);
     await logAttempt(2, result);
+  }
+  // Length is the one failure a whole-brief retry never fixes (it trims a
+  // word or drifts the untouched fields), so over-long items are compressed
+  // one at a time and spliced back in. Nothing else in the draft moves.
+  if (!result.passed && !isKill(outcome)) {
+    const repaired = await compressOverLongItems(outcome, result.failures);
+    if (repaired) {
+      const repairedResult = validateBrief(repaired.draft, ctx);
+      await logAttempt(3, repairedResult);
+      if (repairedResult.failures.length < result.failures.length) {
+        outcome = repaired;
+        result = repairedResult;
+      }
+    }
   }
   const warnings = result.passed
     ? result.warnings

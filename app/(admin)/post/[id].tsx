@@ -42,6 +42,11 @@ import {
   type OverlayTextStyle,
 } from '../../../lib/overlay-boxes';
 import { TextStyleCard } from '../../../components/admin/editor/TextStyleCard';
+import {
+  TikTokPreview,
+  type PreviewClipSpec,
+} from '../../../components/admin/editor/TikTokPreview';
+import type { ShotPreview } from '../../../components/creator/SegmentOverlayPreview';
 import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
 import { PortSheet, type PortOption } from '../../../components/admin/editor/PortSheet';
 import {
@@ -52,6 +57,7 @@ import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { KindOfPostSheet } from '../../../components/admin/editor/KindOfPostSheet';
 import { SearchPhraseCard } from '../../../components/admin/editor/SearchPhraseCard';
 import { TitleCard } from '../../../components/admin/editor/TitleCard';
+import { ReviseChatSheet } from '../../../components/admin/editor/ReviseChatSheet';
 import {
   PostTypeChip,
   PushHeader,
@@ -68,6 +74,7 @@ import {
   markBriefComplete,
   briefRowState,
   clearBrief,
+  DEFAULT_SUBTITLES_Y,
   DEFAULT_TEXT_OVERLAY,
   getBrief,
   listBriefSegments,
@@ -82,6 +89,7 @@ import {
   signedScreenshotUrl,
   updateBrief,
   updateBriefSegment,
+  type BriefDraft,
   type BriefSegment,
   type CampaignBriefItem,
   type NoniLibraryGroup,
@@ -191,6 +199,9 @@ export default function PostEditorScreen() {
   const [points, setPoints] = useState<TalkingPoint[]>([]);
   const [cta, setCta] = useState('');
   const [subtitles, setSubtitles] = useState(false);
+  const [subtitlesY, setSubtitlesY] = useState(DEFAULT_SUBTITLES_Y);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [searchPhrase, setSearchPhrase] = useState('');
   const [caption, setCaption] = useState('');
   const [hashtags, setHashtags] = useState<string[]>([]);
@@ -200,6 +211,8 @@ export default function PostEditorScreen() {
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [exampleUrl, setExampleUrl] = useState<string | null>(null);
   const [killReason, setKillReason] = useState<string | null>(null);
+  const [exampleTranscript, setExampleTranscript] = useState<string | null>(null);
+  const [reviseOpen, setReviseOpen] = useState(false);
 
   const [pendingOverlayLabels, setPendingOverlayLabels] = useState<
     (string | null)[] | null
@@ -341,6 +354,7 @@ export default function PostEditorScreen() {
             ? true
             : brief.subtitles,
         );
+        setSubtitlesY(brief.subtitles_y ?? DEFAULT_SUBTITLES_Y);
         setKindSheetOpen(brief.post_type_id === null);
         setSearchPhrase(brief.search_phrase ?? '');
         setCaption(brief.caption ?? '');
@@ -348,6 +362,7 @@ export default function PostEditorScreen() {
         setWhyItWorks(brief.why_it_works ?? '');
         setScript(brief.script);
         setTargetWords(brief.target_words);
+        setExampleTranscript(brief.example_transcript);
         setGenerationId(brief.generation_id);
         setExampleUrl(brief.example_url);
         setKillReason(brief.kill_reason);
@@ -434,6 +449,27 @@ export default function PostEditorScreen() {
       why_it_works: whyItWorks,
       script,
     };
+  }
+
+  /** Mirrors the talking_points regen path: labels and media land on Save. */
+  function applyRevisedDraft(draft: BriefDraft) {
+    setTitle(draft.title);
+    setSearchPhrase(draft.search_phrase ?? '');
+    setHookOptions(draft.hook_options);
+    setChosenHookIndex(0);
+    setUseCustomHook(false);
+    setPoints(draft.talking_points);
+    setCta(draft.cta ?? '');
+    setCaption(draft.caption);
+    setHashtags(draft.hashtags);
+    setWhyItWorks(draft.why_it_works);
+    setScript(draft.script);
+    setTargetWords(draft.target_words);
+    setGenerationId(draft.generation_id);
+    setWarnings(draft.warnings);
+    setPendingOverlayLabels(draft.overlay_labels);
+    pendingPointMedia.current = draft.point_media;
+    if (family === 'photo_carousel') slideRegenPending.current = true;
   }
 
   async function regenerate(field: RegenField, index?: number) {
@@ -1128,6 +1164,77 @@ export default function PostEditorScreen() {
     }
   }
 
+  const previewClips = useMemo<PreviewClipSpec[]>(() => {
+    // Unsaved regenerated copy previews on the saved box geometry.
+    function withPreviewText(segment: BriefSegment, text: string | null): BriefSegment {
+      if (!text?.trim()) return segment;
+      const style = segment.overlay_style;
+      if (style && typeof style === 'object' && !Array.isArray(style)) {
+        const boxes = style.boxes;
+        if (Array.isArray(boxes) && boxes.length > 0) {
+          const first = boxes[0];
+          if (first && typeof first === 'object' && !Array.isArray(first)) {
+            return {
+              ...segment,
+              overlay_style: { ...style, boxes: [{ ...first, text }, ...boxes.slice(1)] },
+            };
+          }
+        }
+      }
+      return { ...segment, overlay_text: text, overlay_style: {} };
+    }
+    const unsavedCopy = pendingOverlayLabels !== null;
+    function shotFor(segment: BriefSegment): ShotPreview | null {
+      const url = screenshotUrls[segment.id];
+      if (!url || !segment.screenshot_url) return null;
+      const isVideo = /\.(mp4|mov)(\?|$)/i.test(segment.screenshot_url);
+      return isVideo
+        ? { url, aspect: 9 / 19.5, videoUrl: url }
+        : { url, aspect: 9 / 19.5 };
+    }
+    const clips: PreviewClipSpec[] = [];
+    if (family === 'video') {
+      const hook = segments.find((s) => s.kind === 'hook');
+      if (hook) {
+        const hookText = useCustomHook ? customHook : hookOptions[chosenHookIndex] ?? null;
+        clips.push({
+          key: hook.id,
+          label: 'Hook',
+          segment: unsavedCopy ? withPreviewText(hook, hookText) : hook,
+          shot: shotFor(hook),
+          spokenText: hookText,
+        });
+      }
+    }
+    points.forEach((point, i) => {
+      const segment = segments.find(
+        (s) =>
+          (s.kind === 'point' || s.kind === 'slide') && s.talking_point_index === i,
+      );
+      if (!segment) return;
+      const pendingText =
+        segment.kind === 'slide' ? point.text : pendingOverlayLabels?.[i] ?? null;
+      clips.push({
+        key: segment.id,
+        label: `${i + 1}`,
+        segment: unsavedCopy ? withPreviewText(segment, pendingText) : segment,
+        shot: shotFor(segment),
+        spokenText: point.text,
+      });
+    });
+    return clips;
+  }, [
+    family,
+    pendingOverlayLabels,
+    segments,
+    screenshotUrls,
+    points,
+    useCustomHook,
+    customHook,
+    hookOptions,
+    chosenHookIndex,
+  ]);
+
   if (!loaded) {
     return (
       <View style={styles.loadingShell}>
@@ -1215,16 +1322,28 @@ export default function PostEditorScreen() {
                 <Text style={styles.saveProgress}>Edit</Text>
               </PressableScale>
             ) : (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Save changes"
-                disabled={saving}
-                onPress={() => void saveSummaryEdits()}
-              >
-                <Text style={styles.saveProgress}>
-                  {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save'}
-                </Text>
-              </PressableScale>
+              <View style={styles.headerActions}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Preview on TikTok"
+                  onPress={() => {
+                    setPreviewIndex(0);
+                    setPreviewOpen(true);
+                  }}
+                >
+                  <Text style={styles.saveProgress}>Preview</Text>
+                </PressableScale>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Save changes"
+                  disabled={saving}
+                  onPress={() => void saveSummaryEdits()}
+                >
+                  <Text style={styles.saveProgress}>
+                    {saving ? 'Saving…' : savedFlash ? 'Saved' : 'Save'}
+                  </Text>
+                </PressableScale>
+              </View>
             )
           }
         />
@@ -1341,6 +1460,16 @@ export default function PostEditorScreen() {
           </View>
         ) : (
           <View style={styles.summaryStack}>
+            <Button
+              size="lg"
+              variant="outline"
+              block
+              icon="sparkles"
+              disabled={saving || regenBusy !== null}
+              onPress={() => setReviseOpen(true)}
+            >
+              Revise with AI
+            </Button>
             {placedNote ? (
               <View style={styles.placedCard}>
                 <Text style={styles.placedText}>{placedNote}</Text>
@@ -1557,6 +1686,14 @@ export default function PostEditorScreen() {
         />
       ) : null}
 
+      <ReviseChatSheet
+        visible={reviseOpen}
+        onClose={() => setReviseOpen(false)}
+        getDraft={buildRegenPayload}
+        postTypeKey={currentType?.key ?? null}
+        exampleTranscript={exampleTranscript}
+        onApply={applyRevisedDraft}
+      />
       <PortSheet
         visible={portSheet !== null}
         title={
@@ -1638,6 +1775,21 @@ export default function PostEditorScreen() {
         />
       ) : null}
 
+      <TikTokPreview
+        visible={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        initialIndex={previewIndex}
+        clips={previewClips}
+        creatorName={accountName || 'Creator'}
+        handle={null}
+        typeLabel={currentType?.label ?? null}
+        caption={caption}
+        hashtags={hashtags}
+        subtitles={family === 'video' && subtitles}
+        subtitlesY={subtitlesY}
+        overlay={textOverlay}
+        format={family}
+      />
     </View>
   );
 }
@@ -1690,6 +1842,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: color.blue600,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   killCard: {
     gap: 6,

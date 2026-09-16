@@ -29,6 +29,14 @@ import {
 } from '../../../lib/video-edit';
 import { color, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
+import {
+  CUE_ROW_GAP,
+  CUE_ROW_H,
+  CueLane,
+  type CueDrag,
+  type CueSelection,
+  type CueSlot,
+} from './CueMarkers';
 import { useClipFrames } from './useClipFrames';
 
 export type TrimEdges = { inMs?: number; outMs?: number };
@@ -51,16 +59,30 @@ export type TimelineProps = {
   onTrimCommit: (pieceId: string, edges: TrimEdges) => void;
   allMuted: boolean;
   onToggleAllMuted: () => void;
+  /** Slots with on screen text or a screenshot; empty hides the cue lane. */
+  cueSlots: CueSlot[];
+  selectedCue: CueSelection | null;
+  onSelectCue: (selection: CueSelection) => void;
+  /** Live while a cue marker moves; source ms inside the marker's slot. */
+  onCuePreview: (drag: CueDrag) => void;
+  onCueCommit: (drag: CueDrag) => void;
 };
 
 const RAIL_W = 44;
 const RULER_H = 22;
 const RULER_GAP = 8;
+const CUE_GAP = 6;
 const TRACK_H = 56;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 16;
 const CONTENT_H = RULER_H + RULER_GAP + TRACK_H;
 export const TIMELINE_HEIGHT = PAD_TOP + CONTENT_H + PAD_BOTTOM;
+
+function cueLaneHeight(slots: CueSlot[]): number {
+  if (slots.length === 0) return 0;
+  const rows = slots.some((s) => s.hasMedia) ? 2 : 1;
+  return rows * CUE_ROW_H + (rows - 1) * CUE_ROW_GAP + CUE_GAP;
+}
 
 const PIECE_RADIUS = 8;
 const HANDLE_W = 22;
@@ -134,8 +156,15 @@ export function Timeline(props: TimelineProps): JSX.Element {
     onTrimCommit,
     allMuted,
     onToggleAllMuted,
+    cueSlots,
+    selectedCue,
+    onSelectCue,
+    onCuePreview,
+    onCueCommit,
   } = props;
 
+  const laneH = cueLaneHeight(cueSlots);
+  const contentH = CONTENT_H + laneH;
   const [width, setWidth] = useState(0);
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
   const [scrollEnabled, setScrollEnabled] = useState(true);
@@ -157,6 +186,9 @@ export function Timeline(props: TimelineProps): JSX.Element {
     onSelectPiece,
     onTrimPreview,
     onTrimCommit,
+    onSelectCue,
+    onCuePreview,
+    onCueCommit,
   });
   latest.current = {
     layout,
@@ -168,6 +200,9 @@ export function Timeline(props: TimelineProps): JSX.Element {
     onSelectPiece,
     onTrimPreview,
     onTrimCommit,
+    onSelectCue,
+    onCuePreview,
+    onCueCommit,
   };
 
   useEffect(() => {
@@ -277,12 +312,31 @@ export function Timeline(props: TimelineProps): JSX.Element {
     latest.current.onTrimCommit(pieceId, edges);
   }, []);
 
+  const selectCue = useCallback((selection: CueSelection) => {
+    latest.current.onSelectCue(selection);
+  }, []);
+
+  const cuePreview = useCallback((drag: CueDrag) => {
+    latest.current.onCuePreview(drag);
+  }, []);
+
+  const endCueDrag = useCallback((drag: CueDrag) => {
+    interactingRef.current = false;
+    setScrollEnabled(true);
+    latest.current.onCueCommit(drag);
+  }, []);
+
+  const cuePieces = useMemo(
+    () => layout.pieces.map((p) => ({ piece: p.range.piece, x: p.x, width: p.width })),
+    [layout],
+  );
+
   const ready = width > 0;
   const pieceCount = layout.pieces.length;
 
   return (
-    <View style={styles.root} {...pinch.panHandlers}>
-      <View style={styles.rail}>
+    <View style={[styles.root, { height: TIMELINE_HEIGHT + laneH }]} {...pinch.panHandlers}>
+      <View style={[styles.rail, { height: contentH, paddingTop: RULER_H + RULER_GAP + laneH }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={allMuted ? 'Unmute all clips' : 'Mute all clips'}
@@ -294,7 +348,7 @@ export function Timeline(props: TimelineProps): JSX.Element {
         </Pressable>
       </View>
       <View
-        style={styles.scrollArea}
+        style={[styles.scrollArea, { height: contentH }]}
         onLayout={(e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width))}
       >
         {ready ? (
@@ -315,9 +369,27 @@ export function Timeline(props: TimelineProps): JSX.Element {
             onMomentumScrollEnd={handleMomentumEnd}
             contentContainerStyle={{ paddingHorizontal: width / 2 }}
           >
-            <View style={{ width: layout.totalWidth, height: CONTENT_H }}>
+            <View style={{ width: layout.totalWidth, height: contentH }}>
               <Ruler layout={layout} pxPerSec={pxPerSec} />
-              <Pressable style={styles.track} onPress={() => selectPiece(null)}>
+              {laneH > 0 ? (
+                <View style={[styles.cueLane, { height: laneH }]}>
+                  <CueLane
+                    slots={cueSlots}
+                    pieces={cuePieces}
+                    pxPerMs={pxPerMs}
+                    showMediaRow={cueSlots.some((s) => s.hasMedia)}
+                    selected={selectedCue}
+                    onSelect={selectCue}
+                    onDragStart={beginTrim}
+                    onDragPreview={cuePreview}
+                    onDragEnd={endCueDrag}
+                  />
+                </View>
+              ) : null}
+              <Pressable
+                style={[styles.track, laneH > 0 && styles.trackAfterLane]}
+                onPress={() => selectPiece(null)}
+              >
                 {layout.pieces.map((p, i) => (
                   <PieceStrip
                     key={p.range.piece.id}
@@ -339,7 +411,10 @@ export function Timeline(props: TimelineProps): JSX.Element {
           </ScrollView>
         ) : null}
         {ready ? (
-          <View pointerEvents="none" style={[styles.playhead, { left: width / 2 - 1 }]} />
+          <View
+            pointerEvents="none"
+            style={[styles.playhead, { left: width / 2 - 1, height: contentH }]}
+          />
         ) : null}
       </View>
     </View>
@@ -537,7 +612,9 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   rulerTick: { position: 'absolute', bottom: 2, width: 1, height: 4, backgroundColor: color.whiteA28 },
+  cueLane: { marginTop: RULER_GAP, width: '100%', zIndex: 2 },
   track: { marginTop: RULER_GAP, height: TRACK_H, width: '100%' },
+  trackAfterLane: { marginTop: 0 },
   pieceWrap: { position: 'absolute', top: 0, height: TRACK_H },
   pieceWrapSelected: { zIndex: 2 },
   piece: { flex: 1, borderRadius: PIECE_RADIUS, overflow: 'hidden', backgroundColor: color.ink800 },
