@@ -628,7 +628,7 @@ export function OverlayEditor(props: {
         placeholderTextColor={color.whiteA45}
         selectionColor={color.blue300}
         underlineColorAndroid="transparent"
-        style={[styles.inputText, overlayTextStyle(fontSize), { color: textColor }]}
+        style={[styles.inputText, overlayTextStyle(fontSize, box.bg), { color: textColor }]}
       />
     ) : undefined;
     return (

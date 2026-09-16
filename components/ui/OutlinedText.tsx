@@ -1,8 +1,8 @@
-// TikTok's classic caption look: bold letters with a thin outline drawn
-// fully outside the glyph. React Native has no text stroke, so copies in the
-// outline color sit one stroke width behind the text, spread evenly around a
-// circle so curves stay smooth. The top element defines the layout; pass
-// children to swap it for a TextInput that shares the same style.
+// TikTok's default caption look: condensed white letters with a solid black
+// stroke drawn fully outside the glyph. React Native has no text stroke, so
+// copies in the stroke color sit one stroke width behind the text, spread
+// evenly around a circle so curves stay smooth. The top element defines the
+// layout; pass children to swap it for a TextInput that shares the style.
 import type { JSX, ReactNode } from 'react';
 import {
   StyleSheet,
@@ -32,7 +32,7 @@ export function OutlinedText(props: {
   children?: ReactNode;
 }): JSX.Element {
   const { text, fontSize, color, style, children } = props;
-  const stroke = fontSize * OVERLAY_TEXT_SPEC.outlineRatio;
+  const stroke = fontSize * OVERLAY_TEXT_SPEC.condensed.strokeRatio;
   const outline = classicOutlineColor(color);
   return (
     <View>
@@ -63,13 +63,10 @@ export function OutlinedText(props: {
 
 const styles = StyleSheet.create({
   base: {
-    fontFamily: OVERLAY_TEXT_SPEC.fontFamily,
-    fontWeight: '700',
+    fontFamily: OVERLAY_TEXT_SPEC.condensed.fontFamily,
+    fontWeight: OVERLAY_TEXT_SPEC.condensed.fontWeight,
   },
   layer: {
     ...StyleSheet.absoluteFill,
-    textShadowColor: 'rgba(0,0,0,0.06)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });

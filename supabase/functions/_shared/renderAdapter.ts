@@ -9,44 +9,84 @@ import {
   type SegmentBox,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
-import { wrapOverlayLines } from './overlayTextMetrics.ts';
+import { measureOverlayLine, wrapOverlayLines } from './overlayTextMetrics.ts';
+import { bubbleGeometry } from './overlayBubblePath.ts';
 
 const RENDERS_URL = 'https://api.creatomate.com/v1/renders';
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 80;
 
-// TikTok Sans is TikTok's own caption font, open sourced on Google Fonts,
-// which Creatomate loads by name. Using it is what makes burned-in text read
-// as native TikTok/Instagram text instead of "an edit".
-const TEXT_BASE = {
-  x: '50%',
-  x_alignment: '50%',
-  y_alignment: '50%',
-  font_family: 'TikTok Sans',
-  font_weight: '700',
-  line_height: '115%',
-} as const;
-
-// ---- Per-box styling. Source of truth: lib/overlay-boxes.ts on the client
-// (OVERLAY_TEXT_SPEC, overlayBoxFill, overlayTextContrast,
+// ---- TikTok text tool styling. Source of truth: lib/overlay-boxes.ts on the
+// client (OVERLAY_TEXT_SPEC, overlayBoxFill, overlayTextContrast,
 // classicOutlineColor). Edge functions cannot import from lib/, so these are
 // mirrored verbatim; change both together. ----
 
-/** TikTok text tool metrics as multiples of the font size. */
+/**
+ * TikTok text tool metrics as multiples of the font size. Both fonts are
+ * static instances cut from the TikTok Sans variable font, served from the
+ * public render-fonts bucket (the same files ship in assets/fonts).
+ */
 const OVERLAY_TEXT_SPEC = {
-  lineHeight: 1.15,
-  boxPadX: 0.55,
-  boxPadY: 0.26,
-  boxRadius: 0.38,
-  outlineRatio: 0.075,
+  /** Bare letters: condensed white with a black stroke. wght 500, wdth 75, opsz 36. */
+  condensed: {
+    fontFamily: 'TikTok Sans Condensed',
+    fontWeight: '500',
+    file: 'TikTokSans-Condensed.ttf',
+    lineHeight: 1.1,
+    strokeRatio: 0.04,
+  },
+  /** Text with background: one bubble per line merged into one blob. wght 600, wdth 100, opsz 36. */
+  bubble: {
+    fontFamily: 'TikTok Sans Bubble',
+    fontWeight: '600',
+    file: 'TikTokSans-Bubble.ttf',
+    lineHeight: 1.15,
+    padX: 0.35,
+    padY: 0.12,
+    radius: 0.25,
+    snap: 0.3,
+    fill: { saturation: 0.84, lightness: 0.73 },
+    ink: { saturation: 1, lightness: 0.28 },
+    pairs: [{ hue: 210, fill: '#80B6F4', ink: '#000590' }],
+    pairHueTolerance: 25,
+  },
   maxWidth: 0.86,
 } as const;
 
-/** Creatomate background_* paddings are percent of the font size. */
+function fontUrl(file: string): string {
+  return `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/render-fonts/${file}`;
+}
+
+/** Root fonts array every render carries so Creatomate can resolve both families. */
+function renderFonts(): Record<string, string | number>[] {
+  return [OVERLAY_TEXT_SPEC.condensed, OVERLAY_TEXT_SPEC.bubble].map((f) => ({
+    family: f.fontFamily,
+    weight: Number(f.fontWeight),
+    style: 'normal',
+    source: fontUrl(f.file),
+  }));
+}
+
+const CONDENSED_BASE = {
+  x: '50%',
+  x_alignment: '50%',
+  y_alignment: '50%',
+  font_family: OVERLAY_TEXT_SPEC.condensed.fontFamily,
+  font_weight: OVERLAY_TEXT_SPEC.condensed.fontWeight,
+  line_height: `${OVERLAY_TEXT_SPEC.condensed.lineHeight * 100}%`,
+  stroke_join: 'round',
+} as const;
+
+const BUBBLE_BASE = {
+  x: '50%',
+  x_alignment: '50%',
+  y_alignment: '50%',
+  font_family: OVERLAY_TEXT_SPEC.bubble.fontFamily,
+  font_weight: OVERLAY_TEXT_SPEC.bubble.fontWeight,
+  line_height: `${OVERLAY_TEXT_SPEC.bubble.lineHeight * 100}%`,
+} as const;
+
 const BOX_WIDTH = `${OVERLAY_TEXT_SPEC.maxWidth * 100}%`;
-const BOX_PAD_X = `${OVERLAY_TEXT_SPEC.boxPadX * 100}%`;
-const BOX_PAD_Y = `${OVERLAY_TEXT_SPEC.boxPadY * 100}%`;
-const BOX_RADIUS = `${OVERLAY_TEXT_SPEC.boxRadius * 100}%`;
 
 function parseHex(hex: string): { r: number; g: number; b: number } | null {
   const raw = hex.replace('#', '').trim();
@@ -115,12 +155,25 @@ function fromHsl(h: number, s: number, l: number): string {
 /** Below this the pick is a grey and keeps its own tone. */
 const NEUTRAL_SATURATION = 0.12;
 
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function measuredPair(hue: number): { fill: string; ink: string } | null {
+  const { pairs, pairHueTolerance } = OVERLAY_TEXT_SPEC.bubble;
+  return pairs.find((p) => hueDistance(p.hue, hue) <= pairHueTolerance) ?? null;
+}
+
 /** TikTok colored bubble fill: the picked hue lifted to a light saturated tint. */
 function overlayBoxFill(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return fill;
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#FFFFFF' : '#000000';
-  return fromHsl(hsl.h, Math.max(hsl.s, 0.9), 0.71);
+  const pair = measuredPair(hsl.h);
+  if (pair) return pair.fill;
+  const { saturation, lightness } = OVERLAY_TEXT_SPEC.bubble.fill;
+  return fromHsl(hsl.h, Math.max(hsl.s, saturation), lightness);
 }
 
 /** Letters on the bubble: the same hue driven deep and fully saturated. */
@@ -128,10 +181,13 @@ function overlayTextContrast(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return '#0F1720';
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#000000' : '#FFFFFF';
-  return fromHsl(hsl.h, 1, 0.24);
+  const pair = measuredPair(hsl.h);
+  if (pair) return pair.ink;
+  const { saturation, lightness } = OVERLAY_TEXT_SPEC.bubble.ink;
+  return fromHsl(hsl.h, saturation, lightness);
 }
 
-/** Classic outline sits behind the letters in the opposite tone. */
+/** Condensed stroke sits behind the letters in the opposite tone. */
 function classicOutlineColor(textColor: string): string {
   const lum = luminance(textColor);
   return lum !== null && lum < 0.5 ? '#FFFFFF' : '#000000';
@@ -139,14 +195,23 @@ function classicOutlineColor(textColor: string): string {
 
 /** Frame aspect: box.size is a fraction of the frame width, y is of height. */
 const FRAME_ASPECT = 1080 / 1920;
+const FRAME_WIDTH = 1080;
+const FRAME_HEIGHT = 1920;
+
+/** Solid stroke outside the letters, no shadow: the condensed TikTok look. */
+function condensedStroke(fontSizeVmin: number, textColor: string): Record<string, string> {
+  return {
+    stroke_color: classicOutlineColor(textColor),
+    stroke_width: `${(fontSizeVmin * OVERLAY_TEXT_SPEC.condensed.strokeRatio).toFixed(3)} vmin`,
+  };
+}
 
 /**
  * Elements for one admin-placed box, wrapped here with the font's own
  * metrics so the lines break exactly where the app preview breaks them.
- * Classic is a single hugging element with hard line breaks. A colored box
- * is one hugging element per line, each with its own background, stacked at
- * the line pitch so the bubbles overlap by the pad and read as one shape,
- * the way TikTok draws it.
+ * Bare text is a single hugging condensed element with hard line breaks. A
+ * colored box is one shape element carrying the merged bubble blob
+ * (overlayBubblePath) with one hugging text element per line on top of it.
  */
 function boxElements(
   box: { x: number; size: number; color: string; bg: boolean },
@@ -154,56 +219,82 @@ function boxElements(
   yCenter: number,
   timing: Record<string, number>,
 ): CreatomateElement[] {
-  const maxEm = (OVERLAY_TEXT_SPEC.maxWidth - 2 * box.size * OVERLAY_TEXT_SPEC.boxPadX) / box.size;
-  const lines = wrapOverlayLines(text, maxEm);
-  const sizeVmin = `${(box.size * 100).toFixed(2)} vmin`;
-  const base = {
-    type: 'text',
-    ...TEXT_BASE,
-    ...timing,
-    x: `${box.x * 100}%`,
-    font_size: sizeVmin,
-    text_wrap: false,
-  };
+  const sizeVmin = box.size * 100;
+  const fontPx = box.size * FRAME_WIDTH;
   if (!box.bg) {
+    const lines = wrapOverlayLines(text, OVERLAY_TEXT_SPEC.maxWidth / box.size, 'condensed');
     return [
       {
-        ...base,
-        text: lines.join('\n'),
+        type: 'text',
+        ...CONDENSED_BASE,
+        ...timing,
+        x: `${box.x * 100}%`,
         y: `${yCenter * 100}%`,
+        font_size: `${sizeVmin.toFixed(2)} vmin`,
+        text_wrap: false,
+        text: lines.join('\n'),
         fill_color: box.color,
-        stroke_color: classicOutlineColor(box.color),
-        stroke_width: `${(box.size * 100 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
-        shadow_color: 'rgba(0,0,0,0.35)',
-        shadow_blur: '0.8 vmin',
+        ...condensedStroke(sizeVmin, box.color),
       },
     ];
   }
-  const pitch = box.size * OVERLAY_TEXT_SPEC.lineHeight * FRAME_ASPECT;
+  const spec = OVERLAY_TEXT_SPEC.bubble;
+  const lines = wrapOverlayLines(
+    text,
+    (OVERLAY_TEXT_SPEC.maxWidth - 2 * box.size * spec.padX) / box.size,
+    'bubble',
+  );
+  const blob = bubbleGeometry(
+    lines.map((line) => measureOverlayLine(line, 'bubble') * fontPx),
+    {
+      pitch: fontPx * spec.lineHeight,
+      padX: fontPx * spec.padX,
+      padY: fontPx * spec.padY,
+      radius: fontPx * spec.radius,
+      snap: fontPx * spec.snap,
+    },
+  );
+  const shape: CreatomateElement = {
+    type: 'shape',
+    ...timing,
+    x: `${box.x * 100}%`,
+    y: `${yCenter * 100}%`,
+    x_alignment: '50%',
+    y_alignment: '50%',
+    width: `${((blob.width / FRAME_WIDTH) * 100).toFixed(3)}%`,
+    height: `${((blob.height / FRAME_HEIGHT) * 100).toFixed(3)}%`,
+    fill_color: overlayBoxFill(box.color),
+    path: scalePath(blob.path, blob.width, blob.height),
+  };
+  const pitch = box.size * spec.lineHeight * FRAME_ASPECT;
   const firstY = yCenter - ((lines.length - 1) / 2) * pitch;
+  const ink = overlayTextContrast(box.color);
   const rows = lines
     .map((line, i) => ({ line, y: `${((firstY + i * pitch) * 100).toFixed(3)}%` }))
-    .filter(({ line }) => line.length > 0);
-  // Bubbles overlap by the pad, so every bubble goes down first (invisible
-  // letters size it) and the ink is drawn in a second pass on top. Otherwise
-  // a lower bubble would cover the descenders of the line above.
-  const bubbles = rows.map(({ line, y }) => ({
-    ...base,
-    text: line,
-    y,
-    fill_color: 'rgba(0,0,0,0)',
-    background_color: overlayBoxFill(box.color),
-    background_x_padding: BOX_PAD_X,
-    background_y_padding: BOX_PAD_Y,
-    background_border_radius: BOX_RADIUS,
-  }));
-  const ink = rows.map(({ line, y }) => ({
-    ...base,
-    text: line,
-    y,
-    fill_color: overlayTextContrast(box.color),
-  }));
-  return [...bubbles, ...ink];
+    .filter(({ line }) => line.length > 0)
+    .map(({ line, y }) => ({
+      type: 'text',
+      ...BUBBLE_BASE,
+      ...timing,
+      x: `${box.x * 100}%`,
+      y,
+      font_size: `${sizeVmin.toFixed(2)} vmin`,
+      text_wrap: false,
+      text: line,
+      fill_color: ink,
+    }));
+  return [shape, ...rows];
+}
+
+/** Path data in px rescaled to Creatomate's boxed 0-100 coordinates. */
+function scalePath(path: string, width: number, height: number): string {
+  let axis = 0;
+  return path.replace(/-?\d+(\.\d+)?/g, (n) => {
+    const v = Number(n);
+    const scaled = axis % 2 === 0 ? (v / width) * 100 : (v / height) * 100;
+    axis++;
+    return Number(scaled.toFixed(3)).toString();
+  });
 }
 
 /**
@@ -213,33 +304,32 @@ function boxElements(
 function textProps(overlay: TimelineTextOverlay): Record<string, string> {
   if (overlay.mode === 'outline') {
     return {
-      ...TEXT_BASE,
+      ...CONDENSED_BASE,
       width: BOX_WIDTH,
       font_size_maximum: '4.6 vmin',
       fill_color: overlay.text_color,
+      ...condensedStroke(4.6, overlay.text_color),
       stroke_color: overlay.accent_color,
-      stroke_width: `${(4.6 * OVERLAY_TEXT_SPEC.outlineRatio).toFixed(2)} vmin`,
     };
   }
   if (overlay.mode === 'plain') {
     return {
-      ...TEXT_BASE,
+      ...CONDENSED_BASE,
       width: BOX_WIDTH,
       font_size_maximum: '4.2 vmin',
       fill_color: overlay.text_color,
-      shadow_color: 'rgba(0,0,0,0.6)',
-      shadow_blur: '1.2 vmin',
+      ...condensedStroke(4.2, overlay.text_color),
     };
   }
   return {
-    ...TEXT_BASE,
+    ...BUBBLE_BASE,
     width: BOX_WIDTH,
     font_size_maximum: '4.4 vmin',
     fill_color: overlay.text_color,
     background_color: overlay.accent_color,
-    background_x_padding: BOX_PAD_X,
-    background_y_padding: BOX_PAD_Y,
-    background_border_radius: BOX_RADIUS,
+    background_x_padding: `${OVERLAY_TEXT_SPEC.bubble.padX * 100}%`,
+    background_y_padding: `${OVERLAY_TEXT_SPEC.bubble.padY * 100}%`,
+    background_border_radius: `${OVERLAY_TEXT_SPEC.bubble.radius * 100}%`,
   };
 }
 
@@ -250,25 +340,25 @@ type CreatomateElement = {
 /** Name Creatomate uses to link the subtitle element to the stitched video. */
 const STITCHED_VIDEO_NAME = 'stitched';
 
-// Instagram Reels caption geometry, measured from native reels on a 9:16
-// frame: block centered at 78% of the height, about 62% of the width, 4.8
-// vmin semibold white with a soft dark shadow and no stroke. Short chunks
+// Caption geometry measured from native posts on a 9:16 frame: block
+// centered at 78% of the height, about 62% of the width, 4.8 vmin in the
+// condensed TikTok look (solid white, black stroke, no shadow). Short chunks
 // (about 40 characters) wrap to exactly two lines at that width, and the
 // fixed two-line height pins the block in place whether a chunk fills one
 // line or two; a rare third line is clipped instead of moving the block.
 const SUBTITLE_FONT_SIZE_VMIN = 4.8;
-const SUBTITLE_LINE_HEIGHT = 1.25;
 const SUBTITLE_MAX_CHARS = 40;
 const SUBTITLE_WIDTH = 0.62;
 const SUBTITLE_Y = 0.78;
 
 /**
  * Talking-head subtitles: auto-transcribed by Creatomate from the stitched
- * video's audio, styled and placed like native Reels captions. No word
- * highlight: the effect color matches the fill so every word reads the same.
+ * video's audio, styled like the on-screen text. No word highlight: the
+ * effect color matches the fill so every word reads the same.
  */
 function subtitleElement(y: number = SUBTITLE_Y): CreatomateElement {
   const fill = '#FFFFFF';
+  const lineHeight = OVERLAY_TEXT_SPEC.condensed.lineHeight;
   return {
     type: 'text',
     transcript_source: STITCHED_VIDEO_NAME,
@@ -277,19 +367,14 @@ function subtitleElement(y: number = SUBTITLE_Y): CreatomateElement {
     transcript_split: 'line',
     transcript_placement: 'static',
     transcript_maximum_length: SUBTITLE_MAX_CHARS,
-    ...TEXT_BASE,
-    font_weight: '600',
+    ...CONDENSED_BASE,
     y: `${y * 100}%`,
     width: `${SUBTITLE_WIDTH * 100}%`,
-    height: `${(SUBTITLE_FONT_SIZE_VMIN * SUBTITLE_LINE_HEIGHT * 2).toFixed(2)} vmin`,
+    height: `${(SUBTITLE_FONT_SIZE_VMIN * lineHeight * 2).toFixed(2)} vmin`,
     text_clip: true,
-    line_height: `${SUBTITLE_LINE_HEIGHT * 100}%`,
     font_size: `${SUBTITLE_FONT_SIZE_VMIN} vmin`,
     fill_color: fill,
-    shadow_color: 'rgba(0,0,0,0.75)',
-    shadow_blur: '1.2 vmin',
-    shadow_x: '0 vmin',
-    shadow_y: '0.15 vmin',
+    ...condensedStroke(SUBTITLE_FONT_SIZE_VMIN, fill),
   };
 }
 
@@ -505,6 +590,7 @@ export async function renderSlideImage(params: {
     output_format: 'jpg',
     width: 1080,
     height: 1920,
+    fonts: renderFonts(),
     elements,
   });
 }
@@ -524,6 +610,7 @@ export async function startOverlayRender(params: {
     output_format: 'mp4',
     width: timeline.width,
     height: timeline.height,
+    fonts: renderFonts(),
     elements: toElements(params),
   });
 }

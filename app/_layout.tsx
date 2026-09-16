@@ -4,10 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { ShareIntentProvider } from 'expo-share-intent';
-import {
-  TikTokSans_700Bold,
-  useFonts,
-} from '@expo-google-fonts/tiktok-sans';
+import * as SplashScreen from 'expo-splash-screen';
+import { isLoaded, useFonts } from 'expo-font';
 
 import { ConfigErrorScreen } from '../components/Screen';
 import { CompanyOverlays } from '../components/shared';
@@ -17,10 +15,18 @@ import {
   createSessionFromUrl,
   getInitialAuthUrl,
 } from '../lib/auth-session';
+import { OVERLAY_TEXT_SPEC } from '../lib/overlay-boxes';
 import { missingSupabaseEnv } from '../lib/supabase';
 import { motion, screenTransition } from '../theme/tokens';
 
 WebBrowser.maybeCompleteAuthSession();
+void SplashScreen.preventAutoHideAsync();
+
+/** The two TikTok Sans instances every on-screen text preview draws with. */
+const OVERLAY_FONTS = {
+  [OVERLAY_TEXT_SPEC.condensed.fontFamily]: require('../assets/fonts/TikTokSans-Condensed.ttf'),
+  [OVERLAY_TEXT_SPEC.bubble.fontFamily]: require('../assets/fonts/TikTokSans-Bubble.ttf'),
+};
 
 export default function RootLayout() {
   if (missingSupabaseEnv.length > 0) {
@@ -31,10 +37,19 @@ export default function RootLayout() {
 }
 
 function App() {
-  // TikTok Sans backs the on-screen text previews (record screen and the
-  // admin style editor) so what creators see matches the rendered captions.
-  // Rendering proceeds with the system font until it loads; no gate needed.
-  useFonts({ TikTokSans_700Bold });
+  // The splash stays up until both fonts are registered, so no text preview
+  // ever draws with the system font and then swaps.
+  const [fontsLoaded, fontError] = useFonts(OVERLAY_FONTS);
+  const fontsReady = fontsLoaded || fontError !== null;
+
+  useEffect(() => {
+    if (!fontsReady) return;
+    for (const family of Object.keys(OVERLAY_FONTS)) {
+      console.log(`overlay font ${family}: ${isLoaded(family) ? 'loaded' : 'MISSING, system fallback'}`);
+    }
+    if (fontError) console.error('overlay fonts failed to load', fontError);
+    void SplashScreen.hideAsync();
+  }, [fontsReady, fontError]);
 
   useEffect(() => {
     void getInitialAuthUrl().then((url) => {
@@ -47,6 +62,8 @@ function App() {
 
     return () => sub.remove();
   }, []);
+
+  if (!fontsReady) return null;
 
   return (
     <ShareIntentProvider>

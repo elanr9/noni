@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { TikTokSans_700Bold, useFonts } from '@expo-google-fonts/tiktok-sans';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BriefSegment } from '../../lib/briefs-api';
@@ -69,7 +68,6 @@ export function videoPreviewClips(params: {
 
 function ClipBoxes(props: { boxes: OverlayBox[]; stage: Size }): JSX.Element {
   const { boxes, stage } = props;
-  const [fontLoaded] = useFonts({ TikTokSans_700Bold });
   return (
     <View style={[StyleSheet.absoluteFill, styles.centre]} pointerEvents="none">
       {boxes.map((box) => {
@@ -95,7 +93,6 @@ function ClipBoxes(props: { boxes: OverlayBox[]; stage: Size }): JSX.Element {
                 bg={box.bg}
                 fontSize={box.size * stage.width}
                 maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.width}
-                fontLoaded={fontLoaded}
               />
             </View>
           </View>

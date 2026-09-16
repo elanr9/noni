@@ -21,6 +21,7 @@ import { useAuth } from '../../../lib/auth';
 import { saveOverlayThemeColor } from '../../../lib/briefs-api';
 import {
   CLASSIC_TEXT_COLOR,
+  OVERLAY_TEXT_SPEC,
   overlayBoxFill,
   overlayTextContrast,
   parseOverlayThemeColor,
@@ -584,11 +585,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   themePreviewPill: {
-    fontFamily: 'TikTokSans_700Bold',
+    fontFamily: OVERLAY_TEXT_SPEC.bubble.fontFamily,
     fontSize: 17,
     lineHeight: 22,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    fontWeight: OVERLAY_TEXT_SPEC.bubble.fontWeight,
     textAlign: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -596,10 +596,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   themePreviewClassic: {
-    fontFamily: 'TikTokSans_700Bold',
     lineHeight: 22,
-    fontWeight: '700',
-    letterSpacing: -0.3,
     textAlign: 'center',
   },
   swatchRow: {

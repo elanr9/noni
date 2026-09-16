@@ -1,15 +1,14 @@
 // Stand in for the auto transcribed subtitles the render pass burns in.
-// Mirrors renderAdapter.ts: two centred lines, 4.8 vmin, 62% wide, soft
-// shadow. The creator can only move it up or down.
+// Mirrors renderAdapter.ts: two centred lines, 4.8 vmin, 62% wide, in the
+// condensed TikTok look. The creator can only move it up or down.
 import type { JSX } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { TikTokSans_700Bold, useFonts } from '@expo-google-fonts/tiktok-sans';
+import { StyleSheet, View } from 'react-native';
 
-import { color } from '../../../theme/tokens';
+import { CLASSIC_TEXT_COLOR, OVERLAY_TEXT_SPEC } from '../../../lib/overlay-boxes';
+import { OutlinedText } from '../../ui/OutlinedText';
 import { DragPlacement } from '../DragPlacement';
 
 const FONT_VMIN = 4.8;
-const LINE_HEIGHT = 1.25;
 const WIDTH = 0.62;
 
 export function SubtitlePlacement(props: {
@@ -20,7 +19,6 @@ export function SubtitlePlacement(props: {
   onDragStart?: () => void;
 }): JSX.Element {
   const { y, stageWidth, stageHeight, onMove, onDragStart } = props;
-  const [fontLoaded] = useFonts({ TikTokSans_700Bold });
   const fontSize = (Math.min(stageWidth, stageHeight) / 100) * FONT_VMIN;
   return (
     <DragPlacement
@@ -34,18 +32,15 @@ export function SubtitlePlacement(props: {
       style={{ width: stageWidth * WIDTH }}
     >
       <View style={styles.block}>
-        <Text
-          style={[
-            styles.text,
-            {
-              fontSize,
-              lineHeight: fontSize * LINE_HEIGHT,
-              fontFamily: fontLoaded ? 'TikTokSans_700Bold' : undefined,
-            },
-          ]}
-        >
-          Your subtitles{'\n'}show up here
-        </Text>
+        <OutlinedText
+          text={'Your subtitles\nshow up here'}
+          fontSize={fontSize}
+          color={CLASSIC_TEXT_COLOR}
+          style={{
+            lineHeight: fontSize * OVERLAY_TEXT_SPEC.condensed.lineHeight,
+            textAlign: 'center',
+          }}
+        />
       </View>
     </DragPlacement>
   );
@@ -54,13 +49,5 @@ export function SubtitlePlacement(props: {
 const styles = StyleSheet.create({
   block: {
     alignItems: 'center',
-  },
-  text: {
-    color: color.white,
-    fontWeight: '600',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });

@@ -1,9 +1,11 @@
 import type { JSX } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { CLASSIC_TEXT_COLOR, OVERLAY_TEXT_SPEC } from '../../../lib/overlay-boxes';
 import { color } from '../../../theme/tokens';
+import { OutlinedText } from '../../ui/OutlinedText';
 
-const SUBTITLE_FONT = 'TikTokSans_700Bold';
+const FONT_SIZE = 15;
 
 /** Non interactive mock of the burned in subtitles, centred on the stage at
  * the same fraction of frame height the render uses. */
@@ -20,10 +22,12 @@ export function SubtitlePreview({
       style={[styles.wrap, { top }, dimmed && styles.dimmed]}
     >
       <Text style={styles.label}>Subtitles</Text>
-      <View style={styles.block}>
-        <Text style={styles.line}>your words show up</Text>
-        <Text style={styles.line}>right here as you talk</Text>
-      </View>
+      <OutlinedText
+        text={'your words show up\nright here as you talk'}
+        fontSize={FONT_SIZE}
+        color={CLASSIC_TEXT_COLOR}
+        style={styles.line}
+      />
     </View>
   );
 }
@@ -47,19 +51,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: color.whiteA45,
   },
-  block: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-  },
   line: {
-    fontFamily: SUBTITLE_FONT,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 19,
-    color: color.white,
+    lineHeight: FONT_SIZE * OVERLAY_TEXT_SPEC.condensed.lineHeight,
     textAlign: 'center',
   },
 });

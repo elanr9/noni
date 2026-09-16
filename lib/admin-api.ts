@@ -167,10 +167,15 @@ export async function reviewAssignment(params: {
       { p_assignment_id: assignment.id },
     );
     if (scheduleError) throw scheduleError;
-    const publishAt = typeof scheduled === 'string' ? scheduled : null;
-    if (publishAt && new Date(publishAt).getTime() <= Date.now()) {
-      void supabase.functions.invoke('publish-due', { body: { source: 'approve' } });
-    }
+    // A slot already in the past is stamped publish_at = now, so the sweep
+    // posts it immediately instead of waiting for the next cron tick. Run
+    // the sweep unconditionally: the device clock cannot be trusted to
+    // compare against the server's now, and a future slot is simply not due.
+    void supabase.functions
+      .invoke('publish-due', { body: { source: 'approve', publish_at: scheduled } })
+      .then(({ error }) => {
+        if (error) console.error('publish-due after approve failed', error);
+      });
   }
 
   void supabase.functions.invoke('notify', {

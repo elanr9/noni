@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo, useRef } from 'react';
+import { PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import type { OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radiusAdmin, type } from '../../../theme/tokens';
@@ -27,11 +28,30 @@ export interface SlideshowSurfaceProps {
  * pictures on them, `n / total` pill under the top bar, glass 34px arrows.
  * Pager dots live in ReviewMetaOverlay, between the photo and the caption.
  */
+/** Horizontal travel that counts as a page swipe. */
+const SWIPE_DISTANCE = 40;
+
 export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfaceProps) {
   const slide = slides[index];
+  const latest = useRef({ index, count: slides.length, onIndex });
+  latest.current = { index, count: slides.length, onIndex };
+
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) =>
+          Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        onPanResponderRelease: (_e, g) => {
+          const { index: i, count, onIndex: go } = latest.current;
+          if (g.dx <= -SWIPE_DISTANCE && i < count - 1) go(i + 1);
+          else if (g.dx >= SWIPE_DISTANCE && i > 0) go(i - 1);
+        },
+      }),
+    [],
+  );
 
   return (
-    <View style={styles.fill}>
+    <View style={styles.fill} {...swipe.panHandlers}>
       {slide !== undefined ? (
         <SlideStage
           boxes={slide.boxes}

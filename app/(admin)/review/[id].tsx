@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApprovedOverlay } from '../../../components/admin/review/ApprovedOverlay';
-import { ReelSurface } from '../../../components/admin/review/ReelSurface';
+import { ReelSurface, type ReelClip } from '../../../components/admin/review/ReelSurface';
 import { ReviewMetaOverlay } from '../../../components/admin/review/ReviewMetaOverlay';
 import { ReviewTopBar } from '../../../components/admin/review/ReviewTopBar';
 import {
@@ -34,7 +34,10 @@ import {
 import {
   listBriefSegments,
   listPostTypes,
+  parseHookOptions,
+  parseTalkingPoints,
   signedScreenshotUrl,
+  type Brief,
   type BriefSegment,
 } from '../../../lib/briefs-api';
 import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
@@ -42,6 +45,7 @@ import { parseNotes } from '../../../lib/post-event-labels';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
+import type { Json } from '../../../lib/types';
 import { borderWidth, color, type } from '../../../theme/tokens';
 
 type ReviewItem = {
@@ -55,6 +59,68 @@ function sectionLabel(index: number, count: number, isReel: boolean): string {
   if (index === 0) return isReel ? 'Hook' : 'Cover';
   if (index === count - 1 && count >= 3) return isReel ? 'Outro' : 'Close';
   return `${isReel ? 'Clip' : 'Slide'} ${index}`;
+}
+
+/** Seconds per stitched clip, in order, from the submission's render manifest. */
+function timelineClipDurations(timeline: Json | null): number[] {
+  if (timeline === null || typeof timeline !== 'object' || Array.isArray(timeline)) return [];
+  const clips = (timeline as { clips?: unknown }).clips;
+  if (!Array.isArray(clips)) return [];
+  return clips.flatMap((c) => {
+    const ms = (c as { duration_ms?: unknown }).duration_ms;
+    return typeof ms === 'number' && ms > 0 ? [ms / 1000] : [];
+  });
+}
+
+/** One revision section per recorded clip, mirroring the creator's recording
+ * plan: hook, one per talking point, then the CTA. Clips are matched to
+ * segments by the slot index in their storage path (`draft-{slot}-…`). */
+function clipSectionsFromSegments(
+  brief: Brief,
+  segments: BriefSegment[],
+  segmentPaths: string[],
+  clipUris: string[],
+): RevisionSection[] {
+  const spoken = segments
+    .filter((s) => s.kind !== 'slide')
+    .sort((a, b) => a.slot_index - b.slot_index);
+  if (spoken.length === 0 || segmentPaths.length === 0) return [];
+  const talkingPoints = parseTalkingPoints(brief.talking_points);
+  const hookLine = brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || '';
+  const ctaLine = brief.cta?.trim() || '';
+  const clipFor = (slot: number, fallbackIndex: number): string | null => {
+    const byPath = segmentPaths.findIndex((p) => /\/draft-(\d+)-/.exec(p)?.[1] === String(slot));
+    const index = byPath >= 0 ? byPath : fallbackIndex;
+    return clipUris[index] || null;
+  };
+  let pointNumber = 0;
+  const sections: RevisionSection[] = [];
+  spoken.forEach((s, i) => {
+    const clipUri = clipFor(s.slot_index, i);
+    if (s.kind === 'outro') {
+      if (clipUri === null) return;
+      sections.push({ key: `segment-${s.slot_index}`, label: 'Outro', text: ctaLine, clipUri });
+      return;
+    }
+    if (s.kind === 'hook') {
+      sections.push({
+        key: `segment-${s.slot_index}`,
+        label: 'Hook',
+        text: hookLine || s.overlay_text?.trim() || '',
+        clipUri,
+      });
+      return;
+    }
+    pointNumber += 1;
+    const point = talkingPoints[s.talking_point_index ?? pointNumber - 1];
+    sections.push({
+      key: `segment-${s.slot_index}`,
+      label: `Clip ${pointNumber}`,
+      text: point?.text?.trim() || s.overlay_text?.trim() || '',
+      clipUri,
+    });
+  });
+  return sections;
 }
 
 export default function ReviewScreen() {
@@ -368,13 +434,33 @@ export default function ReviewScreen() {
   const sectionTexts = isReel ? scriptTexts : surfaceSlides.map((s) => s.text);
   // Spoken sections only. Captions come from the brief and are placed
   // automatically, so revision mode never shows a caption card.
-  const sections: RevisionSection[] = sectionTexts.map((text, i) => ({
-    key: `segment-${i}`,
-    label: sectionLabel(i, sectionTexts.length, isReel),
-    text,
-    clipUri: isReel ? clipUris[i] || null : null,
-    slide: isReel ? undefined : surfaceSlides[i],
-  }));
+  // Video briefs built from talking points have no script, so their sections
+  // come from the recorded clips (one per brief segment, slot order).
+  const clipSections: RevisionSection[] = isReel
+    ? clipSectionsFromSegments(
+        briefRow,
+        briefSegments,
+        submission?.segment_paths ?? [],
+        clipUris,
+      )
+    : [];
+  const sections: RevisionSection[] =
+    clipSections.length > 0
+      ? clipSections
+      : sectionTexts.map((text, i) => ({
+          key: `segment-${i}`,
+          label: sectionLabel(i, sectionTexts.length, isReel),
+          text,
+          clipUri: isReel ? clipUris[i] || null : null,
+          slide: isReel ? undefined : surfaceSlides[i],
+        }));
+  const reelClips: ReelClip[] =
+    isReel && submission?.render_status === 'ready'
+      ? timelineClipDurations(submission.render_timeline).map((durationSec, i) => ({
+          label: clipSections[i]?.label ?? sectionLabel(i, clipSections.length, true),
+          durationSec,
+        }))
+      : [];
   const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
 
   const togglePlay = () => {
@@ -480,6 +566,8 @@ export default function ReviewScreen() {
             positionSec={positionSec}
             durationSec={durationSec}
             onPositionSec={setPositionSec}
+            clips={reelClips}
+            chipTop={insets.top + 56}
           />
         ) : (
           <SlideshowSurface

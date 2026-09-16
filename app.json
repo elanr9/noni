@@ -15,7 +15,9 @@
         "NSCameraUsageDescription": "Noni uses the camera so you can record content for your assigned tasks.",
         "NSMicrophoneUsageDescription": "Noni uses the mic so your recorded takes include audio.",
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["instagram"]
+        "LSApplicationQueriesSchemes": [
+          "instagram"
+        ]
       }
     },
     "android": {
@@ -66,9 +68,12 @@
             "NSExtensionActivationSupportsText": true
           },
           "iosShareExtensionName": "Save to Noni",
-          "androidIntentFilters": ["text/*"]
+          "androidIntentFilters": [
+            "text/*"
+          ]
         }
-      ]
+      ],
+      "expo-splash-screen"
     ],
     "experiments": {
       "typedRoutes": true

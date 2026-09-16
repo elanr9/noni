@@ -27,6 +27,7 @@
     "expo-notifications": "~57.0.17",
     "expo-router": "~57.0.20",
     "expo-share-intent": "^8.0.1",
+    "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-video": "~57.0.3",
     "expo-video-thumbnails": "~57.0.1",

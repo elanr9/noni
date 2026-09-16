@@ -6,11 +6,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import {
-  TikTokSans_700Bold,
-  useFonts,
-} from '@expo-google-fonts/tiktok-sans';
-
 import type { BriefSegment, TextOverlay } from '../../lib/briefs-api';
 import { OVERLAY_TEXT_SPEC, parseOverlayBoxes } from '../../lib/overlay-boxes';
 import { OverlayTextBox } from '../ui/OverlayTextBox';
@@ -176,8 +171,6 @@ export function SegmentOverlayPreview(props: {
     onMoveCard,
     onDragStart,
   } = props;
-  const [fontLoaded] = useFonts({ TikTokSans_700Bold });
-
   const showText = overlay.enabled && segment.show_on_screen;
   const boxes = showText
     ? parseOverlayBoxes(segment.overlay_style, {
@@ -232,7 +225,6 @@ export function SegmentOverlayPreview(props: {
               bg={box.bg}
               fontSize={font}
               maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stageWidth}
-              fontLoaded={fontLoaded}
             />
           </DragPlacement>
         );

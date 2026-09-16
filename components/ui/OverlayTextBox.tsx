@@ -1,24 +1,28 @@
-// One on-screen text box drawn the way TikTok's text tool draws it. Classic
-// is outlined letters; a colored box gives every wrapped line its own bubble
-// hugging that line. Lines are wrapped with the font's own advance widths
-// (lib/overlay-text-metrics) so the render breaks in the same places.
+// One on-screen text box drawn the way TikTok's text tool draws it. Bare
+// text is condensed white letters with a black stroke; text with background
+// is one merged blob of per line bubbles (lib/overlay-bubble-path). Lines are
+// wrapped with the font's own advance widths (lib/overlay-text-metrics) so
+// the render breaks in the same places.
 import type { JSX, ReactNode } from 'react';
 import { Dimensions, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import {
   OVERLAY_TEXT_SPEC,
   overlayBoxFill,
   overlayTextContrast,
 } from '../../lib/overlay-boxes';
-import { wrapOverlayLines } from '../../lib/overlay-text-metrics';
+import { bubbleGeometry } from '../../lib/overlay-bubble-path';
+import { measureOverlayLine, wrapOverlayLines } from '../../lib/overlay-text-metrics';
 import { OutlinedText } from './OutlinedText';
 
-export function overlayTextStyle(fontSize: number, fontLoaded = true): TextStyle {
+export function overlayTextStyle(fontSize: number, bg: boolean): TextStyle {
+  const font = bg ? OVERLAY_TEXT_SPEC.bubble : OVERLAY_TEXT_SPEC.condensed;
   return {
-    fontFamily: fontLoaded ? OVERLAY_TEXT_SPEC.fontFamily : undefined,
-    fontWeight: '700',
+    fontFamily: font.fontFamily,
+    fontWeight: font.fontWeight,
     fontSize,
-    lineHeight: fontSize * OVERLAY_TEXT_SPEC.lineHeight,
+    lineHeight: fontSize * font.lineHeight,
     textAlign: 'center',
   };
 }
@@ -31,32 +35,29 @@ export function OverlayTextBox(props: {
   fontSize: number;
   /** Widest the box may wrap, in px. Defaults to the spec fraction of the window. */
   maxWidth?: number;
-  fontLoaded?: boolean;
   /** Replaces the visible text (an editing TextInput sharing the same metrics). */
   children?: ReactNode;
 }): JSX.Element {
-  const { text, color, bg, fontSize, maxWidth, fontLoaded = true, children } = props;
+  const { text, color, bg, fontSize, maxWidth, children } = props;
 
-  const padX = fontSize * OVERLAY_TEXT_SPEC.boxPadX;
-  const padY = fontSize * OVERLAY_TEXT_SPEC.boxPadY;
-  const radius = fontSize * OVERLAY_TEXT_SPEC.boxRadius;
   const boxWidth =
     maxWidth ?? Dimensions.get('window').width * OVERLAY_TEXT_SPEC.maxWidth;
-  const wrapWidth = Math.max(0, boxWidth - 2 * padX);
-  const textStyle = overlayTextStyle(fontSize, fontLoaded);
-  const lines = wrapOverlayLines(text, wrapWidth / fontSize);
-  const wrapped = lines.join('\n');
+  const textStyle = overlayTextStyle(fontSize, bg);
 
   if (!bg) {
+    const lines = wrapOverlayLines(text, boxWidth / fontSize, 'condensed');
     return (
       <View style={{ maxWidth: boxWidth }}>
-        <OutlinedText text={wrapped} fontSize={fontSize} color={color} style={textStyle}>
+        <OutlinedText text={lines.join('\n')} fontSize={fontSize} color={color} style={textStyle}>
           {children}
         </OutlinedText>
       </View>
     );
   }
 
+  const spec = OVERLAY_TEXT_SPEC.bubble;
+  const padX = fontSize * spec.padX;
+  const padY = fontSize * spec.padY;
   const fill = overlayBoxFill(color);
   const ink = overlayTextContrast(color);
 
@@ -68,7 +69,7 @@ export function OverlayTextBox(props: {
             backgroundColor: fill,
             paddingHorizontal: padX,
             paddingVertical: padY,
-            borderRadius: radius,
+            borderRadius: fontSize * spec.radius,
           }}
         >
           {children}
@@ -77,41 +78,42 @@ export function OverlayTextBox(props: {
     );
   }
 
-  // Bubbles overlap by the pad, so they are laid down first with invisible
-  // letters sizing them and the ink is drawn on an identical layer on top.
-  // Otherwise a lower bubble would cover the descenders of the line above.
-  const layer = (withFill: boolean) =>
-    lines.map((line, i) =>
-      line.length === 0 ? (
-        <View key={i} style={{ height: fontSize * OVERLAY_TEXT_SPEC.lineHeight }} />
-      ) : (
-        <View
-          key={i}
-          style={{
-            backgroundColor: withFill ? fill : 'transparent',
-            paddingHorizontal: padX,
-            paddingVertical: padY,
-            borderRadius: radius,
-            marginTop: i === 0 ? 0 : -2 * padY,
-          }}
-        >
-          <Text style={[textStyle, { color: withFill ? 'transparent' : ink }]}>{line}</Text>
-        </View>
-      ),
-    );
+  const lines = wrapOverlayLines(text, (boxWidth - 2 * padX) / fontSize, 'bubble');
+  const blob = bubbleGeometry(
+    lines.map((line) => measureOverlayLine(line, 'bubble') * fontSize),
+    {
+      pitch: fontSize * spec.lineHeight,
+      padX,
+      padY,
+      radius: fontSize * spec.radius,
+      snap: fontSize * spec.snap,
+    },
+  );
 
   return (
-    <View style={[styles.stack, { maxWidth: boxWidth }]}>
-      {layer(true)}
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.stack]}>
-        {layer(false)}
+    <View style={{ width: blob.width, height: blob.height }}>
+      <Svg
+        pointerEvents="none"
+        style={StyleSheet.absoluteFill}
+        width={blob.width}
+        height={blob.height}
+        viewBox={`0 0 ${blob.width} ${blob.height}`}
+      >
+        <Path d={blob.path} fill={fill} />
+      </Svg>
+      <View style={[styles.lines, { paddingVertical: padY }]}>
+        {lines.map((line, i) => (
+          <Text key={i} style={[textStyle, { color: ink }]}>
+            {line.length === 0 ? ' ' : line}
+          </Text>
+        ))}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  stack: {
+  lines: {
     alignItems: 'center',
   },
 });

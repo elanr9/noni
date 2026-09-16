@@ -29,21 +29,40 @@ export const CLASSIC_TEXT_COLOR = '#FFFFFF';
 export const CLASSIC_BLACK_TEXT_COLOR = '#000000';
 
 /**
- * TikTok text tool metrics, measured off real posts. Every unit is a
- * multiple of the font size so previews at any stage width and the
- * 1080x1920 render come out identical. Mirrored in
+ * TikTok text tool metrics, tuned against real TikTok exports. Every unit is
+ * a multiple of the font size so previews at any stage width and the
+ * 1080x1920 render come out identical. Both fonts are static instances cut
+ * from the TikTok Sans variable font (assets/fonts, OFL). Mirrored in
  * supabase/functions/_shared/renderAdapter.ts; change both together.
  */
 export const OVERLAY_TEXT_SPEC = {
-  fontFamily: 'TikTokSans_700Bold',
-  /** Line box height. */
-  lineHeight: 1.15,
-  /** Background bubble padding, per wrapped line. */
-  boxPadX: 0.55,
-  boxPadY: 0.26,
-  boxRadius: 0.38,
-  /** Classic outline thickness, drawn fully outside the letter. */
-  outlineRatio: 0.075,
+  /** Bare letters: TikTok's default text, condensed white with a black stroke. */
+  condensed: {
+    /** TikTok Sans wght 500, wdth 75, opsz 36, slnt 0. */
+    fontFamily: 'TikTokSans-Condensed',
+    fontWeight: '500',
+    lineHeight: 1.1,
+    /** Stroke drawn fully outside the letter, as a fraction of the font size. */
+    strokeRatio: 0.04,
+  },
+  /** Text with background: one colored bubble per line, merged into one blob. */
+  bubble: {
+    /** TikTok Sans wght 600, wdth 100, opsz 36, slnt 0. */
+    fontFamily: 'TikTokSans-Bubble',
+    fontWeight: '600',
+    lineHeight: 1.15,
+    padX: 0.35,
+    padY: 0.12,
+    radius: 0.25,
+    /** Neighbouring lines whose widths differ by less than this share one width. */
+    snap: 0.3,
+    /** Fallback tint math for picks no measured pair covers. */
+    fill: { saturation: 0.84, lightness: 0.73 },
+    ink: { saturation: 1, lightness: 0.28 },
+    /** Bubble and letter colors measured off TikTok, keyed by the pick's hue. */
+    pairs: [{ hue: 210, fill: '#80B6F4', ink: '#000590' }],
+    pairHueTolerance: 25,
+  },
   /** Widest a box may wrap, as a fraction of the stage width. */
   maxWidth: 0.86,
 } as const;
@@ -324,25 +343,43 @@ function fromHsl(h: number, s: number, l: number): string {
 /** Below this the pick is a grey and keeps its own tone. */
 const NEUTRAL_SATURATION = 0.12;
 
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+/** The measured TikTok pair whose hue the pick falls on, if any. */
+function measuredPair(hue: number): { fill: string; ink: string } | null {
+  const { pairs, pairHueTolerance } = OVERLAY_TEXT_SPEC.bubble;
+  const hit = pairs.find((p) => hueDistance(p.hue, hue) <= pairHueTolerance);
+  return hit ?? null;
+}
+
 /**
  * TikTok colored bubble fill: the picked hue lifted to a light, still
- * saturated tint (a TikTok blue box measures #74B9F8). White and black picks
+ * saturated tint (TikTok's blue box measures #80B6F4). White and black picks
  * stay white and black, matching the platform's own swatches.
  */
 export function overlayBoxFill(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return fill;
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#FFFFFF' : '#000000';
-  return fromHsl(hsl.h, Math.max(hsl.s, 0.9), 0.71);
+  const pair = measuredPair(hsl.h);
+  if (pair) return pair.fill;
+  const { saturation, lightness } = OVERLAY_TEXT_SPEC.bubble.fill;
+  return fromHsl(hsl.h, Math.max(hsl.s, saturation), lightness);
 }
 
 /**
- * Letters on the bubble: the same hue driven deep and fully saturated (TikTok
- * blue letters measure #00107C). Black on white, white on black.
+ * Letters on the bubble: the same hue driven deep and fully saturated
+ * (TikTok's blue letters measure #000590). Black on white, white on black.
  */
 export function overlayTextContrast(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return '#0F1720';
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#000000' : '#FFFFFF';
-  return fromHsl(hsl.h, 1, 0.24);
+  const pair = measuredPair(hsl.h);
+  if (pair) return pair.ink;
+  const { saturation, lightness } = OVERLAY_TEXT_SPEC.bubble.ink;
+  return fromHsl(hsl.h, saturation, lightness);
 }
