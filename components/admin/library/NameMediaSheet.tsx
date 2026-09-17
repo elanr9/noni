@@ -63,8 +63,16 @@ export function NameMediaSheet({
     <Sheet
       visible={prompt !== null}
       onClose={onClose}
-      title={kind === 'recording' ? 'Name this recording' : 'Name this screenshot'}
-      subtitle="The name is the label you see when adding it to a post. The description tells the AI what it shows."
+      title={
+        isRename
+          ? kind === 'recording'
+            ? 'Edit this recording'
+            : 'Edit this screenshot'
+          : kind === 'recording'
+            ? 'Name this recording'
+            : 'Name this screenshot'
+      }
+      subtitle={`The name is the label you see when adding it to a post. The explanation tells the AI what the ${kind} shows when it writes a post from it.`}
       footer={
         <Button
           size="lg"
@@ -72,7 +80,7 @@ export function NameMediaSheet({
           disabled={busy || trimmed.length === 0}
           onPress={() => onSave(trimmed, description)}
         >
-          {busy ? 'Saving' : isRename ? 'Save name' : 'Save to media'}
+          {busy ? 'Saving' : isRename ? 'Save' : 'Save to media'}
         </Button>
       }
     >
@@ -108,7 +116,7 @@ export function NameMediaSheet({
           </View>
         </View>
         <View style={styles.descriptionWrap}>
-          <Text style={styles.label}>Description</Text>
+          <Text style={styles.label}>What it shows</Text>
           <TextInput
             value={descriptionDraft}
             onChangeText={setDescriptionDraft}

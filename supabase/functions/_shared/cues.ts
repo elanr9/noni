@@ -29,8 +29,10 @@ export type CueContext = {
   label: string | null;
   /** The talking point the creator spoke from. */
   point_text: string | null;
-  /** Title / description of the attached screenshot or recording, if any. */
+  /** Title of the attached screenshot or recording, if any. */
   media_title: string | null;
+  /** The manager's explanation of what the attached media shows, if any. */
+  media_description?: string | null;
   media_kind: 'screenshot' | 'recording' | null;
   /** The company's product name, e.g. "Inkbound". */
   product_name: string | null;
@@ -260,6 +262,7 @@ function describeContext(ctx: CueContext): string {
   if (ctx.product_name) lines.push(`Product name: ${ctx.product_name}`);
   if (ctx.media_kind) {
     lines.push(`Attached media: ${ctx.media_kind}${ctx.media_title ? ` showing "${ctx.media_title}"` : ''}`);
+    if (ctx.media_description) lines.push(`What the media shows: ${ctx.media_description}`);
   } else {
     lines.push('Attached media: none (media_word_index should be null)');
   }

@@ -335,6 +335,24 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
                   {tile.item.title ?? 'Untitled'}
                 </Text>
               </View>
+              {tile.item.description ? (
+                <Text style={styles.captionDescription} numberOfLines={2}>
+                  {tile.item.description}
+                </Text>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add what it shows"
+                  onPress={() => {
+                    setSaveError(null);
+                    setPending({ mode: 'rename', item: tile.item });
+                  }}
+                  style={styles.captionAdd}
+                >
+                  <Icon name="pencil" size={11} color={color.blue500} />
+                  <Text style={styles.captionAddText}>Add what it shows</Text>
+                </Pressable>
+              )}
             </Pressable>
           )
         }
@@ -414,7 +432,22 @@ export function MediaLane({ companyId, userId, bottomPadding, onToast, renderHea
                   <Text style={styles.previewDescription} numberOfLines={3}>
                     {preview.description}
                   </Text>
-                ) : null}
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Add what it shows"
+                    onPress={() => {
+                      setSaveError(null);
+                      setPending({ mode: 'rename', item: preview });
+                    }}
+                    style={styles.previewAdd}
+                  >
+                    <Icon name="pencil" size={12} color={color.white} />
+                    <Text style={styles.previewAddText}>
+                      {`Add what it shows so the AI understands this ${preview.kind}`}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             </View>
             <View style={styles.previewFrame}>
@@ -495,6 +528,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: color.slate400,
   },
+  captionDescription: {
+    marginTop: 3,
+    paddingHorizontal: 2,
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: '500',
+    color: color.slate500,
+  },
+  captionAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+    paddingHorizontal: 2,
+  },
+  captionAddText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: color.blue500,
+  },
   durationBadge: {
     position: 'absolute',
     right: 8,
@@ -560,6 +613,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.8)',
     marginTop: 2,
+  },
+  previewAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  previewAddText: {
+    flex: 1,
+    fontSize: type.size.label,
+    fontWeight: '600',
+    color: color.white,
   },
   previewFrame: {
     flex: 1,

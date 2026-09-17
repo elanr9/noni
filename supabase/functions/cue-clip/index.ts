@@ -52,21 +52,30 @@ function talkingPointAt(raw: unknown, index: number | null): TalkingPoint | null
   return typeof item === 'object' && item !== null ? (item as TalkingPoint) : null;
 }
 
-async function mediaTitleForPath(
+type MediaDetails = { title: string | null; description: string | null };
+
+async function mediaDetailsForPath(
   admin: SupabaseClient,
   companyId: string,
   screenshotUrl: string,
-): Promise<string | null> {
+): Promise<MediaDetails> {
   const stem = fileStem(screenshotUrl);
-  if (!stem) return null;
+  if (!stem) return { title: null, description: null };
   const { data } = await admin
     .from('media_library')
-    .select('path, title')
+    .select('path, title, description')
     .eq('company_id', companyId)
     .limit(500);
-  const rows = (data ?? []) as Array<{ path: string; title: string | null }>;
+  const rows = (data ?? []) as Array<{
+    path: string;
+    title: string | null;
+    description: string | null;
+  }>;
   const match = rows.find((row) => fileStem(row.path) === stem);
-  return match?.title ?? null;
+  return {
+    title: match?.title?.trim() || null,
+    description: match?.description?.trim() || null,
+  };
 }
 
 function resolveDuration(bodyDuration: number | undefined, words: TranscriptWord[]): number {
@@ -151,9 +160,12 @@ Deno.serve(async (req) => {
 
     let mediaKind: CueContext['media_kind'] = null;
     let mediaTitle: string | null = null;
+    let mediaDescription: string | null = null;
     if (seg?.screenshot_url) {
       mediaKind = isVideoPath(seg.screenshot_url) ? 'recording' : 'screenshot';
-      mediaTitle = await mediaTitleForPath(admin, companyId, seg.screenshot_url);
+      const media = await mediaDetailsForPath(admin, companyId, seg.screenshot_url);
+      mediaTitle = media.title;
+      mediaDescription = media.description;
       if (!mediaTitle && point?.is_product) mediaTitle = pointText;
     }
 
@@ -179,6 +191,7 @@ Deno.serve(async (req) => {
       label,
       point_text: pointText,
       media_title: mediaTitle,
+      media_description: mediaDescription,
       media_kind: mediaKind,
       product_name: productName,
       duration_ms: resolveDuration(body.duration_ms, words),

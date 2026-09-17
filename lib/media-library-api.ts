@@ -247,8 +247,10 @@ export async function copySegmentMediaToLibrary(params: {
   createdBy: string;
   segmentPath: string;
   media: LocalMedia;
+  title?: string | null;
+  description?: string | null;
 }): Promise<MediaLibraryItem> {
-  const { companyId, createdBy, segmentPath, media } = params;
+  const { companyId, createdBy, segmentPath, media, title = null, description = null } = params;
   const stamp = Date.now();
   const ext = segmentPath.split('.').pop() ?? extensionForContentType(media.contentType);
   const path = `${companyId}/library/${stamp}.${ext}`;
@@ -282,6 +284,8 @@ export async function copySegmentMediaToLibrary(params: {
       width: media.width,
       height: media.height,
       created_by: createdBy,
+      title,
+      description,
     })
     .select('*')
     .single();

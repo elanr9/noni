@@ -501,23 +501,29 @@ function mediaKindFromPath(path: string | null): CueContext['media_kind'] {
   return isVideoFile(path) ? 'recording' : 'screenshot';
 }
 
-// Titles the admin gave library media, keyed by file stem so a path copied
-// into a brief still matches.
-async function loadMediaTitles(
+type MediaDetails = { title: string | null; description: string | null };
+
+// Titles and explanations the admin gave library media, keyed by file stem
+// so a path copied into a brief still matches.
+async function loadMediaDetails(
   admin: AdminClient,
   companyId: string,
-): Promise<Map<string, string>> {
+): Promise<Map<string, MediaDetails>> {
   const { data } = await admin
     .from('media_library')
-    .select('path, title')
-    .eq('company_id', companyId)
-    .not('title', 'is', null);
-  const titles = new Map<string, string>();
+    .select('path, title, description')
+    .eq('company_id', companyId);
+  const details = new Map<string, MediaDetails>();
   for (const row of data ?? []) {
-    const title = row.title as string;
-    if (title.trim().length > 0) titles.set(pathStem(row.path as string), title);
+    const title = typeof row.title === 'string' ? row.title.trim() : '';
+    const description = typeof row.description === 'string' ? row.description.trim() : '';
+    if (title.length === 0 && description.length === 0) continue;
+    details.set(pathStem(row.path as string), {
+      title: title || null,
+      description: description || null,
+    });
   }
-  return titles;
+  return details;
 }
 
 function talkingPointText(points: unknown, index: number | null | undefined): string | null {
@@ -550,22 +556,24 @@ async function resolveCues(params: {
   const slots = briefSegments
     .map((segment, i) => ({ segment, i }))
     .filter(({ segment, i }) => i < durationsMs.length && segmentNeedsCue(segment));
-  const mediaTitles = slots.some(({ segment }) => segment.screenshot_url)
-    ? await loadMediaTitles(admin, companyId)
-    : new Map<string, string>();
+  const mediaDetails = slots.some(({ segment }) => segment.screenshot_url)
+    ? await loadMediaDetails(admin, companyId)
+    : new Map<string, MediaDetails>();
   return mapWithConcurrency(slots, CUE_CONCURRENCY, async ({ segment, i }) => {
     const stored = submissionCues.find((c) => c.slot_index === i);
     if (stored) {
       console.log(`cue slot ${i}: submission (${stored.source})`);
       return stored;
     }
+    const media = segment.screenshot_url
+      ? mediaDetails.get(pathStem(segment.screenshot_url)) ?? null
+      : null;
     const ctx: CueContext = {
       kind: segment.kind,
       label: segment.overlay_text,
       point_text: talkingPointText(params.talkingPoints, segment.talking_point_index),
-      media_title: segment.screenshot_url
-        ? mediaTitles.get(pathStem(segment.screenshot_url)) ?? null
-        : null,
+      media_title: media?.title ?? null,
+      media_description: media?.description ?? null,
       media_kind: mediaKindFromPath(segment.screenshot_url),
       product_name: params.productName,
       duration_ms: durationsMs[i],

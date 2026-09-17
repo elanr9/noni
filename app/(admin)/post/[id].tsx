@@ -968,6 +968,8 @@ export default function PostEditorScreen() {
             createdBy: profile.id,
             segmentPath: path,
             media: pick.media,
+            title: pick.library.title,
+            description: pick.library.description,
           })
             .then((item) => setMediaLibrary((prev) => [item, ...prev]))
             .catch(() => undefined);

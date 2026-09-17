@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -27,7 +28,7 @@ import {
   type MediaKind,
   type MediaLibraryItem,
 } from '../../../lib/media-library-api';
-import { color, radiusAdmin, space } from '../../../theme/tokens';
+import { borderWidth, color, radiusAdmin, space } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
@@ -45,8 +46,11 @@ type RollTile = {
   height: number;
 };
 
+/** Name and explanation a manager gives media that lands in the shared library. */
+export type LibraryDetails = { title: string | null; description: string | null };
+
 export type MediaPick =
-  | { source: 'local'; media: LocalMedia; saveToLibrary: boolean }
+  | { source: 'local'; media: LocalMedia; saveToLibrary: boolean; library: LibraryDetails }
   | { source: 'library'; item: MediaLibraryItem }
   | { source: 'noni'; url: string };
 
@@ -101,7 +105,10 @@ export function CameraRollSheet({
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveToLibrary, setSaveToLibrary] = useState(false);
+  const [libraryTitle, setLibraryTitle] = useState('');
+  const [libraryDescription, setLibraryDescription] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [pendingAdd, setPendingAdd] = useState<LocalMedia | null>(null);
   const [adding, setAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
@@ -118,8 +125,17 @@ export function CameraRollSheet({
       setTab('library');
       setSelectedId(null);
       setSaveToLibrary(false);
+      setLibraryTitle('');
+      setLibraryDescription('');
+      setPendingAdd(null);
     }
   }
+
+  const libraryDetails: LibraryDetails = {
+    title: libraryTitle.trim() || null,
+    description: libraryDescription.trim() || null,
+  };
+  const libraryNameMissing = saveToLibrary && libraryDetails.title === null;
 
   function switchKind(next: MediaKind) {
     if (!allowRecordings && next === 'recording') return;
@@ -197,7 +213,7 @@ export function CameraRollSheet({
     setConfirming(true);
     try {
       const media = await localFromRollTile(tile);
-      onPick({ source: 'local', media, saveToLibrary });
+      onPick({ source: 'local', media, saveToLibrary, library: libraryDetails });
     } catch (e) {
       Alert.alert(`Could not read the ${noun}`, e instanceof Error ? e.message : 'Try again');
     } finally {
@@ -216,22 +232,65 @@ export function CameraRollSheet({
 
   async function pickFromSystemForClip() {
     const media = await pickFromSystem();
-    if (media) onPick({ source: 'local', media, saveToLibrary });
+    if (media) onPick({ source: 'local', media, saveToLibrary, library: libraryDetails });
   }
 
-  async function addToLibrary() {
+  async function startAddToLibrary() {
     const media = await pickFromSystem();
     if (!media) return;
+    setLibraryTitle('');
+    setLibraryDescription('');
+    setPendingAdd(media);
+  }
+
+  async function confirmAddToLibrary() {
+    if (!pendingAdd || libraryDetails.title === null) return;
     setAdding(true);
     try {
-      const item = await addToMediaLibrary({ companyId, createdBy: userId, media });
+      const item = await addToMediaLibrary({
+        companyId,
+        createdBy: userId,
+        media: pendingAdd,
+        title: libraryDetails.title,
+        description: libraryDetails.description,
+      });
       onLibraryChange([item, ...library]);
+      setPendingAdd(null);
+      setLibraryTitle('');
+      setLibraryDescription('');
     } catch (e) {
       Alert.alert('Could not add to the library', e instanceof Error ? e.message : 'Try again');
     } finally {
       setAdding(false);
     }
   }
+
+  const detailFields = (
+    <View style={styles.detailFields}>
+      <TextInput
+        value={libraryTitle}
+        onChangeText={setLibraryTitle}
+        placeholder={kind === 'recording' ? 'Name, e.g. Highlight video' : 'Name, e.g. Chapter view, editor'}
+        placeholderTextColor={color.slate400}
+        autoCapitalize="sentences"
+        returnKeyType="done"
+        style={[styles.detailInput, libraryDetails.title !== null && styles.detailInputActive]}
+      />
+      <TextInput
+        value={libraryDescription}
+        onChangeText={setLibraryDescription}
+        placeholder="What it shows and how it works, so the AI understands it"
+        placeholderTextColor={color.slate400}
+        multiline
+        autoCapitalize="sentences"
+        style={[
+          styles.detailInput,
+          styles.detailInputMulti,
+          libraryDetails.description !== null && styles.detailInputActive,
+        ]}
+      />
+    </View>
+  );
 
   function confirmRemove(item: MediaLibraryItem) {
     Alert.alert(
@@ -268,12 +327,17 @@ export function CameraRollSheet({
           </View>
           <Switch value={saveToLibrary} onValueChange={setSaveToLibrary} />
         </View>
+        {saveToLibrary ? detailFields : null}
         <Button
           block
-          disabled={selectedId === null || confirming}
+          disabled={selectedId === null || confirming || libraryNameMissing}
           onPress={() => void confirmRoll()}
         >
-          {confirming ? 'Preparing…' : `Use ${noun}`}
+          {confirming
+            ? 'Preparing…'
+            : libraryNameMissing
+              ? `Name the ${noun} to save it`
+              : `Use ${noun}`}
         </Button>
       </View>
     ) : undefined;
@@ -342,12 +406,41 @@ export function CameraRollSheet({
           <Text style={styles.hint}>
             {`Shared with every manager here. Tap a ${noun} to place it. Hold one to remove it.`}
           </Text>
+          {pendingAdd ? (
+            <View style={styles.addCard}>
+              <View style={styles.addCardRow}>
+                <Image source={{ uri: pendingAdd.uri }} style={styles.addCardThumb} />
+                <View style={styles.addCardText}>
+                  <Text style={styles.saveTitle}>{`Name this ${noun}`}</Text>
+                  <Text style={styles.saveHint}>
+                    The name is the label in every picker. The explanation tells the AI what it shows.
+                  </Text>
+                </View>
+              </View>
+              {detailFields}
+              <View style={styles.addCardActions}>
+                <Button
+                  variant="secondary"
+                  disabled={adding}
+                  onPress={() => setPendingAdd(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={adding || libraryDetails.title === null}
+                  onPress={() => void confirmAddToLibrary()}
+                >
+                  {adding ? 'Adding…' : 'Save to library'}
+                </Button>
+              </View>
+            </View>
+          ) : null}
           <View style={styles.grid}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel={`Add a ${noun} to the library`}
-              disabled={adding}
-              onPress={() => void addToLibrary()}
+              disabled={adding || pendingAdd !== null}
+              onPress={() => void startAddToLibrary()}
               style={[styles.tile, styles.addTile, { width: tileSize, height: tileSize }]}
             >
               <Icon name="plus" size={22} color={color.blue500} strokeWidth={2.5} />
@@ -389,6 +482,11 @@ export function CameraRollSheet({
                   >
                     {item.title ?? 'Untitled'}
                   </Text>
+                  {item.description ? (
+                    <Text style={styles.tileDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  ) : null}
                 </View>
               );
             })}
@@ -620,6 +718,64 @@ const styles = StyleSheet.create({
   tileTitleMuted: {
     fontWeight: '600',
     color: color.slate400,
+  },
+  tileDescription: {
+    marginTop: 2,
+    paddingHorizontal: 2,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '500',
+    color: color.slate500,
+  },
+  detailFields: {
+    gap: 8,
+  },
+  detailInput: {
+    borderWidth: borderWidth.field,
+    borderColor: color.lineStrong,
+    borderRadius: radiusAdmin.md,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: '600',
+    color: color.ink,
+    backgroundColor: color.white,
+  },
+  detailInputMulti: {
+    minHeight: 64,
+    paddingTop: 11,
+    textAlignVertical: 'top',
+  },
+  detailInputActive: {
+    borderColor: color.blue500,
+  },
+  addCard: {
+    gap: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: radiusAdmin.md,
+    borderWidth: 1,
+    borderColor: color.line,
+    backgroundColor: color.blue100,
+  },
+  addCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addCardThumb: {
+    width: 44,
+    height: 56,
+    borderRadius: radiusAdmin.sm,
+    backgroundColor: color.fillQuiet,
+  },
+  addCardText: {
+    flex: 1,
+  },
+  addCardActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   addTile: {
     alignItems: 'center',
