@@ -113,7 +113,8 @@ type AuthState = {
   refreshManagerAccess: () => Promise<void>;
   refreshAccounts: () => Promise<void>;
   refreshCompanies: () => Promise<void>;
-  switchCompany: (companyId: string) => Promise<AppMode | null>;
+  /** Switches company; lands on `preferredMode` when that membership allows it. */
+  switchCompany: (companyId: string, preferredMode?: AppMode) => Promise<AppMode | null>;
   setActiveMode: (mode: AppMode) => Promise<void>;
   enableCreatorMode: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -377,12 +378,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (mode: AppMode) => {
       if (!profile) return;
       if (!modesForProfile(profile).includes(mode)) return;
+      setActiveModeState(mode);
       try {
         await setStoredMode(profile.id, mode);
       } catch (e) {
         console.error('active mode persist failed', e);
       }
-      setActiveModeState(mode);
       router.replace(destinationForProfile(profile, true, mode));
     },
     [profile],
@@ -391,10 +392,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const enableCreatorMode = useCallback(async () => {
     if (!profile || !session) return;
     if (profile.can_create !== true) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ can_create: true })
-        .eq('id', profile.id);
+      const { error } = await supabase.rpc('enable_creator_for_active_company');
       if (error) throw error;
     }
     const next = await fetchProfile(profile.id);
@@ -426,7 +424,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [profile?.id, profile?.active_company_id, refreshCompanies]);
 
   const switchCompany = useCallback(
-    async (companyId: string) => {
+    async (companyId: string, preferredMode?: AppMode) => {
       if (!profile || profile.active_company_id === companyId) return null;
       await setActiveCompany(companyId);
       const next = await fetchProfile(profile.id);
@@ -439,7 +437,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPermissions(perms);
       setManagerAccess(access);
       if (session) await upsertStoredAccount(session, next);
-      const mode = await resolveMode(next);
+      const mode =
+        preferredMode && modesForProfile(next).includes(preferredMode)
+          ? preferredMode
+          : await resolveMode(next);
       try {
         await setStoredMode(next.id, mode);
       } catch (e) {

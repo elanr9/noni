@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { useCompany } from '../../lib/company-context';
+import { sideForRole, sideLabel } from '../../lib/companies-api';
 import { color, radiusAdmin } from '../../theme/tokens';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
@@ -13,20 +14,25 @@ export interface ElsewhereStripProps {
 
 /** Under the header when another company needs you. Renders nothing otherwise. */
 export function ElsewhereStrip({ style }: ElsewhereStripProps) {
-  const { elsewhere, switchTo, openSwitcher, switching } = useCompany();
+  const { active, elsewhere, switchToSide, openSwitcher, switching } = useCompany();
   if (elsewhere.length === 0) return null;
   const first = elsewhere[0];
+  const firstSide = sideForRole(first.role);
+  const sameCompany = first.companyId === active?.companyId;
   const rest = elsewhere.length - 1;
   const line = rest
-    ? `${first.line} · ${rest} more ${rest === 1 ? 'campaign' : 'campaigns'}`
+    ? `${first.line} · ${rest} more ${rest === 1 ? 'place' : 'places'}`
     : first.line;
+  const title = sameCompany
+    ? `${sideLabel(firstSide)} side needs you`
+    : `${first.name} needs you`;
 
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={`${first.name} needs you. ${line}. Switch`}
+      accessibilityLabel={`${title}. ${line}. Switch`}
       disabled={switching}
-      onPress={() => void switchTo(first.companyId)}
+      onPress={() => void switchToSide(first.companyId, firstSide)}
       style={[styles.strip, style]}
     >
       <View style={styles.markWrap}>
@@ -40,7 +46,7 @@ export function ElsewhereStrip({ style }: ElsewhereStripProps) {
       </View>
       <View style={styles.text}>
         <Text style={styles.title} numberOfLines={1}>
-          {first.name} needs you
+          {title}
         </Text>
         <Text style={styles.line} numberOfLines={1}>
           {line}

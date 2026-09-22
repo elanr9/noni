@@ -20,6 +20,8 @@ export type CompanyMembership = {
   slug: string;
   logoPath: string | null;
   role: MemberRole;
+  /** Manager memberships that also create for this company. */
+  canCreate: boolean;
   isActive: boolean;
   joinedAt: string;
   lastActiveAt: string | null;
@@ -64,6 +66,7 @@ export async function fetchMyCompanies(): Promise<CompanyMembership[]> {
     slug: row.slug,
     logoPath: row.logo_path ?? null,
     role: parseRole(row.role),
+    canCreate: row.can_create === true,
     isActive: row.is_active,
     joinedAt: row.joined_at,
     lastActiveAt: row.last_active_at ?? null,
@@ -97,7 +100,22 @@ export type CompanyStatus = {
   briefDue: boolean;
 };
 
-/** One row per membership, across every company, regardless of the active one. */
+/** Which side of the app a status row belongs to. */
+export type CompanySide = 'admin' | 'creator';
+
+export function sideForRole(role: MemberRole): CompanySide {
+  return role === 'creator' ? 'creator' : 'admin';
+}
+
+export function sideLabel(side: CompanySide): string {
+  return side === 'creator' ? 'Creator' : 'Campaign manager';
+}
+
+export function statusKey(companyId: string, side: CompanySide): string {
+  return `${companyId}:${side}`;
+}
+
+/** One row per (company, side) across every membership, regardless of the active one. */
 export async function fetchCompanyStatusSummary(): Promise<CompanyStatus[]> {
   const { data, error } = await supabase.rpc('company_status_summary');
   if (error) throw error;

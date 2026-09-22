@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { useCompany } from '../../lib/company-context';
+import { sideLabel } from '../../lib/companies-api';
 import { color, radius, shadow } from '../../theme/tokens';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
@@ -13,12 +14,14 @@ export interface CampaignPillProps {
 
 /** Active company top-left; the badge carries every other company's state. */
 export function CampaignPill({ style }: CampaignPillProps) {
-  const { active, elsewhereTotal, openSwitcher } = useCompany();
+  const { active, activeSide, summaryRows, elsewhereTotal, openSwitcher } = useCompany();
   if (!active) return null;
 
+  const dualHere = summaryRows.filter((r) => r.companyId === active.companyId).length > 1;
+  const side = sideLabel(activeSide);
   const label = elsewhereTotal
-    ? `Campaign: ${active.name}. ${elsewhereTotal} waiting in other campaigns`
-    : `Campaign: ${active.name}. Caught up everywhere`;
+    ? `Campaign: ${active.name}, ${side}. ${elsewhereTotal} waiting elsewhere`
+    : `Campaign: ${active.name}, ${side}. Caught up everywhere`;
 
   return (
     <PressableScale
@@ -36,6 +39,11 @@ export function CampaignPill({ style }: CampaignPillProps) {
       <Text style={styles.name} numberOfLines={1}>
         {active.name}
       </Text>
+      {dualHere && (
+        <Text style={styles.side} numberOfLines={1}>
+          {activeSide === 'creator' ? 'Creator' : 'Manager'}
+        </Text>
+      )}
       <Icon name="chevrons-up-down" size={15} color={color.slate400} />
       <View style={styles.divider} />
       <WaitBadge count={elsewhereTotal} size={20} />
@@ -64,6 +72,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.2,
     color: color.ink,
+  },
+  side: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: color.slate500,
   },
   divider: {
     width: 1,

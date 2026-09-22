@@ -16,6 +16,10 @@ import { measureOverlayLine, wrapOverlayLines } from './overlayTextMetrics.ts';
 import { bubbleGeometry } from './overlayBubblePath.ts';
 
 const RENDERS_URL = 'https://api.creatomate.com/v1/renders';
+// Credits scale with width x height x fps x seconds. The stitched cut is
+// conformed to 30fps; left unset, a 60fps screen recording would double the
+// bill for the whole render.
+const OUTPUT_FRAME_RATE = 30;
 const POLL_INTERVAL_MS = 3000;
 const POLL_ATTEMPTS = 80;
 
@@ -29,7 +33,7 @@ const POLL_ATTEMPTS = 80;
  * static instances cut from the TikTok Sans variable font, served from the
  * public render-fonts bucket (the same files ship in assets/fonts).
  */
-const OVERLAY_TEXT_SPEC = {
+export const OVERLAY_TEXT_SPEC = {
   /** Bare letters: condensed white with a black stroke. wght 500, wdth 75, opsz 36. */
   condensed: {
     fontFamily: 'TikTok Sans Condensed',
@@ -56,7 +60,7 @@ const OVERLAY_TEXT_SPEC = {
   maxWidth: 0.9,
 } as const;
 
-function fontUrl(file: string): string {
+export function fontUrl(file: string): string {
   return `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/render-fonts/${file}`;
 }
 
@@ -169,7 +173,7 @@ function measuredPair(hue: number): { fill: string; ink: string } | null {
 }
 
 /** TikTok colored bubble fill: the picked hue lifted to a light saturated tint. */
-function overlayBoxFill(fill: string): string {
+export function overlayBoxFill(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return fill;
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#FFFFFF' : '#000000';
@@ -180,7 +184,7 @@ function overlayBoxFill(fill: string): string {
 }
 
 /** Letters on the bubble: the same hue driven deep and fully saturated. */
-function overlayTextContrast(fill: string): string {
+export function overlayTextContrast(fill: string): string {
   const hsl = toHsl(fill);
   if (hsl === null) return '#0F1720';
   if (hsl.s < NEUTRAL_SATURATION) return hsl.l >= 0.5 ? '#000000' : '#FFFFFF';
@@ -191,7 +195,7 @@ function overlayTextContrast(fill: string): string {
 }
 
 /** Condensed stroke sits behind the letters in the opposite tone. */
-function classicOutlineColor(textColor: string): string {
+export function classicOutlineColor(textColor: string): string {
   const lum = luminance(textColor);
   return lum !== null && lum < 0.5 ? '#FFFFFF' : '#000000';
 }
@@ -366,7 +370,7 @@ function popAnimations(): CreatomateElement[] {
  * Creatomate bearings: 0° moves right, 90° up, 180° left, 270° down. An
  * element near the right edge enters moving left, and so on.
  */
-function slideDirectionFromNearestSide(x: number, y: number): string {
+export function slideDirectionFromNearestSide(x: number, y: number): string {
   const sides: Array<{ distance: number; direction: string }> = [
     { distance: x, direction: '0°' },
     { distance: 1 - x, direction: '180°' },
@@ -413,10 +417,10 @@ const STITCHED_VIDEO_NAME = 'stitched';
 // 30 characters) wrap to at most two lines at that width, and the fixed
 // two-line height pins the block in place whether a chunk fills one line or
 // two; a rare third line is clipped instead of moving the block.
-const SUBTITLE_FONT_SIZE_VMIN = 6.2;
-const SUBTITLE_WIDTH = 0.8;
-const SUBTITLE_Y = 0.72;
-const SUBTITLE_LINES = 2;
+export const SUBTITLE_FONT_SIZE_VMIN = 6.2;
+export const SUBTITLE_WIDTH = 0.8;
+export const SUBTITLE_Y = 0.72;
+export const SUBTITLE_LINES = 2;
 
 /** Shared look and geometry of every subtitle element, ours or auto-transcribed. */
 function subtitleStyle(y: number): CreatomateElement {
@@ -621,6 +625,7 @@ export async function renderGreenScreenClip(params: {
     output_format: 'mp4',
     width,
     height,
+    frame_rate: OUTPUT_FRAME_RATE,
     duration: durationSec,
     elements: [
       {
@@ -715,6 +720,7 @@ export async function startOverlayRender(params: {
     output_format: 'mp4',
     width: timeline.width,
     height: timeline.height,
+    frame_rate: OUTPUT_FRAME_RATE,
     fonts: renderFonts(),
     elements: toElements(params),
   });

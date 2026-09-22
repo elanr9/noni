@@ -87,14 +87,22 @@ async function makeOne(params: {
     .eq('id', briefId);
   if (tagged.error) throw tagged.error;
 
-  const result = await fillPostSlot({
-    briefId,
-    postTypeId: params.postType.id,
-    postTypeKey: params.autoType ? 'auto' : params.postType.key,
-    family: params.family,
-    source: params.source,
-    companyId: params.companyId,
-  });
+  let result: Awaited<ReturnType<typeof fillPostSlot>>;
+  try {
+    result = await fillPostSlot({
+      briefId,
+      postTypeId: params.postType.id,
+      postTypeKey: params.autoType ? 'auto' : params.postType.key,
+      family: params.family,
+      source: params.source,
+      companyId: params.companyId,
+    });
+  } catch (e) {
+    // A failed fill must not leave the empty slot behind: the brief also
+    // blocks the library row's cleanup delete through its foreign key.
+    await supabase.from('briefs').delete().eq('id', briefId);
+    throw e;
+  }
   if (result.kind === 'kill') {
     await supabase.from('briefs').delete().eq('id', briefId);
     return { kill: result.kill_reason };

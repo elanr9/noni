@@ -50,8 +50,7 @@ export default function CreatorLayout() {
     !!profile &&
     profile.onboarded === true &&
     profileCanCreate(profile) &&
-    ((!profileIsCampaignManager(profile) && !profileIsPlatformAdmin(profile)) ||
-      activeMode === 'creator');
+    (!profileIsPlatformAdmin(profile) || activeMode === 'creator');
   const setupFlagged =
     inCreatorMode && isSetupCompleteFlag(profile.onboarding_answers);
   const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
@@ -78,8 +77,6 @@ export default function CreatorLayout() {
     return <Redirect href="/(onboarding)" />;
   }
   if (!inCreatorMode) {
-    // Dual campaign manager in admin mode, or anyone who cannot create →
-    // admin app. Pure creators always pass inCreatorMode above.
     if (profileIsPlatformAdmin(profile)) {
       return <Redirect href="/platform-admin" />;
     }

@@ -1611,6 +1611,7 @@ export type Database = {
       }
       company_members: {
         Row: {
+          can_create: boolean
           company_id: string
           created_at: string
           last_active_at: string | null
@@ -1620,6 +1621,7 @@ export type Database = {
           role: string
         }
         Insert: {
+          can_create?: boolean
           company_id: string
           created_at?: string
           last_active_at?: string | null
@@ -1629,6 +1631,7 @@ export type Database = {
           role?: string
         }
         Update: {
+          can_create?: boolean
           company_id?: string
           created_at?: string
           last_active_at?: string | null
@@ -4662,6 +4665,7 @@ export type Database = {
       }
     }
     Functions: {
+      active_membership_can_create: { Args: never; Returns: boolean }
       active_membership_role: { Args: never; Returns: string }
       apply_invite_membership: {
         Args: { p_invite_id: string; p_profile_id: string }
@@ -4782,6 +4786,42 @@ export type Database = {
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       default_member_permissions: { Args: never; Returns: Json }
+      enable_creator_for_active_company: {
+        Args: never
+        Returns: {
+          active_company_id: string | null
+          available: boolean
+          avatar_path: string | null
+          baseline_primary_signal: number | null
+          baseline_updated_at: string | null
+          bio_facts: Json
+          birthday: string | null
+          can_create: boolean
+          can_film_with_second_person: boolean
+          created_at: string | null
+          credential_line: string | null
+          expo_push_token: string | null
+          full_name: string | null
+          has_credential: boolean
+          has_scar_tissue: boolean
+          has_transformation: boolean
+          id: string
+          lives_the_identity: boolean
+          on_camera_comfortable: boolean
+          onboarded: boolean | null
+          onboarding_answers: Json
+          phone: string | null
+          role: string
+          script_mode: string
+          upload_post_profile: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       full_member_permissions: { Args: never; Returns: Json }
       has_permission: { Args: { p_key: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
@@ -4834,6 +4874,7 @@ export type Database = {
         Args: never
         Returns: {
           attention: Json
+          can_create: boolean
           company_id: string
           is_active: boolean
           joined_at: string

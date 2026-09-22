@@ -11,14 +11,17 @@ import {
 } from 'react';
 import { AppState } from 'react-native';
 
-import type { AppMode } from './active-mode';
+import { modesForProfile, type AppMode } from './active-mode';
 import { useAuth } from './auth';
 import {
   fetchCompanyStatusSummary,
   fetchNotificationsFeed,
   markNotificationRead,
+  sideForRole,
+  statusKey,
   type CompanyMembership,
   type CompanyNotification,
+  type CompanySide,
   type CompanyStatus,
 } from './companies-api';
 import { modeForDeepLink, parseDeepLink, routeForDeepLink } from './deep-link';
@@ -30,12 +33,17 @@ export type SwitchToastState = { companyId: string; name: string; logoPath: stri
 type CompanyState = {
   companies: CompanyMembership[];
   active: CompanyMembership | null;
-  /** company_status_summary rows keyed by company_id. Render `line` verbatim. */
+  /** The side of the app the user is on right now. */
+  activeSide: CompanySide;
+  /** Manager row when the membership has one, else the creator row, keyed by company_id. */
   summary: Record<string, CompanyStatus>;
+  /** Every (company, side) row. Render `line` verbatim. */
   summaryRows: CompanyStatus[];
-  /** Other companies with something waiting, most waiting first. */
+  /** Row for one company and side, or undefined before the first load. */
+  statusFor: (companyId: string, side: CompanySide) => CompanyStatus | undefined;
+  /** Rows other than the current (company, side) with something waiting, most waiting first. */
   elsewhere: CompanyStatus[];
-  /** Sum of waiting across the other companies (the pill badge). */
+  /** Sum of waiting across those rows (the pill badge). */
   elsewhereTotal: number;
   anyWaiting: boolean;
   notifications: CompanyNotification[];
@@ -45,7 +53,9 @@ type CompanyState = {
   switcherOpen: boolean;
   notificationsOpen: boolean;
   /** Resolves with the mode after the switch, or null when already active. */
-  switchTo: (companyId: string) => Promise<AppMode | null>;
+  switchTo: (companyId: string, side?: CompanySide) => Promise<AppMode | null>;
+  /** Lands on a (company, side) pair: switches company, flips side, or both. */
+  switchToSide: (companyId: string, side: CompanySide) => Promise<void>;
   refreshSummary: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
   markRead: (id: string) => Promise<void>;
@@ -69,6 +79,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     loading,
     activeMode,
     setActiveMode,
+    enableCreatorMode,
     companies,
     activeCompany,
     switchCompany,
@@ -85,6 +96,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userId = profile?.id ?? null;
   const activeCompanyId = profile?.active_company_id ?? null;
+  const activeSide: CompanySide = activeMode === 'creator' ? 'creator' : 'admin';
 
   const refreshSummary = useCallback(async () => {
     if (!userId) {
@@ -165,11 +177,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   );
 
   const switchTo = useCallback(
-    async (companyId: string) => {
+    async (companyId: string, side?: CompanySide) => {
       if (companyId === activeCompanyId) return null;
       setSwitching(true);
       try {
-        const mode = await switchCompany(companyId);
+        const mode = await switchCompany(companyId, side);
         await Promise.all([refreshCompanies(), refreshSummary(), refreshNotifications()]);
         const target =
           companies.find((c) => c.companyId === companyId) ??
@@ -191,6 +203,32 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       companies,
       summaryRows,
       showToast,
+    ],
+  );
+
+  const switchToSide = useCallback(
+    async (companyId: string, side: CompanySide) => {
+      if (companyId !== activeCompanyId) {
+        await switchTo(companyId, side);
+        return;
+      }
+      if (side === activeSide) return;
+      if (
+        side === 'creator' &&
+        (!profile || !modesForProfile(profile).includes('creator'))
+      ) {
+        await enableCreatorMode();
+        return;
+      }
+      await setActiveMode(side);
+    },
+    [
+      activeCompanyId,
+      activeSide,
+      switchTo,
+      setActiveMode,
+      enableCreatorMode,
+      profile,
     ],
   );
 
@@ -257,16 +295,34 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const summary = useMemo(() => {
     const byId: Record<string, CompanyStatus> = {};
-    for (const row of summaryRows) byId[row.companyId] = row;
+    for (const row of summaryRows) {
+      const existing = byId[row.companyId];
+      if (!existing || sideForRole(existing.role) === 'creator') byId[row.companyId] = row;
+    }
     return byId;
   }, [summaryRows]);
+
+  const byKey = useMemo(() => {
+    const map: Record<string, CompanyStatus> = {};
+    for (const row of summaryRows) map[statusKey(row.companyId, sideForRole(row.role))] = row;
+    return map;
+  }, [summaryRows]);
+
+  const statusFor = useCallback(
+    (companyId: string, side: CompanySide) => byKey[statusKey(companyId, side)],
+    [byKey],
+  );
 
   const elsewhere = useMemo(
     () =>
       summaryRows
-        .filter((s) => s.companyId !== activeCompanyId && s.waiting > 0)
+        .filter(
+          (s) =>
+            s.waiting > 0 &&
+            !(s.companyId === activeCompanyId && sideForRole(s.role) === activeSide),
+        )
         .sort((a, b) => b.waiting - a.waiting),
-    [summaryRows, activeCompanyId],
+    [summaryRows, activeCompanyId, activeSide],
   );
 
   const elsewhereTotal = useMemo(
@@ -293,8 +349,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     () => ({
       companies,
       active: activeCompany,
+      activeSide,
       summary,
       summaryRows,
+      statusFor,
       elsewhere,
       elsewhereTotal,
       anyWaiting,
@@ -305,6 +363,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       switcherOpen,
       notificationsOpen,
       switchTo,
+      switchToSide,
       refreshSummary,
       refreshNotifications,
       markRead,
@@ -317,8 +376,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     [
       companies,
       activeCompany,
+      activeSide,
       summary,
       summaryRows,
+      statusFor,
       elsewhere,
       elsewhereTotal,
       anyWaiting,
@@ -329,6 +390,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       switcherOpen,
       notificationsOpen,
       switchTo,
+      switchToSide,
       refreshSummary,
       refreshNotifications,
       markRead,

@@ -12,6 +12,7 @@ import {
   type SubtitleLine,
   type TranscriptWord,
 } from './cues.ts';
+import { wrapOverlayLines } from './overlayTextMetrics.ts';
 
 export type TimelineClip = {
   slot_index: number;
@@ -206,6 +207,86 @@ export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
   ];
 }
 
+/** Height over width of an inset file, keyed by its brief-assets path. */
+export type MediaAspects = Record<string, number>;
+/** Portrait phone media, assumed when a file's dimensions are unknown. */
+export const DEFAULT_MEDIA_ASPECT = 2340 / 1080;
+const FRAME_ASPECT = 1080 / 1920;
+/** Frame band an inset may use: below TikTok's top tabs, above its caption area. */
+const INSET_SAFE_TOP = 0.1;
+const INSET_SAFE_BOTTOM = 0.8;
+const INSET_CLEARANCE = 0.02;
+const INSET_MIN_WIDTH = 0.2;
+/** Half height of the two line subtitle block at 6.2 vmin (see renderAdapter). */
+const SUBTITLE_HALF_HEIGHT = 0.05;
+const TEXT_LINE_HEIGHT = 1.15;
+const BUBBLE_PAD_Y = 0.12;
+
+/** Vertical span as fractions of frame height. */
+export type Band = { top: number; bottom: number };
+
+export type InsetPlacement = { x: number; y: number; width: number };
+
+/** Frame band a text box covers once wrapped the way the adapter wraps it. */
+export function textBand(box: SegmentBox): Band {
+  const font = box.bg ? 'bubble' : 'condensed';
+  const lines = Math.max(1, wrapOverlayLines(box.text, BOX_MAX_WIDTH / box.size, font).length);
+  const padEm = box.bg ? BUBBLE_PAD_Y * 2 : 0;
+  const half = ((lines * TEXT_LINE_HEIGHT + padEm) * box.size * FRAME_ASPECT) / 2;
+  return { top: box.y - half, bottom: box.y + half };
+}
+
+export function subtitleBand(y: number): Band {
+  return { top: y - SUBTITLE_HALF_HEIGHT, bottom: y + SUBTITLE_HALF_HEIGHT };
+}
+
+/**
+ * Keeps an inset picture or recording out of every band text occupies while
+ * it is on screen. Placement is kept when it is already clear; otherwise the
+ * inset moves into the free band it was closest to (or the tallest one) and
+ * shrinks to fit, so it never sits on top of a text box or the subtitles.
+ */
+export function fitInsetClearOfText(
+  inset: InsetPlacement,
+  aspect: number,
+  blocked: Band[],
+): InsetPlacement {
+  const heightOf = (width: number) => width * aspect * FRAME_ASPECT;
+  const padded = blocked
+    .map((b) => ({ top: b.top - INSET_CLEARANCE, bottom: b.bottom + INSET_CLEARANCE }))
+    .sort((a, b) => a.top - b.top);
+  const free: Band[] = [];
+  let cursor = INSET_SAFE_TOP;
+  for (const band of padded) {
+    if (band.top > cursor) free.push({ top: cursor, bottom: Math.min(band.top, INSET_SAFE_BOTTOM) });
+    cursor = Math.max(cursor, band.bottom);
+  }
+  if (cursor < INSET_SAFE_BOTTOM) free.push({ top: cursor, bottom: INSET_SAFE_BOTTOM });
+  const usable = free.filter((b) => b.bottom - b.top > 0);
+  if (usable.length === 0) return inset;
+
+  const height = heightOf(inset.width);
+  const home = usable.find((b) => inset.y - height / 2 >= b.top && inset.y + height / 2 <= b.bottom);
+  if (home) return inset;
+
+  const tallEnough = usable.filter((b) => b.bottom - b.top >= height);
+  const nearest = (bands: Band[]) =>
+    bands.reduce((best, b) =>
+      Math.abs((b.top + b.bottom) / 2 - inset.y) < Math.abs((best.top + best.bottom) / 2 - inset.y)
+        ? b
+        : best
+    );
+  const tallest = usable.reduce((best, b) => (b.bottom - b.top > best.bottom - best.top ? b : best));
+  const band = tallEnough.length > 0 ? nearest(tallEnough) : tallest;
+  const bandHeight = band.bottom - band.top;
+  const width = Math.min(inset.width, Math.max(INSET_MIN_WIDTH, bandHeight / (aspect * FRAME_ASPECT)));
+  const fitted = heightOf(width);
+  const y = fitted >= bandHeight
+    ? (band.top + band.bottom) / 2
+    : clamp(inset.y, band.top + fitted / 2, band.bottom - fitted / 2);
+  return { x: inset.x, y, width };
+}
+
 /** Legacy head trim on clip 0, used when no silence detection ran. */
 export const HEAD_TRIM_MS = 150;
 /** Default rule: text shows for the first 4 seconds of its clip. */
@@ -312,10 +393,13 @@ export function buildRenderTimeline(params: {
   /** Transcript per clip, ms in the clip file; drives our own subtitle lines. */
   words?: ClipWords[];
   subtitleMaxChars?: number;
+  /** Height over width per inset path; unknown files count as portrait phones. */
+  mediaAspects?: MediaAspects;
   width?: number;
   height?: number;
 }): RenderTimeline {
   const { briefSegments, durationsMs, clipCuts, cues, words } = params;
+  const mediaAspects = params.mediaAspects ?? {};
   const textOverlay = params.textOverlay ?? DEFAULT_TEXT_OVERLAY;
   const subtitleMaxChars = params.subtitleMaxChars ?? SUBTITLE_MAX_CHARS;
   const ordered = [...briefSegments].sort((a, b) => a.slot_index - b.slot_index);
@@ -403,16 +487,39 @@ export function buildRenderTimeline(params: {
     cursorMs += effectiveMs;
   }
 
+  const subtitlesY = params.subtitlesY ?? DEFAULT_SUBTITLES_Y;
+  const subtitlesOn = params.subtitles === true;
+  const overlapsInTime = (a: OverlayWindow, b: OverlayWindow) =>
+    a.start_ms < b.start_ms + b.duration_ms && b.start_ms < a.start_ms + a.duration_ms;
+  const clearImages = images.map((img) => {
+    const blocked: Band[] = subtitlesOn ? [subtitleBand(subtitlesY)] : [];
+    for (const t of texts) {
+      if (!overlapsInTime(t, img)) continue;
+      blocked.push(
+        textBand({
+          text: t.text,
+          x: t.box?.x ?? 0.5,
+          y: t.y,
+          size: t.box?.size ?? AUTO_MAX_SIZE,
+          color: t.box?.color ?? CLASSIC_TEXT_COLOR,
+          bg: t.box?.bg ?? false,
+        }),
+      );
+    }
+    const aspect = mediaAspects[img.screenshot_path] ?? DEFAULT_MEDIA_ASPECT;
+    return { ...img, ...fitInsetClearOfText(img, aspect, blocked) };
+  });
+
   return {
     width: params.width ?? 1080,
     height: params.height ?? 1920,
     text_overlay: textOverlay,
-    subtitles: params.subtitles ?? false,
-    subtitles_y: params.subtitlesY ?? DEFAULT_SUBTITLES_Y,
+    subtitles: subtitlesOn,
+    subtitles_y: subtitlesY,
     ...(ownSubtitles ? { subtitle_lines: subtitleLinesOut } : {}),
     clips,
     texts,
-    images,
+    images: clearImages,
   };
 }
 

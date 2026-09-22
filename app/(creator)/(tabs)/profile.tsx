@@ -112,7 +112,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { profile, refreshProfile, setActiveMode, signOut } = useAuth();
-  const { active, companies, summary, switchTo, switching } = useCompany();
+  const { active, activeSide, companies, statusFor, switchToSide, switching } = useCompany();
 
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -316,10 +316,17 @@ export default function ProfileScreen() {
           <Text style={styles.groupLabel}>Your campaigns</Text>
           <GroupCard>
             {companies.map((c, i) => {
-              const here = c.companyId === active?.companyId;
-              const status = summary[c.companyId];
+              const creates = c.role === 'creator' || c.canCreate;
+              const side = creates ? 'creator' : 'admin';
+              const here = c.companyId === active?.companyId && side === activeSide;
+              const status = statusFor(c.companyId, side);
               const waiting = status?.waiting ?? 0;
-              const roleLabel = c.role === 'creator' ? 'Creator' : 'Campaign manager';
+              const roleLabel =
+                c.role === 'creator'
+                  ? 'Creator'
+                  : c.canCreate
+                    ? 'Creator and campaign manager'
+                    : 'Campaign manager';
               const line = status ? `${roleLabel} · ${status.line}` : roleLabel;
               return (
                 <PressableScale
@@ -327,7 +334,7 @@ export default function ProfileScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={here ? `${c.name}, current campaign` : `Switch to ${c.name}`}
                   disabled={here || switching}
-                  onPress={() => void switchTo(c.companyId)}
+                  onPress={() => void switchToSide(c.companyId, side)}
                   style={[styles.row, i < companies.length - 1 && styles.rowBorder]}
                 >
                   <CompanyMark

@@ -1,0 +1,12 @@
+---
+description: Response length. Answers stay short, no essays.
+alwaysApply: true
+---
+
+# Brevity
+
+- Answer in 3 sentences or fewer unless asked for detail. Yes/no questions get a yes/no plus one clause.
+- No headers, no bold labels, no multi-section breakdowns. One short paragraph, or a list of at most 3 lines.
+- No restating context, findings, or prior turns. No "worth flagging" asides. Blockers get one sentence.
+- After code changes: file paths only.
+- One probe or check per question. Do not keep polling, re-verifying, or exploring past what the answer needs.

@@ -2,7 +2,12 @@ import { useCallback, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useCompany } from '../../lib/company-context';
-import type { CompanyStatus } from '../../lib/companies-api';
+import {
+  sideForRole,
+  sideLabel,
+  type CompanySide,
+  type CompanyStatus,
+} from '../../lib/companies-api';
 import { color, radiusAdmin, space } from '../../theme/tokens';
 import { SectionLabel } from '../admin/shared/SectionLabel';
 import { Sheet } from '../admin/shared/Sheet';
@@ -19,10 +24,11 @@ type RowProps = {
 
 function CompanyRow({ row, current, last, onPress }: RowProps) {
   const waiting = row.waiting > 0;
+  const side = sideLabel(sideForRole(row.role));
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${row.name}. ${row.line}`}
+      accessibilityLabel={`${row.name}, ${side}. ${row.line}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
@@ -32,9 +38,14 @@ function CompanyRow({ row, current, last, onPress }: RowProps) {
     >
       <CompanyMark companyId={row.companyId} name={row.name} logoPath={row.logoPath} size={42} />
       <View style={styles.rowText}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {row.name}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.rowName} numberOfLines={1}>
+            {row.name}
+          </Text>
+          <View style={styles.sideChip}>
+            <Text style={styles.sideChipText}>{side}</Text>
+          </View>
+        </View>
         <View style={styles.lineRow}>
           {waiting && <View style={styles.dot} />}
           <Text style={[styles.line, waiting && styles.lineWaiting]} numberOfLines={1}>
@@ -53,53 +64,69 @@ function CompanyRow({ row, current, last, onPress }: RowProps) {
   );
 }
 
-/** Switcher. Current company first, the rest by what is waiting. */
+type Pick = { companyId: string; side: CompanySide };
+
+/** Switcher. One row per company and role; the current pair first, the rest
+ *  with the other role of this company on top, then by what is waiting. */
 export function CampaignSheet() {
-  const { active, summary, summaryRows, elsewhereTotal, switcherOpen, closeSwitcher, switchTo } =
-    useCompany();
-  const pending = useRef<string | null>(null);
+  const {
+    active,
+    activeSide,
+    summaryRows,
+    statusFor,
+    elsewhereTotal,
+    switcherOpen,
+    closeSwitcher,
+    switchToSide,
+  } = useCompany();
+  const pending = useRef<Pick | null>(null);
 
   const activeId = active?.companyId ?? null;
   const current: CompanyStatus | null =
-    activeId && summary[activeId]
-      ? summary[activeId]
-      : active
-        ? {
-            companyId: active.companyId,
-            name: active.name,
-            logoPath: active.logoPath,
-            role: active.role,
-            isActive: true,
-            waiting: 0,
-            line: 'Caught up',
-            fix: 0,
-            unread: 0,
-            shoot: 0,
-            review: 0,
-            briefDue: false,
-          }
-        : null;
+    (activeId ? statusFor(activeId, activeSide) : undefined) ??
+    (active
+      ? {
+          companyId: active.companyId,
+          name: active.name,
+          logoPath: active.logoPath,
+          role: activeSide === 'creator' ? 'creator' : active.role,
+          isActive: true,
+          waiting: 0,
+          line: 'Caught up',
+          fix: 0,
+          unread: 0,
+          shoot: 0,
+          review: 0,
+          briefDue: false,
+        }
+      : null);
   const others = summaryRows
-    .filter((s) => s.companyId !== activeId)
-    .sort((a, b) => b.waiting - a.waiting);
+    .filter((s) => !(s.companyId === activeId && sideForRole(s.role) === activeSide))
+    .sort((a, b) => {
+      const aHere = a.companyId === activeId ? 1 : 0;
+      const bHere = b.companyId === activeId ? 1 : 0;
+      return bHere - aHere || b.waiting - a.waiting;
+    });
 
   const subtitle = elsewhereTotal
-    ? `${elsewhereTotal} ${elsewhereTotal === 1 ? 'thing' : 'things'} waiting on you in other campaigns.`
+    ? `${elsewhereTotal} ${elsewhereTotal === 1 ? 'thing' : 'things'} waiting on you elsewhere.`
     : 'Caught up everywhere.';
 
   const pick = useCallback(
-    (companyId: string) => {
-      pending.current = companyId === activeId ? null : companyId;
+    (row: CompanyStatus) => {
+      const side = sideForRole(row.role);
+      pending.current =
+        row.companyId === activeId && side === activeSide ? null : { companyId: row.companyId, side };
       closeSwitcher();
     },
-    [activeId, closeSwitcher],
+    [activeId, activeSide, closeSwitcher],
   );
 
   const onClosed = useCallback(() => {
     const next = pending.current;
     pending.current = null;
-    if (next) void switchTo(next);
-  }, [switchTo]);
+    if (next) void switchToSide(next.companyId, next.side);
+  }, [switchToSide]);
 
   return (
     <Sheet
@@ -115,20 +142,20 @@ export function CampaignSheet() {
     >
       {current && (
         <View style={styles.card}>
-          <CompanyRow row={current} current last onPress={() => pick(current.companyId)} />
+          <CompanyRow row={current} current last onPress={() => pick(current)} />
         </View>
       )}
       {others.length > 0 && (
         <View style={styles.section}>
-          <SectionLabel style={styles.sectionLabel}>Other campaigns</SectionLabel>
+          <SectionLabel style={styles.sectionLabel}>Switch to</SectionLabel>
           <View style={styles.card}>
             {others.map((row, i) => (
               <CompanyRow
-                key={row.companyId}
+                key={`${row.companyId}:${sideForRole(row.role)}`}
                 row={row}
                 current={false}
                 last={i === others.length - 1}
-                onPress={() => pick(row.companyId)}
+                onPress={() => pick(row)}
               />
             ))}
           </View>
@@ -189,11 +216,28 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 2,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   rowName: {
+    flexShrink: 1,
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: -0.2,
     color: color.ink,
+  },
+  sideChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: color.fillQuiet,
+  },
+  sideChipText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: color.slate500,
   },
   lineRow: {
     flexDirection: 'row',

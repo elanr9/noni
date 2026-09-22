@@ -8,13 +8,17 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   buildRenderTimeline,
+  DEFAULT_MEDIA_ASPECT,
   DEFAULT_TEXT_OVERLAY,
+  fitInsetClearOfText,
   HEAD_TRIM_MS,
   segmentBoxes,
+  textBand,
   timelineHasOverlays,
   type BriefSegmentRow,
   type ClipCut,
   type ClipWords,
+  type MediaAspects,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
 import {
@@ -24,6 +28,9 @@ import {
   renderSlideImage,
 } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
+import { buildOverlayAss, buildOverlayGraph, overlayCommand } from './ffmpegOverlay.ts';
+import { fontUrl, isVideoSource, OVERLAY_TEXT_SPEC } from './renderAdapter.ts';
+import type { RenderTimeline } from './renderTimeline.ts';
 import {
   placeCue,
   speechRangesFromWords,
@@ -60,6 +67,9 @@ export function uploadPostKey(): string {
 type FfmpegOutputExtension = 'mp4' | 'png' | 'txt';
 
 const FFMPEG_JOBS_URL = 'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs';
+// Upload-Post workers may pick a job up hours after creation when their queue
+// backs up; a 1h signed URL expired mid-queue and failed downloads with a 400.
+const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 
 // Create an FFmpeg job on Upload-Post (docs.upload-post.com/api/ffmpeg-editor),
 // poll it to completion and return the result as a byte stream.
@@ -185,6 +195,71 @@ async function runFfmpegJob(params: {
   });
   console.log(`ffmpeg ${label} stored ${outputPath}`);
   if (scriptPath) await admin.storage.from('videos').remove([scriptPath]);
+}
+
+async function fetchFont(file: string): Promise<Uint8Array> {
+  const res = await fetch(fontUrl(file));
+  if (!res.ok) throw new Error(`could not fetch overlay font ${file}: ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// Overlay pass on Upload-Post ffmpeg: text via an embedded-font ASS script,
+// screenshots via overlay chains. Returns the rendered video's storage path.
+async function renderOverlaysWithFfmpeg(params: {
+  admin: AdminClient;
+  timeline: RenderTimeline;
+  videoPath: string;
+  outputPath: string;
+}): Promise<string> {
+  const { admin, timeline, videoPath, outputPath } = params;
+  if (timeline.subtitles && !timeline.subtitle_lines) {
+    console.warn('overlay ffmpeg: subtitles requested but subtitle_lines absent, rendering without');
+  }
+  const [condensed, bubble] = await Promise.all([
+    fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
+    fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
+  ]);
+  const assPath = `${outputPath.replace(/-rendered\.mp4$/, '')}-overlay.ass`;
+  const { error } = await admin.storage
+    .from('videos')
+    .upload(assPath, new TextEncoder().encode(buildOverlayAss(timeline, { condensed, bubble })), {
+      contentType: 'video/mp4',
+      upsert: true,
+    });
+  if (error) throw new Error(`could not store overlay ass: ${error.message}`);
+  try {
+    const [videoUrl, assUrl] = await signVideoUrls(admin, [videoPath, assPath]);
+    const imageUrls: string[] = [];
+    for (const img of timeline.images) {
+      const { data, error: imgError } = await admin.storage
+        .from('brief-assets')
+        .createSignedUrl(img.screenshot_path, SIGNED_URL_TTL_SECONDS);
+      if (imgError || !data?.signedUrl) {
+        throw new Error(`could not sign screenshot ${img.screenshot_path}: ${imgError?.message}`);
+      }
+      imageUrls.push(data.signedUrl);
+    }
+    const files = [videoUrl, ...imageUrls, assUrl];
+    await runFfmpegJob({
+      admin,
+      apiKey: uploadPostKey(),
+      files,
+      filterGraph: buildOverlayGraph({
+        timeline,
+        images: timeline.images.map((img, i) => ({
+          index: i + 1,
+          isVideo: isVideoSource(img.screenshot_path),
+        })),
+        assIndex: files.length - 1,
+      }),
+      fullCommand: overlayCommand({ inputCount: files.length, hasImages: imageUrls.length > 0 }),
+      outputPath,
+      label: 'overlay',
+    });
+  } finally {
+    await admin.storage.from('videos').remove([assPath]);
+  }
+  return outputPath;
 }
 
 // Run an FFmpeg job whose {output} is a text file and return its contents.
@@ -496,6 +571,43 @@ function pathStem(path: string): string {
   return base.replace(/\.[^.]+$/, '');
 }
 
+/** Pixel size from a PNG or JPEG header; null for anything else. */
+function imageDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.length >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50) {
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isSof) {
+      return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+    }
+    offset += 2 + view.getUint16(offset + 2);
+  }
+  return null;
+}
+
+/**
+ * Height over width of every still inset, read from its file header so the
+ * overlay pass knows how tall it renders. Recordings stay unknown and fall
+ * back to a portrait phone, the tallest shape they realistically have.
+ */
+async function insetAspects(admin: AdminClient, paths: string[]): Promise<MediaAspects> {
+  const aspects: MediaAspects = {};
+  for (const path of new Set(paths)) {
+    if (isVideoFile(path)) continue;
+    const { data } = await admin.storage.from('brief-assets').download(path);
+    if (!data) continue;
+    const dims = imageDimensions(new Uint8Array(await data.arrayBuffer()));
+    if (dims && dims.width > 0 && dims.height > 0) aspects[path] = dims.height / dims.width;
+  }
+  return aspects;
+}
+
 function mediaKindFromPath(path: string | null): CueContext['media_kind'] {
   if (!path) return null;
   return isVideoFile(path) ? 'recording' : 'screenshot';
@@ -618,7 +730,7 @@ export async function signVideoUrls(
   for (const path of paths) {
     const { data, error } = await admin.storage
       .from('videos')
-      .createSignedUrl(path, 3600);
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
     if (error || !data?.signedUrl) {
       throw new Error(`could not sign ${path}: ${error?.message}`);
     }
@@ -1025,19 +1137,24 @@ async function runSlideshowAssembly(params: {
       if (insetPath) {
         const { data: signedImg, error: imgError } = await admin.storage
           .from('brief-assets')
-          .createSignedUrl(insetPath, 3600);
+          .createSignedUrl(insetPath, SIGNED_URL_TTL_SECONDS);
         if (imgError || !signedImg?.signedUrl) {
           throw new Error(
             `could not sign inset ${insetPath}: ${imgError?.message}`,
           );
         }
-        inset = {
-          url: signedImg.signedUrl,
-          // Same defaults the app previews when no placement was saved.
-          x: segment.screenshot_x ?? 0.72,
-          y: segment.screenshot_y ?? 0.56,
-          width: segment.screenshot_width ?? 0.34,
-        };
+        const aspects = await insetAspects(admin, [insetPath]);
+        const placed = fitInsetClearOfText(
+          {
+            // Same defaults the app previews when no placement was saved.
+            x: segment.screenshot_x ?? 0.72,
+            y: segment.screenshot_y ?? 0.56,
+            width: segment.screenshot_width ?? 0.34,
+          },
+          aspects[insetPath] ?? DEFAULT_MEDIA_ASPECT,
+          boxes.map(textBand),
+        );
+        inset = { url: signedImg.signedUrl, ...placed };
       }
       const image = await renderSlideImage({
         apiKey: renderKey,
@@ -1190,7 +1307,7 @@ async function runAssembly(params: {
         const [clipUrl] = await signVideoUrls(admin, [segmentPaths[slot]]);
         const { data: signedImg, error: imgError } = await admin.storage
           .from('brief-assets')
-          .createSignedUrl(segment.screenshot_url!, 3600);
+          .createSignedUrl(segment.screenshot_url!, SIGNED_URL_TTL_SECONDS);
         if (imgError || !signedImg?.signedUrl) {
           throw new Error(
             `could not sign screenshot ${segment.screenshot_url}: ${imgError?.message}`,
@@ -1313,6 +1430,14 @@ async function runAssembly(params: {
               productName,
             })
           : [];
+      const mediaAspects = durationsMs
+        ? await insetAspects(
+            admin,
+            briefSegments.flatMap((s) =>
+              s.screenshot_url && s.layout !== 'green_screen' ? [s.screenshot_url] : [],
+            ),
+          )
+        : {};
       const timeline = buildRenderTimeline({
         briefSegments: durationsMs ? briefSegments : [],
         durationsMs: durationsMs ?? [],
@@ -1322,6 +1447,7 @@ async function runAssembly(params: {
         subtitlesY,
         cues,
         words: transcripts,
+        mediaAspects,
       });
       await admin
         .from('submissions')
@@ -1334,6 +1460,19 @@ async function runAssembly(params: {
           return { videoPath, overlayWarning, deferred: true };
         }
         console.log(`rendering overlays for ${submission.id}`);
+        if (Deno.env.get('OVERLAY_RENDERER') === 'ffmpeg') {
+          videoPath = await renderOverlaysWithFfmpeg({
+            admin,
+            timeline,
+            videoPath,
+            outputPath: `${companyId}/${targetId}/${version}-rendered.mp4`,
+          });
+          await admin
+            .from('submissions')
+            .update({ video_path: videoPath, overlay_render_id: null })
+            .eq('id', submission.id);
+          return { videoPath, overlayWarning };
+        }
         const renderKey = Deno.env.get('CREATOMATE_API_KEY');
         if (!renderKey) {
           throw new Error(
@@ -1345,7 +1484,7 @@ async function runAssembly(params: {
         for (const img of timeline.images) {
           const { data: signedImg, error: imgError } = await admin.storage
             .from('brief-assets')
-            .createSignedUrl(img.screenshot_path, 3600);
+            .createSignedUrl(img.screenshot_path, SIGNED_URL_TTL_SECONDS);
           if (imgError || !signedImg?.signedUrl) {
             throw new Error(
               `could not sign screenshot ${img.screenshot_path}: ${imgError?.message}`,
@@ -1353,10 +1492,10 @@ async function runAssembly(params: {
           }
           imageUrls[img.screenshot_path] = signedImg.signedUrl;
         }
-        // The stitched cut is already stored and watchable, so an overlay
-        // render that fails degrades to that cut with a warning instead of
-        // failing the whole edit. A render still running at the deadline is
-        // handed to the next invocation, which resumes on the stored id.
+        // An overlay render that fails fails the edit: a post must never go
+        // to review as the plain cut with its text, subtitles and screenshots
+        // silently missing. A render still running at the deadline is handed
+        // to the next invocation, which resumes on the stored id.
         let rendered: ReadableStream<Uint8Array> | null = null;
         let renderId = submission.overlay_render_id ?? null;
         try {
@@ -1387,8 +1526,11 @@ async function runAssembly(params: {
             throw new Error('render timed out');
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          overlayWarning = `overlays skipped: ${message}`;
+          await admin
+            .from('submissions')
+            .update({ overlay_render_id: null })
+            .eq('id', submission.id);
+          throw error;
         }
         if (rendered) {
           const renderedPath = `${companyId}/${targetId}/${version}-rendered.mp4`;

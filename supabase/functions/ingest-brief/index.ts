@@ -15,6 +15,7 @@ import {
   authenticate,
   handleCors,
   jsonResponse,
+  streamJsonResponse,
   loadBrandContext,
   parseClaudeJson,
   toFeatureScreenshot,
@@ -352,6 +353,7 @@ Deno.serve(async (req) => {
   // Query path: no scrape / transcribe / OCR. This is the grid's path: the
   // row is pre-stamped with a post type and a search phrase.
   if (query) {
+    return streamJsonResponse(async () => {
     try {
       const brand = await loadBrandContext(admin, caller.companyId);
       const validationCtx = brandValidationCtx(brand);
@@ -373,13 +375,13 @@ Deno.serve(async (req) => {
         validationCtx,
       );
       if (isKill(outcome)) {
-        return jsonResponse({
+        return {
           kill_reason: outcome.kill_reason,
           generation_id: generationId,
           post_type_id: postType?.id ?? null,
-        });
+        };
       }
-      return jsonResponse({
+      return {
         ...outcome.draft,
         search_phrase: query,
         overlay_labels: outcome.overlayLabels,
@@ -389,19 +391,18 @@ Deno.serve(async (req) => {
         warnings,
         example_url: null,
         example_transcript: null,
-      });
+      };
     } catch (e) {
       console.error('ingest-brief query error:', e);
-      return jsonResponse(
-        { error: e instanceof Error ? e.message : 'ingest failed' },
-        500,
-      );
+      return { error: e instanceof Error ? e.message : 'ingest failed' };
     }
+    });
   }
 
   // Feature path: the brief is anchored on one brain_features row. The
   // model writes the search phrase itself.
   if (featureId) {
+    return streamJsonResponse(async () => {
     try {
       const { data: featureRow, error: featureError } = await admin
         .from('brain_features')
@@ -410,7 +411,7 @@ Deno.serve(async (req) => {
         .eq('company_id', caller.companyId)
         .maybeSingle();
       if (featureError) throw new Error(featureError.message);
-      if (!featureRow) return jsonResponse({ error: 'unknown feature' }, 400);
+      if (!featureRow) return { error: 'unknown feature' };
       const feature = featureRow as BrainFeatureRow;
 
       const loaded = await loadBrandContext(admin, caller.companyId);
@@ -449,13 +450,13 @@ Deno.serve(async (req) => {
         validationCtx,
       );
       if (isKill(outcome)) {
-        return jsonResponse({
+        return {
           kill_reason: outcome.kill_reason,
           generation_id: generationId,
           post_type_id: postType?.id ?? null,
-        });
+        };
       }
-      return jsonResponse({
+      return {
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
         point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, postType?.family ?? body.family ?? 'video'),
@@ -464,17 +465,16 @@ Deno.serve(async (req) => {
         warnings,
         example_url: null,
         example_transcript: null,
-      });
+      };
     } catch (e) {
       console.error('ingest-brief feature error:', e);
-      return jsonResponse(
-        { error: e instanceof Error ? e.message : 'ingest failed' },
-        500,
-      );
+      return { error: e instanceof Error ? e.message : 'ingest failed' };
     }
+    });
   }
 
   if (mediaId) {
+    return streamJsonResponse(async () => {
     try {
       const { data: mediaRow, error: mediaError } = await admin
         .from('media_library')
@@ -483,7 +483,7 @@ Deno.serve(async (req) => {
         .eq('company_id', caller.companyId)
         .maybeSingle();
       if (mediaError) throw new Error(mediaError.message);
-      if (!mediaRow) return jsonResponse({ error: 'unknown media' }, 400);
+      if (!mediaRow) return { error: 'unknown media' };
       const media = mediaRow as MediaLibraryRow;
 
       const brand = await loadBrandContext(admin, caller.companyId);
@@ -493,7 +493,7 @@ Deno.serve(async (req) => {
       const postType = await resolvePostType(sourceLines, 'video');
       const mediaFamily = postType?.family ?? body.family ?? 'video';
       if (mediaFamily === 'photo_carousel' && media.kind === 'recording') {
-        return jsonResponse({ error: 'Slideshows use screenshots only' }, 400);
+        return { error: 'Slideshows use screenshots only' };
       }
       const { outcome, warnings } = await generateValidated(
         admin,
@@ -505,11 +505,11 @@ Deno.serve(async (req) => {
         validationCtx,
       );
       if (isKill(outcome)) {
-        return jsonResponse({
+        return {
           kill_reason: outcome.kill_reason,
           generation_id: generationId,
           post_type_id: postType?.id ?? null,
-        });
+        };
       }
       const pointMedia = await resolvePointMedia(
         admin,
@@ -520,7 +520,7 @@ Deno.serve(async (req) => {
         mediaFamily,
       );
       pinMedia(pointMedia, outcome.draft.talking_points, media);
-      return jsonResponse({
+      return {
         ...outcome.draft,
         overlay_labels: outcome.overlayLabels,
         point_media: pointMedia,
@@ -529,14 +529,12 @@ Deno.serve(async (req) => {
         warnings,
         example_url: null,
         example_transcript: null,
-      });
+      };
     } catch (e) {
       console.error('ingest-brief media error:', e);
-      return jsonResponse(
-        { error: e instanceof Error ? e.message : 'ingest failed' },
-        500,
-      );
+      return { error: e instanceof Error ? e.message : 'ingest failed' };
     }
+    });
   }
 
   let host: string;
@@ -551,10 +549,11 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Paste a TikTok or Instagram link' }, 400);
   }
 
+  return streamJsonResponse(async () => {
   try {
     const post = isTikTok ? await scrapeTikTok(url!) : await scrapeInstagram(url!);
     if (!post) {
-      return jsonResponse({ error: 'Could not read that post. Check the link.' }, 404);
+      return { error: 'Could not read that post. Check the link.' };
     }
 
     let transcript: string | null = null;
@@ -600,11 +599,11 @@ Deno.serve(async (req) => {
       validationCtx,
     );
     if (isKill(outcome)) {
-      return jsonResponse({
+      return {
         kill_reason: outcome.kill_reason,
         generation_id: generationId,
         post_type_id: postType?.id ?? null,
-      });
+      };
     }
 
     const exampleTranscript =
@@ -613,7 +612,7 @@ Deno.serve(async (req) => {
         ? slideTexts.map((s, i) => `[${i + 1}] ${s}`).join('\n')
         : null);
 
-    return jsonResponse({
+    return {
       ...outcome.draft,
       overlay_labels: outcome.overlayLabels,
       point_media: await resolvePointMedia(admin, caller.companyId, brand.features, outcome.featureIds, outcome.draft.talking_points, postType?.family ?? post.format),
@@ -622,12 +621,10 @@ Deno.serve(async (req) => {
       warnings,
       example_url: url,
       example_transcript: exampleTranscript,
-    });
+    };
   } catch (e) {
     console.error('ingest-brief error:', e);
-    return jsonResponse(
-      { error: e instanceof Error ? e.message : 'ingest failed' },
-      500,
-    );
+    return { error: e instanceof Error ? e.message : 'ingest failed' };
   }
+  });
 });

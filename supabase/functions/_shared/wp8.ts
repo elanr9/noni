@@ -23,6 +23,45 @@ export function jsonResponse(body: Record<string, unknown>, status = 200): Respo
   });
 }
 
+/**
+ * A 200 JSON response that trickles one space every 15s while work runs, so
+ * the app's native fetch (60s idle timeout on iOS) never drops a slow
+ * generation. Leading spaces are valid JSON whitespace; failures come back
+ * in the body as { error } for the client to throw on.
+ */
+export function streamJsonResponse(
+  work: () => Promise<Record<string, unknown>>,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const beat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(' '));
+        } catch {
+          clearInterval(beat);
+        }
+      }, 15000);
+      work()
+        .catch((e) => ({
+          error: e instanceof Error ? e.message : 'request failed',
+        }))
+        .then((body) => {
+          clearInterval(beat);
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify(body)));
+            controller.close();
+          } catch {
+            // The client already went away; nothing to deliver.
+          }
+        });
+    },
+  });
+  return new Response(stream, {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 export function adminClient(): SupabaseClient {
   return createClient(
     Deno.env.get('SUPABASE_URL')!,
