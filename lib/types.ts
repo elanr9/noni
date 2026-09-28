@@ -4767,6 +4767,7 @@ export type Database = {
           p_box_id?: string
           p_box_x?: number
           p_box_y?: number
+          p_screenshot_width?: number
           p_screenshot_x?: number
           p_screenshot_y?: number
           p_segment_id: string

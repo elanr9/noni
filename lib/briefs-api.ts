@@ -583,7 +583,7 @@ export async function updateBriefSegment(
 export async function creatorPlaceSegment(params: {
   segmentId: string;
   box?: { id: string; x: number; y: number };
-  screenshot?: { x: number; y: number };
+  screenshot?: { x: number; y: number; width?: number };
 }): Promise<void> {
   const { error } = await supabase.rpc('creator_place_segment', {
     p_segment_id: params.segmentId,
@@ -592,6 +592,7 @@ export async function creatorPlaceSegment(params: {
     p_box_y: params.box?.y,
     p_screenshot_x: params.screenshot?.x,
     p_screenshot_y: params.screenshot?.y,
+    p_screenshot_width: params.screenshot?.width,
   });
   if (error) throw error;
 }
