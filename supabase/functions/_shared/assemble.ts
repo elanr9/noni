@@ -274,7 +274,6 @@ async function renderOverlaysWithFfmpeg(params: {
     timeline.subtitles && !timeline.subtitle_lines
       ? 'subtitles skipped: no transcript lines for this post'
       : null;
-  const assPath = `${outputPath.replace(/-rendered\.mp4$/, '')}-overlay.ass`;
   const graphPath = `${outputPath}.graph`;
   let jobId = params.resumeJobId;
   if (!jobId) {
@@ -282,12 +281,6 @@ async function renderOverlaysWithFfmpeg(params: {
       fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
       fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
     ]);
-    await uploadTextToVideos(
-      admin,
-      assPath,
-      buildOverlayAss(timeline, { condensed, bubble }),
-      'overlay ass',
-    );
     const imageUrls: string[] = [];
     for (const img of timeline.images) {
       const { data, error: imgError } = await admin.storage
@@ -298,18 +291,17 @@ async function renderOverlaysWithFfmpeg(params: {
       }
       imageUrls.push(data.signedUrl);
     }
-    const assIndex = 1 + imageUrls.length;
     const graph = buildOverlayGraph({
       timeline,
       images: timeline.images.map((img, i) => ({
         index: i + 1,
         isVideo: isVideoSource(img.screenshot_path),
       })),
-      assIndex,
+      ass: buildOverlayAss(timeline, { condensed, bubble }),
     });
     await uploadTextToVideos(admin, graphPath, graph, 'overlay graph');
-    const [videoUrl, assUrl, graphUrl] = await signVideoUrls(admin, [videoPath, assPath, graphPath]);
-    const files = [videoUrl, ...imageUrls, assUrl, graphUrl];
+    const [videoUrl, graphUrl] = await signVideoUrls(admin, [videoPath, graphPath]);
+    const files = [videoUrl, ...imageUrls, graphUrl];
     const fullCommand = overlayCommand({
       inputCount: files.length - 1,
       hasImages: imageUrls.length > 0,
@@ -338,7 +330,7 @@ async function renderOverlaysWithFfmpeg(params: {
     const body = await downloadFfmpegJob({ apiKey, jobId, label: 'overlay' });
     await streamToVideos({ path: outputPath, contentType: 'video/mp4', body, label: 'overlay' });
   } finally {
-    if (settled) await admin.storage.from('videos').remove([assPath, graphPath]);
+    if (settled) await admin.storage.from('videos').remove([graphPath]);
   }
   return { path: outputPath, warning };
 }
@@ -386,15 +378,8 @@ async function renderSlideWithFfmpeg(params: {
         ]
       : [],
   };
-  const assPath = `${outputPath}.ass`;
-  await uploadTextToVideos(
-    admin,
-    assPath,
-    buildOverlayAss(timeline, { condensed, bubble }),
-    `${label} ass`,
-  );
-  try {
-    const [photoUrl, assUrl] = await signVideoUrls(admin, [photoPath, assPath]);
+  const [photoUrl] = await signVideoUrls(admin, [photoPath]);
+  {
     const imageUrls: string[] = [];
     if (inset) {
       const { data, error } = await admin.storage
@@ -405,7 +390,7 @@ async function renderSlideWithFfmpeg(params: {
       }
       imageUrls.push(data.signedUrl);
     }
-    const files = [photoUrl, ...imageUrls, assUrl];
+    const files = [photoUrl, ...imageUrls];
     await runFfmpegJob({
       admin,
       apiKey: uploadPostKey(),
@@ -413,7 +398,7 @@ async function renderSlideWithFfmpeg(params: {
       filterGraph: buildOverlayGraph({
         timeline,
         images: inset ? [{ index: 1, isVideo: false }] : [],
-        assIndex: files.length - 1,
+        ass: buildOverlayAss(timeline, { condensed, bubble }),
         baseFilters: CONFORM_1080x1920,
       }),
       fullCommand: slideCommand({ inputCount: files.length }),
@@ -421,8 +406,6 @@ async function renderSlideWithFfmpeg(params: {
       outputExtension: 'png',
       label,
     });
-  } finally {
-    await admin.storage.from('videos').remove([assPath]);
   }
 }
 

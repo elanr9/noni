@@ -27,12 +27,19 @@ import { measureOverlayLine, wrapOverlayLines, type OverlayFont } from './overla
 import { bubbleGeometry } from './overlayBubblePath.ts';
 
 /**
- * Upload-Post stores every job input as `in-src-N` in the ffmpeg cwd; only
- * full_command gets `{inputN}` substituted, so the script names the ASS file
- * directly (naming to be verified against a live job).
+ * Upload-Post substitutes `{inputN}` only inside full_command and runs ffmpeg
+ * outside the job directory, so a script cannot name the ASS file by path.
+ * The script carries the whole ASS inline as a base64 data URI instead, read
+ * through the `subtitles` filter (libavformat opens data: URLs).
  */
-export const ASS_PATH_IN_SCRIPT = (index: number): string =>
-  (Deno.env.get('UPLOAD_POST_INPUT_NAME') ?? 'in-src-{n}').replace('{n}', String(index));
+function assDataUri(ass: string): string {
+  const bytes = new TextEncoder().encode(ass);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return `data\\:text/plain\\;base64\\,${btoa(binary)}`;
+}
 
 // Mirrors renderAdapter popAnimations / slideAnimations / FADE_OUT.
 const POP_MS = 250;
@@ -660,11 +667,12 @@ function imagePosition(
 export function buildOverlayGraph(params: {
   timeline: RenderTimeline;
   images: Array<{ index: number; isVideo: boolean }>;
-  assIndex: number;
+  /** Full ASS script (buildOverlayAss), embedded in the graph. */
+  ass: string;
   /** Filters applied to input 0 before compositing (a slide photo is conformed to the frame). */
   baseFilters?: string;
 }): string {
-  const { timeline, images, assIndex } = params;
+  const { timeline, images, ass } = params;
   const frame = { width: timeline.width, height: timeline.height };
   const vmin = Math.min(frame.width, frame.height) / 100;
   const radius = px(IMAGE_RADIUS_VMIN * vmin);
@@ -731,7 +739,7 @@ export function buildOverlayGraph(params: {
     base = `[v${i}]`;
   });
 
-  chains.push(`${base}ass=${ASS_PATH_IN_SCRIPT(assIndex)}[outv]`);
+  chains.push(`${base}subtitles=filename='${assDataUri(ass)}'[outv]`);
   return chains.join(';\n');
 }
 
