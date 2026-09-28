@@ -340,3 +340,31 @@ export function wrapOverlayLines(text: string, maxWidthEm: number, font: Overlay
   }
   return out;
 }
+
+/**
+ * Two-line caption wrap the way TikTok breaks its auto captions: when the
+ * text needs two lines, break at the word that makes the lines most even
+ * rather than filling the first one.
+ */
+export function wrapCaptionLines(text: string, maxWidthEm: number, font: OverlayFont): string[] {
+  const greedy = wrapOverlayLines(text, maxWidthEm, font);
+  if (greedy.length !== 2) return greedy;
+  const words = text.trim().split(/\s+/).filter((w) => w.length > 0);
+  let best: string[] = greedy;
+  let bestGap = Math.abs(
+    measureOverlayLine(greedy[0], font) - measureOverlayLine(greedy[1], font),
+  );
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(" ");
+    const b = words.slice(i).join(" ");
+    const wa = measureOverlayLine(a, font);
+    const wb = measureOverlayLine(b, font);
+    if (wa > maxWidthEm || wb > maxWidthEm) continue;
+    const gap = Math.abs(wa - wb);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = [a, b];
+    }
+  }
+  return best;
+}

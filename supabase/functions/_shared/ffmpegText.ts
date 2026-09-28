@@ -15,7 +15,7 @@ import {
   SUBTITLE_WIDTH,
   SUBTITLE_Y,
 } from './renderAdapter.ts';
-import { wrapOverlayLines, type OverlayFont } from './overlayTextMetrics.ts';
+import { wrapCaptionLines, wrapOverlayLines, type OverlayFont } from './overlayTextMetrics.ts';
 import { readFontMetrics, type FontMetrics } from './ffmpegOverlay.ts';
 
 /** Characters Upload-Post rejects anywhere in full_command. */
@@ -136,7 +136,7 @@ export function buildDrawtextChain(params: {
     const centreY = (timeline.subtitles_y ?? SUBTITLE_Y) * frame.height;
     for (const line of timeline.subtitle_lines) {
       pushBlock({
-        wrapped: wrapOverlayLines(line.text, (SUBTITLE_WIDTH * frame.width) / fontPx, 'condensed')
+        wrapped: wrapCaptionLines(line.text, (SUBTITLE_WIDTH * frame.width) / fontPx, 'condensed')
           .slice(0, SUBTITLE_LINES),
         font: 'condensed',
         fontPx,
