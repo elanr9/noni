@@ -277,6 +277,12 @@ Deno.serve(async (req) => {
     let overlayWarning: string | null = null;
     let uploadUrl = 'https://api.upload-post.com/api/upload';
 
+    // An edit still in flight must not be assembled a second time here: that
+    // double bills every render step and races the running invocation.
+    if (submission.render_status === 'rendering') {
+      return jsonResponse({ error: 'edit still in progress, approve once it is ready' }, 409);
+    }
+
     if (target.isSlideshow) {
       // Slideshow: the slides in segment_paths post as a photo carousel
       // (TikTok photo post + Instagram carousel). Trending music is layered

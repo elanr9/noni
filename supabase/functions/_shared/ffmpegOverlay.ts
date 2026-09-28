@@ -31,7 +31,8 @@ import { bubbleGeometry } from './overlayBubblePath.ts';
  * full_command gets `{inputN}` substituted, so the script names the ASS file
  * directly (naming to be verified against a live job).
  */
-export const ASS_PATH_IN_SCRIPT = (index: number): string => `in-src-${index}`;
+export const ASS_PATH_IN_SCRIPT = (index: number): string =>
+  (Deno.env.get('UPLOAD_POST_INPUT_NAME') ?? 'in-src-{n}').replace('{n}', String(index));
 
 // Mirrors renderAdapter popAnimations / slideAnimations / FADE_OUT.
 const POP_MS = 250;
@@ -579,8 +580,9 @@ export function buildOverlayAss(
     '[Fonts]',
     `fontname: ${OVERLAY_TEXT_SPEC.condensed.file}`,
     assUuencode(fonts.condensed),
-    `fontname: ${OVERLAY_TEXT_SPEC.bubble.file}`,
-    assUuencode(fonts.bubble),
+    ...(OVERLAY_TEXT_SPEC.bubble.file === OVERLAY_TEXT_SPEC.condensed.file
+      ? []
+      : [`fontname: ${OVERLAY_TEXT_SPEC.bubble.file}`, assUuencode(fonts.bubble)]),
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -601,7 +603,12 @@ function slideRemainder(startMs: number): string {
 }
 
 /** Overlay x/y expressions for one image, centred with an optional slide entrance. */
-function imagePosition(img: TimelineImage, isVideo: boolean, frame: { width: number; height: number }): {
+function imagePosition(
+  img: TimelineImage,
+  isVideo: boolean,
+  frame: { width: number; height: number },
+  pad: number,
+): {
   x: string;
   y: string;
 } {
@@ -613,7 +620,8 @@ function imagePosition(img: TimelineImage, isVideo: boolean, frame: { width: num
   // Creatomate slides a still by its own size; a recording lives in a full
   // frame composition whose distance is the recording's width fraction.
   const w = px(img.width * frame.width);
-  const h = isVideo ? px(img.width * frame.height) : 'overlay_h';
+  // Both layers carry the shadow padding; a still slides by its own height.
+  const h = isVideo ? px(img.width * frame.height) : `(overlay_h-${2 * pad})`;
   const rem = slideRemainder(img.start_ms);
   const dir = slideDirectionFromNearestSide(img.x, img.y) as Bearing;
   if (dir === '0°') return { x: `${x}-${w}*${rem}`, y };
@@ -638,8 +646,10 @@ export function buildOverlayGraph(params: {
   const radius = px(IMAGE_RADIUS_VMIN * vmin);
   const shadowBlur = IMAGE_SHADOW_BLUR_VMIN * vmin;
   const pad = Math.ceil(shadowBlur * 2);
+  // Anti-aliased rounded rectangle of the unpadded box, centred in the padded frame.
   const rounded =
-    `lte(hypot(max(abs(X+0.5-W/2)-(W/2-${radius}),0),max(abs(Y+0.5-H/2)-(H/2-${radius}),0)),${radius})`;
+    `clip(${radius}+0.5-hypot(max(abs(X+0.5-W/2)-(W/2-${pad}-${radius}),0),` +
+    `max(abs(Y+0.5-H/2)-(H/2-${pad}-${radius}),0)),0,1)`;
   const chains: string[] = [];
   let base = '[0:v]';
 
@@ -659,26 +669,34 @@ export function buildOverlayGraph(params: {
         ]
       : [];
     const prep = isVideo
-      ? ['setpts=PTS-STARTPTS', `trim=duration=${dur}`]
+      ? ['setpts=PTS-STARTPTS', `trim=duration=${dur}`, `fps=${OUTPUT_FPS}`]
       : animated
         ? ['loop=loop=-1:size=1:start=0', `setpts=N/(${OUTPUT_FPS}*TB)`, `trim=duration=${dur}`]
         : [];
-    const source = [
+    // Fit and pad once so picture and shadow share one box.
+    const fitted = [
       ...prep,
       `scale=${widthPx}:-2`,
       'setsar=1',
-      'format=rgba',
-      `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${rounded}'`,
-      ...fades,
-      ...(isVideo || animated ? [`setpts=PTS+${start}/TB`] : []),
+      'format=gbrap',
+      `pad=iw+${2 * pad}:ih+${2 * pad}:${pad}:${pad}:color=black@0`,
     ].join(',');
-    chains.push(`[${index}:v]${source},split[img${i}][msk${i}]`);
+    chains.push(`[${index}:v]${fitted},split[fit${i}][key${i}]`);
+    // Corner mask evaluated on the first frame only, then held for the stream.
     chains.push(
-      `[msk${i}]pad=iw+${2 * pad}:ih+${2 * pad}:${pad}:${pad}:color=black@0,` +
-        `geq=r=0:g=0:b=0:a='alpha(X,Y)*${IMAGE_SHADOW_ALPHA}',format=gbrap,` +
-        `gblur=sigma=${px(shadowBlur / 2)},format=rgba[shd${i}]`,
+      `[key${i}]trim=end_frame=1,format=gray,geq=lum='255*${rounded}',` +
+        `loop=loop=-1:size=1:start=0,setpts=N/(${OUTPUT_FPS}*TB)[mask${i}]`,
     );
-    const pos = imagePosition(img, isVideo, frame);
+    const timed = [...fades, ...(isVideo || animated ? [`setpts=PTS+${start}/TB`] : [])];
+    chains.push(
+      `[fit${i}][mask${i}]alphamerge=shortest=1` +
+        `${timed.length > 0 ? `,${timed.join(',')}` : ''},split[img${i}][msk${i}]`,
+    );
+    chains.push(
+      `[msk${i}]colorchannelmixer=rr=0:gg=0:bb=0:aa=${IMAGE_SHADOW_ALPHA},` +
+        `gblur=sigma=${px(shadowBlur / 2)}[shd${i}]`,
+    );
+    const pos = imagePosition(img, isVideo, frame, pad);
     const common = `eof_action=${isVideo ? 'pass' : 'repeat'}:enable='between(t,${start},${end})'`;
     chains.push(`${base}[shd${i}]overlay=x='${pos.x}':y='${pos.y}':${common}[sh${i}]`);
     chains.push(`[sh${i}][img${i}]overlay=x='${pos.x}':y='${pos.y}':${common}[v${i}]`);

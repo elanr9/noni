@@ -75,13 +75,17 @@ const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 // poll it to completion and return the result as a byte stream.
 // Upload-Post rejects `;` `|` `&` `$` and backticks anywhere in the command,
 // so no inline filtergraph may use `;` to separate chains.
-async function executeFfmpegJob(params: {
+const FFMPEG_POLL_MS = 270_000;
+/** overlay_render_id prefix marking an Upload-Post ffmpeg job rather than a Creatomate render. */
+const FFMPEG_JOB_PREFIX = 'ffmpeg:';
+
+async function createFfmpegJob(params: {
   apiKey: string;
   files: string[];
   fullCommand: string;
   outputExtension: FfmpegOutputExtension;
   label: string;
-}): Promise<ReadableStream<Uint8Array>> {
+}): Promise<string> {
   const { apiKey, files, fullCommand, outputExtension, label } = params;
   if (/[;|&$`]/.test(fullCommand)) {
     throw new Error(`ffmpeg ${label} command contains a forbidden character`);
@@ -116,11 +120,20 @@ async function executeFfmpegJob(params: {
     );
   }
   console.log(`ffmpeg ${label} job created`);
+  return jobJson.job_id;
+}
 
-  let finished = false;
-  for (let i = 0; i < 90; i++) {
+/** Polls until finished (true), failed (throws) or the deadline passes (false). */
+async function awaitFfmpegJob(params: {
+  apiKey: string;
+  jobId: string;
+  label: string;
+  deadline: number;
+}): Promise<boolean> {
+  const { apiKey, jobId, label } = params;
+  while (Date.now() < params.deadline) {
     await new Promise((r) => setTimeout(r, 3000));
-    const statusRes = await fetch(`${FFMPEG_JOBS_URL}/${jobJson.job_id}`, {
+    const statusRes = await fetch(`${FFMPEG_JOBS_URL}/${jobId}`, {
       headers: { Authorization: `Apikey ${apiKey}` },
     });
     const statusJson = (await statusRes.json()) as {
@@ -129,10 +142,7 @@ async function executeFfmpegJob(params: {
       result?: { stderr_tail?: string | null } | null;
     };
     const status = (statusJson.status ?? '').toLowerCase();
-    if (status === 'finished' || status === 'done') {
-      finished = true;
-      break;
-    }
+    if (status === 'finished' || status === 'done') return true;
     if (status === 'failed' || status === 'error') {
       const detail =
         statusJson.result?.stderr_tail?.trim().split('\n').slice(-3).join(' ') ??
@@ -141,15 +151,36 @@ async function executeFfmpegJob(params: {
       throw new Error(`ffmpeg ${label} job errored${detail ? `: ${detail}` : ''}`);
     }
   }
-  if (!finished) throw new Error(`ffmpeg ${label} timed out`);
+  return false;
+}
 
-  const download = await fetch(`${FFMPEG_JOBS_URL}/${jobJson.job_id}/download`, {
+async function downloadFfmpegJob(params: {
+  apiKey: string;
+  jobId: string;
+  label: string;
+}): Promise<ReadableStream<Uint8Array>> {
+  const { apiKey, jobId, label } = params;
+  const download = await fetch(`${FFMPEG_JOBS_URL}/${jobId}/download`, {
     headers: { Authorization: `Apikey ${apiKey}` },
   });
   if (!download.ok || !download.body) {
     throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
   }
   return download.body;
+}
+
+async function executeFfmpegJob(params: {
+  apiKey: string;
+  files: string[];
+  fullCommand: string;
+  outputExtension: FfmpegOutputExtension;
+  label: string;
+}): Promise<ReadableStream<Uint8Array>> {
+  const { apiKey, label } = params;
+  const jobId = await createFfmpegJob(params);
+  const done = await awaitFfmpegJob({ apiKey, jobId, label, deadline: Date.now() + FFMPEG_POLL_MS });
+  if (!done) throw new Error(`ffmpeg ${label} timed out`);
+  return downloadFfmpegJob({ apiKey, jobId, label });
 }
 
 // Run an FFmpeg job and store the media result in the videos bucket.
@@ -185,50 +216,78 @@ async function runFfmpegJob(params: {
     fullCommand = fullCommand.replace('{graph}', inputPlaceholder(files.length - 1, files.length));
   }
 
-  const body = await executeFfmpegJob({ apiKey, files, fullCommand, outputExtension, label });
-  console.log(`ffmpeg ${label} finished, storing ${outputPath}`);
-  await streamToVideos({
-    path: outputPath,
-    contentType: outputExtension === 'png' ? 'image/png' : 'video/mp4',
-    body,
-    label,
-  });
-  console.log(`ffmpeg ${label} stored ${outputPath}`);
-  if (scriptPath) await admin.storage.from('videos').remove([scriptPath]);
+  try {
+    const body = await executeFfmpegJob({ apiKey, files, fullCommand, outputExtension, label });
+    console.log(`ffmpeg ${label} finished, storing ${outputPath}`);
+    await streamToVideos({
+      path: outputPath,
+      contentType: outputExtension === 'png' ? 'image/png' : 'video/mp4',
+      body,
+      label,
+    });
+    console.log(`ffmpeg ${label} stored ${outputPath}`);
+  } finally {
+    if (scriptPath) await admin.storage.from('videos').remove([scriptPath]);
+  }
 }
 
+const fontCache = new Map<string, Uint8Array>();
+
 async function fetchFont(file: string): Promise<Uint8Array> {
+  const cached = fontCache.get(file);
+  if (cached) return cached;
   const res = await fetch(fontUrl(file));
   if (!res.ok) throw new Error(`could not fetch overlay font ${file}: ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  fontCache.set(file, bytes);
+  return bytes;
+}
+
+async function uploadTextToVideos(
+  admin: AdminClient,
+  path: string,
+  text: string,
+  label: string,
+): Promise<void> {
+  const { error } = await admin.storage
+    .from('videos')
+    .upload(path, new TextEncoder().encode(text), { contentType: 'video/mp4', upsert: true });
+  if (error) throw new Error(`could not store ${label}: ${error.message}`);
 }
 
 // Overlay pass on Upload-Post ffmpeg: text via an embedded-font ASS script,
-// screenshots via overlay chains. Returns the rendered video's storage path.
+// screenshots via overlay chains. Resolves null when the job is still running
+// at the deadline (inputs stay in storage for the worker); the caller hands
+// the wait to a fresh invocation, which resumes on resumeJobId.
 async function renderOverlaysWithFfmpeg(params: {
   admin: AdminClient;
   timeline: RenderTimeline;
   videoPath: string;
   outputPath: string;
-}): Promise<string> {
+  resumeJobId: string | null;
+  deadline: number;
+  onJobCreated: (jobId: string) => Promise<void>;
+}): Promise<{ path: string; warning: string | null } | null> {
   const { admin, timeline, videoPath, outputPath } = params;
-  if (timeline.subtitles && !timeline.subtitle_lines) {
-    console.warn('overlay ffmpeg: subtitles requested but subtitle_lines absent, rendering without');
-  }
-  const [condensed, bubble] = await Promise.all([
-    fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
-    fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
-  ]);
+  const apiKey = uploadPostKey();
+  const warning =
+    timeline.subtitles && !timeline.subtitle_lines
+      ? 'subtitles skipped: no transcript lines for this post'
+      : null;
   const assPath = `${outputPath.replace(/-rendered\.mp4$/, '')}-overlay.ass`;
-  const { error } = await admin.storage
-    .from('videos')
-    .upload(assPath, new TextEncoder().encode(buildOverlayAss(timeline, { condensed, bubble })), {
-      contentType: 'video/mp4',
-      upsert: true,
-    });
-  if (error) throw new Error(`could not store overlay ass: ${error.message}`);
-  try {
-    const [videoUrl, assUrl] = await signVideoUrls(admin, [videoPath, assPath]);
+  const graphPath = `${outputPath}.graph`;
+  let jobId = params.resumeJobId;
+  if (!jobId) {
+    const [condensed, bubble] = await Promise.all([
+      fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
+      fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
+    ]);
+    await uploadTextToVideos(
+      admin,
+      assPath,
+      buildOverlayAss(timeline, { condensed, bubble }),
+      'overlay ass',
+    );
     const imageUrls: string[] = [];
     for (const img of timeline.images) {
       const { data, error: imgError } = await admin.storage
@@ -239,27 +298,49 @@ async function renderOverlaysWithFfmpeg(params: {
       }
       imageUrls.push(data.signedUrl);
     }
-    const files = [videoUrl, ...imageUrls, assUrl];
-    await runFfmpegJob({
-      admin,
-      apiKey: uploadPostKey(),
+    const assIndex = 1 + imageUrls.length;
+    const graph = buildOverlayGraph({
+      timeline,
+      images: timeline.images.map((img, i) => ({
+        index: i + 1,
+        isVideo: isVideoSource(img.screenshot_path),
+      })),
+      assIndex,
+    });
+    await uploadTextToVideos(admin, graphPath, graph, 'overlay graph');
+    const [videoUrl, assUrl, graphUrl] = await signVideoUrls(admin, [videoPath, assPath, graphPath]);
+    const files = [videoUrl, ...imageUrls, assUrl, graphUrl];
+    const fullCommand = overlayCommand({
+      inputCount: files.length - 1,
+      hasImages: imageUrls.length > 0,
+    }).replace('{graph}', inputPlaceholder(files.length - 1, files.length));
+    jobId = await createFfmpegJob({
+      apiKey,
       files,
-      filterGraph: buildOverlayGraph({
-        timeline,
-        images: timeline.images.map((img, i) => ({
-          index: i + 1,
-          isVideo: isVideoSource(img.screenshot_path),
-        })),
-        assIndex: files.length - 1,
-      }),
-      fullCommand: overlayCommand({ inputCount: files.length, hasImages: imageUrls.length > 0 }),
-      outputPath,
+      fullCommand,
+      outputExtension: 'mp4',
       label: 'overlay',
     });
-  } finally {
-    await admin.storage.from('videos').remove([assPath]);
+    await params.onJobCreated(jobId);
   }
-  return outputPath;
+  let settled = true;
+  try {
+    const done = await awaitFfmpegJob({
+      apiKey,
+      jobId,
+      label: 'overlay',
+      deadline: params.deadline,
+    });
+    if (!done) {
+      settled = false;
+      return null;
+    }
+    const body = await downloadFfmpegJob({ apiKey, jobId, label: 'overlay' });
+    await streamToVideos({ path: outputPath, contentType: 'video/mp4', body, label: 'overlay' });
+  } finally {
+    if (settled) await admin.storage.from('videos').remove([assPath, graphPath]);
+  }
+  return { path: outputPath, warning };
 }
 
 // Run an FFmpeg job whose {output} is a text file and return its contents.
@@ -739,7 +820,7 @@ export async function signVideoUrls(
   return urls;
 }
 
-const VIDEO_CODEC = '-c:v h264_nvenc -preset p5 -cq 23';
+const VIDEO_CODEC = '-c:v h264_nvenc -preset p5 -cq 23 -pix_fmt yuv420p -movflags +faststart';
 const AUDIO_CODEC = '-c:a aac -b:a 128k';
 const CONFORM_1080x1920 =
   'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1';
@@ -1265,11 +1346,10 @@ async function runAssembly(params: {
 
   // Word timestamps per clip drive the silence cut, the overlay cues and our
   // own subtitle lines. Measured on the uploaded clips, before any green
-  // screen composite replaces them; a resumed overlay pass reuses the stored
-  // transcript when it covers every clip.
-  const storedWords = stitched
-    ? storedTranscript(submission.transcript, segmentPaths.length)
-    : null;
+  // screen composite replaces them; any retry reuses the stored transcript
+  // when it covers every clip (a resubmission is a new row, so it is never
+  // stale).
+  const storedWords = storedTranscript(submission.transcript, segmentPaths.length);
   const transcripts =
     storedWords ??
     (await transcribeClips({
@@ -1461,12 +1541,42 @@ async function runAssembly(params: {
         }
         console.log(`rendering overlays for ${submission.id}`);
         if (Deno.env.get('OVERLAY_RENDERER') === 'ffmpeg') {
-          videoPath = await renderOverlaysWithFfmpeg({
-            admin,
-            timeline,
-            videoPath,
-            outputPath: `${companyId}/${targetId}/${version}-rendered.mp4`,
-          });
+          const storedId = submission.overlay_render_id ?? null;
+          const resumeJobId = storedId?.startsWith(FFMPEG_JOB_PREFIX)
+            ? storedId.slice(FFMPEG_JOB_PREFIX.length)
+            : null;
+          const clearJobId = () =>
+            admin.from('submissions').update({ overlay_render_id: null }).eq('id', submission.id);
+          let result: Awaited<ReturnType<typeof renderOverlaysWithFfmpeg>>;
+          try {
+            result = await renderOverlaysWithFfmpeg({
+              admin,
+              timeline,
+              videoPath,
+              outputPath: `${companyId}/${targetId}/${version}-rendered.mp4`,
+              resumeJobId,
+              deadline: Date.now() + OVERLAY_WAIT_MS,
+              onJobCreated: async (jobId) => {
+                await admin
+                  .from('submissions')
+                  .update({ overlay_render_id: `${FFMPEG_JOB_PREFIX}${jobId}` })
+                  .eq('id', submission.id);
+              },
+            });
+          } catch (error) {
+            await clearJobId();
+            throw error;
+          }
+          if (!result) {
+            if (handoff && (await handoff())) {
+              console.log(`overlay ffmpeg job still running for ${submission.id}, handed off`);
+              return { videoPath, overlayWarning, deferred: true };
+            }
+            await clearJobId();
+            throw new Error('overlay ffmpeg job timed out');
+          }
+          videoPath = result.path;
+          overlayWarning = result.warning ?? overlayWarning;
           await admin
             .from('submissions')
             .update({ video_path: videoPath, overlay_render_id: null })
