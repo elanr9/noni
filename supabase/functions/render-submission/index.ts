@@ -117,7 +117,11 @@ Deno.serve(async (req) => {
       : ['queued', 'failed', 'rendering'];
     const { data: claimed } = await admin
       .from('submissions')
-      .update({ render_status: 'rendering', render_error: null })
+      .update({
+        render_status: 'rendering',
+        render_error: null,
+        render_claimed_at: new Date().toISOString(),
+      })
       .eq('id', submission.id)
       .in('render_status', claimable)
       .select('id')

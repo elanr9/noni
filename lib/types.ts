@@ -4164,6 +4164,7 @@ export type Database = {
           duration_seconds: number | null
           id: string
           overlay_render_id: string | null
+          render_claimed_at: string | null
           render_error: string | null
           render_status: string
           render_timeline: Json | null
@@ -4182,6 +4183,7 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           overlay_render_id?: string | null
+          render_claimed_at?: string | null
           render_error?: string | null
           render_status?: string
           render_timeline?: Json | null
@@ -4200,6 +4202,7 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           overlay_render_id?: string | null
+          render_claimed_at?: string | null
           render_error?: string | null
           render_status?: string
           render_timeline?: Json | null
