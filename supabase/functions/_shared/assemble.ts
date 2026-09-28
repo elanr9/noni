@@ -21,16 +21,16 @@ import {
   type MediaAspects,
   type TimelineTextOverlay,
 } from './renderTimeline.ts';
-import {
-  renderGreenScreenClip,
-  awaitRender,
-  startOverlayRender,
-  renderSlideImage,
-} from './renderAdapter.ts';
+import { renderGreenScreenClip, awaitRender, startOverlayRender } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
-import { buildOverlayAss, buildOverlayGraph, overlayCommand } from './ffmpegOverlay.ts';
-import { fontUrl, isVideoSource, OVERLAY_TEXT_SPEC } from './renderAdapter.ts';
-import type { RenderTimeline } from './renderTimeline.ts';
+import {
+  buildOverlayAss,
+  buildOverlayGraph,
+  overlayCommand,
+  slideCommand,
+} from './ffmpegOverlay.ts';
+import { fontUrl, isVideoSource, OVERLAY_TEXT_SPEC, SUBTITLE_Y } from './renderAdapter.ts';
+import type { RenderTimeline, SegmentBox } from './renderTimeline.ts';
 import {
   placeCue,
   speechRangesFromWords,
@@ -341,6 +341,89 @@ async function renderOverlaysWithFfmpeg(params: {
     if (settled) await admin.storage.from('videos').remove([assPath, graphPath]);
   }
   return { path: outputPath, warning };
+}
+
+// Bake one slideshow slide on Upload-Post ffmpeg: the photo conformed to the
+// frame, the admin's inset picture and text boxes burnt in, stored as a PNG.
+// Same ASS and overlay graph as the video pass, on a single frame.
+async function renderSlideWithFfmpeg(params: {
+  admin: AdminClient;
+  photoPath: string;
+  boxes: SegmentBox[];
+  inset?: { path: string; x: number; y: number; width: number };
+  outputPath: string;
+  label: string;
+}): Promise<void> {
+  const { admin, photoPath, boxes, inset, outputPath, label } = params;
+  const [condensed, bubble] = await Promise.all([
+    fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
+    fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
+  ]);
+  const timeline: RenderTimeline = {
+    width: 1080,
+    height: 1920,
+    text_overlay: DEFAULT_TEXT_OVERLAY,
+    subtitles: false,
+    subtitles_y: SUBTITLE_Y,
+    clips: [],
+    texts: boxes.map((box) => ({
+      text: box.text,
+      start_ms: 0,
+      duration_ms: 1000,
+      y: box.y,
+      box: { x: box.x, size: box.size, color: box.color, bg: box.bg },
+    })),
+    images: inset
+      ? [
+          {
+            screenshot_path: inset.path,
+            start_ms: 0,
+            duration_ms: 1000,
+            x: inset.x,
+            y: inset.y,
+            width: inset.width,
+          },
+        ]
+      : [],
+  };
+  const assPath = `${outputPath}.ass`;
+  await uploadTextToVideos(
+    admin,
+    assPath,
+    buildOverlayAss(timeline, { condensed, bubble }),
+    `${label} ass`,
+  );
+  try {
+    const [photoUrl, assUrl] = await signVideoUrls(admin, [photoPath, assPath]);
+    const imageUrls: string[] = [];
+    if (inset) {
+      const { data, error } = await admin.storage
+        .from('brief-assets')
+        .createSignedUrl(inset.path, SIGNED_URL_TTL_SECONDS);
+      if (error || !data?.signedUrl) {
+        throw new Error(`could not sign inset ${inset.path}: ${error?.message}`);
+      }
+      imageUrls.push(data.signedUrl);
+    }
+    const files = [photoUrl, ...imageUrls, assUrl];
+    await runFfmpegJob({
+      admin,
+      apiKey: uploadPostKey(),
+      files,
+      filterGraph: buildOverlayGraph({
+        timeline,
+        images: inset ? [{ index: 1, isVideo: false }] : [],
+        assIndex: files.length - 1,
+        baseFilters: CONFORM_1080x1920,
+      }),
+      fullCommand: slideCommand({ inputCount: files.length }),
+      outputPath,
+      outputExtension: 'png',
+      label,
+    });
+  } finally {
+    await admin.storage.from('videos').remove([assPath]);
+  }
 }
 
 // Run an FFmpeg job whose {output} is a text file and return its contents.
@@ -1141,9 +1224,9 @@ export async function assembleSubmission(params: {
   }
 }
 
-/** `{v}-slide-{n}-final.jpg` back to the uploaded `{v}-slide-{n}.{ext}`. */
+/** `{v}-slide-{n}-final.{png,jpg}` back to the uploaded `{v}-slide-{n}.{ext}`. */
 async function originalSlidePath(admin: AdminClient, path: string): Promise<string> {
-  const match = /^(.*\/)(\d+-slide-\d+)-final\.jpg$/.exec(path);
+  const match = /^(.*\/)(\d+-slide-\d+)-final\.(?:png|jpg)$/.exec(path);
   if (!match) return path;
   const [, folder, stem] = match;
   const { data } = await admin.storage
@@ -1207,23 +1290,8 @@ async function runSlideshowAssembly(params: {
           : null;
       if (boxes.length === 0 && !insetPath) return rawPath;
 
-      const renderKey = Deno.env.get('CREATOMATE_API_KEY');
-      if (!renderKey) {
-        throw new Error(
-          'This slideshow has on-slide text or pictures but CREATOMATE_API_KEY is not set in the edge function env.',
-        );
-      }
-      const [photoUrl] = await signVideoUrls(admin, [rawPath]);
-      let inset: { url: string; x: number; y: number; width: number } | undefined;
+      let inset: { path: string; x: number; y: number; width: number } | undefined;
       if (insetPath) {
-        const { data: signedImg, error: imgError } = await admin.storage
-          .from('brief-assets')
-          .createSignedUrl(insetPath, SIGNED_URL_TTL_SECONDS);
-        if (imgError || !signedImg?.signedUrl) {
-          throw new Error(
-            `could not sign inset ${insetPath}: ${imgError?.message}`,
-          );
-        }
         const aspects = await insetAspects(admin, [insetPath]);
         const placed = fitInsetClearOfText(
           {
@@ -1235,19 +1303,15 @@ async function runSlideshowAssembly(params: {
           aspects[insetPath] ?? DEFAULT_MEDIA_ASPECT,
           boxes.map(textBand),
         );
-        inset = { url: signedImg.signedUrl, ...placed };
+        inset = { path: insetPath, ...placed };
       }
-      const image = await renderSlideImage({
-        apiKey: renderKey,
-        photoUrl,
+      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.png`;
+      await renderSlideWithFfmpeg({
+        admin,
+        photoPath: rawPath,
         boxes,
         inset,
-      });
-      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.jpg`;
-      await streamToVideos({
-        path: outPath,
-        contentType: 'image/jpeg',
-        body: image,
+        outputPath: outPath,
         label: `slide ${i + 1}`,
       });
       return outPath;
@@ -1540,7 +1604,8 @@ async function runAssembly(params: {
           return { videoPath, overlayWarning, deferred: true };
         }
         console.log(`rendering overlays for ${submission.id}`);
-        if (Deno.env.get('OVERLAY_RENDERER') === 'ffmpeg') {
+        // ffmpeg is the renderer; OVERLAY_RENDERER=creatomate keeps the old path for a comparison run.
+        if (Deno.env.get('OVERLAY_RENDERER') !== 'creatomate') {
           const storedId = submission.overlay_render_id ?? null;
           const resumeJobId = storedId?.startsWith(FFMPEG_JOB_PREFIX)
             ? storedId.slice(FFMPEG_JOB_PREFIX.length)

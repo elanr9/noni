@@ -661,6 +661,8 @@ export function buildOverlayGraph(params: {
   timeline: RenderTimeline;
   images: Array<{ index: number; isVideo: boolean }>;
   assIndex: number;
+  /** Filters applied to input 0 before compositing (a slide photo is conformed to the frame). */
+  baseFilters?: string;
 }): string {
   const { timeline, images, assIndex } = params;
   const frame = { width: timeline.width, height: timeline.height };
@@ -674,6 +676,10 @@ export function buildOverlayGraph(params: {
     `max(abs(Y+0.5-H/2)-(H/2-${pad}-${radius}),0)),0,1)`;
   const chains: string[] = [];
   let base = '[0:v]';
+  if (params.baseFilters) {
+    chains.push(`[0:v]${params.baseFilters}[bg]`);
+    base = '[bg]';
+  }
 
   images.forEach(({ index, isVideo }, i) => {
     const img = timeline.images[i];
@@ -727,6 +733,18 @@ export function buildOverlayGraph(params: {
 
   chains.push(`${base}ass=${ASS_PATH_IN_SCRIPT(assIndex)}[outv]`);
   return chains.join(';\n');
+}
+
+/**
+ * full_command baking one slideshow slide: the photo (input 0) with its inset
+ * picture and text boxes burnt in, out as a single frame.
+ */
+export function slideCommand(params: { inputCount: number }): string {
+  const inputs = Array.from({ length: params.inputCount }, (_v, i) => `-i {input${i}}`).join(' ');
+  return (
+    `ffmpeg -y -hide_banner ${inputs} -filter_complex_script {graph} ` +
+    `-map "[outv]" -frames:v 1 -update 1 {output}`
+  );
 }
 
 /** full_command for runFfmpegJob; {graph} is replaced with the script input. */
