@@ -151,7 +151,11 @@ function assTime(ms: number): string {
 const px = (n: number): string => Number(n.toFixed(2)).toString();
 
 function escapeAssText(text: string): string {
-  return text.replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+  // A zero width space after a user backslash stops libass reading \N \n \h \{ \}.
+  return text
+    .replace(/\\(?=[Nnh{}])/g, '\\\u200B')
+    .replace(/\{/g, '\\{')
+    .replace(/\}/g, '\\}');
 }
 
 /** ASS uuencode: 3 bytes to 4 chars of 33 + 6 bits, 80 chars per line. */
@@ -174,6 +178,8 @@ function assUuencode(bytes: Uint8Array): string {
 
 type Placement = {
   enter: TimelineEnter | undefined;
+  /** First ASS layer of the element; its stroke pass and fill pass stack above it. */
+  layer: number;
   /** Block centre and size in px; slide distance and pop origin come from these. */
   blockX: number;
   blockY: number;
@@ -223,8 +229,6 @@ type TextLook = {
   fill: string;
   /** Outline colour with its full width in px; absent means no stroke. */
   stroke?: { color: string; widthPx: number };
-  /** Blurred shadow drawn as a lower layer beneath the letters. */
-  shadow?: { color: string; blurPx: number };
 };
 
 type Metrics = Record<OverlayFont, FontMetrics>;
@@ -242,7 +246,11 @@ function textStyleTags(look: TextLook, metrics: Metrics): string {
   return `\\an5\\fn${family}\\fs${px(size)}\\1c${assColor(look.fill)}${stroke}\\shad0`;
 }
 
-/** One line of text, optionally with its blurred shadow duplicate underneath. */
+/**
+ * One line of text. Stroke and fill go out as two passes on consecutive
+ * layers so every line's outline sits under every line's fill, as one
+ * element's stroke does in Creatomate and TikTok.
+ */
 function lineEvents(params: {
   line: string;
   look: TextLook;
@@ -258,27 +266,22 @@ function lineEvents(params: {
   const motion = motionTags(placed, frame.width, frame.height);
   const text = escapeAssText(line);
   const events: string[] = [];
-  if (look.shadow) {
-    const shadowLook: TextLook = {
-      ...look,
-      fill: look.shadow.color,
-      stroke: look.stroke ? { ...look.stroke, color: look.shadow.color } : undefined,
-    };
+  if (look.stroke) {
     events.push(
       dialogue(
-        0,
+        placement.layer + 1,
         timing.startMs,
         timing.durationMs,
-        `{${textStyleTags(shadowLook, metrics)}\\blur${px(look.shadow.blurPx / 2)}${motion}}${text}`,
+        `{${textStyleTags(look, metrics)}\\1a&HFF&${motion}}${text}`,
       ),
     );
   }
   events.push(
     dialogue(
-      2,
+      placement.layer + 2,
       timing.startMs,
       timing.durationMs,
-      `{${textStyleTags(look, metrics)}${motion}}${text}`,
+      `{${textStyleTags({ ...look, stroke: undefined }, metrics)}${motion}}${text}`,
     ),
   );
   return events;
@@ -335,7 +338,7 @@ function condensedEvents(params: {
   timing: { startMs: number; durationMs: number };
   metrics: Metrics;
   frame: { width: number; height: number };
-  shadow?: { color: string; blurPx: number };
+  layer: number;
 }): string[] {
   const { lines, fontPx, metrics, frame, timing } = params;
   const pitch = fontPx * OVERLAY_TEXT_SPEC.condensed.lineHeight;
@@ -350,7 +353,6 @@ function condensedEvents(params: {
       color: params.strokeColor,
       widthPx: fontPx * OVERLAY_TEXT_SPEC.condensed.strokeRatio,
     },
-    shadow: params.shadow,
   };
   return lines.flatMap((line, i) =>
     lineEvents({
@@ -361,6 +363,7 @@ function condensedEvents(params: {
       frame,
       placement: {
         enter: params.enter,
+        layer: params.layer,
         blockX: params.centreX,
         blockY: params.centreY,
         blockW,
@@ -384,6 +387,7 @@ function bubbleEvents(params: {
   timing: { startMs: number; durationMs: number };
   metrics: Metrics;
   frame: { width: number; height: number };
+  layer: number;
 }): string[] {
   const { lines, fontPx, metrics, frame, timing } = params;
   const spec = OVERLAY_TEXT_SPEC.bubble;
@@ -399,6 +403,7 @@ function bubbleEvents(params: {
   );
   const base: Placement = {
     enter: params.enter,
+    layer: params.layer,
     blockX: params.centreX,
     blockY: params.centreY,
     blockW: blob.width,
@@ -407,7 +412,7 @@ function bubbleEvents(params: {
     y: params.centreY,
   };
   const shape = dialogue(
-    1,
+    params.layer,
     timing.startMs,
     timing.durationMs,
     `{\\an5\\1c${assColor(params.fill)}\\bord0\\shad0${motionTags(base, frame.width, frame.height)}\\p3}${svgPathToAss(blob.path)}{\\p0}`,
@@ -450,6 +455,7 @@ function subtitleEvents(
       timing: { startMs: line.start_ms, durationMs: line.duration_ms },
       metrics,
       frame,
+      layer: 0,
     }),
   );
 }
@@ -462,6 +468,7 @@ function legacyTextEvents(params: {
   timing: { startMs: number; durationMs: number };
   timeline: RenderTimeline;
   metrics: Metrics;
+  layer: number;
 }): string[] {
   const { timeline, metrics } = params;
   const frame = { width: timeline.width, height: timeline.height };
@@ -474,7 +481,15 @@ function legacyTextEvents(params: {
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join('\n');
-  const shared = { centreX, centreY, enter: params.enter, timing: params.timing, metrics, frame };
+  const shared = {
+    centreX,
+    centreY,
+    enter: params.enter,
+    timing: params.timing,
+    metrics,
+    frame,
+    layer: params.layer,
+  };
   if (overlay.mode === 'outline' || overlay.mode === 'plain') {
     const fontPx = (overlay.mode === 'outline' ? 4.6 : 4.2) * vmin;
     return condensedEvents({
@@ -521,12 +536,17 @@ export function buildOverlayAss(
     events.push(...subtitleEvents(timeline.subtitle_lines, subtitlesY, metrics, frame));
   }
 
-  for (const t of timeline.texts) {
+  timeline.texts.forEach((t, i) => {
+    // Subtitles live on layers 0 to 2; each text element gets its own band
+    // above them so later elements paint over earlier ones, as in Creatomate.
+    const layer = 10 + 3 * i;
     const y = t.y ?? TEXT_Y;
     const timing = { startMs: t.start_ms, durationMs: t.duration_ms };
     if (!t.box) {
-      events.push(...legacyTextEvents({ text: t.text, y, enter: t.enter, timing, timeline, metrics }));
-      continue;
+      events.push(
+        ...legacyTextEvents({ text: t.text, y, enter: t.enter, timing, timeline, metrics, layer }),
+      );
+      return;
     }
     const box = t.box;
     const fontPx = box.size * frame.width;
@@ -538,6 +558,7 @@ export function buildOverlayAss(
       timing,
       metrics,
       frame,
+      layer,
     };
     if (!box.bg) {
       events.push(
@@ -548,7 +569,7 @@ export function buildOverlayAss(
           strokeColor: classicOutlineColor(box.color),
         }),
       );
-      continue;
+      return;
     }
     events.push(
       ...bubbleEvents({
@@ -562,7 +583,7 @@ export function buildOverlayAss(
         ink: overlayTextContrast(box.color),
       }),
     );
-  }
+  });
 
   return [
     '[Script Info]',
@@ -571,6 +592,7 @@ export function buildOverlayAss(
     `PlayResY: ${frame.height}`,
     'WrapStyle: 2',
     'ScaledBorderAndShadow: yes',
+    'Kerning: yes',
     'YCbCr Matrix: None',
     '',
     '[V4+ Styles]',
