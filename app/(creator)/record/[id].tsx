@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Easing,
   Image,
   Linking,
   Platform,
@@ -36,6 +35,25 @@ import {
   lensForZoom,
   useBackLenses,
 } from '../../../components/creator/record/useBackLenses';
+import { BetweenClipView } from '../../../components/creator/record/BetweenClipView';
+import {
+  coverFrame,
+  frameStyle,
+} from '../../../components/creator/record/stageFrame';
+import {
+  TextBoxLayer,
+  type BoxPatch,
+} from '../../../components/creator/record/TextBoxLayer';
+import { TextEditSheet } from '../../../components/creator/record/TextEditSheet';
+import {
+  UploadFailedToast,
+  UploadPill,
+} from '../../../components/creator/record/UploadStatus';
+import {
+  clipQueueLabel,
+  getClipUploadQueue,
+  useClipUploadQueue,
+} from '../../../lib/clip-upload-queue';
 import {
   GreenScreenBackdrop,
   SegmentOverlayPreview,
@@ -91,6 +109,7 @@ import { color, motion, radius, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
   DEFAULT_SUBTITLES_Y,
+  creatorEditSegmentBoxes,
   creatorPlaceSegment,
   creatorPlaceSubtitles,
   creatorStyleBriefBoxes,
@@ -104,7 +123,13 @@ import {
   type BriefSegment,
 } from '../../../lib/briefs-api';
 import { useCreatorQueue } from '../../../lib/creator-queue';
-import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
+import {
+  CLASSIC_TEXT_COLOR,
+  autoLayoutBox,
+  parseOverlayBoxes,
+  serializeOverlayBoxes,
+  type OverlayBox,
+} from '../../../lib/overlay-boxes';
 import {
   latestChangesNote,
   listAssignmentReviewEvents,
@@ -135,13 +160,7 @@ import { supabase } from '../../../lib/supabase';
 import type { ContentTask } from '../../../lib/tasks';
 import { flaggedSlotIndices } from './flagged';
 
-type Phase =
-  | 'idle'
-  | 'countdown'
-  | 'recording'
-  | 'between'
-  | 'processing'
-  | 'review';
+type Phase = 'idle' | 'countdown' | 'recording' | 'between' | 'review';
 
 type ClipPlan = {
   slotIndex: number;
@@ -168,7 +187,6 @@ const COUNTDOWN_STEP_MS = 800;
 const SPEEDS: PrompterSpeed[] = [0.75, 1, 1.25, 1.5];
 /** The visual fill reference: the current segment fills by elapsed / 20s. */
 const PROGRESS_REF_MS = 20_000;
-const PROCESSING_MIN_MS = 2_000;
 const STOP_WATCHDOG_MS = 5_000;
 const RECORD_ARM_MS = 350;
 /** Time for the capture session to settle after a lens or facing swap. */
@@ -350,28 +368,46 @@ async function signedVideoUrl(path: string): Promise<string> {
   return data.signedUrl;
 }
 
-/** 54px ring spinning 900ms linear (SCREENS §3 processing). */
-function SpinnerRing() {
-  const spin = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 900,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
+/** The slot's pieces swapped for `pieces`, keeping slot order. */
+function withSlotPieces(
+  timeline: EditTimeline,
+  slotIndex: number,
+  pieces: EditPiece[],
+): EditTimeline {
+  const without = timeline.pieces.filter((p) => p.slotIndex !== slotIndex);
+  const after = without.findIndex((p) => p.slotIndex > slotIndex);
+  const next =
+    after === -1
+      ? [...without, ...pieces]
+      : [...without.slice(0, after), ...pieces, ...without.slice(after)];
+  return { ...timeline, pieces: next };
+}
+
+/** Same cut, ignoring piece ids. */
+function samePieces(a: EditPiece[], b: EditPiece[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((p, i) => {
+    const q = b[i];
+    return (
+      p.sourceUri === q.sourceUri &&
+      p.inMs === q.inMs &&
+      p.outMs === q.outMs &&
+      p.speed === q.speed &&
+      p.muted === q.muted &&
+      JSON.stringify(p.crop) === JSON.stringify(q.crop)
     );
-    loop.start();
-    return () => loop.stop();
-  }, [spin]);
-  const rotate = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
   });
-  return (
-    <Animated.View style={[styles.spinnerRing, { transform: [{ rotate }] }]} />
-  );
+}
+
+function segmentWithBoxes(segment: BriefSegment, boxes: OverlayBox[]): BriefSegment {
+  const next = serializeOverlayBoxes(boxes);
+  return {
+    ...segment,
+    overlay_style: next.overlay_style,
+    overlay_text: next.overlay_text,
+    text_y: next.text_y,
+    show_on_screen: next.show_on_screen,
+  };
 }
 
 export default function RecordScreen() {
@@ -400,13 +436,21 @@ export default function RecordScreen() {
   const [facing, setFacing] = useState<CameraType>('front');
   const [flashOn, setFlashOn] = useState(false);
   const [zoom, setZoom] = useState<0.5 | 1>(1);
-  const [kept, setKept] = useState<Record<number, KeptClip>>({});
+  const [kept, setKeptState] = useState<Record<number, KeptClip>>({});
+  // Background jobs read the latest kept map without waiting for a render.
+  const keptRef = useRef<Record<number, KeptClip>>({});
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [, setPendingClip] = useState<PendingClip | null>(null);
+  const [pendingClip, setPendingClip] = useState<PendingClip | null>(null);
   const [pendingSaved, setPendingSaved] = useState(false);
-  const [pendingThumb, setPendingThumb] = useState<string | null>(null);
   const [pendingDurationMs, setPendingDurationMs] = useState(0);
+  const [openingEditor, setOpeningEditor] = useState(false);
+  // Set by Send: the post submits itself as soon as the queue drains.
+  const autoSubmitRef = useRef(false);
+  const [textEdit, setTextEdit] = useState<{
+    boxId: string | null;
+    session: number;
+  } | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [speed, setSpeed] = useState<PrompterSpeed>(1);
   const [takeCount, setTakeCount] = useState(0);
@@ -449,7 +493,6 @@ export default function RecordScreen() {
       cancelled = true;
     };
   }, [profile]);
-  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [subtitlesY, setSubtitlesY] = useState<number>(DEFAULT_SUBTITLES_Y);
   const editorTimelineRef = useRef<EditTimeline | null>(null);
   const storedEditsRef = useRef<StoredEdits>(emptyStoredEdits());
@@ -459,11 +502,16 @@ export default function RecordScreen() {
   const cueTokensRef = useRef<Record<number, number>>({});
   const aiCuesRef = useRef<Record<number, SlotCue>>({});
   const [cuePendingSlots, setCuePendingSlots] = useState<number[]>([]);
-  // Speech bounds per clip uri; a uri that is present was already handled
-  // this session, so re-entering the editor never re-trims it.
-  const speechBoundsRef = useRef<Record<string, SpeechBounds | null>>({});
+  // Speech analysis is shared between the background job and the editor:
+  // one promise per clip uri, one trim per piece, never on an exported file.
+  const speechBoundsRef = useRef<Record<string, Promise<SpeechBounds | null>>>({});
+  const speechTrimmedPiecesRef = useRef(new Set<string>());
+  const exportedUrisRef = useRef(new Set<string>());
+  const anySpeechTrimRef = useRef(false);
   const speechPillShownRef = useRef(false);
   const [speechTrimmed, setSpeechTrimmed] = useState(false);
+  // Bumped per slot on every new take so a job for an older take never lands.
+  const takeTokenRef = useRef<Record<number, number>>({});
   const signedUrlCache = useRef<Record<string, string>>({});
   const editsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const returnToEditorRef = useRef(false);
@@ -479,6 +527,20 @@ export default function RecordScreen() {
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
   const saveTokenRef = useRef(0);
+
+  const uploadQueue = useMemo(
+    () => getClipUploadQueue(`${isAssignment ? 'a' : 't'}:${id ?? ''}`),
+    [isAssignment, id],
+  );
+  const queueState = useClipUploadQueue(uploadQueue);
+
+  const setKept = useCallback(
+    (update: (prev: Record<number, KeptClip>) => Record<number, KeptClip>) => {
+      keptRef.current = update(keptRef.current);
+      setKeptState(keptRef.current);
+    },
+    [],
+  );
 
   const brief = isAssignment ? assignment?.briefs ?? null : null;
   const typeMeta = usePostTypeMeta(brief?.post_type_id ?? null);
@@ -610,7 +672,7 @@ export default function RecordScreen() {
                 localUri: null,
               };
             }
-            setKept(resumed);
+            setKept(() => resumed);
           }
         } else {
           const t = await getTask(id);
@@ -872,12 +934,8 @@ export default function RecordScreen() {
         };
         setPendingClip(captured);
         setPendingSaved(false);
-        setPendingThumb(null);
         setPendingDurationMs(captured.durationMs);
         setPhase('between');
-        void VideoThumbnails.getThumbnailAsync(uri, { time: 0 })
-          .then((t) => setPendingThumb(t.uri))
-          .catch(() => undefined);
         void saveClip(captured);
       } else {
         setPhase('idle');
@@ -975,47 +1033,27 @@ export default function RecordScreen() {
 
   const onStagePress = useDoubleTap(flipCamera);
 
-  /** Stop saves this clip: probe, upload the draft, keep the slot. */
+  /** Stop keeps this take locally: probe its length and hold the slot. The
+   * upload and any export run in the background queue once it is accepted. */
   async function saveClip(captured: PendingClip) {
     if (!profile || activeClip === null) return;
     const token = ++saveTokenRef.current;
+    const slot = activeClip.slotIndex;
     try {
       const durationMs = await probeDurationMs(captured.uri, captured.durationMs);
-      let storagePath: string | null = null;
-      if (assignment) {
-        storagePath = draftClipPath(
-          profile.active_company_id,
-          assignment.id,
-          activeClip.slotIndex,
-        );
-        await uploadClip(captured.uri, storagePath);
-        if (saveTokenRef.current !== token) return;
-        const segment: DraftSegment = {
-          slot_index: activeClip.slotIndex,
-          kind: activeClip.kind,
-          storage_path: storagePath,
-          duration_ms: durationMs,
-        };
-        await saveDraftSegment({
-          companyId: profile.active_company_id,
-          assignmentId: assignment.id,
-          creatorId: profile.id,
-          segment,
-        });
-        if (saveTokenRef.current !== token) return;
-        // A new clip means the old cue and transcript no longer apply.
-        delete aiCuesRef.current[activeClip.slotIndex];
-        commitStoredEdits(withSlotCue(storedEditsRef.current, activeClip.slotIndex, null, []));
-        fetchClipCue(activeClip.slotIndex, storagePath, false);
-      }
       if (saveTokenRef.current !== token) return;
+      takeTokenRef.current[slot] = (takeTokenRef.current[slot] ?? 0) + 1;
+      uploadQueue.drop(slot);
+      // A new clip means the old cue and transcript no longer apply.
+      delete aiCuesRef.current[slot];
+      commitStoredEdits(withSlotCue(storedEditsRef.current, slot, null, []));
       setKept((prev) => ({
         ...prev,
-        [activeClip.slotIndex]: {
-          slotIndex: activeClip.slotIndex,
+        [slot]: {
+          slotIndex: slot,
           kind: activeClip.kind,
           durationMs,
-          storagePath,
+          storagePath: null,
           localUri: captured.uri,
         },
       }));
@@ -1033,6 +1071,130 @@ export default function RecordScreen() {
     }
   }
 
+  /** Background work for one kept slot: trim a fresh take to speech, export
+   * the slot when its cut differs from the source, upload, write the draft.
+   * Reads the latest refs when it runs so queued edits are never stale. */
+  async function runSlotJob(slot: number): Promise<void> {
+    const clip = keptRef.current[slot];
+    if (clip === undefined || !profile) return;
+    const take = takeTokenRef.current[slot] ?? 0;
+    const stale = () => takeTokenRef.current[slot] !== take;
+
+    let timeline =
+      editorTimelineRef.current ?? timelineFromStored([], storedEditsRef.current);
+    if (useEditor && clip.localUri !== null) {
+      const pieces = slotPieces(timeline, slot);
+      const same = pieces.length > 0 && pieces[0].sourceUri === clip.localUri;
+      if (!same) {
+        timeline = replaceSlot(timeline, {
+          slotIndex: slot,
+          sourceUri: clip.localUri,
+          durationMs: clip.durationMs,
+        });
+      }
+      timeline = (await trimToSpeech(timeline, [slot])).timeline;
+      if (stale()) return;
+      timeline = withSlotPieces(
+        editorTimelineRef.current ?? timeline,
+        slot,
+        slotPieces(timeline, slot),
+      );
+      editorTimelineRef.current = timeline;
+    }
+
+    const snapshot = slotPieces(timeline, slot);
+    const needsExport =
+      useEditor && snapshot.length > 0 && !slotIsUntouched(timeline, slot);
+    const needsUpload = assignment !== null && (needsExport || clip.storagePath === null);
+    if (!needsExport && !needsUpload) return;
+
+    let uri = clip.localUri;
+    let durationMs = clip.durationMs;
+    if (needsExport) {
+      const result = await exportTimeline(
+        toNativeTimeline({ ...timeline, pieces: snapshot }),
+      );
+      uri = result.uri;
+      durationMs = Math.round(result.durationMs);
+    }
+    if (uri === null) throw new Error('A clip is missing. Record it again.');
+    if (stale()) return;
+
+    let storagePath = clip.storagePath;
+    if (assignment && needsUpload) {
+      storagePath = draftClipPath(profile.active_company_id, assignment.id, slot);
+      await uploadClip(uri, storagePath);
+      if (stale()) return;
+      const segment: DraftSegment = {
+        slot_index: slot,
+        kind: clip.kind,
+        storage_path: storagePath,
+        duration_ms: durationMs,
+      };
+      await saveDraftSegment({
+        companyId: profile.active_company_id,
+        assignmentId: assignment.id,
+        creatorId: profile.id,
+        segment,
+      });
+    }
+    if (stale()) return;
+
+    const current = editorTimelineRef.current ?? timeline;
+    // The creator cut this slot again while it exported; the drain check
+    // queues it once more with the newer cut.
+    if (needsExport && !samePieces(slotPieces(current, slot), snapshot)) return;
+
+    if (needsExport) {
+      exportedUrisRef.current.add(uri);
+      // The exported file is the slot's clip now, so its cue and transcript
+      // move from source ms to exported ms.
+      const stored = remapSlotEditsToExport(storedEditsRef.current, slot, snapshot);
+      storedEditsRef.current = stored;
+      setStoredEdits(stored);
+      const next = replaceSlot(current, { slotIndex: slot, sourceUri: uri, durationMs });
+      editorTimelineRef.current = next;
+      if (assignment) {
+        saveDraftEdits({
+          companyId: profile.active_company_id,
+          assignmentId: assignment.id,
+          creatorId: profile.id,
+          edits: serializeEdits(next, stored),
+        }).catch(() => undefined);
+      }
+    }
+    const finalUri = uri;
+    const finalPath = storagePath;
+    setKept((prev) => {
+      const before = prev[slot];
+      if (before === undefined) return prev;
+      return {
+        ...prev,
+        [slot]: { ...before, durationMs, storagePath: finalPath, localUri: finalUri },
+      };
+    });
+    if (assignment && clip.storagePath === null && finalPath !== null) {
+      fetchClipCue(slot, finalPath, false);
+    }
+  }
+
+  /** Slots whose stored clip is behind what the creator sees. */
+  function pendingSlots(): number[] {
+    const timeline = editorTimelineRef.current;
+    return plan
+      .map((c) => c.slotIndex)
+      .filter((slot) => {
+        const k = keptRef.current[slot];
+        if (k === undefined) return false;
+        if (assignment && k.storagePath === null) return true;
+        return (
+          timeline !== null &&
+          slotPieces(timeline, slot).length > 0 &&
+          !slotIsUntouched(timeline, slot)
+        );
+      });
+  }
+
   function redoClip() {
     saveTokenRef.current += 1;
     setPendingClip(null);
@@ -1040,15 +1202,22 @@ export default function RecordScreen() {
     setPhase('idle');
   }
 
-  function nextClip() {
+  /** Next or Finish on the between screen: hand the take to the queue. */
+  function acceptClip() {
+    if (!pendingSaved || activeClip === null) return;
     setPendingClip(null);
+    uploadQueue.enqueue(activeClip.slotIndex, runSlotJob);
     if (returnToEditorRef.current) {
       returnToEditorRef.current = false;
       void processPost();
       return;
     }
     const next = plan.findIndex((c) => kept[c.slotIndex] === undefined);
-    if (next !== -1) setActiveIndex(next);
+    if (next === -1) {
+      void processPost();
+      return;
+    }
+    setActiveIndex(next);
     setPhase('idle');
   }
 
@@ -1064,28 +1233,41 @@ export default function RecordScreen() {
     throw new Error('A clip is missing. Record it again.');
   }
 
+  function speechBoundsFor(uri: string): Promise<SpeechBounds | null> {
+    const cached = speechBoundsRef.current[uri];
+    if (cached !== undefined) return cached;
+    const pending = speechBounds(uri).catch((): SpeechBounds | null => null);
+    speechBoundsRef.current[uri] = pending;
+    return pending;
+  }
+
   /** Trim every still untouched slot to where the creator speaks. Clips
-   * without a readable audio track (remote or silent) are left whole. */
+   * without a readable audio track (remote or silent) are left whole; an
+   * exported clip or a piece already trimmed once is never trimmed again. */
   async function trimToSpeech(
     timeline: EditTimeline,
+    onlySlots?: number[],
   ): Promise<{ timeline: EditTimeline; trimmed: boolean }> {
     let next = timeline;
     let trimmed = false;
     for (const slot of slotIndices(timeline)) {
+      if (onlySlots !== undefined && !onlySlots.includes(slot)) continue;
       const piece = untrimmedPiece(next, slot);
-      if (piece === null || piece.sourceUri in speechBoundsRef.current) continue;
-      let bounds: SpeechBounds | null = null;
-      try {
-        bounds = await speechBounds(piece.sourceUri);
-      } catch {
-        bounds = null;
+      if (
+        piece === null ||
+        exportedUrisRef.current.has(piece.sourceUri) ||
+        speechTrimmedPiecesRef.current.has(piece.id)
+      ) {
+        continue;
       }
-      speechBoundsRef.current[piece.sourceUri] = bounds;
+      speechTrimmedPiecesRef.current.add(piece.id);
+      const bounds = await speechBoundsFor(piece.sourceUri);
       if (bounds === null) continue;
       const after = trimPiece(next, piece.id, { inMs: bounds.startMs, outMs: bounds.endMs });
       if (after !== next) {
         next = after;
         trimmed = true;
+        anySpeechTrimRef.current = true;
       }
     }
     return { timeline: next, trimmed };
@@ -1116,7 +1298,7 @@ export default function RecordScreen() {
     }
     const auto = await trimToSpeech(timeline);
     timeline = auto.timeline;
-    const showPill = auto.trimmed && !speechPillShownRef.current;
+    const showPill = anySpeechTrimRef.current && !speechPillShownRef.current;
     if (showPill) speechPillShownRef.current = true;
     setSpeechTrimmed(showPill);
     editorTimelineRef.current = timeline;
@@ -1134,19 +1316,17 @@ export default function RecordScreen() {
     setEditorSession((n) => n + 1);
   }
 
+  /** Open the review step right away; the queue keeps finishing clips behind it. */
   async function processPost() {
+    if (openingEditor) return;
     setPendingClip(null);
-    setPhase('processing');
-    const startedAt = Date.now();
+    setOpeningEditor(true);
     try {
+      const clipsNow = keptRef.current;
       const clips = plan
-        .filter((c) => kept[c.slotIndex] !== undefined)
-        .map((c) => kept[c.slotIndex]);
+        .filter((c) => clipsNow[c.slotIndex] !== undefined)
+        .map((c) => clipsNow[c.slotIndex]);
       const uris = await Promise.all(clips.map(clipUri));
-      const waitLeft = PROCESSING_MIN_MS - (Date.now() - startedAt);
-      if (waitLeft > 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, waitLeft));
-      }
       if (useEditor) {
         await prepareEditor(clips, uris);
         setReviewUris([]);
@@ -1161,6 +1341,8 @@ export default function RecordScreen() {
       setErrorToast(
         e instanceof Error ? e.message : 'Could not load your clips. Try again.',
       );
+    } finally {
+      setOpeningEditor(false);
     }
   }
 
@@ -1271,87 +1453,56 @@ export default function RecordScreen() {
     );
   }
 
-  /** Bake every edited slot into a fresh clip, swap it into the kept map and
-   * the draft, then hand the result to the normal submit path. */
-  async function sendEdited() {
+  /** Send for approval without a blocking step: anything still to export or
+   * upload goes to the queue and the post submits itself once it drains. */
+  function requestSubmit() {
     if (!profile || submitting) return;
-    const timeline = editorTimelineRef.current;
-    if (!timeline) return;
     setSendOpen(false);
     // A pending debounced edits save could land mid export with stale
-    // segments; every exported slot writes the draft itself below.
+    // segments; every exported slot writes the draft itself.
     if (editsSaveTimer.current) {
       clearTimeout(editsSaveTimer.current);
       editsSaveTimer.current = null;
     }
-    const edited = slotIndices(timeline).filter((s) => !slotIsUntouched(timeline, s));
-    const keptNow: Record<number, KeptClip> = { ...kept };
-    let current = timeline;
-    let stored = storedEditsRef.current;
-    try {
-      for (let i = 0; i < edited.length; i++) {
-        const slot = edited[i];
-        const before = keptNow[slot];
-        if (before === undefined) continue;
-        setBusyLabel(
-          edited.length === 1
-            ? 'Finishing your clip…'
-            : `Finishing clip ${i + 1} of ${edited.length}…`,
-        );
-        const result = await exportTimeline(
-          toNativeTimeline({ ...current, pieces: slotPieces(current, slot) }),
-        );
-        let storagePath = before.storagePath;
-        if (assignment) {
-          storagePath = draftClipPath(profile.active_company_id, assignment.id, slot);
-          await uploadClip(result.uri, storagePath);
-          await saveDraftSegment({
-            companyId: profile.active_company_id,
-            assignmentId: assignment.id,
-            creatorId: profile.id,
-            segment: {
-              slot_index: slot,
-              kind: before.kind,
-              storage_path: storagePath,
-              duration_ms: Math.round(result.durationMs),
-            },
-          });
-        }
-        keptNow[slot] = {
-          ...before,
-          durationMs: Math.round(result.durationMs),
-          storagePath,
-          localUri: result.uri,
-        };
-        // The exported file is the slot's clip now, so its cue and transcript
-        // move from source ms to exported ms.
-        stored = remapSlotEditsToExport(stored, slot, slotPieces(timeline, slot));
-        storedEditsRef.current = stored;
-        setStoredEdits(stored);
-        current = replaceSlot(current, {
-          slotIndex: slot,
-          sourceUri: result.uri,
-          durationMs: Math.round(result.durationMs),
-        });
-        editorTimelineRef.current = current;
-        setKept({ ...keptNow });
-        if (assignment) {
-          await saveDraftEdits({
-            companyId: profile.active_company_id,
-            assignmentId: assignment.id,
-            creatorId: profile.id,
-            edits: serializeEdits(current, stored),
-          }).catch(() => undefined);
-        }
-      }
-      setBusyLabel('Sending for approval…');
-      await sendForApproval(keptNow, current.gain, submissionCues(stored));
-    } catch (e) {
-      setErrorToast(e instanceof Error ? e.message : 'Could not finish the video. Try again.');
-    } finally {
-      setBusyLabel(null);
+    const pending = pendingSlots();
+    if (pending.length === 0 && uploadQueue.getState().idle) {
+      void sendForApproval(
+        keptRef.current,
+        editorTimelineRef.current?.gain,
+        submissionCues(storedEditsRef.current),
+      );
+      return;
     }
+    autoSubmitRef.current = true;
+    for (const slot of pending) uploadQueue.enqueue(slot, runSlotJob);
   }
+
+  // Once every queued clip is stored, submit; a slot cut again while it was
+  // exporting goes round once more first. A failed slot waits on Retry.
+  const settleRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    settleRef.current = settleQueue;
+  });
+  function settleQueue() {
+    if (!autoSubmitRef.current || submitting) return;
+    const state = uploadQueue.getState();
+    if (!state.idle || state.failed.length > 0) return;
+    const pending = pendingSlots();
+    if (pending.length > 0) {
+      for (const slot of pending) uploadQueue.enqueue(slot, runSlotJob);
+      return;
+    }
+    autoSubmitRef.current = false;
+    void sendForApproval(
+      keptRef.current,
+      editorTimelineRef.current?.gain,
+      submissionCues(storedEditsRef.current),
+    );
+  }
+  useEffect(
+    () => uploadQueue.subscribe(() => settleRef.current()),
+    [uploadQueue],
+  );
 
   async function sendForApproval(
     keptOverride?: Record<number, KeptClip>,
@@ -1492,6 +1643,68 @@ export default function RecordScreen() {
           textY: reviewSegment.text_y,
         }).length > 0));
 
+  const textOverlay = parseTextOverlay(brief?.text_overlay);
+  const activeBoxes = useMemo<OverlayBox[]>(
+    () =>
+      activeSegment !== null && textOverlay.enabled && activeSegment.show_on_screen
+        ? parseOverlayBoxes(activeSegment.overlay_style, {
+            text: activeSegment.overlay_text,
+            textY: activeSegment.text_y,
+          })
+        : [],
+    [activeSegment, textOverlay.enabled],
+  );
+  const canEditText =
+    brief !== null && activeSegment !== null && textOverlay.enabled;
+
+  /** Optimistic local update, then the server validates and stores the boxes. */
+  function commitActiveBoxes(boxes: OverlayBox[]) {
+    if (activeSegment === null) return;
+    const segmentId = activeSegment.id;
+    setBriefSegments((prev) =>
+      prev.map((s) => (s.id === segmentId ? segmentWithBoxes(s, boxes) : s)),
+    );
+    creatorEditSegmentBoxes({ segmentId, boxes }).catch(() =>
+      setErrorToast('Could not save that text. Try again.'),
+    );
+  }
+
+  function patchActiveBox(boxId: string, patch: BoxPatch) {
+    commitActiveBoxes(activeBoxes.map((b) => (b.id === boxId ? { ...b, ...patch } : b)));
+  }
+
+  function openTextEdit(boxId: string | null) {
+    setTextEdit((prev) => ({ boxId, session: (prev?.session ?? 0) + 1 }));
+  }
+
+  function finishTextEdit(text: string) {
+    const edit = textEdit;
+    setTextEdit(null);
+    if (edit === null) return;
+    if (edit.boxId === null) {
+      const like = activeBoxes[0];
+      commitActiveBoxes([
+        ...activeBoxes,
+        {
+          id: `box-${Date.now().toString(36)}`,
+          text,
+          color: like?.color ?? CLASSIC_TEXT_COLOR,
+          bg: like?.bg ?? false,
+          ...autoLayoutBox(text, activeBoxes.length),
+        },
+      ]);
+      return;
+    }
+    commitActiveBoxes(activeBoxes.map((b) => (b.id === edit.boxId ? { ...b, text } : b)));
+  }
+
+  function removeEditedBox() {
+    const edit = textEdit;
+    setTextEdit(null);
+    if (edit === null || edit.boxId === null) return;
+    commitActiveBoxes(activeBoxes.filter((b) => b.id !== edit.boxId));
+  }
+
   function onClose() {
     if (submitting) return;
     if (phase === 'countdown') {
@@ -1530,7 +1743,6 @@ export default function RecordScreen() {
   const showPrompt =
     activeClip !== null &&
     (phase === 'idle' || phase === 'countdown' || phase === 'recording');
-  const submitCount = keptCount;
   const clipNumber = (activeIndex ?? 0) + 1;
   const toGo = plan.filter(
     (c) =>
@@ -1541,19 +1753,82 @@ export default function RecordScreen() {
   const reviewData = brief ?? null;
   const promptMaxHeight = Math.round((stageSize?.h ?? 640) * 0.22);
   const headerTop = insets.top + 8 + (showPrompt ? promptHeight + 10 : 0);
+  const frame = stageSize !== null ? coverFrame(stageSize.w, stageSize.h) : null;
+  const queueLabel = openingEditor
+    ? 'Getting your edit ready…'
+    : clipQueueLabel(queueState);
+  const failedSlot = queueState.failed[0];
+  const failedLabel =
+    failedSlot !== undefined
+      ? `${plan.find((c) => c.slotIndex === failedSlot)?.label ?? 'A clip'} did not upload.`
+      : null;
+
+  const headerBar = (
+    <View style={[styles.topBar, { paddingTop: headerTop }]} pointerEvents="box-none">
+      <View style={styles.progressRow}>
+        {plan.map((c, i) => {
+          const isDone = kept[c.slotIndex] !== undefined;
+          const isActive = i === activeIndex;
+          const fill =
+            isActive && phase === 'recording'
+              ? Math.min(elapsedMs / PROGRESS_REF_MS, 1)
+              : 0;
+          return (
+            <View key={c.slotIndex} style={styles.progressTrack}>
+              {isDone ? (
+                <View style={styles.progressDone} />
+              ) : fill > 0 ? (
+                <>
+                  <View style={[styles.progressActive, { flex: fill }]} />
+                  <View style={{ flex: 1 - fill }} />
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.headerRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          hitSlop={10}
+          style={styles.closeBtn}
+        >
+          <Icon name="x" size={24} color={color.white} />
+        </Pressable>
+        {phase === 'recording' ? (
+          <View style={styles.recPill}>
+            <View style={styles.recDot} />
+            <Text style={styles.recPillText}>{formatMs(elapsedMs)}</Text>
+          </View>
+        ) : (
+          <View style={styles.clipPill}>
+            <Text style={styles.clipPillText}>
+              {activeClip?.label ?? 'Clip'} · {clipNumber} of {plan.length}
+            </Text>
+          </View>
+        )}
+        <View style={styles.headerSpacer} />
+      </View>
+    </View>
+  );
+
+  const shotCard =
+    activeSegment && frame && activeSegment.layout !== 'green_screen' ? (
+      <SegmentOverlayPreview
+        segment={{ ...activeSegment, show_on_screen: false }}
+        shot={activeShot}
+        stageWidth={frame.width}
+        stageHeight={frame.height}
+        overlay={textOverlay}
+        recording={phase === 'recording'}
+      />
+    ) : null;
 
   return (
     <View style={styles.root}>
-      {phase === 'processing' ? (
-        <View style={[styles.processing, { paddingTop: insets.top }]}>
-          <SpinnerRing />
-          <Text style={styles.processingTitle}>Processing your post…</Text>
-          <Text style={styles.processingSub}>
-            Stitching {submitCount} {submitCount === 1 ? 'clip' : 'clips'},
-            adding your assets and captions.
-          </Text>
-        </View>
-      ) : phase === 'review' && useEditor && editorInitial !== null ? (
+      {phase === 'review' && useEditor && editorInitial !== null ? (
         <PostEditor
           key={editorSession}
           slots={editorSlots}
@@ -1593,7 +1868,7 @@ export default function RecordScreen() {
             editorTimelineRef.current = timeline;
             setSendOpen(true);
           }}
-          busyLabel={busyLabel ?? (submitting ? 'Sending for approval…' : null)}
+          busyLabel={submitting ? 'Sending for approval…' : null}
           showPlaceHint={!placedOnce}
           topInset={insets.top}
           bottomInset={insets.bottom}
@@ -1751,7 +2026,7 @@ export default function RecordScreen() {
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Send for approval"
-              onPress={() => void sendForApproval()}
+              onPress={requestSubmit}
               disabled={submitting}
               style={[styles.sendBtn, submitting && styles.sendBtnOff]}
             >
@@ -1767,346 +2042,287 @@ export default function RecordScreen() {
           </Animated.View>
         </View>
       ) : (
-        <>
-          <View
-            style={styles.stage}
-            onLayout={(e) =>
-              setStageSize({
-                w: e.nativeEvent.layout.width,
-                h: e.nativeEvent.layout.height,
-              })
-            }
-          >
-            {cameraMounted ? (
-              <Pressable
-                accessibilityLabel="Camera preview. Double tap to flip."
-                onPress={onStagePress}
+        <View
+          style={styles.stage}
+          onLayout={(e) =>
+            setStageSize({
+              w: e.nativeEvent.layout.width,
+              h: e.nativeEvent.layout.height,
+            })
+          }
+        >
+          {cameraMounted ? (
+            <Pressable
+              accessibilityLabel="Camera preview. Double tap to flip."
+              onPress={onStagePress}
+              style={StyleSheet.absoluteFill}
+            >
+              <CameraView
+                ref={cameraRef}
                 style={StyleSheet.absoluteFill}
-              >
-                <CameraView
-                  ref={cameraRef}
-                  style={StyleSheet.absoluteFill}
-                  facing={facing}
-                  selectedLens={selectedLens}
-                  mode="video"
-                  mute={false}
-                  mirror={facing === 'front'}
-                  videoQuality="720p"
-                  enableTorch={flashOn && facing === 'back'}
-                  onCameraReady={() => setCameraReady(true)}
-                  onMountError={(e) => {
-                    setCameraReady(false);
-                    Alert.alert(
-                      'Camera failed',
-                      e.message ||
-                        'Could not start the camera. Close and open this screen again.',
-                    );
-                  }}
-                />
-              </Pressable>
-            ) : null}
-
-            {greenScreenActive && activeShot ? (
-              // The camera preview layer is never translucent on iOS, so the
-              // green screen media sits over it instead of under it.
-              <View style={styles.greenScreenLayer} pointerEvents="none">
-                <GreenScreenBackdrop
-                  shot={activeShot}
-                  recording={phase === 'recording'}
-                />
-              </View>
-            ) : null}
-
-            {needsPermissionGate ? (
-              <View style={styles.permissionGate}>
-                <Text style={styles.permissionTitle}>Camera and mic needed</Text>
-                <Text style={styles.permissionBody}>
-                  Allow both so you can record each clip in Noni with the
-                  teleprompter.
-                </Text>
-                <Pressable
-                  style={styles.permissionBtn}
-                  onPress={() => {
-                    const blocked =
-                      (cameraPermission !== null &&
-                        !cameraPermission.granted &&
-                        !cameraPermission.canAskAgain) ||
-                      (micPermission !== null &&
-                        !micPermission.granted &&
-                        !micPermission.canAskAgain);
-                    if (blocked) void Linking.openSettings();
-                    else void ensurePermissions();
-                  }}
-                >
-                  <Text style={styles.permissionBtnText}>Allow access</Text>
-                </Pressable>
-              </View>
-            ) : null}
-
-            {frontGlow ? (
-              <View style={styles.frontGlow} pointerEvents="none" />
-            ) : null}
-
-            {activeSegment && stageSize && phase !== 'between' ? (
-              <SegmentOverlayPreview
-                segment={activeSegment}
-                shot={activeShot}
-                stageWidth={stageSize.w}
-                stageHeight={stageSize.h}
-                overlay={parseTextOverlay(brief?.text_overlay)}
-                recording={phase === 'recording'}
-              />
-            ) : null}
-
-            <View
-              style={[
-                styles.topBar,
-                { paddingTop: headerTop },
-              ]}
-            >
-              <View style={styles.progressRow}>
-                {plan.map((c, i) => {
-                  const isDone = kept[c.slotIndex] !== undefined;
-                  const isActive = i === activeIndex;
-                  const fill =
-                    isActive && phase === 'recording'
-                      ? Math.min(elapsedMs / PROGRESS_REF_MS, 1)
-                      : 0;
-                  return (
-                    <View key={c.slotIndex} style={styles.progressTrack}>
-                      {isDone ? (
-                        <View style={styles.progressDone} />
-                      ) : fill > 0 ? (
-                        <>
-                          <View
-                            style={[styles.progressActive, { flex: fill }]}
-                          />
-                          <View style={{ flex: 1 - fill }} />
-                        </>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
-              <View style={styles.headerRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Close"
-                  onPress={onClose}
-                  hitSlop={10}
-                >
-                  <Icon name="x" size={26} color={color.white} />
-                </Pressable>
-                {phase === 'recording' ? (
-                  <View style={styles.recPill}>
-                    <View style={styles.recDot} />
-                    <Text style={styles.recPillText}>{formatMs(elapsedMs)}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.clipPill}>
-                    <Text style={styles.clipPillText}>
-                      {activeClip?.label ?? 'Clip'} · {clipNumber} of {plan.length}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.headerSpacer} />
-              </View>
-            </View>
-
-            {showPrompt && activeClip !== null ? (
-              <View
-                style={[
-                  styles.promptSlot,
-                  { top: insets.top + 8, maxHeight: promptMaxHeight },
-                ]}
-                onLayout={(e) => setPromptHeight(e.nativeEvent.layout.height)}
-              >
-                {activeClip.scripted ? (
-                  <TeleprompterOverlay
-                    key={`${activeIndex}-${takeCount}`}
-                    text={activeClip.script}
-                    speed={speed}
-                    running={phase === 'recording'}
-                    maxHeight={promptMaxHeight}
-                  />
-                ) : (
-                  <View style={[styles.talkingPoint, { maxHeight: promptMaxHeight }]}>
-                    <View style={styles.talkingHead}>
-                      <Text style={styles.talkingLabel}>Talk about</Text>
-                      <Text style={styles.talkingHint}>
-                        Say it your way. Not shown on the video
-                      </Text>
-                    </View>
-                    <ScrollView
-                      showsVerticalScrollIndicator={false}
-                      contentContainerStyle={styles.talkingBox}
-                    >
-                      <Text style={styles.talkingText}>{activeClip.script}</Text>
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-            ) : null}
-
-            {capturePhase && phase !== 'between' && activeClip !== null ? (
-              <CameraRail
-                style={{ top: headerTop + 48 }}
                 facing={facing}
-                onFlip={flipCamera}
-                flashOn={flashOn}
-                onToggleFlash={() => setFlashOn((v) => !v)}
-                zoom={zoom}
-                hasUltraWide={lenses.hasUltraWide}
-                onToggleZoom={toggleZoom}
-                speed={speed}
-                onCycleSpeed={cycleSpeed}
-                showSpeed={activeClip.scripted}
+                selectedLens={selectedLens}
+                mode="video"
+                mute={false}
+                mirror={facing === 'front'}
+                videoQuality="720p"
+                enableTorch={flashOn && facing === 'back'}
+                onCameraReady={() => setCameraReady(true)}
+                onMountError={(e) => {
+                  setCameraReady(false);
+                  Alert.alert(
+                    'Camera failed',
+                    e.message ||
+                      'Could not start the camera. Close and open this screen again.',
+                  );
+                }}
+              />
+            </Pressable>
+          ) : null}
+
+          {greenScreenActive && activeShot && phase !== 'between' ? (
+            // The camera preview layer is never translucent on iOS, so the
+            // green screen media sits over it instead of under it.
+            <View style={styles.greenScreenLayer} pointerEvents="none">
+              <GreenScreenBackdrop
+                shot={activeShot}
                 recording={phase === 'recording'}
               />
-            ) : null}
-
-            {phase === 'countdown' ? (
-              <Pressable
-                style={styles.countdownWrap}
-                onPress={() => setPhase('idle')}
-              >
-                <Text style={styles.countdown}>{countdown}</Text>
-              </Pressable>
-            ) : null}
-
-            {phase === 'between' && activeClip !== null ? (
-              <View style={styles.betweenScrim}>
-                <View
-                  style={[
-                    styles.betweenPanel,
-                    { paddingBottom: Math.max(insets.bottom, 14) + 6 },
-                  ]}
-                >
-                  <View style={styles.betweenTop}>
-                    <View style={styles.betweenThumb}>
-                      {pendingThumb !== null ? (
-                        <Image
-                          source={{ uri: pendingThumb }}
-                          style={StyleSheet.absoluteFill}
-                          resizeMode="cover"
-                        />
-                      ) : null}
-                      <View style={styles.betweenThumbGlyph}>
-                        <Icon name="play" size={12} color={color.white} />
-                      </View>
-                    </View>
-                    <View style={styles.betweenText}>
-                      <Text style={styles.betweenTitle}>
-                        {pendingSaved
-                          ? `Clip ${clipNumber} saved · ${formatMs(pendingDurationMs)}`
-                          : `Saving clip ${clipNumber}…`}
-                      </Text>
-                      <Text style={styles.betweenSub}>
-                        {toGo > 0
-                          ? `${toGo} ${toGo === 1 ? 'clip' : 'clips'} to go.`
-                          : 'That was the last one.'}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.betweenDots}>
-                    {plan.map((c, i) => (
-                      <View
-                        key={c.slotIndex}
-                        style={[
-                          styles.betweenDot,
-                          kept[c.slotIndex] !== undefined &&
-                            styles.betweenDotDone,
-                          i === activeIndex && styles.betweenDotActive,
-                        ]}
-                      />
-                    ))}
-                  </View>
-                  <View style={styles.betweenActions}>
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel="Redo this clip"
-                      onPress={redoClip}
-                      style={styles.redoBtn}
-                    >
-                      <Text style={styles.redoText}>Redo clip</Text>
-                    </PressableScale>
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel={toGo > 0 ? 'Next clip' : 'Process post'}
-                      onPress={() => {
-                        if (!pendingSaved) return;
-                        if (toGo > 0) nextClip();
-                        else void processPost();
-                      }}
-                      style={[
-                        styles.nextBtn,
-                        !pendingSaved && styles.nextBtnOff,
-                      ]}
-                    >
-                      <Text style={styles.nextText}>
-                        {toGo > 0 ? 'Next clip' : 'Process post'}
-                      </Text>
-                    </PressableScale>
-                  </View>
-                </View>
-              </View>
-            ) : null}
-          </View>
-
-          {phase !== 'between' ? (
-            <View
-              style={[
-                styles.bottomBar,
-                { paddingBottom: Math.max(insets.bottom, 14) },
-              ]}
-            >
-              <View style={styles.shutterRow}>
-                <View style={styles.shutterSide}>
-                  {phase !== 'recording' && keptCount > 0 ? (
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel={`Finish with ${keptCount} clips`}
-                      onPress={() => void processPost()}
-                      style={styles.finishPill}
-                    >
-                      <Text style={styles.finishText}>
-                        Finish with {keptCount}
-                      </Text>
-                    </PressableScale>
-                  ) : null}
-                </View>
-                {phase === 'recording' ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Stop recording"
-                    onPress={stopClip}
-                    style={[styles.shutter, styles.shutterRecording]}
-                  >
-                    <View style={styles.stopSquare} />
-                  </Pressable>
-                ) : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Start recording"
-                    style={[styles.shutter, !cameraReady && styles.shutterOff]}
-                    disabled={!cameraReady || phase === 'countdown'}
-                    onPress={onShutterPress}
-                  >
-                    <View style={styles.shutterInner} />
-                  </Pressable>
-                )}
-                <View style={styles.shutterSide}>
-                  <Text style={styles.clipsLeft}>
-                    {phase === 'recording'
-                      ? 'Tap to stop'
-                      : `${clipsLeft} ${clipsLeft === 1 ? 'clip' : 'clips'} left`}
-                  </Text>
-                </View>
-              </View>
             </View>
           ) : null}
-        </>
+
+          {needsPermissionGate ? (
+            <View style={styles.permissionGate}>
+              <Text style={styles.permissionTitle}>Camera and mic needed</Text>
+              <Text style={styles.permissionBody}>
+                Allow both so you can record each clip in Noni with the
+                teleprompter.
+              </Text>
+              <Pressable
+                style={styles.permissionBtn}
+                onPress={() => {
+                  const blocked =
+                    (cameraPermission !== null &&
+                      !cameraPermission.granted &&
+                      !cameraPermission.canAskAgain) ||
+                    (micPermission !== null &&
+                      !micPermission.granted &&
+                      !micPermission.canAskAgain);
+                  if (blocked) void Linking.openSettings();
+                  else void ensurePermissions();
+                }}
+              >
+                <Text style={styles.permissionBtnText}>Allow access</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {frontGlow ? (
+            <View style={styles.frontGlow} pointerEvents="none" />
+          ) : null}
+
+          {phase === 'between' && pendingClip !== null && frame !== null ? (
+            <BetweenClipView
+              uri={pendingClip.uri}
+              durationMs={pendingDurationMs}
+              frame={frame}
+              header={headerBar}
+              shotCard={shotCard}
+              boxes={activeBoxes}
+              canEditText={canEditText}
+              onChangeBox={patchActiveBox}
+              onTapBox={(boxId) => openTextEdit(boxId)}
+              onAddText={() => openTextEdit(null)}
+              title={
+                pendingSaved
+                  ? `Clip ${clipNumber} · ${formatMs(pendingDurationMs)}`
+                  : `Saving clip ${clipNumber}…`
+              }
+              subtitle={[
+                toGo > 0
+                  ? `${toGo} ${toGo === 1 ? 'clip' : 'clips'} to go.`
+                  : 'That was the last one.',
+                canEditText ? 'Tap the text to edit it.' : 'Tap to pause.',
+              ].join(' ')}
+              primaryLabel={toGo > 0 ? 'Next clip' : 'Finish'}
+              primaryEnabled={pendingSaved && !openingEditor}
+              onPrimary={acceptClip}
+              onRedo={redoClip}
+              bottomInset={insets.bottom}
+              railTop={headerTop + 48}
+            />
+          ) : (
+            <>
+              {frame !== null ? (
+                <View style={frameStyle(frame)} pointerEvents="none">
+                  {shotCard}
+                </View>
+              ) : null}
+
+              {headerBar}
+
+              {showPrompt && activeClip !== null ? (
+                <View
+                  style={[
+                    styles.promptSlot,
+                    { top: insets.top + 8, maxHeight: promptMaxHeight },
+                  ]}
+                  onLayout={(e) => setPromptHeight(e.nativeEvent.layout.height)}
+                >
+                  {activeClip.scripted ? (
+                    <TeleprompterOverlay
+                      key={`${activeIndex}-${takeCount}`}
+                      text={activeClip.script}
+                      speed={speed}
+                      running={phase === 'recording'}
+                      maxHeight={promptMaxHeight}
+                    />
+                  ) : (
+                    <View style={[styles.talkingPoint, { maxHeight: promptMaxHeight }]}>
+                      <View style={styles.talkingHead}>
+                        <Text style={styles.talkingLabel}>Talk about</Text>
+                        <Text style={styles.talkingHint}>
+                          Say it your way. Not shown on the video
+                        </Text>
+                      </View>
+                      <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.talkingBox}
+                      >
+                        <Text style={styles.talkingText}>{activeClip.script}</Text>
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              ) : null}
+
+              {capturePhase && activeClip !== null ? (
+                <CameraRail
+                  style={{ top: headerTop + 48 }}
+                  facing={facing}
+                  onFlip={flipCamera}
+                  flashOn={flashOn}
+                  onToggleFlash={() => setFlashOn((v) => !v)}
+                  zoom={zoom}
+                  hasUltraWide={lenses.hasUltraWide}
+                  onToggleZoom={toggleZoom}
+                  speed={speed}
+                  onCycleSpeed={cycleSpeed}
+                  showSpeed={activeClip.scripted}
+                  recording={phase === 'recording'}
+                />
+              ) : null}
+
+              {phase === 'countdown' ? (
+                <Pressable
+                  style={styles.countdownWrap}
+                  onPress={() => setPhase('idle')}
+                >
+                  <Text style={styles.countdown}>{countdown}</Text>
+                </Pressable>
+              ) : null}
+
+              {frame !== null ? (
+                // Above every control: the text the render burns in is never
+                // hidden behind chrome.
+                <View style={frameStyle(frame)} pointerEvents="none">
+                  <TextBoxLayer boxes={activeBoxes} frame={frame} editable={false} />
+                </View>
+              ) : null}
+
+              <View
+                style={[
+                  styles.bottomBar,
+                  { paddingBottom: Math.max(insets.bottom, 14) },
+                ]}
+                pointerEvents="box-none"
+              >
+                <View style={styles.shutterRow}>
+                  <View style={styles.shutterSide}>
+                    {phase !== 'recording' && keptCount > 0 ? (
+                      <PressableScale
+                        accessibilityRole="button"
+                        accessibilityLabel={`Finish with ${keptCount} clips`}
+                        onPress={() => void processPost()}
+                        disabled={openingEditor}
+                        style={[styles.finishPill, openingEditor && styles.finishPillOff]}
+                      >
+                        <Text style={styles.finishText}>
+                          Finish with {keptCount}
+                        </Text>
+                      </PressableScale>
+                    ) : null}
+                  </View>
+                  {phase === 'recording' ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Stop recording"
+                      onPress={stopClip}
+                      style={[styles.shutter, styles.shutterRecording]}
+                    >
+                      <View style={styles.stopSquare} />
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Start recording"
+                      style={[styles.shutter, !cameraReady && styles.shutterOff]}
+                      disabled={!cameraReady || phase === 'countdown'}
+                      onPress={onShutterPress}
+                    >
+                      <View style={styles.shutterInner} />
+                    </Pressable>
+                  )}
+                  <View style={styles.shutterSide}>
+                    <Text style={styles.clipsLeft}>
+                      {phase === 'recording'
+                        ? 'Tap to stop'
+                        : `${clipsLeft} ${clipsLeft === 1 ? 'clip' : 'clips'} left`}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+        </View>
       )}
+
+      {queueLabel !== null ? (
+        <View
+          style={[
+            styles.floatingPill,
+            { top: phase === 'review' ? insets.top + 56 : headerTop + 44 },
+          ]}
+          pointerEvents="none"
+        >
+          <UploadPill label={queueLabel} />
+        </View>
+      ) : null}
+      {failedLabel !== null && failedSlot !== undefined ? (
+        <View
+          style={[styles.floatingToast, { bottom: Math.max(insets.bottom, 14) + 128 }]}
+          pointerEvents="box-none"
+        >
+          <UploadFailedToast
+            message={failedLabel}
+            onRetry={() => uploadQueue.retry(failedSlot)}
+          />
+        </View>
+      ) : null}
+
+      <TextEditSheet
+        key={textEdit?.session ?? 0}
+        visible={textEdit !== null}
+        isNew={textEdit?.boxId === null}
+        initialText={
+          textEdit !== null && textEdit.boxId !== null
+            ? activeBoxes.find((b) => b.id === textEdit.boxId)?.text ?? ''
+            : ''
+        }
+        onDone={finishTextEdit}
+        onRemove={removeEditedBox}
+        onClose={() => setTextEdit(null)}
+      />
 
       <SheetShell visible={sendOpen} onClose={() => setSendOpen(false)}>
         <Text style={styles.reviewLabel}>Autofilled from the brief</Text>
@@ -2138,7 +2354,7 @@ export default function RecordScreen() {
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Send for approval"
-            onPress={() => void sendEdited()}
+            onPress={requestSubmit}
             style={[styles.sendBtn, styles.sendGrow]}
           >
             <Icon name="send" size={19} color={color.white} />
@@ -2197,10 +2413,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   stage: {
-    flex: 1,
-    width: '100%',
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
-    backgroundColor: color.ink800,
+    backgroundColor: color.ink900,
+  },
+  floatingPill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  floatingToast: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 21,
   },
   permissionGate: {
     ...StyleSheet.absoluteFill,
@@ -2277,7 +2506,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerSpacer: {
-    width: 26,
+    width: 40,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: color.inkA55,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   clipPill: {
     paddingVertical: 6,
@@ -2366,105 +2603,15 @@ const styles = StyleSheet.create({
     fontSize: 96,
     fontWeight: type.weight.heavy,
   },
-  betweenScrim: {
-    ...StyleSheet.absoluteFill,
-    justifyContent: 'flex-end',
-    backgroundColor: color.scrim,
-    zIndex: 7,
-  },
-  betweenPanel: {
-    paddingHorizontal: space[7],
-    paddingTop: space[6],
-    gap: 14,
-    backgroundColor: color.scrimStrong,
-  },
-  betweenTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  betweenThumb: {
-    width: 46,
-    height: 62,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: color.white,
-    backgroundColor: color.ink800,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  betweenThumbGlyph: {
-    position: 'absolute',
-    alignSelf: 'center',
-  },
-  betweenText: {
-    flex: 1,
-    gap: 2,
-  },
-  betweenTitle: {
-    color: color.white,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.heavy,
-  },
-  betweenSub: {
-    color: color.whiteA75,
-    fontSize: type.size.chip,
-  },
-  betweenDots: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  betweenDot: {
-    width: 6,
-    height: 6,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA28,
-  },
-  betweenDotDone: {
-    backgroundColor: color.white,
-  },
-  betweenDotActive: {
-    backgroundColor: color.accent,
-  },
-  betweenActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  redoBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  redoText: {
-    color: color.white,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-  },
-  nextBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: radius.pill,
-    backgroundColor: color.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nextBtnOff: {
-    opacity: 0.5,
-  },
-  nextText: {
-    color: color.white,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.heavy,
-  },
   bottomBar: {
-    backgroundColor: color.ink900,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: space[7],
     paddingTop: space[4],
     gap: 14,
+    zIndex: 8,
   },
   shutterRow: {
     flexDirection: 'row',
@@ -2480,6 +2627,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: radius.pill,
     backgroundColor: color.whiteA16,
+  },
+  finishPillOff: {
+    opacity: 0.5,
   },
   finishText: {
     color: color.white,
@@ -2517,34 +2667,6 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 8,
     backgroundColor: color.danger,
-  },
-  processing: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    paddingHorizontal: space[10],
-    backgroundColor: color.ink900,
-  },
-  spinnerRing: {
-    width: 54,
-    height: 54,
-    borderRadius: radius.pill,
-    borderWidth: 4,
-    borderColor: color.whiteA28,
-    borderTopColor: color.accent,
-  },
-  processingTitle: {
-    color: color.white,
-    fontSize: type.size.card,
-    fontWeight: type.weight.heavy,
-    textAlign: 'center',
-  },
-  processingSub: {
-    color: color.whiteA75,
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-    textAlign: 'center',
   },
   review: {
     flex: 1,

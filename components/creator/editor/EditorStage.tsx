@@ -1,10 +1,13 @@
 // The 9:16 preview card: native composition player underneath, the segment's
-// text boxes, screenshot card and subtitle block on top (all draggable), and
-// the crop gesture layer while the crop tool is open.
-import { forwardRef, useState, type JSX } from 'react';
+// screenshot card and subtitle block (draggable), the creator's text boxes
+// (drag, pinch, tap to select, double tap to edit), and the crop gesture
+// layer while the crop tool is open. Memoised: the parent hands it stable
+// callbacks so playhead ticks do not re-render it.
+import { forwardRef, memo, useMemo, useState, type JSX } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { BriefSegment, TextOverlay } from '../../../lib/briefs-api';
+import type { OverlayBox } from '../../../lib/overlay-boxes';
 import type { EditCrop } from '../../../lib/video-edit';
 import {
   VideoEditorPreview,
@@ -18,7 +21,9 @@ import { color } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { SegmentOverlayPreview, type ShotPreview } from '../SegmentOverlayPreview';
 import { CropGesture } from './CropGesture';
+import type { BoxPlacement } from './StageTextBox';
 import { SubtitlePlacement } from './SubtitlePlacement';
+import { TextBoxLayer } from './TextBoxLayer';
 
 export type StageSize = { w: number; h: number };
 
@@ -35,11 +40,16 @@ export type EditorStageProps = {
   segment: BriefSegment | null;
   shot: ShotPreview | null;
   overlay: TextOverlay;
+  /** Effective text boxes of the clip under the playhead (creator edits applied). */
+  boxes: OverlayBox[];
+  selectedBoxId: string | null;
   /** Cue gates: the playhead is inside the text or media window of the segment. */
   showText: boolean;
   showMedia: boolean;
   subtitles: { y: number } | null;
-  onMoveBox: (boxId: string, x: number, y: number) => void;
+  onSelectBox: (boxId: string) => void;
+  onEditBox: (boxId: string) => void;
+  onCommitBox: (boxId: string, placement: BoxPlacement) => void;
   onMoveCard: (x: number, y: number) => void;
   onMoveSubtitles: (y: number) => void;
   onDragStart: () => void;
@@ -49,8 +59,11 @@ export type EditorStageProps = {
   onCropCommit: (crop: EditCrop) => void;
 };
 
-export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps>(
-  function EditorStage(props, ref): JSX.Element {
+export const EditorStage = memo(
+  forwardRef<VideoEditorPreviewHandle, EditorStageProps>(function EditorStage(
+    props,
+    ref,
+  ): JSX.Element {
     const {
       timeline,
       playing,
@@ -64,10 +77,14 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
       segment,
       shot,
       overlay,
+      boxes,
+      selectedBoxId,
       showText,
       showMedia,
       subtitles,
-      onMoveBox,
+      onSelectBox,
+      onEditBox,
+      onCommitBox,
       onMoveCard,
       onMoveSubtitles,
       onDragStart,
@@ -76,7 +93,8 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
       onCropCommit,
     } = props;
     const [area, setArea] = useState<StageSize | null>(null);
-    const gatedOverlay = showText ? overlay : { ...overlay, enabled: false };
+    // The card layer draws only the screenshot; text boxes have their own layer.
+    const cardOnlyOverlay = useMemo<TextOverlay>(() => ({ ...overlay, enabled: false }), [overlay]);
 
     // Fit a 9:16 card inside the available area with a little breathing room.
     let card: StageSize | null = null;
@@ -89,6 +107,7 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
 
     const cropping = crop !== null;
     const liveCrop = crop ?? { scale: 1, x: 0, y: 0 };
+    const showCard = segment !== null && segment.layout !== 'green_screen' && shot !== null;
 
     return (
       <View
@@ -134,16 +153,28 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
               />
             ) : null}
 
-            {!cropping && segment !== null && cardSize !== null && segment.layout !== 'green_screen' ? (
+            {!cropping && showCard && segment !== null && cardSize !== null ? (
               <SegmentOverlayPreview
                 segment={segment}
                 shot={showMedia ? shot : null}
                 stageWidth={cardSize.w}
                 stageHeight={cardSize.h}
-                overlay={gatedOverlay}
-                onMoveBox={onMoveBox}
+                overlay={cardOnlyOverlay}
                 onMoveCard={onMoveCard}
                 onDragStart={onDragStart}
+              />
+            ) : null}
+
+            {!cropping && showText && cardSize !== null && boxes.length > 0 ? (
+              <TextBoxLayer
+                boxes={boxes}
+                stageWidth={cardSize.w}
+                stageHeight={cardSize.h}
+                selectedBoxId={selectedBoxId}
+                onSelect={onSelectBox}
+                onEdit={onEditBox}
+                onDragStart={onDragStart}
+                onCommit={onCommitBox}
               />
             ) : null}
 
@@ -178,7 +209,7 @@ export const EditorStage = forwardRef<VideoEditorPreviewHandle, EditorStageProps
         ) : null}
       </View>
     );
-  },
+  }),
 );
 
 const styles = StyleSheet.create({

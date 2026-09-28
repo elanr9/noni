@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Image,
+  PanResponder,
   StyleSheet,
   Text,
   View,
@@ -11,7 +12,7 @@ import {
 
 import type { OverlayBox } from '../../lib/overlay-boxes';
 import { color, motion, radius, shadow, type } from '../../theme/tokens';
-import { SlideStage, type SlideInset } from '../SlideStage';
+import { SlideStage, type SlideInset, type SlideStageEditing } from '../SlideStage';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 
@@ -45,6 +46,41 @@ export interface SlideNavProps {
   onMoveInset?: (slideIndex: number, x: number, y: number) => void;
   /** Fires when the creator pages to another slide. */
   onIndexChange?: (slideIndex: number) => void;
+  /** Full stage editing on the current slide; every slide renders on the stage. */
+  editing?: SlideNavEditing;
+  /** Ghost TikTok UI on every slide as safe area guides. */
+  chrome?: boolean;
+  /** Horizontal swipes on the slide page it. */
+  swipe?: boolean;
+}
+
+export interface SlideNavEditing {
+  onMoveBox: (slideIndex: number, boxId: string, x: number, y: number) => void;
+  onScaleBox: (slideIndex: number, boxId: string, size: number) => void;
+  onTapBox: (slideIndex: number, boxId: string) => void;
+  onMoveInset: (slideIndex: number, x: number, y: number) => void;
+  selectedBoxId: string | null;
+}
+
+const SWIPE_MIN_DX = 48;
+
+/** Horizontal swipe pager whose targets are refreshed after each render. */
+function createSwipeGesture() {
+  let page = { go: (_next: number) => undefined as void, index: 0, enabled: false };
+  const responder = PanResponder.create({
+    onMoveShouldSetPanResponder: (_evt, gs) =>
+      page.enabled && Math.abs(gs.dx) > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+    onPanResponderRelease: (_evt, gs) => {
+      if (Math.abs(gs.dx) < SWIPE_MIN_DX) return;
+      page.go(page.index + (gs.dx < 0 ? 1 : -1));
+    },
+  });
+  return {
+    panHandlers: responder.panHandlers,
+    setPage(go: (next: number) => void, index: number, enabled: boolean) {
+      page = { go, index, enabled };
+    },
+  };
 }
 
 const DARK_TINTS = ['#16324A', '#242C3B', '#2E2838', '#1E3A30'];
@@ -62,15 +98,24 @@ function SlideLayer({
   dark,
   onMoveBox,
   onMoveInset,
+  editing,
+  chrome,
 }: {
   slide: SlideNavSlide;
   tint: string;
   dark: boolean;
   onMoveBox?: (boxId: string, x: number, y: number) => void;
   onMoveInset?: (x: number, y: number) => void;
+  editing?: SlideStageEditing;
+  chrome?: boolean;
 }) {
   // Slides with admin-placed boxes render exactly as they will publish.
-  if ((slide.boxes?.length ?? 0) > 0 || slide.inset !== undefined) {
+  if (
+    (slide.boxes?.length ?? 0) > 0 ||
+    slide.inset !== undefined ||
+    editing !== undefined ||
+    chrome === true
+  ) {
     return (
       <SlideStage
         boxes={slide.boxes ?? []}
@@ -80,6 +125,8 @@ function SlideLayer({
         style={StyleSheet.absoluteFill}
         onMoveBox={onMoveBox}
         onMoveInset={onMoveInset}
+        editing={editing}
+        chrome={chrome}
       />
     );
   }
@@ -110,6 +157,9 @@ export function SlideNav({
   onMoveBox,
   onMoveInset,
   onIndexChange,
+  editing,
+  chrome = false,
+  swipe = false,
 }: SlideNavProps) {
   const dark = variant === 'dark';
   const [index, setIndex] = useState(0);
@@ -134,18 +184,35 @@ export function SlideNav({
     }).start();
   };
 
+  // Boxes and the inset claim touches on start, so this only sees swipes on
+  // the bare photo.
+  const [swipeGesture] = useState(() => createSwipeGesture());
+  useEffect(() => {
+    swipeGesture.setPage(go, safeIndex, swipe);
+  });
+
   if (count === 0) return <View style={[styles.root, style]} />;
 
   const current = slides[safeIndex];
   const previous = slides[prevIndex];
+  const stageEditing: SlideStageEditing | undefined = editing
+    ? {
+        onMoveBox: (boxId, x, y) => editing.onMoveBox(safeIndex, boxId, x, y),
+        onScaleBox: (boxId, size) => editing.onScaleBox(safeIndex, boxId, size),
+        onTapBox: (boxId) => editing.onTapBox(safeIndex, boxId),
+        onMoveInset: (x, y) => editing.onMoveInset(safeIndex, x, y),
+        selectedBoxId: editing.selectedBoxId,
+      }
+    : undefined;
 
   return (
-    <View style={[styles.root, style]}>
+    <View style={[styles.root, style]} {...(swipe ? swipeGesture.panHandlers : {})}>
       {prevIndex !== safeIndex && (
         <SlideLayer
           slide={previous}
           tint={tintFor(previous, prevIndex, dark)}
           dark={dark}
+          chrome={chrome}
         />
       )}
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
@@ -161,6 +228,8 @@ export function SlideNav({
           onMoveInset={
             onMoveInset ? (x, y) => onMoveInset(safeIndex, x, y) : undefined
           }
+          editing={stageEditing}
+          chrome={chrome}
         />
       </Animated.View>
 

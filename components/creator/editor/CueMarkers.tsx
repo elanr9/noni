@@ -21,8 +21,33 @@ import {
 } from '../../../lib/video-edit';
 import { color, type } from '../../../theme/tokens';
 
-export const DEFAULT_TEXT_HOLD_MS = 4000;
 export const MIN_TEXT_HOLD_MS = 500;
+
+export type SourceWindow = { startMs: number; endMs: number };
+
+/** The creator narrowed the text window; anything else means the whole clip. */
+export function hasCreatorTextWindow(cue: SlotCue | null): boolean {
+  return cue !== null && cue.source === 'creator' && cue.text_start_ms !== null;
+}
+
+/**
+ * Source ms window the on-screen text covers, matching the render pass: the
+ * whole clip unless the creator set a start (and optionally a hold).
+ */
+export function slotTextWindow(cue: SlotCue | null, pieces: EditPiece[]): SourceWindow {
+  const first = pieces[0];
+  const last = pieces[pieces.length - 1];
+  const clipStart = first ? first.inMs : 0;
+  const clipEnd = last ? last.outMs : 0;
+  if (cue !== null && cue.source === 'creator' && cue.text_start_ms !== null) {
+    const startMs = cue.text_start_ms;
+    return {
+      startMs,
+      endMs: cue.text_hold_ms !== null ? startMs + cue.text_hold_ms : clipEnd,
+    };
+  }
+  return { startMs: clipStart, endMs: clipEnd };
+}
 
 export const CUE_ROW_H = 18;
 export const CUE_ROW_GAP = 2;
@@ -162,10 +187,13 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
   const { slot, pieces, pxPerMs, selectedKind } = props;
   const cue = slot.cue;
   const creator = cue?.source === 'creator';
-  const textStart = cue?.text_start_ms ?? 0;
-  const textEnd = textStart + (cue?.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS);
-  const textX = xForSource(pieces, pxPerMs, textStart);
-  const textW = Math.max(CHIP_MIN_W, xForSource(pieces, pxPerMs, textEnd) - textX);
+  const textCreator = hasCreatorTextWindow(cue);
+  const textWindow = slotTextWindow(
+    cue,
+    pieces.map((p) => p.piece),
+  );
+  const textX = xForSource(pieces, pxPerMs, textWindow.startMs);
+  const textW = Math.max(CHIP_MIN_W, xForSource(pieces, pxPerMs, textWindow.endMs) - textX);
   const mediaX = xForSource(pieces, pxPerMs, cue?.media_start_ms ?? 0);
   const slotStart = pieces[0].x;
   const slotEnd = pieces[pieces.length - 1].x + pieces[pieces.length - 1].width;
@@ -191,7 +219,7 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
           style={[
             styles.chip,
             { left: textX, width: textW },
-            creator ? styles.creator : styles.ai,
+            textCreator ? styles.creator : styles.ai,
             slot.pending && styles.pending,
             selectedKind === 'text' && styles.selected,
           ]}

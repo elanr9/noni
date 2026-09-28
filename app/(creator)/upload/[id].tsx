@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,15 @@ import { FormatTag, TypeTag } from '../../../components/creator/Chips';
 import { scriptBlocks, usePostTypeMeta } from '../../../components/creator/PostCard';
 import { PostPreview } from '../../../components/creator/PostPreview';
 import { SlideNav } from '../../../components/creator/SlideNav';
+import { FrameFit } from '../../../components/creator/slides/FrameFit';
+import {
+  clampBoxSize,
+  segmentBoxes,
+  segmentWithBoxes,
+} from '../../../components/creator/slides/segment-boxes';
+import { SlideToolbar } from '../../../components/creator/slides/SlideToolbar';
+import { TextEditPanel } from '../../../components/creator/slides/TextEditPanel';
+import { useDebouncedCommit } from '../../../components/creator/slides/useDebouncedCommit';
 import { TextColorPicker } from '../../../components/creator/TextColorPicker';
 import { useCreatorToast } from '../../../components/creator/Toast';
 import { DetailSkeleton, SoftToast } from '../../../components/states';
@@ -28,18 +36,23 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { color, motion, radius, shadow, space, type } from '../../../theme/tokens';
 import { useAuth } from '../../../lib/auth';
 import {
+  creatorEditSegmentBoxes,
   creatorPlaceSegment,
   creatorStyleBriefBoxes,
   listBriefSegments,
   parseTalkingPoints,
-  segmentWithBoxMoved,
   segmentWithBoxesStyled,
   signedScreenshotUrl,
   type BriefSegment,
 } from '../../../lib/briefs-api';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
-import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
-import { type SlideInset } from '../../../components/SlideStage';
+import { useKeyboardHeight } from '../../../lib/keyboard';
+import {
+  newOverlayBox,
+  parseOverlayBoxes,
+  type OverlayBox,
+} from '../../../lib/overlay-boxes';
+import { SlideStage, type SlideInset } from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
 import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissions';
@@ -153,7 +166,11 @@ export default function UploadScreen() {
   const [reviewIndex, setReviewIndex] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [tiktokHandle, setTiktokHandle] = useState<string | null>(null);
+  const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [freshBoxId, setFreshBoxId] = useState<string | null>(null);
   const reviewSheet = useRef(new Animated.Value(0)).current;
+  const keyboardHeight = useKeyboardHeight();
+  const { schedule } = useDebouncedCommit();
 
   const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
 
@@ -280,7 +297,7 @@ export default function UploadScreen() {
   const nextEmpty = slides.find((s) => photos[s.slotIndex] === undefined);
 
   async function pickPhoto(slotIndex: number) {
-    if (picking || phase !== 'idle' || !assignment) return;
+    if (picking || phase === 'processing' || !assignment) return;
     setPicking(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -350,22 +367,76 @@ export default function UploadScreen() {
     );
   }
 
-  function persistPlacement(params: Parameters<typeof creatorPlaceSegment>[0]) {
+  // Optimistic: the stage updates now, the save runs once the creator is still.
+  function updateSlideBoxes(
+    slideIndex: number,
+    update: (boxes: OverlayBox[]) => OverlayBox[],
+  ) {
+    const segment = slideSegment(slideIndex);
+    if (!segment) return;
+    const next = update(segmentBoxes(segment));
     setPlacedOnce(true);
-    creatorPlaceSegment(params).catch(() =>
-      setErrorToast('Could not save that position. Try again.'),
+    setBriefSegments((prev) =>
+      prev.map((s) => (s.id === segment.id ? segmentWithBoxes(s, next) : s)),
     );
+    schedule(`boxes:${segment.id}`, () => {
+      creatorEditSegmentBoxes({ segmentId: segment.id, boxes: next }).catch(() =>
+        setErrorToast('Could not save that text. Try again.'),
+      );
+    });
   }
 
   function moveSlideBox(slideIndex: number, boxId: string, x: number, y: number) {
-    const segment = slideSegment(slideIndex);
-    if (!segment) return;
-    setBriefSegments((prev) =>
-      prev.map((s) =>
-        s.id === segment.id ? segmentWithBoxMoved(s, boxId, x, y) : s,
-      ),
+    updateSlideBoxes(slideIndex, (boxes) =>
+      boxes.map((b) => (b.id === boxId ? { ...b, x, y } : b)),
     );
-    persistPlacement({ segmentId: segment.id, box: { id: boxId, x, y } });
+  }
+
+  function scaleSlideBox(slideIndex: number, boxId: string, size: number) {
+    updateSlideBoxes(slideIndex, (boxes) =>
+      boxes.map((b) => (b.id === boxId ? { ...b, size: clampBoxSize(size) } : b)),
+    );
+  }
+
+  function editSlideBox(slideIndex: number, box: OverlayBox) {
+    updateSlideBoxes(slideIndex, (boxes) =>
+      boxes.map((b) => (b.id === box.id ? box : b)),
+    );
+  }
+
+  function deleteSlideBox(slideIndex: number, boxId: string) {
+    updateSlideBoxes(slideIndex, (boxes) => boxes.filter((b) => b.id !== boxId));
+    setSelectedBoxId(null);
+    setFreshBoxId(null);
+  }
+
+  function addSlideBox(slideIndex: number) {
+    if (!slideSegment(slideIndex)) {
+      setErrorToast('Text can only be added once this post has slides.');
+      return;
+    }
+    const id = `box-${Date.now().toString(36)}`;
+    updateSlideBoxes(slideIndex, (boxes) => [
+      ...boxes,
+      newOverlayBox({
+        id,
+        text: 'Your text',
+        style: 'classic',
+        themeColor: null,
+        index: boxes.length,
+      }),
+    ]);
+    setSelectedBoxId(id);
+    setFreshBoxId(id);
+  }
+
+  function finishEditingBox(slideIndex: number, boxId: string, finalText: string) {
+    if (finalText.trim().length === 0) {
+      deleteSlideBox(slideIndex, boxId);
+      return;
+    }
+    setSelectedBoxId(null);
+    setFreshBoxId(null);
   }
 
   // One look for the whole post: a pick on any slide restyles every slide.
@@ -380,12 +451,23 @@ export default function UploadScreen() {
   function moveSlideInset(slideIndex: number, x: number, y: number) {
     const segment = slideSegment(slideIndex);
     if (!segment) return;
+    setPlacedOnce(true);
     setBriefSegments((prev) =>
       prev.map((s) =>
         s.id === segment.id ? { ...s, screenshot_x: x, screenshot_y: y } : s,
       ),
     );
-    persistPlacement({ segmentId: segment.id, screenshot: { x, y } });
+    schedule(`inset:${segment.id}`, () => {
+      creatorPlaceSegment({ segmentId: segment.id, screenshot: { x, y } }).catch(() =>
+        setErrorToast('Could not save that position. Try again.'),
+      );
+    });
+  }
+
+  function changeReviewIndex(next: number) {
+    setReviewIndex(next);
+    setSelectedBoxId(null);
+    setFreshBoxId(null);
   }
 
   const canPlace = slides.some(
@@ -394,6 +476,7 @@ export default function UploadScreen() {
   const reviewSlide = slides[Math.min(reviewIndex, Math.max(slides.length - 1, 0))];
   const reviewBoxes = reviewSlide?.boxes ?? [];
   const reviewSegmentId = slideSegment(reviewIndex)?.id ?? null;
+  const selectedBox = reviewBoxes.find((b) => b.id === selectedBoxId) ?? null;
 
   if (loading) {
     return <DetailSkeleton />;
@@ -440,34 +523,47 @@ export default function UploadScreen() {
             <Text style={styles.reviewHeaderBtn}>Edit photos</Text>
           </PressableScale>
           <Text style={styles.reviewHeaderTitle}>Review</Text>
-          <View style={styles.reviewHeaderSpacer} />
+          <SlideToolbar
+            onAddText={() => addSlideBox(reviewIndex)}
+            onPickPhoto={() => {
+              if (reviewSlide) void pickPhoto(reviewSlide.slotIndex);
+            }}
+            disabled={picking || submitting}
+          />
         </View>
 
-        <View style={styles.reviewStage}>
-          <View style={styles.reviewCard}>
-            <SlideNav
-              variant="dark"
-              slides={slides.map((s) => ({
-                text: s.text.length > 0 ? s.text : undefined,
-                image: photos[s.slotIndex]?.uri,
-                boxes: s.boxes,
-                inset: s.inset,
-              }))}
-              style={StyleSheet.absoluteFill}
-              onMoveBox={moveSlideBox}
-              onMoveInset={moveSlideInset}
-              onIndexChange={setReviewIndex}
-            />
-            {canPlace && !placedOnce ? (
-              <View style={styles.placeHint} pointerEvents="none">
-                <Text style={styles.placeHintText}>
-                  Hold any text or picture to move it
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        </View>
-        {reviewBoxes.length > 0 && reviewSegmentId !== null ? (
+        <FrameFit style={styles.reviewStage} frameStyle={styles.reviewCard}>
+          <SlideNav
+            variant="dark"
+            slides={slides.map((s) => ({
+              image: photos[s.slotIndex]?.uri,
+              boxes: s.boxes,
+              inset: s.inset,
+            }))}
+            style={StyleSheet.absoluteFill}
+            editing={{
+              onMoveBox: moveSlideBox,
+              onScaleBox: scaleSlideBox,
+              onTapBox: (_slideIndex, boxId) => {
+                setFreshBoxId(null);
+                setSelectedBoxId(boxId);
+              },
+              onMoveInset: moveSlideInset,
+              selectedBoxId,
+            }}
+            chrome
+            swipe
+            onIndexChange={changeReviewIndex}
+          />
+          {canPlace && !placedOnce ? (
+            <View style={styles.placeHint} pointerEvents="none">
+              <Text style={styles.placeHintText}>
+                Drag to move, pinch to resize, tap to edit
+              </Text>
+            </View>
+          ) : null}
+        </FrameFit>
+        {selectedBox === null && reviewBoxes.length > 0 && reviewSegmentId !== null ? (
           <View style={styles.colorPicker}>
             <TextColorPicker
               key={reviewSegmentId}
@@ -481,7 +577,7 @@ export default function UploadScreen() {
           style={[
             styles.reviewSheet,
             {
-              paddingBottom: Math.max(insets.bottom, 14) + 6,
+              paddingBottom: Math.max(insets.bottom, 14) + 6 + keyboardHeight,
               transform: [
                 {
                   translateY: reviewSheet.interpolate({
@@ -493,52 +589,67 @@ export default function UploadScreen() {
             },
           ]}
         >
-          <Text style={styles.reviewLabel}>Autofilled from the brief</Text>
-          <Text style={styles.reviewTitle} numberOfLines={2}>
-            {brief.title}
-          </Text>
-          <View style={styles.reviewChips}>
-            <FormatTag format={brief.format} />
-            {typeMeta !== null ? (
-              <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
-            ) : null}
-          </View>
-          {brief.caption ? (
-            <View style={styles.captionBlock}>
-              <Text style={styles.captionLabel}>Caption</Text>
-              <Text style={styles.captionText} numberOfLines={4}>
-                {brief.caption}
+          {selectedBox !== null ? (
+            <TextEditPanel
+              key={selectedBox.id}
+              box={selectedBox}
+              autoFocus={freshBoxId === selectedBox.id}
+              onChange={(box) => editSlideBox(reviewIndex, box)}
+              onDelete={() => deleteSlideBox(reviewIndex, selectedBox.id)}
+              onDone={(finalText) =>
+                finishEditingBox(reviewIndex, selectedBox.id, finalText)
+              }
+            />
+          ) : (
+            <>
+              <Text style={styles.reviewLabel}>Autofilled from the brief</Text>
+              <Text style={styles.reviewTitle} numberOfLines={2}>
+                {brief.title}
               </Text>
-            </View>
-          ) : null}
-          <View style={styles.actionRow}>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Preview post"
-              onPress={() => setPreviewVisible(true)}
-              disabled={submitting}
-              style={styles.previewBtn}
-            >
-              <Icon name="play" size={18} color={color.ink} />
-              <Text style={styles.previewText}>Preview</Text>
-            </PressableScale>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Send for approval"
-              onPress={() => void sendForApproval()}
-              disabled={submitting}
-              style={[styles.sendBtn, submitting && styles.sendBtnOff]}
-            >
-              {submitting ? (
-                <ActivityIndicator color={color.white} />
-              ) : (
-                <Icon name="send" size={19} color={color.white} />
-              )}
-              <Text style={styles.sendText}>
-                {submitting ? 'Sending…' : 'Send for approval'}
-              </Text>
-            </PressableScale>
-          </View>
+              <View style={styles.reviewChips}>
+                <FormatTag format={brief.format} />
+                {typeMeta !== null ? (
+                  <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
+                ) : null}
+              </View>
+              {brief.caption ? (
+                <View style={styles.captionBlock}>
+                  <Text style={styles.captionLabel}>Caption</Text>
+                  <Text style={styles.captionText} numberOfLines={4}>
+                    {brief.caption}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={styles.actionRow}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Preview post"
+                  onPress={() => setPreviewVisible(true)}
+                  disabled={submitting}
+                  style={styles.previewBtn}
+                >
+                  <Icon name="play" size={18} color={color.ink} />
+                  <Text style={styles.previewText}>Preview</Text>
+                </PressableScale>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Send for approval"
+                  onPress={() => void sendForApproval()}
+                  disabled={submitting}
+                  style={[styles.sendBtn, submitting && styles.sendBtnOff]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color={color.white} />
+                  ) : (
+                    <Icon name="send" size={19} color={color.white} />
+                  )}
+                  <Text style={styles.sendText}>
+                    {submitting ? 'Sending…' : 'Send for approval'}
+                  </Text>
+                </PressableScale>
+              </View>
+            </>
+          )}
         </Animated.View>
 
         <PostPreview
@@ -612,10 +723,12 @@ export default function UploadScreen() {
               >
                 {photo !== undefined ? (
                   <>
-                    <Image
-                      source={{ uri: photo.uri }}
+                    <SlideStage
+                      boxes={slide.boxes}
+                      photoUri={photo.uri}
+                      inset={slide.inset}
+                      tint={color.ink800}
                       style={StyleSheet.absoluteFill}
-                      resizeMode="cover"
                     />
                     <View style={styles.tileCheck}>
                       <Icon name="check" size={11} color={color.white} />
@@ -727,8 +840,8 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   tile: {
-    width: 62,
-    height: 82,
+    width: 54,
+    height: 96,
     borderRadius: radius.sm,
     borderWidth: 1.5,
     borderColor: color.lineStrong,
@@ -828,19 +941,12 @@ const styles = StyleSheet.create({
     fontSize: type.size.body,
     fontWeight: type.weight.heavy,
   },
-  reviewHeaderSpacer: {
-    width: 80,
-  },
   reviewStage: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: space[3],
+    paddingHorizontal: space[7],
   },
   reviewCard: {
-    height: '100%',
-    aspectRatio: 4 / 5,
-    maxWidth: '86%',
     borderRadius: radius.xl,
     backgroundColor: color.ink800,
     overflow: 'hidden',

@@ -13,10 +13,26 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { OVERLAY_TEXT_SPEC, type OverlayBox } from '../lib/overlay-boxes';
+import {
+  MAX_BOX_SIZE,
+  MIN_BOX_SIZE,
+  OVERLAY_TEXT_SPEC,
+  type OverlayBox,
+} from '../lib/overlay-boxes';
 import { color } from '../theme/tokens';
 import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
+import { GestureItem } from './creator/slides/GestureItem';
+import { TikTokChrome } from './creator/slides/TikTokChrome';
 import { OverlayTextBox } from './ui/OverlayTextBox';
+
+/** Full creator editing: drag, pinch and tap on boxes, drag on the inset. */
+export type SlideStageEditing = {
+  onMoveBox: (boxId: string, x: number, y: number) => void;
+  onScaleBox: (boxId: string, size: number) => void;
+  onTapBox: (boxId: string) => void;
+  onMoveInset?: PlacementMove;
+  selectedBoxId: string | null;
+};
 
 /** Defaults when the admin attached a picture but never saved a placement.
  * Mirrors renderTimeline.ts (IMAGE_Y / IMAGE_WIDTH). */
@@ -47,6 +63,10 @@ export function SlideStage(props: {
   /** When set, the creator can hold and drag the inset picture. */
   onMoveInset?: PlacementMove;
   onDragStart?: () => void;
+  /** Creator stage editing; replaces the hold and drag handlers above. */
+  editing?: SlideStageEditing;
+  /** Ghost TikTok UI (action column, caption block) as safe area guides. */
+  chrome?: boolean;
 }): JSX.Element {
   const {
     boxes,
@@ -58,6 +78,8 @@ export function SlideStage(props: {
     onMoveBox,
     onMoveInset,
     onDragStart,
+    editing,
+    chrome = false,
   } = props;
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const [insetAspect, setInsetAspect] = useState(9 / 16);
@@ -101,7 +123,29 @@ export function SlideStage(props: {
         </View>
       ) : null}
 
-      {insetUri !== undefined && stage.w > 0 ? (
+      {chrome ? <TikTokChrome stageWidth={stage.w} stageHeight={stage.h} /> : null}
+
+      {insetUri !== undefined && stage.w > 0 && editing !== undefined ? (
+        <GestureItem
+          x={inset?.x ?? SLIDE_INSET_DEFAULTS.x}
+          y={inset?.y ?? SLIDE_INSET_DEFAULTS.y}
+          stageWidth={stage.w}
+          stageHeight={stage.h}
+          onMove={editing.onMoveInset}
+          onGestureStart={onDragStart}
+          style={[
+            styles.inset,
+            { width: insetW, height: insetH, borderRadius: 10 * k },
+          ]}
+        >
+          <Image
+            source={{ uri: insetUri }}
+            style={styles.insetImg}
+            resizeMode="cover"
+          />
+        </GestureItem>
+      ) : null}
+      {insetUri !== undefined && stage.w > 0 && editing === undefined ? (
         <DragPlacement
           x={inset?.x ?? SLIDE_INSET_DEFAULTS.x}
           y={inset?.y ?? SLIDE_INSET_DEFAULTS.y}
@@ -122,7 +166,37 @@ export function SlideStage(props: {
         </DragPlacement>
       ) : null}
 
-      {stage.w > 0
+      {stage.w > 0 && editing !== undefined
+        ? boxes.map((box) => {
+            const fontSize = Math.max(6, box.size * stage.w);
+            return (
+              <GestureItem
+                key={box.id}
+                x={box.x}
+                y={box.y}
+                stageWidth={stage.w}
+                stageHeight={stage.h}
+                onMove={(nx, ny) => editing.onMoveBox(box.id, nx, ny)}
+                onScale={(ratio) => editing.onScaleBox(box.id, box.size * ratio)}
+                minScale={MIN_BOX_SIZE / box.size}
+                maxScale={MAX_BOX_SIZE / box.size}
+                onTap={() => editing.onTapBox(box.id)}
+                onGestureStart={onDragStart}
+                selected={editing.selectedBoxId === box.id}
+              >
+                <OverlayTextBox
+                  text={box.text}
+                  color={box.color}
+                  bg={box.bg}
+                  fontSize={fontSize}
+                  maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.w}
+                />
+              </GestureItem>
+            );
+          })
+        : null}
+
+      {stage.w > 0 && editing === undefined
         ? boxes.map((box) => {
             const fontSize = Math.max(6, box.size * stage.w);
             return (

@@ -1,5 +1,6 @@
 // Body of the "When it shows" tool: the slot's transcript with the word at
-// the cue highlighted, tap a word to snap the cue there, plus Reset to AI.
+// the cue highlighted, tap a word to snap the cue there, plus a reset (text
+// goes back to the whole clip, the screenshot back to the AI suggestion).
 import { useEffect, useRef, type JSX } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -24,10 +25,11 @@ export function CuePanel(props: {
   kindLabel: string;
   pending: boolean;
   canReset: boolean;
+  resetLabel: string;
   onPickWord: (word: TranscriptWord) => void;
   onReset: () => void;
 }): JSX.Element {
-  const { words, sourceMs, kindLabel, pending, canReset, onPickWord, onReset } = props;
+  const { words, sourceMs, kindLabel, pending, canReset, resetLabel, onPickWord, onReset } = props;
   const active = wordIndexAt(words, sourceMs);
   const scrollRef = useRef<ScrollView>(null);
   const wordX = useRef<Record<number, number>>({});
@@ -82,13 +84,13 @@ export function CuePanel(props: {
         </Text>
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Reset to AI suggestion"
+          accessibilityLabel={resetLabel}
           onPress={onReset}
           disabled={!canReset || pending}
           style={[styles.resetBtn, (!canReset || pending) && styles.resetOff]}
         >
           <Icon name="rotate-ccw" size={14} color={color.white} />
-          <Text style={styles.resetText}>Reset to AI</Text>
+          <Text style={styles.resetText}>{resetLabel}</Text>
         </PressableScale>
       </View>
     </View>

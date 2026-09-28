@@ -13,7 +13,9 @@ export type ToolId =
   | 'crop'
   | 'mute'
   | 'volume'
-  | 'text-color';
+  | 'text-color'
+  | 'add-text'
+  | 'edit-text';
 
 type Tool = {
   id: ToolId;
@@ -30,10 +32,32 @@ export function EditorToolbar(props: {
   selectedMuted: boolean;
   /** The clip under the playhead carries text boxes the creator can recolor. */
   canStyleText: boolean;
+  /** The clip under the playhead can take a new text box. */
+  canAddText?: boolean;
+  /** A text box is selected on the stage: show the text tools instead. */
+  boxSelected?: boolean;
   onTool: (tool: ToolId) => void;
 }): JSX.Element {
-  const { canSplit, hasSelection, canDelete, selectedMuted, canStyleText, onTool } = props;
-  const tools: Tool[] = [
+  const {
+    canSplit,
+    hasSelection,
+    canDelete,
+    selectedMuted,
+    canStyleText,
+    canAddText = false,
+    boxSelected = false,
+    onTool,
+  } = props;
+  const textTools: Tool[] = [
+    { id: 'edit-text', label: 'Edit', icon: 'pencil', enabled: true },
+    { id: 'text-color', label: 'Text color', icon: 'palette', enabled: true },
+    { id: 'add-text', label: 'Add text', icon: 'plus', enabled: canAddText },
+    { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
+  ];
+  const clipTools: Tool[] = [
+    ...(canAddText
+      ? [{ id: 'add-text' as const, label: 'Text', icon: 'plus' as const, enabled: true }]
+      : []),
     ...(canStyleText
       ? [{ id: 'text-color' as const, label: 'Text color', icon: 'palette' as const, enabled: true }]
       : []),
@@ -51,6 +75,7 @@ export function EditorToolbar(props: {
     },
     { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
   ];
+  const tools = boxSelected ? textTools : clipTools;
   return (
     <ScrollView
       horizontal

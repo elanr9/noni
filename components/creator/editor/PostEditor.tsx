@@ -1,10 +1,16 @@
 // Creator video editor: the last stop before a video post goes to review.
-// Owns the edit history, the preview playhead and the open tool; the record
-// screen owns the clips, persistence, re-records and the final export.
+// Owns the edit history, the preview playhead, the open tool and the
+// creator's text box edits; the record screen owns the clips, persistence,
+// re-records and the final export.
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import type { BriefSegment, TextOverlay } from '../../../lib/briefs-api';
+import {
+  CLASSIC_TEXT_COLOR,
+  DEFAULT_BOX_SIZE,
+  type OverlayBox,
+} from '../../../lib/overlay-boxes';
 import {
   EDIT_SPEEDS,
   canSplitAt,
@@ -29,22 +35,25 @@ import {
   type StoredWords,
   type TranscriptWord,
 } from '../../../lib/video-edit';
-import { parseOverlayBoxes } from '../../../lib/overlay-boxes';
 import {
   toNativeTimeline,
   type NativeTimeline,
+  type PreviewErrorEvent,
+  type PreviewReadyEvent,
+  type PreviewTimeEvent,
   type VideoEditorPreviewHandle,
 } from '../../../modules/video-editor';
 import { color, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import type { ShotPreview } from '../SegmentOverlayPreview';
-import { TextColorPicker } from '../TextColorPicker';
+import { TextColorPicker, type TextColorPick } from '../TextColorPicker';
 import { clampCrop } from './CropGesture';
 import {
-  DEFAULT_TEXT_HOLD_MS,
   MIN_TEXT_HOLD_MS,
+  hasCreatorTextWindow,
   slotSourceToTimelineMs,
+  slotTextWindow,
   slotTimelineRange,
   type CueDrag,
   type CueSelection,
@@ -53,9 +62,14 @@ import {
 import { CuePanel } from './CuePanel';
 import { EditorStage, type StageSize } from './EditorStage';
 import { EditorToolbar, type ToolId } from './EditorToolbar';
-import { Timeline } from './Timeline';
+import { Playhead } from './playhead';
+import type { BoxPlacement } from './StageTextBox';
+import { TextEditSheet } from './TextEditSheet';
+import { Timeline, type TrimEdges } from './Timeline';
 import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
+import { useBoxEdits } from './useBoxEdits';
 import { useEditHistory } from './useEditHistory';
+import { useEvent } from './useEvent';
 
 export type EditorSlot = {
   slotIndex: number;
@@ -72,16 +86,23 @@ export type PostEditorProps = {
   overlay: TextOverlay;
   subtitles: { y: number } | null;
   onTimelineChange: (timeline: EditTimeline) => void;
+  /** Legacy: text box moves now flow through onBoxesChange; kept so older callers type check. */
   onMoveBox: (segment: BriefSegment, boxId: string, x: number, y: number) => void;
   onStyleBox: (segment: BriefSegment, boxId: string, color: string, bg: boolean) => void;
   onMoveCard: (segment: BriefSegment, x: number, y: number) => void;
   onMoveSubtitles: (y: number) => void;
+  /**
+   * Mirror of every creator text box edit on a clip (add, words, resize,
+   * move, delete). The editor saves them itself with creatorEditSegmentBoxes.
+   */
+  onBoxesChange?: (segment: BriefSegment, boxes: OverlayBox[]) => void;
   /** Cue timing per slot index (source ms) and the cached transcripts. */
   cues: StoredCues;
   words: StoredWords;
   /** Slots whose cue suggestion is still being fetched. */
   cuePendingSlots: number[];
   onCueChange: (slotIndex: number, cue: SlotCue | null) => void;
+  /** Screenshot timing back to the AI suggestion (text resets locally to the whole clip). */
   onResetCue: (slotIndex: number) => void;
   onBack: () => void;
   onReplaceSlot: (slotIndex: number) => void;
@@ -97,7 +118,15 @@ export type PostEditorProps = {
 
 type OpenTool = 'speed' | 'crop' | 'volume' | 'text-color' | 'cue';
 
+type TextEdit = { segment: BriefSegment; boxId: string | null };
+
 const SPEECH_PILL_MS = 2000;
+/** How often the playhead is mirrored into React state for labels. */
+const POSITION_MIRROR_MS = 66;
+/** Imprecise player seeks while scrubbing are spaced at least this far apart. */
+const SEEK_MIN_GAP_MS = 80;
+const NEW_BOX_X = 0.5;
+const NEW_BOX_Y = 0.3;
 
 const EMPTY_CUE: SlotCue = {
   text_start_ms: null,
@@ -106,6 +135,10 @@ const EMPTY_CUE: SlotCue = {
   media_end_ms: null,
   source: 'creator',
 };
+
+function newBoxId(): string {
+  return `box-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
 
 function cueAfterDrag(base: SlotCue, drag: CueDrag): SlotCue {
   switch (drag.kind) {
@@ -117,6 +150,7 @@ function cueAfterDrag(base: SlotCue, drag: CueDrag): SlotCue {
       const start = base.text_start_ms ?? 0;
       return {
         ...base,
+        text_start_ms: start,
         text_hold_ms: Math.max(MIN_TEXT_HOLD_MS, drag.sourceMs - start),
         source: 'creator',
       };
@@ -124,8 +158,14 @@ function cueAfterDrag(base: SlotCue, drag: CueDrag): SlotCue {
   }
 }
 
-function cueStartMs(cue: SlotCue | null, kind: CueSelection['kind']): number {
-  if (kind === 'text') return cue?.text_start_ms ?? 0;
+/** Source ms where the selected cue kind enters its slot. */
+function cueStartMs(
+  timeline: EditTimeline,
+  slotIndex: number,
+  cue: SlotCue | null,
+  kind: CueSelection['kind'],
+): number {
+  if (kind === 'text') return slotTextWindow(cue, slotPieces(timeline, slotIndex)).startMs;
   return cue?.media_start_ms ?? 0;
 }
 
@@ -144,10 +184,10 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     overlay,
     subtitles,
     onTimelineChange,
-    onMoveBox,
     onStyleBox,
     onMoveCard,
     onMoveSubtitles,
+    onBoxesChange,
     cues,
     words,
     cuePendingSlots,
@@ -168,10 +208,15 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const [preview, setPreview] = useState<EditTimeline | null>(null);
   const shown = preview ?? committed;
 
+  // The playhead ticks at frame rate outside React; positionMs is a low rate
+  // mirror for the clock, the slot label and the cue gates.
+  const [playhead] = useState(() => new Playhead());
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(timelineDurationMs(shown));
   const [playing, setPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [textEdit, setTextEdit] = useState<TextEdit | null>(null);
   const [tool, setTool] = useState<OpenTool | null>(null);
   const [liveCrop, setLiveCrop] = useState<EditCrop | null>(null);
   const [cardSize, setCardSize] = useState<StageSize | null>(null);
@@ -181,6 +226,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const cueAtOpen = useRef<SlotCue | null>(null);
   const previewRef = useRef<VideoEditorPreviewHandle>(null);
   const busy = busyLabel !== null;
+
+  const boxEdits = useBoxEdits({ onError: setError, onChange: onBoxesChange });
 
   const shownCues = useMemo<StoredCues>(
     () => (cuePreview ? { ...cues, [String(cuePreview.slotIndex)]: cuePreview.cue } : cues),
@@ -224,12 +271,64 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     onTimelineChange(committed);
   }, [committed, onTimelineChange]);
 
-  const seek = useCallback((ms: number, precise: boolean) => {
-    setPositionMs(ms);
-    void previewRef.current?.seekTo(ms, precise).catch(() => undefined);
+  const lastMirrorAt = useRef(0);
+  const setPosition = useCallback(
+    (ms: number, force: boolean) => {
+      playhead.set(ms);
+      const now = Date.now();
+      if (!force && now - lastMirrorAt.current < POSITION_MIRROR_MS) return;
+      lastMirrorAt.current = now;
+      setPositionMs(ms);
+    },
+    [playhead],
+  );
+
+  const seekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSeekAt = useRef(0);
+  const seek = useCallback(
+    (ms: number, precise: boolean) => {
+      setPosition(ms, precise);
+      if (seekTimer.current !== null) {
+        clearTimeout(seekTimer.current);
+        seekTimer.current = null;
+      }
+      const run = () => {
+        lastSeekAt.current = Date.now();
+        void previewRef.current?.seekTo(ms, precise).catch(() => undefined);
+      };
+      if (precise) {
+        run();
+        return;
+      }
+      const wait = SEEK_MIN_GAP_MS - (Date.now() - lastSeekAt.current);
+      if (wait <= 0) {
+        run();
+        return;
+      }
+      seekTimer.current = setTimeout(() => {
+        seekTimer.current = null;
+        run();
+      }, wait);
+    },
+    [setPosition],
+  );
+  useEffect(() => {
+    return () => {
+      if (seekTimer.current !== null) clearTimeout(seekTimer.current);
+    };
   }, []);
 
-  const pause = useCallback(() => setPlaying(false), []);
+  const pause = useCallback(() => {
+    setPlaying(false);
+    setPositionMs(playhead.get());
+  }, [playhead]);
+
+  const onTime = useCallback(
+    (e: PreviewTimeEvent) => setPosition(e.nativeEvent.positionMs, false),
+    [setPosition],
+  );
+  const onReady = useCallback((e: PreviewReadyEvent) => setDurationMs(e.nativeEvent.durationMs), []);
+  const onPreviewError = useCallback((e: PreviewErrorEvent) => setError(e.nativeEvent.message), []);
 
   const current = pieceAt(shown, positionMs);
   const currentSlot = current
@@ -241,18 +340,16 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const allMuted = shown.pieces.length > 0 && shown.pieces.every((p) => p.muted);
   const currentSegment = currentSlot?.segment ?? null;
   const currentBoxes = useMemo(
-    () =>
-      currentSegment && currentSegment.show_on_screen && overlay.enabled
-        ? parseOverlayBoxes(currentSegment.overlay_style, {
-            text: currentSegment.overlay_text,
-            textY: currentSegment.text_y,
-          })
-        : [],
-    [currentSegment, overlay.enabled],
+    () => boxEdits.boxesFor(currentSegment, overlay.enabled),
+    [boxEdits, currentSegment, overlay.enabled],
   );
+  const selectedBox =
+    selectedBoxId !== null ? currentBoxes.find((b) => b.id === selectedBoxId) ?? null : null;
+  const canAddText = currentSegment !== null && overlay.enabled && !busy;
   const canSplit = !busy && tool === null && canSplitAt(shown, positionMs);
-  const canDelete =
+  const canDeletePiece =
     selected !== null && slotPieces(shown, selected.slotIndex).length > 1;
+  const canDelete = selectedBox !== null || canDeletePiece;
 
   const cueSlots = useMemo<CueSlot[]>(
     () =>
@@ -260,29 +357,26 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         .map((s) => ({
           slotIndex: s.slotIndex,
           label: s.label,
-          hasText: s.segment !== null && s.segment.show_on_screen && overlay.enabled,
+          hasText: boxEdits.boxesFor(s.segment, overlay.enabled).length > 0,
           hasMedia: s.segment !== null && s.segment.screenshot_url !== null,
           cue: shownCues[String(s.slotIndex)] ?? null,
           pending: cuePendingSlots.includes(s.slotIndex),
         }))
         .filter((s) => s.hasText || s.hasMedia),
-    [slots, overlay.enabled, shownCues, cuePendingSlots],
+    [slots, overlay.enabled, shownCues, cuePendingSlots, boxEdits],
   );
 
-  // The stage shows the segment's text and screenshot only inside their cue windows.
+  // The stage shows the segment's text and screenshot only inside their cue
+  // windows. Text covers the whole clip unless the creator narrowed it.
   const cueGate = useMemo(() => {
     if (!currentSlot) return { showText: true, showMedia: true };
     const slot = currentSlot.slotIndex;
     const cue = shownCues[String(slot)] ?? null;
     const range = slotTimelineRange(shown, slot);
     if (!range) return { showText: true, showMedia: true };
-    const textStart = cue?.text_start_ms ?? 0;
-    const textFrom = slotSourceToTimelineMs(shown, slot, textStart);
-    const textTo = slotSourceToTimelineMs(
-      shown,
-      slot,
-      textStart + (cue?.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS),
-    );
+    const textWindow = slotTextWindow(cue, slotPieces(shown, slot));
+    const textFrom = slotSourceToTimelineMs(shown, slot, textWindow.startMs);
+    const textTo = slotSourceToTimelineMs(shown, slot, textWindow.endMs);
     const mediaFrom = slotSourceToTimelineMs(shown, slot, cue?.media_start_ms ?? 0);
     const mediaTo =
       cue?.media_end_ms !== null && cue?.media_end_ms !== undefined
@@ -305,11 +399,25 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     setPlaying((p) => !p);
   }
 
-  function onScrubStart() {
-    pause();
-  }
+  const onStagePress = useEvent(() => {
+    if (selectedBoxId !== null) {
+      setSelectedBoxId(null);
+      return;
+    }
+    togglePlay();
+  });
 
-  function onTrimPreview(pieceId: string, edges: { inMs?: number; outMs?: number }) {
+  const onScrubStart = useEvent(() => pause());
+  const onScrub = useEvent((ms: number) => seek(ms, false));
+  const onScrubEnd = useEvent((ms: number) => seek(ms, true));
+
+  const onSelectPiece = useEvent((id: string | null) => {
+    if (tool !== null) return;
+    setSelectedBoxId(null);
+    setSelectedId(id);
+  });
+
+  const onTrimPreview = useEvent((pieceId: string, edges: TrimEdges) => {
     if (tool !== null || busy) return;
     const next = trimPiece(committed, pieceId, edges);
     setPreview(next);
@@ -317,9 +425,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     if (!range) return;
     const at = edges.inMs !== undefined ? range.startMs : Math.max(range.startMs, range.endMs - 40);
     seek(at, false);
-  }
+  });
 
-  function onTrimCommit(pieceId: string, edges: { inMs?: number; outMs?: number }) {
+  const onTrimCommit = useEvent((pieceId: string, edges: TrimEdges) => {
     if (tool !== null || busy) return;
     const next = trimPiece(committed, pieceId, edges);
     setPreview(null);
@@ -328,19 +436,93 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     if (!range) return;
     const at = edges.inMs !== undefined ? range.startMs : Math.max(range.startMs, range.endMs - 40);
     seek(at, true);
+  });
+
+  const onToggleAllMuted = useEvent(() => history.commit(setAllMuted(committed, !allMuted)));
+
+  // Text boxes. Gestures commit once on release; the sheet saves the words.
+  const selectBox = useEvent((boxId: string) => {
+    if (busy || tool !== null) return;
+    pause();
+    setSelectedId(null);
+    setSelectedBoxId(boxId);
+  });
+
+  const editBox = useEvent((boxId: string) => {
+    if (busy || tool !== null || currentSegment === null) return;
+    pause();
+    setSelectedId(null);
+    setSelectedBoxId(boxId);
+    setTextEdit({ segment: currentSegment, boxId });
+  });
+
+  const commitBox = useEvent((boxId: string, placement: BoxPlacement) => {
+    if (currentSegment === null) return;
+    boxEdits.update(
+      currentSegment,
+      currentBoxes.map((b) =>
+        b.id === boxId ? { ...b, x: placement.x, y: placement.y, size: placement.size } : b,
+      ),
+    );
+  });
+
+  function addText() {
+    if (!canAddText || currentSegment === null) return;
+    pause();
+    setSelectedId(null);
+    setTextEdit({ segment: currentSegment, boxId: null });
   }
+
+  function saveText(text: string) {
+    if (textEdit === null) return;
+    const { segment, boxId } = textEdit;
+    const boxes = boxEdits.boxesFor(segment, true);
+    if (boxId === null) {
+      const box: OverlayBox = {
+        id: newBoxId(),
+        text,
+        color: CLASSIC_TEXT_COLOR,
+        bg: false,
+        size: DEFAULT_BOX_SIZE,
+        x: NEW_BOX_X,
+        y: NEW_BOX_Y,
+      };
+      boxEdits.update(segment, [...boxes, box]);
+      setSelectedBoxId(box.id);
+    } else {
+      boxEdits.update(segment, boxes.map((b) => (b.id === boxId ? { ...b, text } : b)));
+    }
+    setTextEdit(null);
+  }
+
+  function deleteSelectedBox() {
+    if (currentSegment === null || selectedBox === null) return;
+    boxEdits.update(currentSegment, currentBoxes.filter((b) => b.id !== selectedBox.id));
+    setSelectedBoxId(null);
+  }
+
+  function pickTextColor(boxId: string, pick: TextColorPick) {
+    if (currentSegment === null) return;
+    onStyleBox(currentSegment, boxId, pick.color, pick.bg);
+    boxEdits.restyleAll(pick.color, pick.bg, { segment: currentSegment, boxes: currentBoxes });
+  }
+
+  const onMoveCardHere = useEvent((x: number, y: number) => {
+    if (currentSegment !== null) onMoveCard(currentSegment, x, y);
+  });
 
   function split() {
     pause();
-    const hit = pieceAt(committed, positionMs);
-    const next = splitAt(committed, positionMs);
+    const at = playhead.get();
+    const hit = pieceAt(committed, at);
+    const next = splitAt(committed, at);
     if (next === committed || !hit) return;
     history.commit(next);
     setSelectedId(hit.piece.id);
   }
 
   function remove() {
-    if (!selected || !canDelete) return;
+    if (!selected || !canDeletePiece) return;
     pause();
     const range = pieceRanges(committed).find((r) => r.piece.id === selected.id);
     const next = deletePiece(committed, selected.id);
@@ -385,42 +567,62 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     return busy || (tool !== null && tool !== 'cue');
   }
 
-  function selectCue(selection: CueSelection) {
+  const selectCue = useEvent((selection: CueSelection) => {
     if (cueToolBlocked()) return;
     pause();
     setSelectedId(null);
+    setSelectedBoxId(null);
     if (tool !== 'cue' || selectedCue?.slotIndex !== selection.slotIndex) {
       cueAtOpen.current = cues[String(selection.slotIndex)] ?? null;
     }
     setSelectedCue(selection);
     setTool('cue');
-    const start = cueStartMs(cues[String(selection.slotIndex)] ?? null, selection.kind);
+    const start = cueStartMs(
+      committed,
+      selection.slotIndex,
+      cues[String(selection.slotIndex)] ?? null,
+      selection.kind,
+    );
     seek(slotSourceToTimelineMs(committed, selection.slotIndex, start), true);
-  }
+  });
 
   function cueSeekMs(drag: CueDrag): number {
     const at = slotSourceToTimelineMs(shown, drag.slotIndex, drag.sourceMs);
     return drag.kind === 'hold' ? Math.max(0, at - 40) : at;
   }
 
-  function previewCueDrag(drag: CueDrag) {
+  const previewCueDrag = useEvent((drag: CueDrag) => {
     if (cueToolBlocked()) return;
     const cue = cueAfterDrag(cues[String(drag.slotIndex)] ?? EMPTY_CUE, drag);
     setCuePreview({ slotIndex: drag.slotIndex, cue });
     seek(cueSeekMs(drag), false);
-  }
+  });
 
-  function commitCueDrag(drag: CueDrag) {
+  const commitCueDrag = useEvent((drag: CueDrag) => {
     if (cueToolBlocked()) return;
     const cue = cueAfterDrag(cues[String(drag.slotIndex)] ?? EMPTY_CUE, drag);
     setCuePreview(null);
     onCueChange(drag.slotIndex, cue);
     seek(cueSeekMs(drag), true);
-  }
+  });
 
   function pickCueWord(word: TranscriptWord) {
     if (!selectedCue) return;
     commitCueDrag({ slotIndex: selectedCue.slotIndex, kind: selectedCue.kind, sourceMs: word.s });
+  }
+
+  /** Text goes back to covering the whole clip; the screenshot back to the AI pick. */
+  function resetCue() {
+    if (!selectedCue) return;
+    const slot = selectedCue.slotIndex;
+    if (selectedCue.kind === 'media') {
+      onResetCue(slot);
+      return;
+    }
+    const base = cues[String(slot)] ?? EMPTY_CUE;
+    setCuePreview(null);
+    onCueChange(slot, { ...base, text_start_ms: null, text_hold_ms: null });
+    seek(slotSourceToTimelineMs(committed, slot, 0), true);
   }
 
   function closeTool(save: boolean) {
@@ -460,7 +662,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         split();
         return;
       case 'delete':
-        remove();
+        if (selectedBox !== null) deleteSelectedBox();
+        else remove();
         return;
       case 'speed':
         openSpeed();
@@ -473,6 +676,12 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         return;
       case 'volume':
         openVolume();
+        return;
+      case 'add-text':
+        addText();
+        return;
+      case 'edit-text':
+        if (selectedBox !== null) editBox(selectedBox.id);
         return;
       case 'text-color':
         if (currentBoxes.length === 0) return;
@@ -514,6 +723,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     if (busy) return;
     pause();
     if (tool !== null) closeTool(true);
+    boxEdits.flush();
     onContinue(preview ?? committed);
   }
 
@@ -524,19 +734,34 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
 
   const cueCaption = useMemo(() => {
     if (!selectedCue) return '';
-    const range = slotTimelineRange(shown, selectedCue.slotIndex);
+    const slot = selectedCue.slotIndex;
+    const range = slotTimelineRange(shown, slot);
     if (!range) return '';
-    const start = cueStartMs(selectedCueValue, selectedCue.kind);
-    const at = slotSourceToTimelineMs(shown, selectedCue.slotIndex, start) - range.startMs;
-    if (selectedCue.kind === 'media') return `Screenshot shows at ${formatSeconds(at)}`;
-    const holdEnd =
-      slotSourceToTimelineMs(
-        shown,
-        selectedCue.slotIndex,
-        start + (selectedCueValue?.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS),
-      ) - range.startMs;
-    return `Text shows at ${formatSeconds(at)} for ${formatSeconds(holdEnd - at)}`;
+    if (selectedCue.kind === 'media') {
+      const at = slotSourceToTimelineMs(shown, slot, selectedCueValue?.media_start_ms ?? 0);
+      return `Screenshot shows at ${formatSeconds(at - range.startMs)}`;
+    }
+    const cue = selectedCueValue;
+    if (cue === null || cue.source !== 'creator' || cue.text_start_ms === null) {
+      return 'Text shows for the whole clip';
+    }
+    const textWindow = slotTextWindow(cue, slotPieces(shown, slot));
+    const at = slotSourceToTimelineMs(shown, slot, textWindow.startMs) - range.startMs;
+    if (cue.text_hold_ms === null) return `Text shows from ${formatSeconds(at)} to the end`;
+    const end = slotSourceToTimelineMs(shown, slot, textWindow.endMs) - range.startMs;
+    return `Text shows at ${formatSeconds(at)} for ${formatSeconds(end - at)}`;
   }, [selectedCue, selectedCueValue, shown]);
+
+  const canResetCue =
+    selectedCue !== null &&
+    (selectedCue.kind === 'text'
+      ? hasCreatorTextWindow(selectedCueValue)
+      : selectedCueValue === null || selectedCueValue.source === 'creator');
+
+  const editingBox =
+    textEdit !== null && textEdit.boxId !== null
+      ? boxEdits.boxesFor(textEdit.segment, true).find((b) => b.id === textEdit.boxId) ?? null
+      : null;
 
   return (
     <View style={styles.root}>
@@ -566,34 +791,39 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           ref={previewRef}
           timeline={nativeTimeline}
           playing={playing && !busy}
-          onTime={(e) => setPositionMs(e.nativeEvent.positionMs)}
-          onReady={(e) => setDurationMs(e.nativeEvent.durationMs)}
+          onTime={onTime}
+          onReady={onReady}
           onEnd={pause}
-          onError={(e) => setError(e.nativeEvent.message)}
-          onTogglePlay={togglePlay}
+          onError={onPreviewError}
+          onTogglePlay={onStagePress}
           onLayoutCard={setCardSize}
           cardSize={cardSize}
-          segment={currentSlot?.segment ?? null}
+          segment={currentSegment}
           shot={currentSlot?.shot ?? null}
           overlay={overlay}
+          boxes={currentBoxes}
+          selectedBoxId={selectedBox?.id ?? null}
           showText={cueGate.showText}
           showMedia={cueGate.showMedia}
           subtitles={subtitles}
-          onMoveBox={(boxId, x, y) => {
-            if (currentSlot?.segment) onMoveBox(currentSlot.segment, boxId, x, y);
-          }}
-          onMoveCard={(x, y) => {
-            if (currentSlot?.segment) onMoveCard(currentSlot.segment, x, y);
-          }}
+          onSelectBox={selectBox}
+          onEditBox={editBox}
+          onCommitBox={commitBox}
+          onMoveCard={onMoveCardHere}
           onMoveSubtitles={onMoveSubtitles}
           onDragStart={pause}
           crop={tool === 'crop' ? liveCrop : null}
           onCropChange={setLiveCrop}
           onCropCommit={setLiveCrop}
         />
-        {showPlaceHint && !playing && tool === null ? (
+        {showPlaceHint && !playing && tool === null && selectedBox === null ? (
           <View style={styles.hint} pointerEvents="none">
-            <Text style={styles.hintText}>Hold any text or picture to move it</Text>
+            <Text style={styles.hintText}>Drag text to move it, pinch to resize</Text>
+          </View>
+        ) : null}
+        {selectedBox !== null && tool === null ? (
+          <View style={styles.hint} pointerEvents="none">
+            <Text style={styles.hintText}>Tap twice to edit the words</Text>
           </View>
         ) : null}
         {tool === 'crop' ? (
@@ -655,20 +885,17 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
 
       <Timeline
         timeline={shown}
-        positionMs={positionMs}
+        playhead={playhead}
         playing={playing}
         selectedPieceId={selectedId}
-        onSelectPiece={(id) => {
-          if (tool !== null) return;
-          setSelectedId(id);
-        }}
+        onSelectPiece={onSelectPiece}
         onScrubStart={onScrubStart}
-        onScrub={(ms) => seek(ms, false)}
-        onScrubEnd={(ms) => seek(ms, true)}
+        onScrub={onScrub}
+        onScrubEnd={onScrubEnd}
         onTrimPreview={onTrimPreview}
         onTrimCommit={onTrimCommit}
         allMuted={allMuted}
-        onToggleAllMuted={() => history.commit(setAllMuted(committed, !allMuted))}
+        onToggleAllMuted={onToggleAllMuted}
         cueSlots={cueSlots}
         selectedCue={tool === 'cue' ? selectedCue : null}
         onSelectCue={selectCue}
@@ -716,9 +943,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             <TextColorPicker
               key={currentSegment.id}
               boxes={currentBoxes}
-              onChange={(boxId, pick) =>
-                onStyleBox(currentSegment, boxId, pick.color, pick.bg)
-              }
+              onChange={pickTextColor}
             />
           </ToolPanel>
         ) : tool === 'cue' && selectedCue !== null ? (
@@ -729,12 +954,13 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           >
             <CuePanel
               words={selectedCueWords}
-              sourceMs={cueStartMs(selectedCueValue, selectedCue.kind)}
+              sourceMs={cueStartMs(shown, selectedCue.slotIndex, selectedCueValue, selectedCue.kind)}
               kindLabel={cueCaption}
               pending={cuePendingSlots.includes(selectedCue.slotIndex)}
-              canReset={selectedCueValue === null || selectedCueValue.source === 'creator'}
+              canReset={canResetCue}
+              resetLabel={selectedCue.kind === 'text' ? 'Reset to full clip' : 'Reset to AI'}
               onPickWord={pickCueWord}
-              onReset={() => onResetCue(selectedCue.slotIndex)}
+              onReset={resetCue}
             />
           </ToolPanel>
         ) : (
@@ -744,10 +970,22 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             canDelete={canDelete && !busy}
             selectedMuted={selected?.muted ?? false}
             canStyleText={currentBoxes.length > 0 && !busy}
+            canAddText={canAddText}
+            boxSelected={selectedBox !== null && !busy}
             onTool={onTool}
           />
         )}
       </View>
+
+      {textEdit !== null ? (
+        <TextEditSheet
+          initialText={editingBox?.text ?? ''}
+          title={textEdit.boxId === null ? 'Add text' : 'Edit text'}
+          bottomInset={bottomInset}
+          onCancel={() => setTextEdit(null)}
+          onSave={saveText}
+        />
+      ) : null}
 
       {error !== null ? (
         <View style={styles.errorBar}>
