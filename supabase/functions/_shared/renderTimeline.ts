@@ -4,7 +4,6 @@
 
 import {
   DEFAULT_SCREENSHOT_HOLD_MS,
-  DEFAULT_TEXT_HOLD_MS,
   sourceToOutputMs,
   subtitleLines,
   type KeepRange,
@@ -321,20 +320,6 @@ function clipWindow(
   return { start_ms: start, duration_ms: Math.max(0, end - start) };
 }
 
-function cuedTextWindow(
-  cue: SubmissionCue,
-  keep: KeepRange[],
-  clipStart: number,
-  clipEnd: number,
-  isHook: boolean,
-): OverlayWindow {
-  const start = isHook
-    ? clipStart
-    : clipStart + sourceToOutputMs(cue.text_start_ms ?? 0, keep);
-  const hold = cue.text_hold_ms ?? DEFAULT_TEXT_HOLD_MS;
-  return clipWindow(start, start + hold, clipStart, clipEnd);
-}
-
 function cuedImageWindow(
   cue: SubmissionCue,
   keep: KeepRange[],
@@ -443,14 +428,11 @@ export function buildRenderTimeline(params: {
     const segment = ordered[i];
     if (segment) {
       if (textOverlay.enabled && segment.show_on_screen) {
-        const textWindow: OverlayWindow = cue
-          ? cuedTextWindow(cue, keep, cursorMs, clipEnd, segment.kind === 'hook')
-          : { start_ms: cursorMs, duration_ms: Math.min(TEXT_HOLD_MS, effectiveMs) };
+        const textWindow: OverlayWindow = { start_ms: cursorMs, duration_ms: effectiveMs };
         for (const box of segmentBoxes(segment)) {
           texts.push({
             text: box.text,
             ...textWindow,
-            ...(cue ? { enter: 'pop' as const } : {}),
             y: box.y,
             box: {
               x: box.x,
