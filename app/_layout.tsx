@@ -22,9 +22,8 @@ import { motion, screenTransition } from '../theme/tokens';
 WebBrowser.maybeCompleteAuthSession();
 void SplashScreen.preventAutoHideAsync();
 
-/** The two TikTok Sans instances every on-screen text preview draws with. */
+/** The TikTok Sans instance every on-screen text preview draws with. */
 const OVERLAY_FONTS = {
-  [OVERLAY_TEXT_SPEC.condensed.fontFamily]: require('../assets/fonts/TikTokSans-Condensed.ttf'),
   [OVERLAY_TEXT_SPEC.bubble.fontFamily]: require('../assets/fonts/TikTokSans-Bubble.ttf'),
 };
 

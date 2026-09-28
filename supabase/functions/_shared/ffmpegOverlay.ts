@@ -41,8 +41,6 @@ const FADE_OUT_MS = 200;
 /** \t acceleration approximating Creatomate's quadratic-out. */
 const EASE_OUT_ACCEL = 0.5;
 
-const SHADOW_COLOR = 'rgba(0,0,0,0.6)';
-const SHADOW_BLUR_VMIN = 1;
 const IMAGE_RADIUS_VMIN = 2.5;
 const IMAGE_SHADOW_ALPHA = 0.4;
 const IMAGE_SHADOW_BLUR_VMIN = 4;
@@ -432,7 +430,6 @@ function subtitleEvents(
       timing: { startMs: line.start_ms, durationMs: line.duration_ms },
       metrics,
       frame,
-      shadow: { color: SHADOW_COLOR, blurPx: SHADOW_BLUR_VMIN * vmin },
     }),
   );
 }

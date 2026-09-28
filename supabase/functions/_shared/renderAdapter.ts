@@ -34,13 +34,13 @@ const POLL_ATTEMPTS = 80;
  * public render-fonts bucket (the same files ship in assets/fonts).
  */
 export const OVERLAY_TEXT_SPEC = {
-  /** Bare letters: condensed white with a black stroke. wght 500, wdth 75, opsz 36. */
+  /** Bare letters: TikTok classic, white with a black stroke. wght 600, wdth 100, opsz 36. */
   condensed: {
-    fontFamily: 'TikTok Sans Condensed',
-    fontWeight: '500',
-    file: 'TikTokSans-Condensed.ttf',
+    fontFamily: 'TikTok Sans',
+    fontWeight: '600',
+    file: 'TikTokSans-Bubble.ttf',
     lineHeight: 1.1,
-    strokeRatio: 0.04,
+    strokeRatio: 0.06,
   },
   /** Text with background: one bubble per line merged into one blob. wght 600, wdth 100, opsz 36. */
   bubble: {
@@ -436,8 +436,6 @@ function subtitleStyle(y: number): CreatomateElement {
     font_size: `${SUBTITLE_FONT_SIZE_VMIN} vmin`,
     fill_color: fill,
     ...condensedStroke(SUBTITLE_FONT_SIZE_VMIN, fill),
-    shadow_color: 'rgba(0,0,0,0.6)',
-    shadow_blur: '1 vmin',
   };
 }
 

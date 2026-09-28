@@ -293,11 +293,11 @@ export const TIKTOK_SANS_CONDENSED_WIDTHS: Readonly<Record<string, number>> = {
 /** Glyphs missing from the table (emoji, other scripts) use this width. */
 export const TIKTOK_SANS_FALLBACK_WIDTH: Readonly<Record<OverlayFont, number>> = {
   bubble: 0.58,
-  condensed: 0.45,
+  condensed: 0.58,
 };
 
 export function measureOverlayLine(text: string, font: OverlayFont): number {
-  const widths = font === "bubble" ? TIKTOK_SANS_BUBBLE_WIDTHS : TIKTOK_SANS_CONDENSED_WIDTHS;
+  const widths = TIKTOK_SANS_BUBBLE_WIDTHS;
   let total = 0;
   for (const ch of text) {
     total += widths[ch] ?? TIKTOK_SANS_FALLBACK_WIDTH[font];

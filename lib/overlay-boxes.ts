@@ -38,12 +38,12 @@ export const CLASSIC_BLACK_TEXT_COLOR = '#000000';
 export const OVERLAY_TEXT_SPEC = {
   /** Bare letters: TikTok's default text, condensed white with a black stroke. */
   condensed: {
-    /** TikTok Sans wght 500, wdth 75, opsz 36, slnt 0. */
-    fontFamily: 'TikTokSans-Condensed',
-    fontWeight: '500',
+    /** TikTok Sans wght 600, wdth 100, opsz 36, slnt 0, same face as the bubble. */
+    fontFamily: 'TikTokSans-Bubble',
+    fontWeight: '600',
     lineHeight: 1.1,
     /** Stroke drawn fully outside the letter, as a fraction of the font size. */
-    strokeRatio: 0.04,
+    strokeRatio: 0.06,
   },
   /** Text with background: one colored bubble per line, merged into one blob. */
   bubble: {
