@@ -1,5 +1,6 @@
 // Morning due-today / overdue pushes for creators. Hourly cron at :15; only
-// acts in America/New_York hour 8–9. Claims via creator_reminders insert so
+// acts in America/New_York hour 8–9. Account warm-up pushes fire in hour 14
+// every 3 days starting 2026-09-28. Claims via creator_reminders insert so
 // concurrent runs cannot double-send. One push per creator per kind per day.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
@@ -8,6 +9,94 @@ import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 
 const INCOMPLETE = ['assigned', 'recorded', 'changes_requested'] as const;
 type ReminderKind = 'due_today' | 'overdue';
+const WARMUP_START = '2026-09-28';
+const WARMUP_TITLE = 'Warm up account time!';
+const WARMUP_BODY =
+  'Search college soccer recruiting, like, comment, save, and scroll for 10-15 minutes.';
+
+function isWarmupDay(today: string): boolean {
+  const [sy, sm, sd] = WARMUP_START.split('-').map(Number);
+  const [y, m, d] = today.split('-').map(Number);
+  const diff = Math.round(
+    (Date.UTC(y, m - 1, d) - Date.UTC(sy, sm - 1, sd)) / 86_400_000,
+  );
+  return diff >= 0 && diff % 3 === 0;
+}
+
+type WarmupResult = {
+  warmup_skipped?: boolean;
+  warmup_reason?: string;
+  warmup_claimed: number;
+  warmup_pushes: number;
+  warmup_day: string;
+};
+
+async function sendAccountWarmup(
+  admin: ReturnType<typeof adminClient>,
+  forceCadence: boolean,
+): Promise<WarmupResult> {
+  const today = todayInTz('America/New_York');
+  if (!forceCadence && !isWarmupDay(today)) {
+    return {
+      warmup_skipped: true,
+      warmup_reason: 'not a warmup day',
+      warmup_claimed: 0,
+      warmup_pushes: 0,
+      warmup_day: today,
+    };
+  }
+
+  const creators: { id: string; company_id: string; expo_push_token: string | null }[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await admin
+      .from('company_roster')
+      .select('id, company_id, expo_push_token')
+      .eq('member_role', 'creator')
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    creators.push(...((data ?? []) as typeof creators));
+    if (!data || data.length < pageSize) break;
+  }
+
+  const claimed = new Map<string, { profileId: string; token: string | null }[]>();
+  let warmupClaimed = 0;
+  for (const creator of creators) {
+    const { error: claimError } = await admin.from('creator_reminders').insert({
+      company_id: creator.company_id,
+      creator_id: creator.id,
+      kind: 'account_warmup',
+      sent_on: today,
+    });
+    if (claimError) {
+      if (claimError.code === '23505') continue;
+      throw new Error(claimError.message);
+    }
+    warmupClaimed += 1;
+    const list = claimed.get(creator.company_id) ?? [];
+    list.push({ profileId: creator.id, token: creator.expo_push_token });
+    claimed.set(creator.company_id, list);
+  }
+
+  let warmupPushes = 0;
+  for (const [companyId, recipients] of claimed) {
+    warmupPushes += await sendPush(admin, recipients, {
+      title: WARMUP_TITLE,
+      body: WARMUP_BODY,
+      data: {
+        event: 'account_warmup',
+        company_id: companyId,
+        deep_link: creatorLink(companyId, 'home'),
+      },
+    });
+  }
+
+  return {
+    warmup_claimed: warmupClaimed,
+    warmup_pushes: warmupPushes,
+    warmup_day: today,
+  };
+}
 
 function behindBody(count: number): string {
   if (count === 1) return '1 post overdue. Check in with them.';
@@ -89,24 +178,30 @@ Deno.serve(async (req) => {
   }
 
   let force = false;
+  let warmupForce = false;
   try {
-    const body = (await req.json()) as { force?: boolean };
+    const body = (await req.json()) as { force?: boolean; warmup?: boolean };
     force = body.force === true;
+    warmupForce = body.warmup === true;
   } catch {
     // empty body from cron is fine
   }
 
   const nyHour = getNyHour();
   const inWindow = nyHour === 8 || nyHour === 9;
-  if (!inWindow && !force) {
-    return jsonResponse({
-      skipped: true,
-      reason: 'outside 8–9 America/New_York',
-      ny_hour: nyHour,
-    });
-  }
 
   try {
+    const warmupResult =
+      nyHour === 14 || warmupForce ? await sendAccountWarmup(admin, warmupForce) : null;
+
+    if (!inWindow && !force) {
+      return jsonResponse({
+        skipped: true,
+        reason: warmupResult ? 'warmup window' : 'outside 8–9 America/New_York',
+        ny_hour: nyHour,
+        ...(warmupResult ?? {}),
+      });
+    }
     const { data: companies, error: companiesError } = await admin
       .from('companies')
       .select('id, settings');
