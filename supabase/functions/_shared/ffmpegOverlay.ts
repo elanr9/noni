@@ -52,7 +52,24 @@ type FontMetrics = {
   winDescent: number;
   hheaAscender: number;
   hheaDescender: number;
+  /** Windows family name from the name table; libass matches \fn against this, not the CSS family. */
+  family: string;
 };
+
+function readFamilyName(dv: DataView, nameTable: number): string {
+  const count = dv.getUint16(nameTable + 2);
+  const storage = nameTable + dv.getUint16(nameTable + 4);
+  for (let i = 0; i < count; i++) {
+    const rec = nameTable + 6 + i * 12;
+    if (dv.getUint16(rec) !== 3 || dv.getUint16(rec + 6) !== 1) continue;
+    const length = dv.getUint16(rec + 8);
+    const offset = storage + dv.getUint16(rec + 10);
+    let out = '';
+    for (let j = 0; j < length; j += 2) out += String.fromCharCode(dv.getUint16(offset + j));
+    return out;
+  }
+  throw new Error('overlay font has no Windows family name');
+}
 
 /**
  * libass sizes a font so ascender + descender (OS/2 win metrics) equals the
@@ -71,8 +88,9 @@ function readFontMetrics(ttf: Uint8Array): FontMetrics {
   const head = tables['head'];
   const os2 = tables['OS/2'];
   const hhea = tables['hhea'];
-  if (head === undefined || os2 === undefined || hhea === undefined) {
-    throw new Error('overlay font is missing head, OS/2 or hhea tables');
+  const name = tables['name'];
+  if (head === undefined || os2 === undefined || hhea === undefined || name === undefined) {
+    throw new Error('overlay font is missing head, OS/2, hhea or name tables');
   }
   return {
     unitsPerEm: dv.getUint16(head + 18),
@@ -80,6 +98,7 @@ function readFontMetrics(ttf: Uint8Array): FontMetrics {
     winDescent: dv.getUint16(os2 + 76),
     hheaAscender: dv.getInt16(hhea + 4),
     hheaDescender: dv.getInt16(hhea + 6),
+    family: readFamilyName(dv, name),
   };
 }
 
@@ -91,7 +110,7 @@ function assFontSize(px: number, m: FontMetrics): number {
 function baselineShift(px: number, m: FontMetrics): number {
   const winCentre = (m.winAscent - m.winDescent) / 2;
   const hheaCentre = (m.hheaAscender + m.hheaDescender) / 2;
-  return ((winCentre - hheaCentre) / m.unitsPerEm) * px;
+  return ((hheaCentre - winCentre) / m.unitsPerEm) * px;
 }
 
 function parseColor(color: string): { r: number; g: number; b: number; a: number } {
@@ -214,7 +233,7 @@ function dialogue(layer: number, startMs: number, durationMs: number, text: stri
 }
 
 function textStyleTags(look: TextLook, metrics: Metrics): string {
-  const family = OVERLAY_TEXT_SPEC[look.font].fontFamily;
+  const family = metrics[look.font].family;
   const size = assFontSize(look.fontPx, metrics[look.font]);
   const stroke = look.stroke
     ? `\\bord${px(look.stroke.widthPx)}\\3c${assColor(look.stroke.color)}`
@@ -555,7 +574,7 @@ export function buildOverlayAss(
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,${OVERLAY_TEXT_SPEC.condensed.fontFamily},48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1`,
+    `Style: Default,${metrics.condensed.family},48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1`,
     '',
     '[Fonts]',
     `fontname: ${OVERLAY_TEXT_SPEC.condensed.file}`,
