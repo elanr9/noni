@@ -83,6 +83,8 @@ const SERVICE_EVENTS: NotifyEvent[] = [
   'credits_low',
   'bounty_earned',
   'post_live',
+  // Fired by render-submission once the edit is ready to watch, not at submit.
+  'submitted',
 ];
 
 const ET = 'America/New_York';

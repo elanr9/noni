@@ -1305,6 +1305,31 @@ function isVideoFile(path: string): boolean {
  * inset picture onto each slide. Updates submissions as it goes and flips
  * render_status to ready (or failed + render_error on throw).
  */
+/**
+ * Managers hear about a post once the edit is watchable, not at submit: the
+ * push deep links into review, and review shows the finished cut.
+ */
+async function notifyReadyForReview(admin: AdminClient, submissionId: string): Promise<void> {
+  const secret = Deno.env.get('CRON_SECRET');
+  if (!secret) return;
+  const { data } = await admin
+    .from('submissions')
+    .select('assignment_id, task_id')
+    .eq('id', submissionId)
+    .maybeSingle();
+  const body = data?.assignment_id
+    ? { assignment_id: data.assignment_id as string, event: 'submitted' }
+    : data?.task_id
+      ? { task_id: data.task_id as string, event: 'submitted' }
+      : null;
+  if (!body) return;
+  await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/notify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
+    body: JSON.stringify(body),
+  }).catch((e) => console.warn(`notify submitted failed: ${e}`));
+}
+
 export async function assembleSubmission(params: {
   admin: AdminClient;
   submission: SubmissionRow;
@@ -1326,6 +1351,7 @@ export async function assembleSubmission(params: {
       .from('submissions')
       .update({ render_status: 'ready', render_error: null })
       .eq('id', submission.id);
+    await notifyReadyForReview(admin, submission.id);
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

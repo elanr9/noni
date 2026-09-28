@@ -271,12 +271,6 @@ export async function transitionTask(
 
   if (error) throw error;
 
-  if (to === 'submitted') {
-    void supabase.functions.invoke('notify', {
-      body: { task_id: taskId, event: 'submitted' },
-    });
-  }
-
   const task = data as ContentTask;
   if (
     STREAK_COUNT_STATUSES.has(to) &&
@@ -319,12 +313,6 @@ export async function transitionAssignment(
   if (error) throw error;
 
   const assignment = data as Assignment;
-  if (to === 'submitted') {
-    void supabase.functions.invoke('notify', {
-      body: { assignment_id: assignment.id, event: 'submitted' },
-    });
-  }
-
   if (STREAK_COUNT_STATUSES.has(to) && !STREAK_COUNT_STATUSES.has(from)) {
     void recordStreakDay({
       companyId: assignment.company_id,
