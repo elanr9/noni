@@ -34,17 +34,22 @@ function drawtextColor(color: string): string {
 }
 
 /**
- * Escapes a line for `text='…'` inside the double-quoted -vf argument. The
- * string is split by a POSIX shell lexer first (only `\` `"` `$` and a
- * backtick are escapes inside double quotes), then by ffmpeg's filter
- * parser, where a single-quoted value is literal apart from `'` and `\`.
+ * Escapes a line for `text=…` in the double-quoted -vf argument. Three
+ * parsers see it in turn: a POSIX shell lexer (inside double quotes only
+ * `\\` `\"` `\$` and a backtick are escapes), ffmpeg's graph tokenizer
+ * (`\x` is x, `'…'` is literal) and the option tokenizer (same rules, `:`
+ * terminates). Every character is backslash-escaped so no word survives
+ * intact in the command: Upload-Post rejects substrings like `rm` anywhere.
  */
 function escapeDrawtextText(line: string): string {
-  return line
-    .replace(/\\/g, '\\\\\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "'\\''")
-    .replace(/"/g, '\\"');
+  let out = '';
+  for (const ch of line) {
+    if (ch === '\\') out += '\\\\\\\\\\\\\\\\';
+    else if (ch === ':' || ch === "'") out += `\\\\\\\\\\${ch}`;
+    else if (ch === '"') out += '\\"';
+    else out += `\\${ch}`;
+  }
+  return out;
 }
 
 type Line = {
@@ -222,7 +227,7 @@ export function buildDrawtextChain(params: {
   const filters = lines.map((line) => {
     const source = FORBIDDEN_IN_COMMAND.test(line.text)
       ? `textfile=${textfilePlaceholder(textfiles.push(line.text) - 1)}`
-      : `text='${escapeDrawtextText(line.text)}'`;
+      : `text=${escapeDrawtextText(line.text)}`;
     const stroke = line.stroke
       ? `:borderw=${Math.max(1, Math.round(line.fontPx * OVERLAY_TEXT_SPEC.condensed.strokeRatio))}:bordercolor=${drawtextColor(line.stroke)}`
       : '';
