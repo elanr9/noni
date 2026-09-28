@@ -23,12 +23,13 @@ import {
 } from './renderTimeline.ts';
 import { renderGreenScreenClip, awaitRender, startOverlayRender } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
+import { buildOverlayGraph, buildShapeAss, overlayCommand, slideCommand } from './ffmpegOverlay.ts';
 import {
-  buildOverlayAss,
-  buildOverlayGraph,
-  overlayCommand,
-  slideCommand,
-} from './ffmpegOverlay.ts';
+  buildDrawtextChain,
+  needsCompositePass,
+  textImageCommand,
+  textVideoCommand,
+} from './ffmpegText.ts';
 import { fontUrl, isVideoSource, OVERLAY_TEXT_SPEC, SUBTITLE_Y } from './renderAdapter.ts';
 import type { RenderTimeline, SegmentBox } from './renderTimeline.ts';
 import {
@@ -255,18 +256,120 @@ async function uploadTextToVideos(
   if (error) throw new Error(`could not store ${label}: ${error.message}`);
 }
 
-// Overlay pass on Upload-Post ffmpeg: text via an embedded-font ASS script,
-// screenshots via overlay chains. Resolves null when the job is still running
-// at the deadline (inputs stay in storage for the worker); the caller hands
-// the wait to a fresh invocation, which resumes on resumeJobId.
+type OverlayStage = 'composite' | 'text';
+
+/** overlay_render_id for an in-flight Upload-Post job of one overlay stage. */
+function stageJobId(stage: OverlayStage, jobId: string): string {
+  return `${FFMPEG_JOB_PREFIX}${stage}:${jobId}`;
+}
+
+function parseStageJobId(stored: string | null): { stage: OverlayStage; jobId: string } | null {
+  if (!stored?.startsWith(FFMPEG_JOB_PREFIX)) return null;
+  const rest = stored.slice(FFMPEG_JOB_PREFIX.length);
+  const sep = rest.indexOf(':');
+  if (sep < 0) return null;
+  const stage = rest.slice(0, sep);
+  if (stage !== 'composite' && stage !== 'text') return null;
+  return { stage, jobId: rest.slice(sep + 1) };
+}
+
+/** Signs brief-assets paths in order. */
+async function signBriefAssets(admin: AdminClient, paths: string[]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const path of paths) {
+    const { data, error } = await admin.storage
+      .from('brief-assets')
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (error || !data?.signedUrl) {
+      throw new Error(`could not sign ${path}: ${error?.message}`);
+    }
+    urls.push(data.signedUrl);
+  }
+  return urls;
+}
+
+/**
+ * Composite stage: pictures, recordings and bubble shapes onto the video
+ * through a filter graph file. Returns the created job id.
+ */
+async function createCompositeJob(params: {
+  admin: AdminClient;
+  apiKey: string;
+  timeline: RenderTimeline;
+  videoPath: string;
+  graphPath: string;
+}): Promise<string> {
+  const { admin, apiKey, timeline, videoPath, graphPath } = params;
+  const imageUrls = await signBriefAssets(admin, timeline.images.map((img) => img.screenshot_path));
+  const graph = buildOverlayGraph({
+    timeline,
+    images: timeline.images.map((img, i) => ({
+      index: i + 1,
+      isVideo: isVideoSource(img.screenshot_path),
+    })),
+    ass: buildShapeAss(timeline),
+  });
+  await uploadTextToVideos(admin, graphPath, graph, 'overlay graph');
+  const [videoUrl, graphUrl] = await signVideoUrls(admin, [videoPath, graphPath]);
+  const files = [videoUrl, ...imageUrls, graphUrl];
+  const fullCommand = overlayCommand({
+    inputCount: files.length - 1,
+    hasImages: imageUrls.length > 0,
+  }).replace('{graph}', inputPlaceholder(files.length - 1, files.length));
+  return createFfmpegJob({ apiKey, files, fullCommand, outputExtension: 'mp4', label: 'composite' });
+}
+
+/**
+ * Text stage: every title, bubble ink and subtitle line as drawtext with the
+ * TikTok Sans TTF passed as a job file. Text files carry lines Upload-Post
+ * would reject inline; they are stored under `${outputPath}.textN`.
+ */
+async function createTextJob(params: {
+  admin: AdminClient;
+  apiKey: string;
+  timeline: RenderTimeline;
+  videoPath: string;
+  outputPath: string;
+  textfilePaths: string[];
+}): Promise<string> {
+  const { admin, apiKey, timeline, videoPath, outputPath, textfilePaths } = params;
+  const font = await fetchFont(OVERLAY_TEXT_SPEC.condensed.file);
+  // Files: video, font, text files. Placeholders are indexed over that list.
+  const plan = buildDrawtextChain({
+    timeline,
+    font,
+    fontPlaceholder: '{input1}',
+    textfilePlaceholder: (i) => `{input${2 + i}}`,
+  });
+  for (const [i, text] of plan.textfiles.entries()) {
+    const path = `${outputPath}.text${i}`;
+    await uploadTextToVideos(admin, path, text, `overlay text ${i}`);
+    textfilePaths.push(path);
+  }
+  const [videoUrl, ...textUrls] = await signVideoUrls(admin, [videoPath, ...textfilePaths]);
+  const files = [videoUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls];
+  return createFfmpegJob({
+    apiKey,
+    files,
+    fullCommand: textVideoCommand({ vf: plan.vf, fps: 30 }),
+    outputExtension: 'mp4',
+    label: 'text',
+  });
+}
+
+// Overlay pass on Upload-Post ffmpeg in up to two jobs: a composite stage
+// (pictures, recordings, bubble shapes) when the timeline has any, then the
+// text stage. Resolves null when the current job is still running at the
+// deadline; the caller hands the wait to a fresh invocation, which resumes on
+// the stored stage and job id.
 async function renderOverlaysWithFfmpeg(params: {
   admin: AdminClient;
   timeline: RenderTimeline;
   videoPath: string;
   outputPath: string;
-  resumeJobId: string | null;
+  resume: { stage: OverlayStage; jobId: string } | null;
   deadline: number;
-  onJobCreated: (jobId: string) => Promise<void>;
+  onJobCreated: (stage: OverlayStage, jobId: string) => Promise<void>;
 }): Promise<{ path: string; warning: string | null } | null> {
   const { admin, timeline, videoPath, outputPath } = params;
   const apiKey = uploadPostKey();
@@ -274,70 +377,68 @@ async function renderOverlaysWithFfmpeg(params: {
     timeline.subtitles && !timeline.subtitle_lines
       ? 'subtitles skipped: no transcript lines for this post'
       : null;
-  const graphPath = `${outputPath}.graph`;
-  let jobId = params.resumeJobId;
-  if (!jobId) {
-    const [condensed, bubble] = await Promise.all([
-      fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
-      fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
-    ]);
-    const imageUrls: string[] = [];
-    for (const img of timeline.images) {
-      const { data, error: imgError } = await admin.storage
-        .from('brief-assets')
-        .createSignedUrl(img.screenshot_path, SIGNED_URL_TTL_SECONDS);
-      if (imgError || !data?.signedUrl) {
-        throw new Error(`could not sign screenshot ${img.screenshot_path}: ${imgError?.message}`);
-      }
-      imageUrls.push(data.signedUrl);
+  const compositedPath = outputPath.replace(/-rendered\.mp4$/, '-composited.mp4');
+  const graphPath = `${compositedPath}.graph`;
+  const textfilePaths: string[] = [];
+  const composite = needsCompositePass(timeline);
+
+  let stage: OverlayStage = params.resume?.stage ?? (composite ? 'composite' : 'text');
+  let jobId: string | null = params.resume?.jobId ?? null;
+
+  if (stage === 'composite') {
+    if (!jobId) {
+      jobId = await createCompositeJob({ admin, apiKey, timeline, videoPath, graphPath });
+      await params.onJobCreated('composite', jobId);
     }
-    const graph = buildOverlayGraph({
-      timeline,
-      images: timeline.images.map((img, i) => ({
-        index: i + 1,
-        isVideo: isVideoSource(img.screenshot_path),
-      })),
-      ass: buildOverlayAss(timeline, { condensed, bubble }),
-    });
-    await uploadTextToVideos(admin, graphPath, graph, 'overlay graph');
-    const [videoUrl, graphUrl] = await signVideoUrls(admin, [videoPath, graphPath]);
-    const files = [videoUrl, ...imageUrls, graphUrl];
-    const fullCommand = overlayCommand({
-      inputCount: files.length - 1,
-      hasImages: imageUrls.length > 0,
-    }).replace('{graph}', inputPlaceholder(files.length - 1, files.length));
-    jobId = await createFfmpegJob({
+    let settled = true;
+    try {
+      const done = await awaitFfmpegJob({ apiKey, jobId, label: 'composite', deadline: params.deadline });
+      if (!done) {
+        settled = false;
+        return null;
+      }
+      const body = await downloadFfmpegJob({ apiKey, jobId, label: 'composite' });
+      await streamToVideos({ path: compositedPath, contentType: 'video/mp4', body, label: 'composite' });
+    } finally {
+      if (settled) await admin.storage.from('videos').remove([graphPath]);
+    }
+    stage = 'text';
+    jobId = null;
+  }
+
+  if (!jobId) {
+    jobId = await createTextJob({
+      admin,
       apiKey,
-      files,
-      fullCommand,
-      outputExtension: 'mp4',
-      label: 'overlay',
+      timeline,
+      videoPath: composite ? compositedPath : videoPath,
+      outputPath,
+      textfilePaths,
     });
-    await params.onJobCreated(jobId);
+    await params.onJobCreated('text', jobId);
   }
   let settled = true;
   try {
-    const done = await awaitFfmpegJob({
-      apiKey,
-      jobId,
-      label: 'overlay',
-      deadline: params.deadline,
-    });
+    const done = await awaitFfmpegJob({ apiKey, jobId, label: 'text', deadline: params.deadline });
     if (!done) {
       settled = false;
       return null;
     }
-    const body = await downloadFfmpegJob({ apiKey, jobId, label: 'overlay' });
-    await streamToVideos({ path: outputPath, contentType: 'video/mp4', body, label: 'overlay' });
+    const body = await downloadFfmpegJob({ apiKey, jobId, label: 'text' });
+    await streamToVideos({ path: outputPath, contentType: 'video/mp4', body, label: 'text' });
   } finally {
-    if (settled) await admin.storage.from('videos').remove([graphPath]);
+    if (settled) {
+      const scratch = [...textfilePaths, ...(composite ? [compositedPath] : [])];
+      if (scratch.length > 0) await admin.storage.from('videos').remove(scratch);
+    }
   }
   return { path: outputPath, warning };
 }
 
 // Bake one slideshow slide on Upload-Post ffmpeg: the photo conformed to the
 // frame, the admin's inset picture and text boxes burnt in, stored as a PNG.
-// Same ASS and overlay graph as the video pass, on a single frame.
+// A slide with an inset or a bubble runs the composite graph first (one job),
+// then the drawtext pass (one job); bare text is a single job.
 async function renderSlideWithFfmpeg(params: {
   admin: AdminClient;
   photoPath: string;
@@ -347,10 +448,7 @@ async function renderSlideWithFfmpeg(params: {
   label: string;
 }): Promise<void> {
   const { admin, photoPath, boxes, inset, outputPath, label } = params;
-  const [condensed, bubble] = await Promise.all([
-    fetchFont(OVERLAY_TEXT_SPEC.condensed.file),
-    fetchFont(OVERLAY_TEXT_SPEC.bubble.file),
-  ]);
+  const apiKey = uploadPostKey();
   const timeline: RenderTimeline = {
     width: 1080,
     height: 1920,
@@ -378,34 +476,60 @@ async function renderSlideWithFfmpeg(params: {
         ]
       : [],
   };
-  const [photoUrl] = await signVideoUrls(admin, [photoPath]);
-  {
-    const imageUrls: string[] = [];
-    if (inset) {
-      const { data, error } = await admin.storage
-        .from('brief-assets')
-        .createSignedUrl(inset.path, SIGNED_URL_TTL_SECONDS);
-      if (error || !data?.signedUrl) {
-        throw new Error(`could not sign inset ${inset.path}: ${error?.message}`);
-      }
-      imageUrls.push(data.signedUrl);
+  const font = await fetchFont(OVERLAY_TEXT_SPEC.condensed.file);
+  const scratch: string[] = [];
+  try {
+    let basePath = photoPath;
+    let prefix = [CONFORM_1080x1920];
+    if (needsCompositePass(timeline)) {
+      const compositedPath = `${outputPath}.composited.png`;
+      const imageUrls = inset ? await signBriefAssets(admin, [inset.path]) : [];
+      const [photoUrl] = await signVideoUrls(admin, [photoPath]);
+      await runFfmpegJob({
+        admin,
+        apiKey,
+        files: [photoUrl, ...imageUrls],
+        filterGraph: buildOverlayGraph({
+          timeline,
+          images: inset ? [{ index: 1, isVideo: false }] : [],
+          ass: buildShapeAss(timeline),
+          baseFilters: CONFORM_1080x1920,
+        }),
+        fullCommand: slideCommand({ inputCount: 1 + imageUrls.length }),
+        outputPath: compositedPath,
+        outputExtension: 'png',
+        label: `${label} composite`,
+      });
+      scratch.push(compositedPath);
+      basePath = compositedPath;
+      prefix = [];
     }
-    const files = [photoUrl, ...imageUrls];
+    const textfilePaths: string[] = [];
+    const plan = buildDrawtextChain({
+      timeline,
+      font,
+      fontPlaceholder: '{input1}',
+      textfilePlaceholder: (i) => `{input${2 + i}}`,
+      prefix,
+    });
+    for (const [i, text] of plan.textfiles.entries()) {
+      const path = `${outputPath}.text${i}`;
+      await uploadTextToVideos(admin, path, text, `${label} text ${i}`);
+      textfilePaths.push(path);
+      scratch.push(path);
+    }
+    const [baseUrl, ...textUrls] = await signVideoUrls(admin, [basePath, ...textfilePaths]);
     await runFfmpegJob({
       admin,
-      apiKey: uploadPostKey(),
-      files,
-      filterGraph: buildOverlayGraph({
-        timeline,
-        images: inset ? [{ index: 1, isVideo: false }] : [],
-        ass: buildOverlayAss(timeline, { condensed, bubble }),
-        baseFilters: CONFORM_1080x1920,
-      }),
-      fullCommand: slideCommand({ inputCount: files.length }),
+      apiKey,
+      files: [baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
+      fullCommand: textImageCommand({ vf: plan.vf }),
       outputPath,
       outputExtension: 'png',
       label,
     });
+  } finally {
+    if (scratch.length > 0) await admin.storage.from('videos').remove(scratch);
   }
 }
 
@@ -1589,10 +1713,7 @@ async function runAssembly(params: {
         console.log(`rendering overlays for ${submission.id}`);
         // ffmpeg is the renderer; OVERLAY_RENDERER=creatomate keeps the old path for a comparison run.
         if (Deno.env.get('OVERLAY_RENDERER') !== 'creatomate') {
-          const storedId = submission.overlay_render_id ?? null;
-          const resumeJobId = storedId?.startsWith(FFMPEG_JOB_PREFIX)
-            ? storedId.slice(FFMPEG_JOB_PREFIX.length)
-            : null;
+          const resume = parseStageJobId(submission.overlay_render_id ?? null);
           const clearJobId = () =>
             admin.from('submissions').update({ overlay_render_id: null }).eq('id', submission.id);
           let result: Awaited<ReturnType<typeof renderOverlaysWithFfmpeg>>;
@@ -1602,12 +1723,12 @@ async function runAssembly(params: {
               timeline,
               videoPath,
               outputPath: `${companyId}/${targetId}/${version}-rendered.mp4`,
-              resumeJobId,
+              resume,
               deadline: Date.now() + OVERLAY_WAIT_MS,
-              onJobCreated: async (jobId) => {
+              onJobCreated: async (stage, jobId) => {
                 await admin
                   .from('submissions')
-                  .update({ overlay_render_id: `${FFMPEG_JOB_PREFIX}${jobId}` })
+                  .update({ overlay_render_id: stageJobId(stage, jobId) })
                   .eq('id', submission.id);
               },
             });

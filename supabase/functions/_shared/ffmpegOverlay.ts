@@ -54,7 +54,7 @@ const IMAGE_SHADOW_ALPHA = 0.4;
 const IMAGE_SHADOW_BLUR_VMIN = 4;
 const OUTPUT_FPS = 30;
 
-type FontMetrics = {
+export type FontMetrics = {
   unitsPerEm: number;
   winAscent: number;
   winDescent: number;
@@ -84,7 +84,7 @@ function readFamilyName(dv: DataView, nameTable: number): string {
  * ASS font size, and centres lines on that box. Browsers size by em and use
  * hhea metrics, so both the size and the vertical centre need converting.
  */
-function readFontMetrics(ttf: Uint8Array): FontMetrics {
+export function readFontMetrics(ttf: Uint8Array): FontMetrics {
   const dv = new DataView(ttf.buffer, ttf.byteOffset, ttf.byteLength);
   const tables: Record<string, number> = {};
   const count = dv.getUint16(4);
@@ -440,6 +440,123 @@ function bubbleEvents(params: {
   return [shape, ...rows];
 }
 
+/** The bubble blob of one text box, no ink: the text pass draws the letters. */
+function bubbleShapeEvent(params: {
+  lines: string[];
+  fontPx: number;
+  fill: string;
+  centreX: number;
+  centreY: number;
+  timing: { startMs: number; durationMs: number };
+  frame: { width: number; height: number };
+}): string {
+  const { lines, fontPx, frame, timing } = params;
+  const spec = OVERLAY_TEXT_SPEC.bubble;
+  const blob = bubbleGeometry(
+    lines.map((line) => measureOverlayLine(line, 'bubble') * fontPx),
+    {
+      pitch: fontPx * spec.lineHeight,
+      padX: fontPx * spec.padX,
+      padY: fontPx * spec.padY,
+      radius: fontPx * spec.radius,
+      snap: fontPx * spec.snap,
+    },
+  );
+  const base: Placement = {
+    enter: undefined,
+    layer: 0,
+    blockX: params.centreX,
+    blockY: params.centreY,
+    blockW: blob.width,
+    blockH: blob.height,
+    x: params.centreX,
+    y: params.centreY,
+  };
+  return dialogue(
+    0,
+    timing.startMs,
+    timing.durationMs,
+    `{\\an5\\1c${assColor(params.fill)}\\bord0\\shad0${motionTags(base, frame.width, frame.height)}\\p3}${svgPathToAss(blob.path)}{\\p0}`,
+  );
+}
+
+/**
+ * ASS script with only the bubble shapes of the timeline (vector drawings, no
+ * fonts), burnt in the composite pass under the drawtext text pass. Empty
+ * string when the timeline has no bubbles.
+ */
+export function buildShapeAss(timeline: RenderTimeline): string {
+  const frame = { width: timeline.width, height: timeline.height };
+  const vmin = Math.min(frame.width, frame.height) / 100;
+  const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
+  const events: string[] = [];
+  for (const t of timeline.texts) {
+    const y = t.y ?? TEXT_Y;
+    const timing = { startMs: t.start_ms, durationMs: t.duration_ms };
+    if (t.box) {
+      if (!t.box.bg) continue;
+      const fontPx = t.box.size * frame.width;
+      events.push(
+        bubbleShapeEvent({
+          lines: wrapOverlayLines(
+            t.text,
+            (OVERLAY_TEXT_SPEC.maxWidth - 2 * t.box.size * OVERLAY_TEXT_SPEC.bubble.padX) / t.box.size,
+            'bubble',
+          ),
+          fontPx,
+          fill: overlayBoxFill(t.box.color),
+          centreX: t.box.x * frame.width,
+          centreY: y * frame.height,
+          timing,
+          frame,
+        }),
+      );
+      continue;
+    }
+    if (overlay.mode === 'outline' || overlay.mode === 'plain') continue;
+    const fontPx = 4.4 * vmin;
+    const text = t.text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
+    events.push(
+      bubbleShapeEvent({
+        lines: wrapOverlayLines(
+          text,
+          (OVERLAY_TEXT_SPEC.maxWidth * frame.width) / fontPx - 2 * OVERLAY_TEXT_SPEC.bubble.padX,
+          'bubble',
+        ),
+        fontPx,
+        fill: overlay.accent_color,
+        centreX: frame.width / 2,
+        centreY: y * frame.height,
+        timing,
+        frame,
+      }),
+    );
+  }
+  if (events.length === 0) return '';
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${frame.width}`,
+    `PlayResY: ${frame.height}`,
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    'YCbCr Matrix: None',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    'Style: Default,Arial,48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...events,
+    '',
+  ].join('\n');
+}
+
 function subtitleEvents(
   lines: SubtitleLine[],
   centreY: number,
@@ -667,7 +784,7 @@ function imagePosition(
 export function buildOverlayGraph(params: {
   timeline: RenderTimeline;
   images: Array<{ index: number; isVideo: boolean }>;
-  /** Full ASS script (buildOverlayAss), embedded in the graph. */
+  /** ASS script embedded in the graph (buildShapeAss); empty burns nothing. */
   ass: string;
   /** Filters applied to input 0 before compositing (a slide photo is conformed to the frame). */
   baseFilters?: string;
@@ -739,7 +856,9 @@ export function buildOverlayGraph(params: {
     base = `[v${i}]`;
   });
 
-  chains.push(`${base}subtitles=filename='${assDataUri(ass)}'[outv]`);
+  chains.push(
+    ass.length > 0 ? `${base}subtitles=filename='${assDataUri(ass)}'[outv]` : `${base}null[outv]`,
+  );
   return chains.join(';\n');
 }
 

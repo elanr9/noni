@@ -8,6 +8,8 @@ type Body = {
   json?: unknown;
   /** Multipart upload: storage paths in the videos bucket become file, file1, ... */
   multipart?: { files: string[]; fields: Record<string, string> };
+  /** Return the response body base64 encoded (binary downloads). */
+  raw?: boolean;
 };
 
 Deno.serve(async (req) => {
@@ -30,6 +32,16 @@ Deno.serve(async (req) => {
     init = { ...init, body: form };
   }
   const res = await fetch(`${BASE}${body.path}`, init);
+  if (body.raw) {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return new Response(JSON.stringify({ status: res.status, base64: btoa(binary) }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
   const text = await res.text();
   return new Response(JSON.stringify({ status: res.status, body: text.slice(0, 4000) }), {
     headers: { 'Content-Type': 'application/json' },
