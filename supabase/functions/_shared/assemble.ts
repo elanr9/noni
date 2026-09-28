@@ -137,7 +137,8 @@ async function awaitFfmpegJob(params: {
     const statusRes = await fetch(`${FFMPEG_JOBS_URL}/${jobId}`, {
       headers: { Authorization: `Apikey ${apiKey}` },
     });
-    const statusJson = (await statusRes.json()) as {
+    if (statusRes.status === 429) continue;
+    const statusJson = (await statusRes.json().catch(() => ({}))) as {
       status?: string;
       exc_info?: string | null;
       result?: { stderr_tail?: string | null } | null;
@@ -161,13 +162,19 @@ async function downloadFfmpegJob(params: {
   label: string;
 }): Promise<ReadableStream<Uint8Array>> {
   const { apiKey, jobId, label } = params;
-  const download = await fetch(`${FFMPEG_JOBS_URL}/${jobId}/download`, {
-    headers: { Authorization: `Apikey ${apiKey}` },
-  });
-  if (!download.ok || !download.body) {
+  // Upload-Post rate limits every endpoint; a slideshow downloads several
+  // slides close together, so back off on 429 instead of failing the post.
+  for (let attempt = 0; ; attempt++) {
+    const download = await fetch(`${FFMPEG_JOBS_URL}/${jobId}/download`, {
+      headers: { Authorization: `Apikey ${apiKey}` },
+    });
+    if (download.ok && download.body) return download.body;
+    if (download.status === 429 && attempt < 6) {
+      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+      continue;
+    }
     throw new Error(`ffmpeg ${label} download failed: ${download.status}`);
   }
-  return download.body;
 }
 
 async function executeFfmpegJob(params: {
@@ -254,6 +261,24 @@ async function uploadTextToVideos(
     .from('videos')
     .upload(path, new TextEncoder().encode(text), { contentType: 'video/mp4', upsert: true });
   if (error) throw new Error(`could not store ${label}: ${error.message}`);
+}
+
+/** Maps items with at most `limit` callbacks in flight, preserving order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 type OverlayStage = 'composite' | 'text';
@@ -1386,8 +1411,9 @@ async function runSlideshowAssembly(params: {
   }
 
   let overlayWarning: string | null = null;
-  const finalPaths = await Promise.all(
-    rawPaths.map(async (rawPath, i) => {
+  // Slides bake two at a time: each is up to two Upload-Post jobs and the
+  // API rate limits job creation, polling and downloads alike.
+  const finalPaths = await mapWithConcurrency(rawPaths, 2, async (rawPath, i) => {
       const segment = slideSegments[i];
       if (!segment) return rawPath;
       const boxes = segment.show_on_screen ? segmentBoxes(segment) : [];
@@ -1422,8 +1448,7 @@ async function runSlideshowAssembly(params: {
         label: `slide ${i + 1}`,
       });
       return outPath;
-    }),
-  );
+  });
 
   if (slideSegments.length === 0 && briefId) {
     overlayWarning = 'slides posted without text: this brief has no slide segments';
