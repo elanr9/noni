@@ -17,6 +17,7 @@ import {
 } from '../../../lib/overlay-boxes';
 import { color } from '../../../theme/tokens';
 import { OverlayTextBox } from '../../ui/OverlayTextBox';
+import { rectsOverlap, type FrameRect } from './FrameGuides';
 import type { StageFrame } from './stageFrame';
 
 export type BoxPatch = Partial<Pick<OverlayBox, 'x' | 'y' | 'size'>>;
@@ -34,6 +35,7 @@ type BoxGesture = {
   pinchStart: number | null;
   scale: number;
   snapped: boolean;
+  overlapping: boolean;
 };
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -50,15 +52,19 @@ function EditableTextBox(props: {
   box: OverlayBox;
   frame: StageFrame;
   editable: boolean;
+  /** Area the box should stay clear of (the subtitle band); warns while dragging. */
+  avoid: FrameRect | null;
   onChange: (patch: BoxPatch) => void;
   onTap: () => void;
   onGestureStart?: () => void;
 }): JSX.Element | null {
-  const { box, frame, editable, onChange, onTap, onGestureStart } = props;
+  const { box, frame, editable, avoid, onChange, onTap, onGestureStart } = props;
   const [offset] = useState(() => new Animated.ValueXY({ x: 0, y: 0 }));
   const [scale] = useState(() => new Animated.Value(1));
   const [active, setActive] = useState(false);
   const [snapped, setSnapped] = useState(false);
+  const [overlapping, setOverlapping] = useState(false);
+  const sizeRef = useRef({ w: 0, h: 0 });
   const gesture = useRef<BoxGesture>({
     startX: 0,
     startY: 0,
@@ -68,8 +74,27 @@ function EditableTextBox(props: {
     pinchStart: null,
     scale: 1,
     snapped: false,
+    overlapping: false,
   });
   const pendingReset = useRef(false);
+
+  /** Live box rect in frame fractions for the current gesture offset and scale. */
+  const checkOverlap = () => {
+    const g = gesture.current;
+    if (avoid === null) return;
+    const cx = box.x + g.dx / frame.width;
+    const cy = box.y + g.dy / frame.height;
+    const halfW = (sizeRef.current.w * g.scale) / frame.width / 2;
+    const halfH = (sizeRef.current.h * g.scale) / frame.height / 2;
+    const hit = rectsOverlap(
+      { left: cx - halfW, right: cx + halfW, top: cy - halfH, bottom: cy + halfH },
+      avoid,
+    );
+    if (hit !== g.overlapping) {
+      g.overlapping = hit;
+      setOverlapping(hit);
+    }
+  };
 
   // The parent re-renders the box at its committed spot; clearing the
   // gesture offset in that same commit keeps it from jumping.
@@ -90,9 +115,11 @@ function EditableTextBox(props: {
       pinchStart: null,
       scale: 1,
       snapped: false,
+      overlapping: false,
     };
     onGestureStart?.();
     setActive(true);
+    checkOverlap();
   };
 
   const onMove = (evt: GestureResponderEvent) => {
@@ -106,6 +133,7 @@ function EditableTextBox(props: {
       }
       g.scale = clamp(dist / g.pinchStart, MIN_BOX_SIZE / box.size, MAX_BOX_SIZE / box.size);
       scale.setValue(g.scale);
+      checkOverlap();
       return;
     }
     if (g.pinchStart !== null) return;
@@ -121,6 +149,7 @@ function EditableTextBox(props: {
     g.dx = dx;
     g.dy = dy;
     offset.setValue({ x: dx, y: dy });
+    checkOverlap();
   };
 
   const onRelease = () => {
@@ -135,6 +164,7 @@ function EditableTextBox(props: {
     }
     setActive(false);
     setSnapped(false);
+    setOverlapping(false);
     const changed =
       (patch.size !== undefined && patch.size !== box.size) ||
       (patch.x !== undefined && (patch.x !== box.x || patch.y !== box.y));
@@ -151,6 +181,7 @@ function EditableTextBox(props: {
   const onTerminate = () => {
     setActive(false);
     setSnapped(false);
+    setOverlapping(false);
     Animated.parallel([
       Animated.spring(offset, { toValue: { x: 0, y: 0 }, useNativeDriver: true }),
       Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
@@ -177,6 +208,9 @@ function EditableTextBox(props: {
         onResponderTerminate={onTerminate}
         accessibilityRole={editable ? 'button' : undefined}
         accessibilityLabel={editable ? `Edit text: ${text}` : undefined}
+        onLayout={(e) => {
+          sizeRef.current = { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height };
+        }}
         style={{
           transform: [
             { translateX: (box.x - 0.5) * frame.width },
@@ -194,7 +228,12 @@ function EditableTextBox(props: {
           fontSize={frame.width * box.size}
           maxWidth={OVERLAY_TEXT_SPEC.maxWidth * frame.width}
         />
-        {active ? <View style={styles.outline} pointerEvents="none" /> : null}
+        {active ? (
+          <View
+            style={[styles.outline, overlapping && styles.outlineWarn]}
+            pointerEvents="none"
+          />
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -204,11 +243,13 @@ export function TextBoxLayer(props: {
   boxes: OverlayBox[];
   frame: StageFrame;
   editable: boolean;
+  /** Frame rect boxes should keep clear of; a dragged box overlapping it warns. */
+  avoid?: FrameRect | null;
   onChangeBox?: (boxId: string, patch: BoxPatch) => void;
   onTapBox?: (boxId: string) => void;
   onGestureStart?: () => void;
 }): JSX.Element | null {
-  const { boxes, frame, editable, onChangeBox, onTapBox, onGestureStart } = props;
+  const { boxes, frame, editable, avoid = null, onChangeBox, onTapBox, onGestureStart } = props;
   if (boxes.length === 0) return null;
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={editable ? 'box-none' : 'none'}>
@@ -218,6 +259,7 @@ export function TextBoxLayer(props: {
           box={box}
           frame={frame}
           editable={editable}
+          avoid={avoid}
           onChange={(patch) => onChangeBox?.(box.id, patch)}
           onTap={() => onTapBox?.(box.id)}
           onGestureStart={onGestureStart}
@@ -252,5 +294,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: color.white,
     borderStyle: 'dashed',
+  },
+  outlineWarn: {
+    borderColor: color.danger,
+    borderStyle: 'solid',
+    backgroundColor: 'rgba(217,58,58,0.12)',
   },
 });

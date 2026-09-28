@@ -31,8 +31,14 @@ export type SlideStageEditing = {
   onScaleBox: (boxId: string, size: number) => void;
   onTapBox: (boxId: string) => void;
   onMoveInset?: PlacementMove;
+  /** New inset width as a frame fraction; the stage keeps the aspect. */
+  onScaleInset?: (width: number) => void;
   selectedBoxId: string | null;
 };
+
+/** Server bounds for the inset width (creator_place_segment). */
+const INSET_MIN_WIDTH = 0.15;
+const INSET_MAX_WIDTH = 0.95;
 
 /** Defaults when the admin attached a picture but never saved a placement.
  * Mirrors renderTimeline.ts (IMAGE_Y / IMAGE_WIDTH). */
@@ -97,9 +103,15 @@ export function SlideStage(props: {
     );
   }, [insetUri]);
 
-  const insetW = (inset?.width ?? SLIDE_INSET_DEFAULTS.width) * stage.w;
+  const insetWidthFraction = inset?.width ?? SLIDE_INSET_DEFAULTS.width;
+  const insetW = insetWidthFraction * stage.w;
   const insetH = insetW / insetAspect;
   const k = stage.w > 0 ? stage.w / 390 : 1;
+  // Widest the inset may grow and still sit inside the frame top to bottom.
+  const insetMaxWidth =
+    stage.w > 0
+      ? Math.min(INSET_MAX_WIDTH, (insetAspect * stage.h) / stage.w)
+      : INSET_MAX_WIDTH;
 
   return (
     <View
@@ -132,6 +144,13 @@ export function SlideStage(props: {
           stageWidth={stage.w}
           stageHeight={stage.h}
           onMove={editing.onMoveInset}
+          onScale={
+            editing.onScaleInset
+              ? (ratio) => editing.onScaleInset?.(insetWidthFraction * ratio)
+              : undefined
+          }
+          minScale={INSET_MIN_WIDTH / insetWidthFraction}
+          maxScale={Math.max(1, insetMaxWidth / insetWidthFraction)}
           onGestureStart={onDragStart}
           style={[
             styles.inset,

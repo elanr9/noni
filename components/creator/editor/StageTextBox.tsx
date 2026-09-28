@@ -45,11 +45,16 @@ type Gesture = {
   moved: boolean;
 };
 
+/** Vertical band (frame height fractions) a box should stay clear of. */
+export type AvoidBand = { top: number; bottom: number };
+
 export type StageTextBoxProps = {
   box: OverlayBox;
   stageWidth: number;
   stageHeight: number;
   selected: boolean;
+  /** The subtitle band; a dragged box overlapping it shows a red outline. */
+  avoidBand: AvoidBand | null;
   onSelect: (boxId: string) => void;
   onEdit: (boxId: string) => void;
   onDragStart: () => void;
@@ -61,6 +66,8 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
   const [pos] = useState(() => new Animated.ValueXY());
   const [scale] = useState(() => new Animated.Value(1));
   const [dragOutline] = useState(() => new Animated.Value(0));
+  const [overlapOutline] = useState(() => new Animated.Value(0));
+  const contentHeight = useRef(0);
   const latest = useRef(props);
   useLayoutEffect(() => {
     latest.current = props;
@@ -127,11 +134,18 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
         g.live.x = nx;
         g.live.y = ny;
         pos.setValue({ x: (nx - 0.5) * w, y: (ny - 0.5) * h });
+        const band = latest.current.avoidBand;
+        if (band !== null) {
+          const halfH = ((contentHeight.current * (g.live.size / b.size)) / h) * 0.5;
+          const overlaps = ny - halfH < band.bottom && ny + halfH > band.top;
+          overlapOutline.setValue(overlaps ? 1 : 0);
+        }
       },
       onPanResponderRelease: () => {
         const { box: b, onCommit, onSelect, onEdit } = latest.current;
         const g = gesture.current;
         dragOutline.setValue(0);
+        overlapOutline.setValue(0);
         if (g.moved) {
           const changed = g.live.x !== b.x || g.live.y !== b.y || g.live.size !== b.size;
           if (changed) onCommit(b.id, { ...g.live });
@@ -150,6 +164,7 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
       onPanResponderTerminate: () => {
         const { box: b, stageWidth: w, stageHeight: h } = latest.current;
         dragOutline.setValue(0);
+        overlapOutline.setValue(0);
         scale.setValue(1);
         pos.setValue({ x: (b.x - 0.5) * w, y: (b.y - 0.5) * h });
       },
@@ -167,17 +182,27 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
           transform: [{ translateX: pos.x }, { translateY: pos.y }, { scale }],
         }}
       >
-        <OverlayTextBox
-          text={box.text}
-          color={box.color}
-          bg={box.bg}
-          fontSize={stageWidth * box.size}
-          maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stageWidth}
-        />
+        <View
+          onLayout={(e) => {
+            contentHeight.current = e.nativeEvent.layout.height;
+          }}
+        >
+          <OverlayTextBox
+            text={box.text}
+            color={box.color}
+            bg={box.bg}
+            fontSize={stageWidth * box.size}
+            maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stageWidth}
+          />
+        </View>
         {selected ? <View style={styles.selectedOutline} pointerEvents="none" /> : null}
         <Animated.View
           pointerEvents="none"
           style={[styles.dragOutline, { opacity: dragOutline }]}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.overlapOutline, { opacity: overlapOutline }]}
         />
       </Animated.View>
     </View>
@@ -209,5 +234,15 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: color.whiteA75,
     borderStyle: 'dashed',
+  },
+  overlapOutline: {
+    position: 'absolute',
+    top: -8,
+    bottom: -8,
+    left: -8,
+    right: -8,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(254,44,85,0.75)',
   },
 });

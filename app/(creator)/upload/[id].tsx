@@ -52,7 +52,11 @@ import {
   parseOverlayBoxes,
   type OverlayBox,
 } from '../../../lib/overlay-boxes';
-import { SlideStage, type SlideInset } from '../../../components/SlideStage';
+import {
+  SLIDE_INSET_DEFAULTS,
+  SlideStage,
+  type SlideInset,
+} from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
 import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissions';
@@ -448,18 +452,30 @@ export default function UploadScreen() {
     );
   }
 
-  function moveSlideInset(slideIndex: number, x: number, y: number) {
+  // Position and width save together so a move followed by a pinch (or the
+  // reverse) inside the debounce window never drops the earlier change.
+  function placeSlideInset(
+    slideIndex: number,
+    change: Partial<{ x: number; y: number; width: number }>,
+  ) {
     const segment = slideSegment(slideIndex);
     if (!segment) return;
+    const next = {
+      x: change.x ?? segment.screenshot_x ?? SLIDE_INSET_DEFAULTS.x,
+      y: change.y ?? segment.screenshot_y ?? SLIDE_INSET_DEFAULTS.y,
+      width: change.width ?? segment.screenshot_width ?? SLIDE_INSET_DEFAULTS.width,
+    };
     setPlacedOnce(true);
     setBriefSegments((prev) =>
       prev.map((s) =>
-        s.id === segment.id ? { ...s, screenshot_x: x, screenshot_y: y } : s,
+        s.id === segment.id
+          ? { ...s, screenshot_x: next.x, screenshot_y: next.y, screenshot_width: next.width }
+          : s,
       ),
     );
     schedule(`inset:${segment.id}`, () => {
-      creatorPlaceSegment({ segmentId: segment.id, screenshot: { x, y } }).catch(() =>
-        setErrorToast('Could not save that position. Try again.'),
+      creatorPlaceSegment({ segmentId: segment.id, screenshot: next }).catch(() =>
+        setErrorToast('Could not save that picture. Try again.'),
       );
     });
   }
@@ -548,7 +564,8 @@ export default function UploadScreen() {
                 setFreshBoxId(null);
                 setSelectedBoxId(boxId);
               },
-              onMoveInset: moveSlideInset,
+              onMoveInset: (slideIndex, x, y) => placeSlideInset(slideIndex, { x, y }),
+              onScaleInset: (slideIndex, width) => placeSlideInset(slideIndex, { width }),
               selectedBoxId,
             }}
             chrome

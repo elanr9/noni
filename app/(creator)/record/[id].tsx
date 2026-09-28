@@ -45,6 +45,12 @@ import {
   type BoxPatch,
 } from '../../../components/creator/record/TextBoxLayer';
 import { TextEditSheet } from '../../../components/creator/record/TextEditSheet';
+import { FrameGuides } from '../../../components/creator/record/FrameGuides';
+import {
+  InsetMediaItem,
+  type InsetPlacement,
+} from '../../../components/creator/record/InsetMediaItem';
+import { useDebouncedCommit } from '../../../components/creator/slides/useDebouncedCommit';
 import {
   UploadFailedToast,
   UploadPill,
@@ -533,6 +539,7 @@ export default function RecordScreen() {
     [isAssignment, id],
   );
   const queueState = useClipUploadQueue(uploadQueue);
+  const placementCommit = useDebouncedCommit(400);
 
   const setKept = useCallback(
     (update: (prev: Record<number, KeptClip>) => Record<number, KeptClip>) => {
@@ -1705,6 +1712,26 @@ export default function RecordScreen() {
     commitActiveBoxes(activeBoxes.filter((b) => b.id !== edit.boxId));
   }
 
+  /** Inset picture moved or resized on the between screen: optimistic, saved
+   * once the creator has been still for 400ms. */
+  function placeActiveInset(place: InsetPlacement) {
+    if (activeSegment === null) return;
+    const segmentId = activeSegment.id;
+    setBriefSegments((prev) =>
+      prev.map((s) =>
+        s.id === segmentId
+          ? { ...s, screenshot_x: place.x, screenshot_y: place.y, screenshot_width: place.width }
+          : s,
+      ),
+    );
+    setPlacedOnce(true);
+    placementCommit.schedule(`inset:${segmentId}`, () => {
+      creatorPlaceSegment({ segmentId, screenshot: place }).catch(() =>
+        setErrorToast('Could not save that position. Try again.'),
+      );
+    });
+  }
+
   function onClose() {
     if (submitting) return;
     if (phase === 'countdown') {
@@ -1814,6 +1841,20 @@ export default function RecordScreen() {
     </View>
   );
 
+  const subtitlesGuideY =
+    brief?.subtitles && (phase === 'countdown' || phase === 'recording' || phase === 'between')
+      ? subtitlesY
+      : null;
+  const insetMedia =
+    activeSegment && activeShot && frame && activeSegment.layout !== 'green_screen' ? (
+      <InsetMediaItem
+        segment={activeSegment}
+        shot={activeShot}
+        frame={frame}
+        editable={brief !== null}
+        onPlace={placeActiveInset}
+      />
+    ) : null;
   const shotCard =
     activeSegment && frame && activeSegment.layout !== 'green_screen' ? (
       <SegmentOverlayPreview
@@ -2127,7 +2168,8 @@ export default function RecordScreen() {
               durationMs={pendingDurationMs}
               frame={frame}
               header={headerBar}
-              shotCard={shotCard}
+              insetMedia={insetMedia}
+              subtitlesY={subtitlesGuideY}
               boxes={activeBoxes}
               canEditText={canEditText}
               onChangeBox={patchActiveBox}
@@ -2153,6 +2195,9 @@ export default function RecordScreen() {
             />
           ) : (
             <>
+              {frame !== null ? (
+                <FrameGuides frame={frame} subtitlesY={subtitlesGuideY} />
+              ) : null}
               {frame !== null ? (
                 <View style={frameStyle(frame)} pointerEvents="none">
                   {shotCard}

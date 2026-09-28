@@ -63,13 +63,16 @@ import { CuePanel } from './CuePanel';
 import { EditorStage, type StageSize } from './EditorStage';
 import { EditorToolbar, type ToolId } from './EditorToolbar';
 import { Playhead } from './playhead';
+import type { InsetPlacement } from './StageInset';
 import type { BoxPlacement } from './StageTextBox';
+import { subtitleBand, subtitleChunks, subtitleTextAt } from './subtitles';
 import { TextEditSheet } from './TextEditSheet';
 import { Timeline, type TrimEdges } from './Timeline';
 import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
 import { useBoxEdits } from './useBoxEdits';
 import { useEditHistory } from './useEditHistory';
 import { useEvent } from './useEvent';
+import { useInsetEdits } from './useInsetEdits';
 
 export type EditorSlot = {
   slotIndex: number;
@@ -89,8 +92,14 @@ export type PostEditorProps = {
   /** Legacy: text box moves now flow through onBoxesChange; kept so older callers type check. */
   onMoveBox: (segment: BriefSegment, boxId: string, x: number, y: number) => void;
   onStyleBox: (segment: BriefSegment, boxId: string, color: string, bg: boolean) => void;
+  /** Legacy: inset moves now flow through onPlaceInset; kept so older callers type check. */
   onMoveCard: (segment: BriefSegment, x: number, y: number) => void;
   onMoveSubtitles: (y: number) => void;
+  /**
+   * Mirror of the creator's inset placement (centre and width as frame
+   * fractions). The editor saves it itself with creatorPlaceSegment.
+   */
+  onPlaceInset?: (segment: BriefSegment, placement: InsetPlacement) => void;
   /**
    * Mirror of every creator text box edit on a clip (add, words, resize,
    * move, delete). The editor saves them itself with creatorEditSegmentBoxes.
@@ -185,9 +194,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     subtitles,
     onTimelineChange,
     onStyleBox,
-    onMoveCard,
     onMoveSubtitles,
     onBoxesChange,
+    onPlaceInset,
     cues,
     words,
     cuePendingSlots,
@@ -216,6 +225,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const [playing, setPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [insetSelected, setInsetSelected] = useState(false);
   const [textEdit, setTextEdit] = useState<TextEdit | null>(null);
   const [tool, setTool] = useState<OpenTool | null>(null);
   const [liveCrop, setLiveCrop] = useState<EditCrop | null>(null);
@@ -228,6 +238,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const busy = busyLabel !== null;
 
   const boxEdits = useBoxEdits({ onError: setError, onChange: onBoxesChange });
+  const insetEdits = useInsetEdits({ onError: setError, onChange: onPlaceInset });
 
   const shownCues = useMemo<StoredCues>(
     () => (cuePreview ? { ...cues, [String(cuePreview.slotIndex)]: cuePreview.cue } : cues),
@@ -346,6 +357,32 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const selectedBox =
     selectedBoxId !== null ? currentBoxes.find((b) => b.id === selectedBoxId) ?? null : null;
   const canAddText = currentSegment !== null && overlay.enabled && !busy;
+  const currentInset = useMemo(
+    () => (currentSegment !== null ? insetEdits.placementFor(currentSegment) : null),
+    [insetEdits, currentSegment],
+  );
+  const currentShot = currentSlot?.shot ?? null;
+  const insetShown =
+    currentShot !== null && currentSegment !== null && currentSegment.layout !== 'green_screen';
+
+  // The subtitle line the render will burn in at the playhead, from the slot transcript.
+  const currentChunks = useMemo(
+    () => (currentSlot ? subtitleChunks(words[String(currentSlot.slotIndex)] ?? []) : []),
+    [words, currentSlot],
+  );
+  const subtitleText = useMemo(() => {
+    if (subtitles === null || current === null) return null;
+    const sourceMs = current.piece.inMs + (positionMs - current.startMs) * current.piece.speed;
+    return subtitleTextAt(currentChunks, sourceMs);
+  }, [subtitles, current, positionMs, currentChunks]);
+  const stageSubtitles = useMemo(
+    () => (subtitles !== null ? { y: subtitles.y, text: subtitleText } : null),
+    [subtitles, subtitleText],
+  );
+  const avoidBand = useMemo(
+    () => (subtitles !== null ? subtitleBand(subtitles.y) : null),
+    [subtitles],
+  );
   const canSplit = !busy && tool === null && canSplitAt(shown, positionMs);
   const canDeletePiece =
     selected !== null && slotPieces(shown, selected.slotIndex).length > 1;
@@ -400,8 +437,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   }
 
   const onStagePress = useEvent(() => {
-    if (selectedBoxId !== null) {
+    if (selectedBoxId !== null || insetSelected) {
       setSelectedBoxId(null);
+      setInsetSelected(false);
       return;
     }
     togglePlay();
@@ -414,6 +452,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const onSelectPiece = useEvent((id: string | null) => {
     if (tool !== null) return;
     setSelectedBoxId(null);
+    setInsetSelected(false);
     setSelectedId(id);
   });
 
@@ -445,6 +484,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     if (busy || tool !== null) return;
     pause();
     setSelectedId(null);
+    setInsetSelected(false);
     setSelectedBoxId(boxId);
   });
 
@@ -507,8 +547,18 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     boxEdits.restyleAll(pick.color, pick.bg, { segment: currentSegment, boxes: currentBoxes });
   }
 
-  const onMoveCardHere = useEvent((x: number, y: number) => {
-    if (currentSegment !== null) onMoveCard(currentSegment, x, y);
+  // Inset media: one gesture commit on release, saved debounced.
+  const selectInset = useEvent(() => {
+    if (busy || tool !== null) return;
+    pause();
+    setSelectedId(null);
+    setSelectedBoxId(null);
+    setInsetSelected(true);
+  });
+
+  const commitInset = useEvent((placement: InsetPlacement) => {
+    if (currentSegment === null) return;
+    insetEdits.update(currentSegment, placement);
   });
 
   function split() {
@@ -572,6 +622,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     pause();
     setSelectedId(null);
     setSelectedBoxId(null);
+    setInsetSelected(false);
     if (tool !== 'cue' || selectedCue?.slotIndex !== selection.slotIndex) {
       cueAtOpen.current = cues[String(selection.slotIndex)] ?? null;
     }
@@ -799,26 +850,34 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           onLayoutCard={setCardSize}
           cardSize={cardSize}
           segment={currentSegment}
-          shot={currentSlot?.shot ?? null}
-          overlay={overlay}
+          shot={currentShot}
+          inset={currentInset}
+          insetSelected={insetSelected && insetShown}
           boxes={currentBoxes}
           selectedBoxId={selectedBox?.id ?? null}
           showText={cueGate.showText}
           showMedia={cueGate.showMedia}
-          subtitles={subtitles}
+          subtitles={stageSubtitles}
+          avoidBand={avoidBand}
           onSelectBox={selectBox}
           onEditBox={editBox}
           onCommitBox={commitBox}
-          onMoveCard={onMoveCardHere}
+          onSelectInset={selectInset}
+          onCommitInset={commitInset}
           onMoveSubtitles={onMoveSubtitles}
           onDragStart={pause}
           crop={tool === 'crop' ? liveCrop : null}
           onCropChange={setLiveCrop}
           onCropCommit={setLiveCrop}
         />
-        {showPlaceHint && !playing && tool === null && selectedBox === null ? (
+        {showPlaceHint && !playing && tool === null && selectedBox === null && !insetSelected ? (
           <View style={styles.hint} pointerEvents="none">
-            <Text style={styles.hintText}>Drag text to move it, pinch to resize</Text>
+            <Text style={styles.hintText}>Drag text or pictures to move, pinch to resize</Text>
+          </View>
+        ) : null}
+        {insetSelected && insetShown && tool === null ? (
+          <View style={styles.hint} pointerEvents="none">
+            <Text style={styles.hintText}>Drag to move, pinch to resize</Text>
           </View>
         ) : null}
         {selectedBox !== null && tool === null ? (
@@ -972,6 +1031,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             canStyleText={currentBoxes.length > 0 && !busy}
             canAddText={canAddText}
             boxSelected={selectedBox !== null && !busy}
+            insetSelected={insetSelected && insetShown && !busy}
             onTool={onTool}
           />
         )}

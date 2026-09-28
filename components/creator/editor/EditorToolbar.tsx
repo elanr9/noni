@@ -36,6 +36,8 @@ export function EditorToolbar(props: {
   canAddText?: boolean;
   /** A text box is selected on the stage: show the text tools instead. */
   boxSelected?: boolean;
+  /** The inset media is selected: nothing can be done to it but move and resize. */
+  insetSelected?: boolean;
   onTool: (tool: ToolId) => void;
 }): JSX.Element {
   const {
@@ -46,8 +48,10 @@ export function EditorToolbar(props: {
     canStyleText,
     canAddText = false,
     boxSelected = false,
+    insetSelected = false,
     onTool,
   } = props;
+  const insetTools: Tool[] = [{ id: 'delete', label: 'Delete', icon: 'trash-2', enabled: false }];
   const textTools: Tool[] = [
     { id: 'edit-text', label: 'Edit', icon: 'pencil', enabled: true },
     { id: 'text-color', label: 'Text color', icon: 'palette', enabled: true },
@@ -75,7 +79,7 @@ export function EditorToolbar(props: {
     },
     { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
   ];
-  const tools = boxSelected ? textTools : clipTools;
+  const tools = insetSelected ? insetTools : boxSelected ? textTools : clipTools;
   return (
     <ScrollView
       horizontal

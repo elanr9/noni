@@ -1,6 +1,6 @@
-// After a take: the clip loops full screen with its on-screen text where the
-// render will put it, the creator can rewatch, scrub, fix the text, then
-// Redo or move on.
+// After a take: the clip loops full screen with its on-screen text and inset
+// picture where the render will put them, the creator can rewatch, scrub,
+// fix the text, move the picture, then Redo or move on.
 import type { JSX, ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -9,6 +9,7 @@ import { color, radius, space, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 import { ClipVideo, ScrubBar, useClipPlayback } from './ClipPlayback';
+import { FrameGuides, subtitleBandRect } from './FrameGuides';
 import { frameStyle, type StageFrame } from './stageFrame';
 import { TextBoxLayer, type BoxPatch } from './TextBoxLayer';
 
@@ -18,8 +19,10 @@ export function BetweenClipView(props: {
   frame: StageFrame;
   /** Progress segments, close and clip pill, drawn over the video. */
   header: ReactNode;
-  /** The segment's picture card, static, inside the frame. */
-  shotCard: ReactNode;
+  /** The segment's inset picture, movable and resizable, inside the frame. */
+  insetMedia: ReactNode;
+  /** Subtitle block centre, null when the post has no subtitles. */
+  subtitlesY: number | null;
   boxes: OverlayBox[];
   canEditText: boolean;
   onChangeBox: (boxId: string, patch: BoxPatch) => void;
@@ -39,7 +42,8 @@ export function BetweenClipView(props: {
     durationMs,
     frame,
     header,
-    shotCard,
+    insetMedia,
+    subtitlesY,
     boxes,
     canEditText,
     onChangeBox,
@@ -59,15 +63,17 @@ export function BetweenClipView(props: {
   return (
     <View style={StyleSheet.absoluteFill}>
       <ClipVideo playback={playback} />
+      <FrameGuides frame={frame} subtitlesY={subtitlesY} />
       {header}
-      <View style={frameStyle(frame)} pointerEvents="none">
-        {shotCard}
+      <View style={frameStyle(frame)} pointerEvents="box-none">
+        {insetMedia}
       </View>
       <View style={frameStyle(frame)} pointerEvents="box-none">
         <TextBoxLayer
           boxes={boxes}
           frame={frame}
           editable={canEditText}
+          avoid={subtitlesY !== null ? subtitleBandRect(frame, subtitlesY) : null}
           onChangeBox={onChangeBox}
           onTapBox={onTapBox}
           onGestureStart={playback.pause}

@@ -59,17 +59,27 @@ export interface SlideNavEditing {
   onScaleBox: (slideIndex: number, boxId: string, size: number) => void;
   onTapBox: (slideIndex: number, boxId: string) => void;
   onMoveInset: (slideIndex: number, x: number, y: number) => void;
+  /** New inset width as a fraction of the frame width. */
+  onScaleInset?: (slideIndex: number, width: number) => void;
   selectedBoxId: string | null;
 }
 
 const SWIPE_MIN_DX = 48;
 
-/** Horizontal swipe pager whose targets are refreshed after each render. */
+/**
+ * Horizontal swipe pager whose targets are refreshed after each render.
+ * Bubble phase only (no capture): a box or the inset that claimed the touch
+ * on start keeps it, so the pager only ever sees swipes on the bare photo.
+ */
 function createSwipeGesture() {
   let page = { go: (_next: number) => undefined as void, index: 0, enabled: false };
   const responder = PanResponder.create({
     onMoveShouldSetPanResponder: (_evt, gs) =>
-      page.enabled && Math.abs(gs.dx) > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+      page.enabled &&
+      gs.numberActiveTouches === 1 &&
+      Math.abs(gs.dx) > 8 &&
+      Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+    onPanResponderTerminationRequest: () => false,
     onPanResponderRelease: (_evt, gs) => {
       if (Math.abs(gs.dx) < SWIPE_MIN_DX) return;
       page.go(page.index + (gs.dx < 0 ? 1 : -1));
@@ -201,6 +211,9 @@ export function SlideNav({
         onScaleBox: (boxId, size) => editing.onScaleBox(safeIndex, boxId, size),
         onTapBox: (boxId) => editing.onTapBox(safeIndex, boxId),
         onMoveInset: (x, y) => editing.onMoveInset(safeIndex, x, y),
+        onScaleInset: editing.onScaleInset
+          ? (width) => editing.onScaleInset?.(safeIndex, width)
+          : undefined,
         selectedBoxId: editing.selectedBoxId,
       }
     : undefined;

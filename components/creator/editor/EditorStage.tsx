@@ -1,12 +1,13 @@
-// The 9:16 preview card: native composition player underneath, the segment's
-// screenshot card and subtitle block (draggable), the creator's text boxes
-// (drag, pinch, tap to select, double tap to edit), and the crop gesture
-// layer while the crop tool is open. Memoised: the parent hands it stable
-// callbacks so playhead ticks do not re-render it.
-import { forwardRef, memo, useMemo, useState, type JSX } from 'react';
+// The exact 1080x1920 render frame scaled to fit (letterboxed, never the phone
+// aspect): native composition player underneath, a faint TikTok chrome guide
+// above it, then the interactive layers: inset media, the creator's text
+// boxes, the subtitle block, and the crop gesture while the crop tool is
+// open. Memoised: the parent hands it stable callbacks so playhead ticks do
+// not re-render it.
+import { forwardRef, memo, type JSX } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import type { BriefSegment, TextOverlay } from '../../../lib/briefs-api';
+import type { BriefSegment } from '../../../lib/briefs-api';
 import type { OverlayBox } from '../../../lib/overlay-boxes';
 import type { EditCrop } from '../../../lib/video-edit';
 import {
@@ -19,10 +20,13 @@ import {
 } from '../../../modules/video-editor';
 import { color } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
-import { SegmentOverlayPreview, type ShotPreview } from '../SegmentOverlayPreview';
+import type { ShotPreview } from '../SegmentOverlayPreview';
+import { FrameFit } from '../slides/FrameFit';
+import { TikTokChrome } from '../slides/TikTokChrome';
 import { CropGesture } from './CropGesture';
-import type { BoxPlacement } from './StageTextBox';
-import { SubtitlePlacement } from './SubtitlePlacement';
+import { StageInset, type InsetPlacement } from './StageInset';
+import { StageSubtitles } from './StageSubtitles';
+import type { AvoidBand, BoxPlacement } from './StageTextBox';
 import { TextBoxLayer } from './TextBoxLayer';
 
 export type StageSize = { w: number; h: number };
@@ -39,18 +43,24 @@ export type EditorStageProps = {
   cardSize: StageSize | null;
   segment: BriefSegment | null;
   shot: ShotPreview | null;
-  overlay: TextOverlay;
+  /** Where the inset media sits (creator edits applied); ignored without a shot. */
+  inset: InsetPlacement | null;
+  insetSelected: boolean;
   /** Effective text boxes of the clip under the playhead (creator edits applied). */
   boxes: OverlayBox[];
   selectedBoxId: string | null;
   /** Cue gates: the playhead is inside the text or media window of the segment. */
   showText: boolean;
   showMedia: boolean;
-  subtitles: { y: number } | null;
+  /** Subtitle block centre and the line spoken at the playhead; null hides it. */
+  subtitles: { y: number; text: string | null } | null;
+  /** Band the dragged text boxes should stay clear of (the subtitles). */
+  avoidBand: AvoidBand | null;
   onSelectBox: (boxId: string) => void;
   onEditBox: (boxId: string) => void;
   onCommitBox: (boxId: string, placement: BoxPlacement) => void;
-  onMoveCard: (x: number, y: number) => void;
+  onSelectInset: () => void;
+  onCommitInset: (placement: InsetPlacement) => void;
   onMoveSubtitles: (y: number) => void;
   onDragStart: () => void;
   /** Live crop while the crop tool is open; null otherwise. */
@@ -76,138 +86,131 @@ export const EditorStage = memo(
       cardSize,
       segment,
       shot,
-      overlay,
+      inset,
+      insetSelected,
       boxes,
       selectedBoxId,
       showText,
       showMedia,
       subtitles,
+      avoidBand,
       onSelectBox,
       onEditBox,
       onCommitBox,
-      onMoveCard,
+      onSelectInset,
+      onCommitInset,
       onMoveSubtitles,
       onDragStart,
       crop,
       onCropChange,
       onCropCommit,
     } = props;
-    const [area, setArea] = useState<StageSize | null>(null);
-    // The card layer draws only the screenshot; text boxes have their own layer.
-    const cardOnlyOverlay = useMemo<TextOverlay>(() => ({ ...overlay, enabled: false }), [overlay]);
-
-    // Fit a 9:16 card inside the available area with a little breathing room.
-    let card: StageSize | null = null;
-    if (area !== null && area.w > 0 && area.h > 0) {
-      const maxW = area.w - 32;
-      const maxH = area.h - 8;
-      const h = Math.min(maxH, (maxW * 16) / 9);
-      card = { w: Math.round((h * 9) / 16), h: Math.round(h) };
-    }
 
     const cropping = crop !== null;
     const liveCrop = crop ?? { scale: 1, x: 0, y: 0 };
-    const showCard = segment !== null && segment.layout !== 'green_screen' && shot !== null;
+    const showInset =
+      segment !== null && segment.layout !== 'green_screen' && shot !== null && inset !== null;
+    const layers = !cropping && cardSize !== null && cardSize.w > 0 && cardSize.h > 0;
 
     return (
-      <View
-        style={styles.area}
-        onLayout={(e) =>
-          setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
-        }
-      >
-        {card !== null ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={playing ? 'Pause preview' : 'Play preview'}
-            onPress={cropping ? undefined : onTogglePlay}
-            onLayout={(e) =>
-              onLayoutCard({
-                w: e.nativeEvent.layout.width,
-                h: e.nativeEvent.layout.height,
-              })
-            }
-            style={[styles.card, { width: card.w, height: card.h }]}
-          >
-            {VideoEditorPreview !== null ? (
-              <VideoEditorPreview
-                ref={ref}
-                timeline={timeline}
-                playing={playing}
-                onTime={onTime}
-                onReady={onReady}
-                onEnd={onEnd}
-                onError={onError}
-                style={[
-                  StyleSheet.absoluteFill,
-                  cropping
-                    ? {
-                        transform: [
-                          { translateX: liveCrop.x * card.w },
-                          { translateY: liveCrop.y * card.h },
-                          { scale: liveCrop.scale },
-                        ],
-                      }
-                    : null,
-                ]}
-              />
-            ) : null}
+      <FrameFit style={styles.area} frameStyle={styles.card}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={playing ? 'Pause preview' : 'Play preview'}
+          onPress={cropping ? undefined : onTogglePlay}
+          onLayout={(e) =>
+            onLayoutCard({
+              w: e.nativeEvent.layout.width,
+              h: e.nativeEvent.layout.height,
+            })
+          }
+          style={StyleSheet.absoluteFill}
+        >
+          {VideoEditorPreview !== null ? (
+            <VideoEditorPreview
+              ref={ref}
+              timeline={timeline}
+              playing={playing}
+              onTime={onTime}
+              onReady={onReady}
+              onEnd={onEnd}
+              onError={onError}
+              style={[
+                StyleSheet.absoluteFill,
+                cropping && cardSize !== null
+                  ? {
+                      transform: [
+                        { translateX: liveCrop.x * cardSize.w },
+                        { translateY: liveCrop.y * cardSize.h },
+                        { scale: liveCrop.scale },
+                      ],
+                    }
+                  : null,
+              ]}
+            />
+          ) : null}
 
-            {!cropping && showCard && segment !== null && cardSize !== null ? (
-              <SegmentOverlayPreview
-                segment={segment}
-                shot={showMedia ? shot : null}
-                stageWidth={cardSize.w}
-                stageHeight={cardSize.h}
-                overlay={cardOnlyOverlay}
-                onMoveCard={onMoveCard}
-                onDragStart={onDragStart}
-              />
-            ) : null}
+          {cardSize !== null && !cropping ? (
+            <TikTokChrome stageWidth={cardSize.w} stageHeight={cardSize.h} />
+          ) : null}
 
-            {!cropping && showText && cardSize !== null && boxes.length > 0 ? (
-              <TextBoxLayer
-                boxes={boxes}
-                stageWidth={cardSize.w}
-                stageHeight={cardSize.h}
-                selectedBoxId={selectedBoxId}
-                onSelect={onSelectBox}
-                onEdit={onEditBox}
-                onDragStart={onDragStart}
-                onCommit={onCommitBox}
-              />
-            ) : null}
+          {layers && showInset && shot !== null && inset !== null && showMedia ? (
+            <StageInset
+              shot={shot}
+              placement={inset}
+              stageWidth={cardSize.w}
+              stageHeight={cardSize.h}
+              selected={insetSelected}
+              onSelect={onSelectInset}
+              onDragStart={onDragStart}
+              onCommit={onCommitInset}
+            />
+          ) : null}
 
-            {!cropping && subtitles !== null && cardSize !== null ? (
-              <SubtitlePlacement
-                y={subtitles.y}
-                stageWidth={cardSize.w}
-                stageHeight={cardSize.h}
-                onMove={onMoveSubtitles}
-                onDragStart={onDragStart}
-              />
-            ) : null}
+          {layers && showText && boxes.length > 0 ? (
+            <TextBoxLayer
+              boxes={boxes}
+              stageWidth={cardSize.w}
+              stageHeight={cardSize.h}
+              selectedBoxId={selectedBoxId}
+              avoidBand={avoidBand}
+              onSelect={onSelectBox}
+              onEdit={onEditBox}
+              onDragStart={onDragStart}
+              onCommit={onCommitBox}
+            />
+          ) : null}
 
-            {cropping && cardSize !== null ? (
-              <CropGesture
-                crop={liveCrop}
-                stageWidth={cardSize.w}
-                stageHeight={cardSize.h}
-                onChange={onCropChange}
-                onCommit={onCropCommit}
-              />
-            ) : null}
+          {layers && subtitles !== null ? (
+            <StageSubtitles
+              y={subtitles.y}
+              text={subtitles.text}
+              stageWidth={cardSize.w}
+              stageHeight={cardSize.h}
+              onMove={onMoveSubtitles}
+              onDragStart={onDragStart}
+            />
+          ) : null}
 
-            {!playing && !cropping ? (
-              <View style={styles.playWrap} pointerEvents="none">
-                <View style={styles.play}>
-                  <Icon name="play" size={26} color={color.white} />
-                </View>
+          {cropping && cardSize !== null ? (
+            <CropGesture
+              crop={liveCrop}
+              stageWidth={cardSize.w}
+              stageHeight={cardSize.h}
+              onChange={onCropChange}
+              onCommit={onCropCommit}
+            />
+          ) : null}
+
+          {!playing && !cropping ? (
+            <View style={styles.playWrap} pointerEvents="none">
+              <View style={styles.play}>
+                <Icon name="play" size={26} color={color.white} />
               </View>
-            ) : null}
-          </Pressable>
-        ) : null}
-      </View>
+            </View>
+          ) : null}
+        </Pressable>
+      </FrameFit>
     );
   }),
 );
@@ -215,8 +218,8 @@ export const EditorStage = memo(
 const styles = StyleSheet.create({
   area: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginBottom: 4,
   },
   card: {
     borderRadius: 12,
