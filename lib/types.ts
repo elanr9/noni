@@ -4758,6 +4758,10 @@ export type Database = {
           pending_cents: number
         }[]
       }
+      creator_edit_segment_boxes: {
+        Args: { p_boxes: Json; p_segment_id: string }
+        Returns: undefined
+      }
       creator_place_segment: {
         Args: {
           p_box_id?: string

@@ -13,6 +13,7 @@ import {
   parseOverlayBoxes,
   parseOverlayThemeColor,
   serializeOverlayBoxes,
+  type OverlayBox,
   type OverlayTextStyle,
 } from './overlay-boxes';
 import { supabase } from './supabase';
@@ -591,6 +592,30 @@ export async function creatorPlaceSegment(params: {
     p_box_y: params.box?.y,
     p_screenshot_x: params.screenshot?.x,
     p_screenshot_y: params.screenshot?.y,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Creator side: replace the whole text box set of a clip or slide on their
+ * own assignment (add, edit words, resize, recolour, remove). The RPC clamps
+ * and validates every box.
+ */
+export async function creatorEditSegmentBoxes(params: {
+  segmentId: string;
+  boxes: OverlayBox[];
+}): Promise<void> {
+  const { error } = await supabase.rpc('creator_edit_segment_boxes', {
+    p_segment_id: params.segmentId,
+    p_boxes: params.boxes.map((b) => ({
+      id: b.id,
+      text: b.text,
+      color: b.color,
+      bg: b.bg,
+      size: b.size,
+      x: b.x,
+      y: b.y,
+    })),
   });
   if (error) throw error;
 }

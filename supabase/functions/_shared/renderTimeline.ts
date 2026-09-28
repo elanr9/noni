@@ -428,7 +428,18 @@ export function buildRenderTimeline(params: {
     const segment = ordered[i];
     if (segment) {
       if (textOverlay.enabled && segment.show_on_screen) {
-        const textWindow: OverlayWindow = { start_ms: cursorMs, duration_ms: effectiveMs };
+        // Text covers the whole clip unless the creator set its own window.
+        const textWindow: OverlayWindow =
+          cue && cue.source === 'creator' && cue.text_start_ms !== null
+            ? clipWindow(
+                cursorMs + sourceToOutputMs(cue.text_start_ms, keep),
+                cursorMs +
+                  sourceToOutputMs(cue.text_start_ms, keep) +
+                  (cue.text_hold_ms ?? effectiveMs),
+                cursorMs,
+                clipEnd,
+              )
+            : { start_ms: cursorMs, duration_ms: effectiveMs };
         for (const box of segmentBoxes(segment)) {
           texts.push({
             text: box.text,
