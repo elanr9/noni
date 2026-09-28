@@ -411,15 +411,14 @@ function enterAnimations(
 /** Name Creatomate uses to link the subtitle element to the stitched video. */
 const STITCHED_VIDEO_NAME = 'stitched';
 
-// Caption geometry on a 9:16 frame: block centered at 72% of the height,
-// above TikTok's caption area, 80% of the width, 6.2 vmin in the condensed
-// TikTok look (solid white, black stroke, soft shadow). Short chunks (about
-// 30 characters) wrap to at most two lines at that width, and the fixed
-// two-line height pins the block in place whether a chunk fills one line or
-// two; a rare third line is clipped instead of moving the block.
-export const SUBTITLE_FONT_SIZE_VMIN = 6.2;
-export const SUBTITLE_WIDTH = 0.8;
-export const SUBTITLE_Y = 0.72;
+// Caption geometry on a 9:16 frame, measured off TikTok's own auto captions:
+// block centered at 78% of the height, 62% of the width, 3.6 vmin TikTok Sans
+// with the classic black outline. Chunks of up to 48 characters wrap to two
+// short centred lines; a rare third line is dropped instead of moving the
+// block.
+export const SUBTITLE_FONT_SIZE_VMIN = 3.6;
+export const SUBTITLE_WIDTH = 0.62;
+export const SUBTITLE_Y = 0.78;
 export const SUBTITLE_LINES = 2;
 
 /** Shared look and geometry of every subtitle element, ours or auto-transcribed. */

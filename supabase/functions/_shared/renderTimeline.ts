@@ -293,7 +293,7 @@ export const TEXT_HOLD_MS = 4000;
 /** Shortest an overlay may stay on screen once a cue places it. */
 const MIN_OVERLAY_MS = 800;
 /** Longest chunk of our own subtitles per line (see renderAdapter subtitles). */
-export const SUBTITLE_MAX_CHARS = 40;
+export const SUBTITLE_MAX_CHARS = 48;
 
 export type ClipWords = { slot_index: number; words: TranscriptWord[] };
 
@@ -356,7 +356,7 @@ export const TEXT_Y = 0.22;
 // Lower right, clear of a talking head's face and above the subtitle block.
 const IMAGE_X = 0.72;
 const IMAGE_Y = 0.56;
-const DEFAULT_SUBTITLES_Y = 0.72;
+const DEFAULT_SUBTITLES_Y = 0.78;
 const IMAGE_WIDTH = 0.34;
 
 /**

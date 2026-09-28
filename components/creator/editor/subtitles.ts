@@ -5,12 +5,12 @@ import type { TranscriptWord } from '../../../lib/video-edit';
 
 /** Centre of the two line block sits this far from its top and bottom (renderTimeline SUBTITLE_HALF_HEIGHT). */
 export const SUBTITLE_HALF_HEIGHT = 0.05;
-export const SUBTITLE_FONT_VMIN = 6.2;
-export const SUBTITLE_WIDTH = 0.8;
+export const SUBTITLE_FONT_VMIN = 3.6;
+export const SUBTITLE_WIDTH = 0.62;
 export const SUBTITLE_LINES = 2;
 export const SUBTITLE_PLACEHOLDER = 'Your subtitles\nshow up here';
 
-const SUBTITLE_MAX_CHARS = 40;
+const SUBTITLE_MAX_CHARS = 48;
 const SUBTITLE_PAUSE_BREAK_MS = 600;
 
 export type SubtitleChunk = { text: string; startMs: number; endMs: number };

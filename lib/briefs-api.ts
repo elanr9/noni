@@ -622,7 +622,7 @@ export async function creatorEditSegmentBoxes(params: {
 }
 
 /** Default centre of the burned-in subtitle block, as a fraction of frame height. */
-export const DEFAULT_SUBTITLES_Y = 0.72;
+export const DEFAULT_SUBTITLES_Y = 0.78;
 
 /** Creator side: move the subtitle block up or down. Position only. */
 export async function creatorPlaceSubtitles(params: {

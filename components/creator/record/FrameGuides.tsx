@@ -9,9 +9,9 @@ import { OutlinedText } from '../../ui/OutlinedText';
 import { TikTokChrome } from '../slides/TikTokChrome';
 import { frameStyle, type StageFrame } from './stageFrame';
 
-/** Mirrors renderAdapter.ts subtitleStyle: 6.2 vmin, 80% wide, two lines. */
-const SUBTITLE_FONT_VMIN = 6.2;
-const SUBTITLE_WIDTH = 0.8;
+/** Mirrors renderAdapter.ts subtitleStyle: 3.6 vmin, 62% wide, two lines. */
+const SUBTITLE_FONT_VMIN = 3.6;
+const SUBTITLE_WIDTH = 0.62;
 const SUBTITLE_LINES = 2;
 
 /** Frame-fraction rectangle. */
