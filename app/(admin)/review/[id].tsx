@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -578,32 +578,26 @@ export default function ReviewScreen() {
         )}
 
         {editPending && (
-          <View style={styles.editOverlay}>
+          <View style={styles.editPillRow} pointerEvents="box-none">
             {editFailed ? (
-              <>
-                <Text style={styles.editTitle}>Edit failed</Text>
-                <Text style={styles.editDetail}>
-                  {submission?.render_error ??
-                    'Something went wrong while putting this video together.'}
-                </Text>
-                <Button size="md" variant="primary" onPress={() => void restartEdit()}>
-                  Retry edit
-                </Button>
-              </>
+              <Pressable
+                onPress={() => void restartEdit()}
+                style={[styles.editPill, styles.editPillFailed]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.editPillText}>Edit failed</Text>
+                <Text style={styles.editPillAction}>Retry</Text>
+              </Pressable>
             ) : (
-              <>
-                <ActivityIndicator color={color.white} />
-                <Text style={styles.editTitle}>Editing the final video</Text>
-                <Text style={styles.editDetail}>
-                  Clips are being stitched and captions added. This can take a
-                  couple of minutes. The first raw clip plays meanwhile.
-                </Text>
-                {submission?.render_status === 'queued' && (
-                  <Button size="md" variant="outline" onPress={() => void restartEdit()}>
-                    Restart edit
-                  </Button>
-                )}
-              </>
+              <Pressable
+                onPress={
+                  submission?.render_status === 'queued' ? () => void restartEdit() : undefined
+                }
+                style={styles.editPill}
+              >
+                <ActivityIndicator size="small" color={color.white} />
+                <Text style={styles.editPillText}>Editing final video</Text>
+              </Pressable>
             )}
           </View>
         )}
@@ -726,28 +720,35 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  editOverlay: {
+  editPillRow: {
     position: 'absolute',
     top: 104,
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 18,
-    backgroundColor: 'rgba(10, 10, 14, 0.82)',
   },
-  editTitle: {
-    fontSize: type.size.body,
+  editPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10, 10, 14, 0.6)',
+  },
+  editPillFailed: {
+    backgroundColor: 'rgba(200, 40, 40, 0.85)',
+  },
+  editPillText: {
+    fontSize: type.size.bodySm,
     fontWeight: type.weight.semibold,
     color: color.white,
-    textAlign: 'center',
   },
-  editDetail: {
+  editPillAction: {
     fontSize: type.size.bodySm,
-    color: color.slate500,
-    textAlign: 'center',
+    fontWeight: type.weight.semibold,
+    color: color.white,
+    textDecorationLine: 'underline',
   },
   actionStrip: {
     flexDirection: 'row',
