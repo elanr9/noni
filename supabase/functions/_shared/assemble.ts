@@ -263,24 +263,6 @@ async function uploadTextToVideos(
   if (error) throw new Error(`could not store ${label}: ${error.message}`);
 }
 
-/** Maps items with at most `limit` callbacks in flight, preserving order. */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
 type OverlayStage = 'composite' | 'text';
 
 /** overlay_render_id for an in-flight Upload-Post job of one overlay stage. */
