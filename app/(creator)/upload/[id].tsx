@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   ScrollView,
@@ -21,6 +22,7 @@ import { SlideNav } from '../../../components/creator/SlideNav';
 import { FrameFit } from '../../../components/creator/slides/FrameFit';
 import {
   clampBoxSize,
+  nextBoxId,
   segmentBoxes,
   segmentWithBoxes,
 } from '../../../components/creator/slides/segment-boxes';
@@ -38,6 +40,7 @@ import { useAuth } from '../../../lib/auth';
 import {
   creatorEditSegmentBoxes,
   creatorPlaceSegment,
+  creatorRemoveSlide,
   creatorStyleBriefBoxes,
   listBriefSegments,
   parseTalkingPoints,
@@ -70,7 +73,46 @@ type Slide = {
   boxes: OverlayBox[];
   /** The admin's inset picture on this slide. */
   inset?: SlideInset;
+  /** Same words as the slide before it; probably an accidental copy. */
+  duplicate?: boolean;
 };
+
+/** Photos keyed by slot after one slot is dropped; later slots shift down. */
+function photosWithoutSlot(
+  photos: Record<number, PickedPhoto>,
+  slot: number,
+): Record<number, PickedPhoto> {
+  const out: Record<number, PickedPhoto> = {};
+  for (const [key, photo] of Object.entries(photos)) {
+    const n = Number(key);
+    if (n === slot) continue;
+    out[n > slot ? n - 1 : n] = photo;
+  }
+  return out;
+}
+
+/** Slides the segments describe, then any picked photo sitting past them. */
+function withExtraPhotoSlides(
+  base: Slide[],
+  photos: Record<number, PickedPhoto>,
+): Slide[] {
+  const known = new Set(base.map((s) => s.slotIndex));
+  const extras = Object.keys(photos)
+    .map(Number)
+    .filter((slot) => Number.isFinite(slot) && !known.has(slot))
+    .sort((a, b) => a - b)
+    .map((slotIndex) => ({ slotIndex, text: '', boxes: [] as OverlayBox[] }));
+  return [...base, ...extras];
+}
+
+function markDuplicates(slides: Slide[]): Slide[] {
+  return slides.map((slide, i) => {
+    const prev = slides[i - 1];
+    const words = slide.text.trim();
+    const duplicate = prev !== undefined && words.length > 0 && words === prev.text.trim();
+    return duplicate ? { ...slide, duplicate } : slide;
+  });
+}
 
 const PROCESSING_MIN_MS = 2_000;
 
@@ -148,6 +190,55 @@ function SpinnerRing() {
   );
 }
 
+function briefSlides(
+  brief: AssignmentWithBrief['briefs'],
+  briefSegments: BriefSegment[],
+  insetUrls: Record<string, string>,
+): Slide[] {
+  const talkingPoints = parseTalkingPoints(brief.talking_points);
+  const slideSegments = briefSegments.filter((s) => s.kind === 'slide');
+  if (slideSegments.length > 0) {
+    return slideSegments.map((s) => {
+      const boxes = parseOverlayBoxes(s.overlay_style, {
+        text: s.overlay_text,
+        textY: s.text_y,
+      });
+      const fromPoint =
+        s.talking_point_index !== null
+          ? talkingPoints[s.talking_point_index]?.text?.trim()
+          : undefined;
+      const insetUri = s.screenshot_url ? insetUrls[s.id] : undefined;
+      return {
+        slotIndex: s.slot_index,
+        text:
+          boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') ||
+          fromPoint ||
+          '',
+        boxes,
+        inset:
+          insetUri !== undefined
+            ? {
+                uri: insetUri,
+                x: s.screenshot_x,
+                y: s.screenshot_y,
+                width: s.screenshot_width,
+              }
+            : undefined,
+      };
+    });
+  }
+  const fromPoints = talkingPoints
+    .map((p) => p.text?.trim() ?? '')
+    .filter((t) => t.length > 0)
+    .map((text, i) => ({ slotIndex: i, text, boxes: [] as OverlayBox[] }));
+  if (fromPoints.length > 0) return fromPoints;
+  return scriptBlocks(brief.script).map((text, i) => ({
+    slotIndex: i,
+    text,
+    boxes: [] as OverlayBox[],
+  }));
+}
+
 export default function UploadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -165,6 +256,7 @@ export default function UploadScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [placedOnce, setPlacedOnce] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
@@ -252,53 +344,15 @@ export default function UploadScreen() {
 
   const slides = useMemo<Slide[]>(() => {
     if (!brief) return [];
-    const talkingPoints = parseTalkingPoints(brief.talking_points);
-    const slideSegments = briefSegments.filter((s) => s.kind === 'slide');
-    if (slideSegments.length > 0) {
-      return slideSegments.map((s) => {
-        const boxes = parseOverlayBoxes(s.overlay_style, {
-          text: s.overlay_text,
-          textY: s.text_y,
-        });
-        const fromPoint =
-          s.talking_point_index !== null
-            ? talkingPoints[s.talking_point_index]?.text?.trim()
-            : undefined;
-        const insetUri = s.screenshot_url ? insetUrls[s.id] : undefined;
-        return {
-          slotIndex: s.slot_index,
-          text:
-            boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') ||
-            fromPoint ||
-            '',
-          boxes,
-          inset:
-            insetUri !== undefined
-              ? {
-                  uri: insetUri,
-                  x: s.screenshot_x,
-                  y: s.screenshot_y,
-                  width: s.screenshot_width,
-                }
-              : undefined,
-        };
-      });
-    }
-    const fromPoints = talkingPoints
-      .map((p) => p.text?.trim() ?? '')
-      .filter((t) => t.length > 0)
-      .map((text, i) => ({ slotIndex: i, text, boxes: [] as OverlayBox[] }));
-    if (fromPoints.length > 0) return fromPoints;
-    return scriptBlocks(brief.script).map((text, i) => ({
-      slotIndex: i,
-      text,
-      boxes: [] as OverlayBox[],
-    }));
-  }, [brief, briefSegments, insetUrls]);
+    return markDuplicates(
+      withExtraPhotoSlides(briefSlides(brief, briefSegments, insetUrls), photos),
+    );
+  }, [brief, briefSegments, insetUrls, photos]);
 
   const pickedCount = slides.filter((s) => photos[s.slotIndex] !== undefined).length;
   const allPicked = slides.length > 0 && pickedCount === slides.length;
   const nextEmpty = slides.find((s) => photos[s.slotIndex] === undefined);
+  const missingCount = slides.length - pickedCount;
 
   async function pickPhoto(slotIndex: number) {
     if (picking || phase === 'processing' || !assignment) return;
@@ -329,11 +383,82 @@ export default function UploadScreen() {
   async function processSlideshow() {
     setPhase('processing');
     await new Promise<void>((resolve) => setTimeout(resolve, PROCESSING_MIN_MS));
+    setReviewIndex(0);
     setPhase('review');
   }
 
+  /** The stage is never gated on photos: open any slide and edit it now. */
+  function openStage(slideIndex: number) {
+    setReviewIndex(Math.max(0, Math.min(slideIndex, slides.length - 1)));
+    setSelectedBoxId(null);
+    setFreshBoxId(null);
+    setPhase('review');
+  }
+
+  function removeSlide(slideIndex: number) {
+    const slide = slides[slideIndex];
+    if (!slide || !assignment) return;
+    if (slides.length <= 1) {
+      setErrorToast('A slideshow needs at least one slide.');
+      return;
+    }
+    const segment = slideSegment(slideIndex);
+    Alert.alert(
+      `Remove slide ${slideIndex + 1}?`,
+      segment
+        ? 'Its text and photo go away and the later slides move up.'
+        : 'This photo goes away and the later slides move up.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => void confirmRemoveSlide(slide.slotIndex, segment),
+        },
+      ],
+    );
+  }
+
+  async function confirmRemoveSlide(slot: number, segment: BriefSegment | null) {
+    if (!assignment || removing) return;
+    setRemoving(true);
+    try {
+      if (segment) await creatorRemoveSlide(segment.id);
+      if (segment) {
+        setBriefSegments((prev) =>
+          prev
+            .filter((s) => s.id !== segment.id)
+            .map((s) =>
+              s.kind === 'slide' && s.slot_index > slot
+                ? { ...s, slot_index: s.slot_index - 1 }
+                : s,
+            ),
+        );
+      }
+      const nextPhotos = photosWithoutSlot(photos, slot);
+      setPhotos(nextPhotos);
+      setSelectedBoxId(null);
+      setFreshBoxId(null);
+      setReviewIndex((i) => Math.max(0, Math.min(i, slides.length - 2)));
+      await savePhotoDraft(assignment.id, nextPhotos);
+      toast.show('Slide removed.');
+    } catch (e) {
+      setErrorToast(
+        e instanceof Error ? e.message : 'Could not remove that slide. Try again.',
+      );
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   async function sendForApproval() {
-    if (!profile || !assignment || !allPicked || submitting) return;
+    if (!profile || !assignment || submitting) return;
+    if (!allPicked) {
+      setErrorToast(
+        `Add a photo to ${missingCount === 1 ? 'the last slide' : `${missingCount} slides`} first.`,
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const ordered = slides.map((s) => {
@@ -415,11 +540,14 @@ export default function UploadScreen() {
   }
 
   function addSlideBox(slideIndex: number) {
-    if (!slideSegment(slideIndex)) {
-      setErrorToast('Text can only be added once this post has slides.');
+    const segment = slideSegment(slideIndex);
+    if (!segment) {
+      setErrorToast(
+        'This slide has no text layer yet, so text cannot be added here. You can still swap or remove it.',
+      );
       return;
     }
-    const id = `box-${Date.now().toString(36)}`;
+    const id = nextBoxId(segmentBoxes(segment));
     updateSlideBoxes(slideIndex, (boxes) => [
       ...boxes,
       newOverlayBox({
@@ -544,12 +672,16 @@ export default function UploadScreen() {
             onPickPhoto={() => {
               if (reviewSlide) void pickPhoto(reviewSlide.slotIndex);
             }}
-            disabled={picking || submitting}
+            onRemoveSlide={() => removeSlide(reviewIndex)}
+            disabled={picking || submitting || removing}
+            canRemove={slides.length > 1}
           />
         </View>
 
         <FrameFit style={styles.reviewStage} frameStyle={styles.reviewCard}>
           <SlideNav
+            key={slides.length}
+            initialIndex={reviewIndex}
             variant="dark"
             slides={slides.map((s) => ({
               image: photos[s.slotIndex]?.uri,
@@ -572,6 +704,25 @@ export default function UploadScreen() {
             swipe
             onIndexChange={changeReviewIndex}
           />
+          {reviewSlide !== undefined && photos[reviewSlide.slotIndex] === undefined ? (
+            <View style={styles.stageCta} pointerEvents="box-none">
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Add photo for slide ${reviewIndex + 1}`}
+                onPress={() => void pickPhoto(reviewSlide.slotIndex)}
+                disabled={picking}
+                style={styles.stageCtaBtn}
+              >
+                <Icon name="image-plus" size={18} color={color.ink} />
+                <Text style={styles.stageCtaText}>Add photo</Text>
+              </PressableScale>
+            </View>
+          ) : null}
+          {reviewSlide?.duplicate ? (
+            <View style={styles.duplicatePillStage} pointerEvents="none">
+              <Text style={styles.duplicateText}>Duplicate? Same words as the slide before</Text>
+            </View>
+          ) : null}
           {canPlace && !placedOnce ? (
             <View style={styles.placeHint} pointerEvents="none">
               <Text style={styles.placeHintText}>
@@ -653,7 +804,7 @@ export default function UploadScreen() {
                   accessibilityLabel="Send for approval"
                   onPress={() => void sendForApproval()}
                   disabled={submitting}
-                  style={[styles.sendBtn, submitting && styles.sendBtnOff]}
+                  style={[styles.sendBtn, (submitting || !allPicked) && styles.sendBtnOff]}
                 >
                   {submitting ? (
                     <ActivityIndicator color={color.white} />
@@ -661,7 +812,11 @@ export default function UploadScreen() {
                     <Icon name="send" size={19} color={color.white} />
                   )}
                   <Text style={styles.sendText}>
-                    {submitting ? 'Sending…' : 'Send for approval'}
+                    {submitting
+                      ? 'Sending…'
+                      : allPicked
+                        ? 'Send for approval'
+                        : `${missingCount} ${missingCount === 1 ? 'photo' : 'photos'} missing`}
                   </Text>
                 </PressableScale>
               </View>
@@ -721,13 +876,20 @@ export default function UploadScreen() {
       >
         <Text style={styles.title}>{brief.title}</Text>
         <Text style={styles.sub}>
-          Add a photo for each slide. The text is already on them.
+          Add a photo for each slide. Tap a slide to edit its text, hold to remove it.
         </Text>
 
         {slides.map((slide, i) => {
           const photo = photos[slide.slotIndex];
           return (
-            <View key={slide.slotIndex} style={[styles.slideCard, shadow.shadowCard]}>
+            <PressableScale
+              key={slide.slotIndex}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit slide ${i + 1}`}
+              onPress={() => openStage(i)}
+              onLongPress={() => removeSlide(i)}
+              style={[styles.slideCard, shadow.shadowCard]}
+            >
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel={
@@ -736,6 +898,7 @@ export default function UploadScreen() {
                     : `Add photo for slide ${i + 1}`
                 }
                 onPress={() => void pickPhoto(slide.slotIndex)}
+                onLongPress={() => removeSlide(i)}
                 style={[styles.tile, photo !== undefined && styles.tileFilled]}
               >
                 {photo !== undefined ? (
@@ -756,12 +919,20 @@ export default function UploadScreen() {
                 )}
               </PressableScale>
               <View style={styles.slideBody}>
-                <Text style={styles.slideLabel}>Slide {i + 1}</Text>
+                <View style={styles.slideLabelRow}>
+                  <Text style={styles.slideLabel}>Slide {i + 1}</Text>
+                  {slide.duplicate ? (
+                    <View style={styles.duplicatePill}>
+                      <Text style={styles.duplicateText}>Duplicate?</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.slideText}>
                   {slide.text || 'No text on this slide'}
                 </Text>
               </View>
-            </View>
+              <Icon name="chevron-right" size={18} color={color.slate300} />
+            </PressableScale>
           );
         })}
       </ScrollView>
@@ -774,18 +945,23 @@ export default function UploadScreen() {
             Process slideshow
           </Button>
         ) : (
-          <Button
-            variant="primary"
-            size="lg"
-            block
-            icon="images"
-            disabled={picking || nextEmpty === undefined}
-            onPress={() => {
-              if (nextEmpty !== undefined) void pickPhoto(nextEmpty.slotIndex);
-            }}
-          >
-            {`Add photos · ${pickedCount} of ${slides.length}`}
-          </Button>
+          <>
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              icon="images"
+              disabled={picking || nextEmpty === undefined}
+              onPress={() => {
+                if (nextEmpty !== undefined) void pickPhoto(nextEmpty.slotIndex);
+              }}
+            >
+              {`Add photos · ${pickedCount} of ${slides.length}`}
+            </Button>
+            <Button variant="ghost" size="md" block onPress={() => openStage(reviewIndex)}>
+              Edit slides first
+            </Button>
+          </>
         )}
       </View>
 
@@ -887,12 +1063,56 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  slideLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   slideLabel: {
     fontSize: type.size.micro,
     fontWeight: type.weight.heavy,
     letterSpacing: type.tracking.label,
     textTransform: 'uppercase',
     color: color.slate400,
+  },
+  duplicatePill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: color.amberSoft,
+  },
+  duplicatePillStage: {
+    position: 'absolute',
+    bottom: 12,
+    alignSelf: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: color.amberSoft,
+  },
+  duplicateText: {
+    fontSize: type.size.micro,
+    fontWeight: type.weight.heavy,
+    color: color.ink,
+  },
+  stageCta: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stageCtaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 48,
+    paddingHorizontal: 20,
+    borderRadius: radius.pill,
+    backgroundColor: color.white,
+  },
+  stageCtaText: {
+    color: color.ink,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.heavy,
   },
   slideText: {
     color: color.ink,
@@ -908,6 +1128,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.gutter,
     paddingTop: space[4],
     backgroundColor: color.offWhite,
+    gap: 6,
   },
   processing: {
     flex: 1,

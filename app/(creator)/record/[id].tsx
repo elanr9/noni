@@ -451,6 +451,9 @@ export default function RecordScreen() {
   const [pendingSaved, setPendingSaved] = useState(false);
   const [pendingDurationMs, setPendingDurationMs] = useState(0);
   const [openingEditor, setOpeningEditor] = useState(false);
+  // Set while the creator went back to an already recorded clip; newTake
+  // means they redid it and the fresh take still has to be queued.
+  const [revisit, setRevisit] = useState<{ newTake: boolean } | null>(null);
   // Set by Send: the post submits itself as soon as the queue drains.
   const autoSubmitRef = useRef(false);
   const [textEdit, setTextEdit] = useState<{
@@ -1206,26 +1209,82 @@ export default function RecordScreen() {
     saveTokenRef.current += 1;
     setPendingClip(null);
     setPendingSaved(false);
+    if (revisit !== null) setRevisit({ newTake: true });
     setPhase('idle');
   }
 
-  /** Next or Finish on the between screen: hand the take to the queue. */
+  /** Where recording continues: the first clip without a take, or a rest on
+   * the last clip with Finish showing once every clip has one. */
+  function continueRecording() {
+    const next = plan.findIndex((c) => keptRef.current[c.slotIndex] === undefined);
+    setActiveIndex(next === -1 ? plan.length - 1 : next);
+    setPhase('idle');
+  }
+
+  /** Next, Finish or Done on the between screen: queue a fresh take, then move on. */
   function acceptClip() {
     if (!pendingSaved || activeClip === null) return;
+    const fresh = revisit === null || revisit.newTake;
     setPendingClip(null);
-    uploadQueue.enqueue(activeClip.slotIndex, runSlotJob);
+    if (fresh) uploadQueue.enqueue(activeClip.slotIndex, runSlotJob);
     if (returnToEditorRef.current) {
       returnToEditorRef.current = false;
       void processPost();
       return;
     }
-    const next = plan.findIndex((c) => kept[c.slotIndex] === undefined);
+    if (revisit !== null) {
+      setRevisit(null);
+      continueRecording();
+      return;
+    }
+    const next = plan.findIndex((c) => keptRef.current[c.slotIndex] === undefined);
     if (next === -1) {
       void processPost();
       return;
     }
     setActiveIndex(next);
     setPhase('idle');
+  }
+
+  /** Jump to any clip from the progress bar: a recorded clip opens its take
+   * for rewatch or redo, an unrecorded one opens the camera on it. */
+  function openClip(index: number) {
+    if (phase === 'recording' || phase === 'countdown' || openingEditor) return;
+    const target = plan[index];
+    if (target === undefined) return;
+    if (phase === 'between') {
+      if (!pendingSaved) return;
+      // Leaving a fresh take behind still keeps it: queue it on the way out.
+      if (activeClip !== null && (revisit === null || revisit.newTake)) {
+        uploadQueue.enqueue(activeClip.slotIndex, runSlotJob);
+      }
+    }
+    const token = ++saveTokenRef.current;
+    setActiveIndex(index);
+    setPendingClip(null);
+    const k = keptRef.current[target.slotIndex];
+    if (k === undefined) {
+      setRevisit(null);
+      setPendingSaved(false);
+      setPhase('idle');
+      return;
+    }
+    setRevisit({ newTake: false });
+    setPendingSaved(false);
+    setPendingDurationMs(k.durationMs);
+    setPhase('between');
+    clipUri(k)
+      .then((uri) => {
+        if (saveTokenRef.current !== token) return;
+        setPendingClip({ uri, durationMs: k.durationMs });
+        setPendingSaved(true);
+      })
+      .catch((e: unknown) => {
+        if (saveTokenRef.current !== token) return;
+        setRevisit(null);
+        setPhase('idle');
+        setErrorToast(e instanceof Error ? e.message : 'Could not open that clip.');
+      });
   }
 
   async function clipUri(k: KeptClip): Promise<string> {
@@ -1797,6 +1856,16 @@ export default function RecordScreen() {
       ? `${plan.find((c) => c.slotIndex === failedSlot)?.label ?? 'A clip'} did not upload.`
       : null;
 
+  const canJumpClips =
+    (phase === 'idle' || (phase === 'between' && pendingSaved)) && !openingEditor;
+  const allRecorded = keptCount === plan.length;
+  const textHint =
+    canEditText
+      ? 'Tap the text to edit it.'
+      : brief !== null && !textOverlay.enabled
+        ? 'On-screen text is off for this post.'
+        : 'Tap to pause.';
+
   const headerBar = (
     <View style={[styles.topBar, { paddingTop: headerTop }]} pointerEvents="box-none">
       <View style={styles.progressRow}>
@@ -1808,7 +1877,15 @@ export default function RecordScreen() {
               ? Math.min(elapsedMs / PROGRESS_REF_MS, 1)
               : 0;
           return (
-            <View key={c.slotIndex} style={styles.progressTrack}>
+            <Pressable
+              key={c.slotIndex}
+              accessibilityRole="button"
+              accessibilityLabel={`${c.label}${isDone ? ', recorded' : ''}`}
+              disabled={!canJumpClips}
+              hitSlop={{ top: 14, bottom: 14 }}
+              onPress={() => openClip(i)}
+              style={[styles.progressTrack, isActive && styles.progressTrackActive]}
+            >
               {isDone ? (
                 <View style={styles.progressDone} />
               ) : fill > 0 ? (
@@ -1817,7 +1894,7 @@ export default function RecordScreen() {
                   <View style={{ flex: 1 - fill }} />
                 </>
               ) : null}
-            </View>
+            </Pressable>
           );
         })}
       </View>
@@ -1837,10 +1914,25 @@ export default function RecordScreen() {
             <Text style={styles.recPillText}>{formatMs(elapsedMs)}</Text>
           </View>
         ) : (
-          <View style={styles.clipPill}>
-            <Text style={styles.clipPillText}>
-              {activeClip?.label ?? 'Clip'} · {clipNumber} of {plan.length}
-            </Text>
+          <View style={styles.clipNav}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Previous clip"
+              disabled={!canJumpClips || (activeIndex ?? 0) === 0}
+              hitSlop={8}
+              onPress={() => openClip((activeIndex ?? 0) - 1)}
+              style={[
+                styles.clipNavBtn,
+                (!canJumpClips || (activeIndex ?? 0) === 0) && styles.clipNavBtnOff,
+              ]}
+            >
+              <Icon name="chevron-left" size={18} color={color.white} />
+            </Pressable>
+            <View style={styles.clipPill}>
+              <Text style={styles.clipPillText}>
+                {activeClip?.label ?? 'Clip'} · {clipNumber} of {plan.length}
+              </Text>
+            </View>
           </View>
         )}
         <View style={styles.headerSpacer} />
@@ -2181,16 +2273,22 @@ export default function RecordScreen() {
               onAddText={() => openTextEdit(null)}
               title={
                 pendingSaved
-                  ? `Clip ${clipNumber} · ${formatMs(pendingDurationMs)}`
-                  : `Saving clip ${clipNumber}…`
+                  ? `${activeClip?.label ?? 'Clip'} · ${formatMs(pendingDurationMs)}`
+                  : revisit !== null && !revisit.newTake
+                    ? 'Loading clip…'
+                    : `Saving clip ${clipNumber}…`
               }
               subtitle={[
                 toGo > 0
                   ? `${toGo} ${toGo === 1 ? 'clip' : 'clips'} to go.`
-                  : 'That was the last one.',
-                canEditText ? 'Tap the text to edit it.' : 'Tap to pause.',
+                  : revisit !== null
+                    ? 'Every clip has a take. Finish when ready.'
+                    : 'That was the last one.',
+                textHint,
               ].join(' ')}
-              primaryLabel={toGo > 0 ? 'Next clip' : 'Finish'}
+              primaryLabel={
+                toGo > 0 ? 'Next clip' : revisit !== null ? 'Done' : 'Finish'
+              }
               primaryEnabled={pendingSaved && !openingEditor}
               onPrimary={acceptClip}
               onRedo={redoClip}
@@ -2291,13 +2389,19 @@ export default function RecordScreen() {
                     {phase !== 'recording' && keptCount > 0 ? (
                       <PressableScale
                         accessibilityRole="button"
-                        accessibilityLabel={`Finish with ${keptCount} clips`}
+                        accessibilityLabel={
+                          allRecorded ? 'Finish' : `Finish with ${keptCount} clips`
+                        }
                         onPress={() => void processPost()}
                         disabled={openingEditor}
-                        style={[styles.finishPill, openingEditor && styles.finishPillOff]}
+                        style={[
+                          styles.finishPill,
+                          allRecorded && styles.finishPillReady,
+                          openingEditor && styles.finishPillOff,
+                        ]}
                       >
                         <Text style={styles.finishText}>
-                          Finish with {keptCount}
+                          {allRecorded ? 'Finish' : `Finish with ${keptCount}`}
                         </Text>
                       </PressableScale>
                     ) : null}
@@ -2326,7 +2430,9 @@ export default function RecordScreen() {
                     <Text style={styles.clipsLeft}>
                       {phase === 'recording'
                         ? 'Tap to stop'
-                        : `${clipsLeft} ${clipsLeft === 1 ? 'clip' : 'clips'} left`}
+                        : allRecorded
+                          ? 'Tap to redo this clip'
+                          : `${clipsLeft} ${clipsLeft === 1 ? 'clip' : 'clips'} left`}
                     </Text>
                   </View>
                 </View>
@@ -2542,6 +2648,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexDirection: 'row',
   },
+  progressTrackActive: {
+    backgroundColor: color.whiteA45,
+  },
   progressDone: {
     flex: 1,
     backgroundColor: color.white,
@@ -2556,6 +2665,22 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  clipNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  clipNavBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: color.inkA55,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clipNavBtnOff: {
+    opacity: 0.35,
   },
   closeBtn: {
     width: 40,
@@ -2676,6 +2801,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: radius.pill,
     backgroundColor: color.whiteA16,
+  },
+  finishPillReady: {
+    backgroundColor: color.accent,
   },
   finishPillOff: {
     opacity: 0.5,

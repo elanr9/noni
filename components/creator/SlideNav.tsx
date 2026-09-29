@@ -52,6 +52,8 @@ export interface SlideNavProps {
   chrome?: boolean;
   /** Horizontal swipes on the slide page it. */
   swipe?: boolean;
+  /** Slide shown on mount. */
+  initialIndex?: number;
 }
 
 export interface SlideNavEditing {
@@ -170,10 +172,11 @@ export function SlideNav({
   editing,
   chrome = false,
   swipe = false,
+  initialIndex = 0,
 }: SlideNavProps) {
   const dark = variant === 'dark';
-  const [index, setIndex] = useState(0);
-  const prevIndexRef = useRef(0);
+  const [index, setIndex] = useState(initialIndex);
+  const prevIndexRef = useRef(initialIndex);
   const fade = useRef(new Animated.Value(1)).current;
 
   const count = slides.length;
