@@ -441,7 +441,12 @@ export default function ReviewScreen() {
   // Slides come from brief_segments (the render manifest). Once the bake is
   // ready the photos already carry the text, so nothing composites twice.
   const slideSegs = briefSegments.filter((s) => s.kind === 'slide');
-  const slidesBaked = submission?.render_status === 'ready';
+  // Baked files already carry the text and inset. While a re-bake runs the
+  // paths still point at the previous bake, so nothing composites twice.
+  const slidePaths = submission?.segment_paths ?? [];
+  const slidesBaked =
+    submission?.render_status === 'ready' ||
+    (slidePaths.length > 0 && slidePaths.every((p) => /-final\.(?:png|jpg)$/i.test(p)));
   const surfaceSlides = isReel
     ? []
     : slideSegs.length > 0
