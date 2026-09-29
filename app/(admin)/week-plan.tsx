@@ -17,6 +17,7 @@ import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { PressableScale } from '../../components/ui/PressableScale';
 import {
+  briefDisplayTitle,
   briefRowState,
   listCampaignBriefs,
   listPublishedCampaignDays,
@@ -219,6 +220,12 @@ export default function WeekPlanScreen() {
   const pickerFamily: 'video' | 'photo_carousel' =
     picker?.slot === 2 ? 'photo_carousel' : 'video';
   const pickerChoices = picker ? availableOf(pickerFamily) : [];
+  // Finished posts that already went out this week, listed so nobody hunts for them.
+  const pickerSent = picker
+    ? items.filter(
+        (item) => familyOf(item) === pickerFamily && sentBriefIds.has(item.brief_id),
+      )
+    : [];
 
   const videosLeft = availableOf('video').length;
   const slidesLeft = availableOf('photo_carousel').length;
@@ -302,7 +309,7 @@ export default function WeekPlanScreen() {
                           <View style={styles.slotBody}>
                             <Text style={styles.slotLabel}>{label}</Text>
                             <Text style={styles.slotTitle} numberOfLines={1}>
-                              {item.briefs.title}
+                              {briefDisplayTitle(item.briefs)}
                             </Text>
                             {item.briefs.post_types?.label ? (
                               <Text style={styles.slotType} numberOfLines={1}>
@@ -312,7 +319,7 @@ export default function WeekPlanScreen() {
                           </View>
                           <PressableScale
                             accessibilityRole="button"
-                            accessibilityLabel={`Remove ${item.briefs.title} from ${dayTitle(date, dayIndex)}`}
+                            accessibilityLabel={`Remove ${briefDisplayTitle(item.briefs)} from ${dayTitle(date, dayIndex)}`}
                             hitSlop={8}
                             onPress={() => setSlot(date, slot, null)}
                             style={styles.slotRemove}
@@ -361,7 +368,7 @@ export default function WeekPlanScreen() {
             <PressableScale
               key={item.brief_id}
               accessibilityRole="button"
-              accessibilityLabel={`Use ${item.briefs.title}`}
+              accessibilityLabel={`Use ${briefDisplayTitle(item.briefs)}`}
               onPress={() => {
                 if (picker) setSlot(picker.date, picker.slot, item.brief_id);
                 setPicker(null);
@@ -370,7 +377,7 @@ export default function WeekPlanScreen() {
             >
               <View style={styles.slotBody}>
                 <Text style={styles.slotTitle} numberOfLines={1}>
-                  {item.briefs.title}
+                  {briefDisplayTitle(item.briefs)}
                 </Text>
                 {item.briefs.post_types?.label ? (
                   <Text style={styles.slotType} numberOfLines={1}>
@@ -380,6 +387,26 @@ export default function WeekPlanScreen() {
               </View>
               <Icon name="plus" size={16} color={color.blue600} />
             </PressableScale>
+          ))}
+          {pickerSent.length > 0 ? (
+            <Text style={styles.pickerSectionLabel}>Already with creators this week</Text>
+          ) : null}
+          {pickerSent.map((item) => (
+            <View
+              key={item.brief_id}
+              accessibilityLabel={`${briefDisplayTitle(item.briefs)}, already sent`}
+              style={[styles.pickerRow, styles.pickerRowSent]}
+            >
+              <View style={styles.slotBody}>
+                <Text style={[styles.slotTitle, styles.pickerSentTitle]} numberOfLines={1}>
+                  {briefDisplayTitle(item.briefs)}
+                </Text>
+                <Text style={styles.pickerSentText} numberOfLines={1}>
+                  Already sent
+                </Text>
+              </View>
+              <Icon name="check" size={16} color={color.green} />
+            </View>
           ))}
         </View>
       </Sheet>
@@ -524,5 +551,25 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: radiusAdmin.lg,
     backgroundColor: color.fillQuiet,
+  },
+  pickerRowSent: {
+    backgroundColor: color.greenSoft,
+    opacity: 0.85,
+  },
+  pickerSectionLabel: {
+    marginTop: 8,
+    fontSize: 11,
+    fontWeight: '700',
+    color: color.slate400,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  pickerSentTitle: {
+    color: color.slate500,
+  },
+  pickerSentText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.green,
   },
 });

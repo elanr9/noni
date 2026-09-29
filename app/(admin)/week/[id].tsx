@@ -2,7 +2,7 @@
 // week setup stamps the grid, then lanes, type chips and the stamped rows.
 // Live weeks keep the grid. Done weeks show the lanes and the posts made.
 import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { router, Stack, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
 
 import {
@@ -37,8 +37,10 @@ import {
   briefWeekStatus,
   getCampaign,
   listCampaignBriefs,
+  listCampaignSendStates,
   listCampaigns,
   listWeekPosts,
+  type BriefSendState,
   type Campaign,
   type CampaignBriefItem,
   type WeekPostItem,
@@ -112,6 +114,7 @@ export default function WeekDetailScreen() {
   const [weekNumber, setWeekNumber] = useState<number | null>(null);
   const [items, setItems] = useState<CampaignBriefItem[]>([]);
   const [posts, setPosts] = useState<WeekPostItem[] | null>(null);
+  const [sendStates, setSendStates] = useState<Map<string, BriefSendState>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lane, setLane] = useState<Lane>('video');
@@ -125,13 +128,17 @@ export default function WeekDetailScreen() {
       setCampaign(latest);
       if (!latest) return;
       const weekStatus = briefWeekStatus(latest).status;
-      const [campaignItems, all, weekPosts, nextUnread] = await Promise.all([
+      const [campaignItems, all, weekPosts, nextUnread, sent] = await Promise.all([
         listCampaignBriefs(latest.id),
         listCampaigns(),
         weekStatus === 'done' ? listWeekPosts(latest.id) : Promise.resolve(null),
         unreadManagerMessageCount().catch(() => 0),
+        latest.status === 'published'
+          ? listCampaignSendStates(latest.id)
+          : Promise.resolve(new Map<string, BriefSendState>()),
       ]);
       setItems(campaignItems);
+      setSendStates(sent);
       setUnread(nextUnread);
       const asc = [...all].sort((a, b) =>
         (a.drop_date ?? '') < (b.drop_date ?? '') ? -1 : 1,
@@ -218,8 +225,24 @@ export default function WeekDetailScreen() {
       ? `${briefWeekRangeLabel(campaign.drop_date)}${metaSuffix}`
       : undefined;
 
+  /** Sent briefs open the creators' posts; anything else opens the editor. */
   function openRow(item: CampaignBriefItem) {
-    router.push(`/(admin)/post/${item.brief_id}`);
+    const sent = sendStates.get(item.brief_id);
+    if (!sent || sent.assignments.length === 0) {
+      router.push(`/(admin)/post/${item.brief_id}`);
+      return;
+    }
+    if (sent.assignments.length === 1) {
+      router.push(`/(admin)/creator/post/${sent.assignments[0].id}` as Href);
+      return;
+    }
+    Alert.alert('Which creator?', undefined, [
+      ...sent.assignments.map((a) => ({
+        text: a.status === 'posted' ? `${a.creatorName} · Live` : a.creatorName,
+        onPress: () => router.push(`/(admin)/creator/post/${a.id}` as Href),
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
   }
 
   /** Publish opens the day planner: pick or randomize the days. */
@@ -341,6 +364,7 @@ export default function WeekDetailScreen() {
                   index={i + 1}
                   brief={row.item.briefs}
                   state={row.state}
+                  sent={sendStates.get(row.item.brief_id) ?? null}
                   onPress={() => openRow(row.item)}
                 />
               ))}

@@ -271,6 +271,6 @@ export function textVideoCommand(params: { vf: string; fps: number }): string {
 export function textImageCommand(params: { vf: string }): string {
   return (
     `ffmpeg -y -hide_banner -i {input0} -i {input1} -filter_complex "[1:v]${params.vf}[outv]" ` +
-    `-map "[outv]" -frames:v 1 -update 1 {output}`
+    `-map "[outv]" -frames:v 1 -update 1 -q:v 2 {output}`
   );
 }

@@ -3,8 +3,10 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import {
+  briefDisplayTitle,
   parseTalkingPoints,
   type BriefWithType,
+  type BriefSendState,
 } from '../../../lib/briefs-api';
 import { color, radiusAdmin, shadow, type } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
@@ -27,18 +29,7 @@ function progressLine(brief: BriefWithType): string {
   return `${hasHook ? 'Hook and ' : ''}${points.length} of ${max} points`;
 }
 
-const PLACEHOLDER_TITLE = 'Untitled post';
-
-/** Stamped rows carry the placeholder title, so fall through to the phrase or hook. */
-function titleOf(brief: BriefWithType): string {
-  const title = brief.title.trim();
-  return (
-    (title !== PLACEHOLDER_TITLE ? title : '') ||
-    brief.search_phrase?.trim() ||
-    brief.hook?.trim() ||
-    PLACEHOLDER_TITLE
-  );
-}
+const titleOf = briefDisplayTitle;
 
 export interface BriefRowProps {
   /** 1-based position inside the lane, rendered "01". */
@@ -46,10 +37,28 @@ export interface BriefRowProps {
   brief: BriefWithType;
   state: GridRowState;
   disabled?: boolean;
+  /** Set once the brief went out to creators; the row reads as sent or live. */
+  sent?: BriefSendState | null;
   onPress: () => void;
 }
 
-export function BriefRow({ index, brief, state, disabled = false, onPress }: BriefRowProps) {
+/** "Live · 2 creators" once anything posted, otherwise "Sent to 2 creators". */
+export function sentLine(sent: BriefSendState): string {
+  const who = sent.creators === 1 ? '1 creator' : `${sent.creators} creators`;
+  if (sent.posted > 0) {
+    return sent.posted === sent.creators ? `Live · ${who}` : `Live · ${sent.posted} of ${who}`;
+  }
+  return `Sent to ${who}`;
+}
+
+export function BriefRow({
+  index,
+  brief,
+  state,
+  disabled = false,
+  sent = null,
+  onPress,
+}: BriefRowProps) {
   const postType = brief.post_types;
   const indexLabel = String(index).padStart(2, '0');
 
@@ -90,12 +99,15 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
     );
   }
 
+  const isLive = sent !== null && sent.posted > 0;
   const statusLine =
-    state === 'partial'
-      ? progressLine(brief)
-      : state === 'filled'
-        ? 'Needs review'
-        : 'Complete';
+    sent !== null
+      ? sentLine(sent)
+      : state === 'partial'
+        ? progressLine(brief)
+        : state === 'filled'
+          ? 'Needs review'
+          : 'Complete';
   const title = titleOf(brief);
 
   return (
@@ -104,9 +116,25 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
       accessibilityLabel={`${title}, ${statusLine}`}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.row, styles.rowWorked, shadow.shadowCard]}
+      style={[
+        styles.row,
+        styles.rowWorked,
+        shadow.shadowCard,
+        sent !== null && styles.rowSent,
+        isLive && styles.rowLive,
+      ]}
     >
-      <Text style={styles.index}>{indexLabel}</Text>
+      {sent !== null ? (
+        <View style={[styles.sentBadge, isLive && styles.liveBadge]}>
+          <Icon
+            name={isLive ? 'play' : 'send'}
+            size={11}
+            color={isLive ? color.green : color.blue700}
+          />
+        </View>
+      ) : (
+        <Text style={styles.index}>{indexLabel}</Text>
+      )}
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
           {title}
@@ -121,6 +149,7 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
               state === 'partial' && styles.statusPartial,
               state === 'filled' && styles.statusFilled,
               state === 'complete' && styles.statusComplete,
+              sent !== null && !isLive && styles.statusSent,
             ]}
             numberOfLines={1}
           >
@@ -128,7 +157,12 @@ export function BriefRow({ index, brief, state, disabled = false, onPress }: Bri
           </Text>
         </View>
       </View>
-      {state === 'complete' ? (
+      {sent !== null ? (
+        <View style={styles.viewPill}>
+          <Text style={styles.viewPillText}>{isLive ? 'View post' : 'View'}</Text>
+          <Icon name="chevron-right" size={13} color={color.blue700} />
+        </View>
+      ) : state === 'complete' ? (
         <Icon name="circle-check-big" size={19} color={color.green} />
       ) : (
         <Icon name="chevron-right" size={16} color={color.slate300} />
@@ -196,6 +230,44 @@ const styles = StyleSheet.create({
   statusComplete: {
     fontWeight: '700',
     color: color.green,
+  },
+  statusSent: {
+    color: color.blue700,
+  },
+  rowSent: {
+    borderWidth: 1,
+    borderColor: color.blue200,
+    backgroundColor: color.blue50,
+  },
+  rowLive: {
+    borderColor: color.greenSoft,
+    backgroundColor: color.white,
+  },
+  sentBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveBadge: {
+    backgroundColor: color.greenSoft,
+  },
+  viewPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 5,
+    paddingLeft: 10,
+    paddingRight: 6,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
+  },
+  viewPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.blue700,
   },
   emptyBody: {
     flex: 1,

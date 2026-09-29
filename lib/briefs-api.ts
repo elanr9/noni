@@ -168,6 +168,21 @@ export type BriefInput = {
 export type BriefWithType = Brief & { post_types: PostType | null };
 export type CampaignBriefItem = CampaignBrief & { briefs: BriefWithType };
 
+export const PLACEHOLDER_BRIEF_TITLE = 'Untitled post';
+
+/** Stamped rows carry the placeholder title, so fall through to the phrase or hook. */
+export function briefDisplayTitle(
+  brief: Pick<Brief, 'title' | 'search_phrase' | 'hook'>,
+): string {
+  const title = brief.title.trim();
+  return (
+    (title !== PLACEHOLDER_BRIEF_TITLE ? title : '') ||
+    brief.search_phrase?.trim() ||
+    brief.hook?.trim() ||
+    PLACEHOLDER_BRIEF_TITLE
+  );
+}
+
 /** Reads the talking_points jsonb column back into typed points. */
 export function parseTalkingPoints(value: Json): TalkingPoint[] {
   if (!Array.isArray(value)) return [];
@@ -1198,6 +1213,50 @@ export async function getCampaign(id: string): Promise<Campaign | null> {
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+export type BriefSendAssignment = {
+  id: string;
+  creatorName: string;
+  status: string;
+};
+
+/** How far a brief has travelled once it went out to creators. */
+export type BriefSendState = {
+  creators: number;
+  posted: number;
+  assignments: BriefSendAssignment[];
+};
+
+/** Per brief: which creators hold it this week and how many have posted. */
+export async function listCampaignSendStates(
+  campaignId: string,
+): Promise<Map<string, BriefSendState>> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('id, brief_id, status, profiles:creator_id ( full_name )')
+    .eq('campaign_id', campaignId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  type Row = {
+    id: string;
+    brief_id: string;
+    status: string;
+    profiles: { full_name: string | null } | null;
+  };
+  const byBrief = new Map<string, BriefSendState>();
+  for (const row of (data ?? []) as unknown as Row[]) {
+    const entry = byBrief.get(row.brief_id) ?? { creators: 0, posted: 0, assignments: [] };
+    entry.creators += 1;
+    if (row.status === 'posted') entry.posted += 1;
+    entry.assignments.push({
+      id: row.id,
+      creatorName: row.profiles?.full_name ?? 'Creator',
+      status: row.status,
+    });
+    byBrief.set(row.brief_id, entry);
+  }
+  return byBrief;
 }
 
 export async function listCampaignBriefs(

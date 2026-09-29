@@ -8,7 +8,14 @@ import {
 } from '../_shared/assemble.ts';
 import { isManagerOf } from '../_shared/membership.ts';
 
-type PostApprovedBody = { assignment_id?: string; task_id?: string };
+type PostApprovedBody = {
+  assignment_id?: string;
+  task_id?: string;
+  /** Cron only: re-send an already posted assignment to just these platforms. */
+  repost_platforms?: string[];
+};
+
+const SUPPORTED_PLATFORMS = ['tiktok', 'instagram'];
 
 /** null means the cron caller: no tenant restriction. */
 type ManagerCaller = { userId: string; platformAdmin: boolean } | null;
@@ -142,9 +149,14 @@ async function resolveTarget(
     ) {
       return jsonResponse({ error: 'assignment not found' }, 404);
     }
-    if (assignment.status !== 'approved') {
+    const repostPlatforms =
+      caller === null && body.repost_platforms
+        ? body.repost_platforms.filter((p) => SUPPORTED_PLATFORMS.includes(p))
+        : null;
+    const allowedStatus = repostPlatforms ? 'posted' : 'approved';
+    if (assignment.status !== allowedStatus) {
       return jsonResponse(
-        { error: `assignment status is ${assignment.status}, need approved` },
+        { error: `assignment status is ${assignment.status}, need ${allowedStatus}` },
         409,
       );
     }
@@ -158,7 +170,7 @@ async function resolveTarget(
       companyId: assignment.company_id as string,
       creatorId: assignment.creator_id as string,
       caption: (brief?.caption ?? brief?.title ?? 'New post') as string,
-      platforms: ['tiktok', 'instagram'],
+      platforms: repostPlatforms ?? SUPPORTED_PLATFORMS,
       assignmentId: assignment.id as string,
       taskId: (assignment.task_id ?? null) as string | null,
       briefId: assignment.brief_id as string,
@@ -393,7 +405,7 @@ Deno.serve(async (req) => {
         form.append('photos[]', slide.signedUrl);
         // Instagram feed carousels crop 9:16 to 4:5; the bake stores a 4:5
         // letterboxed copy next to each finished slide.
-        const igPath = path.replace(/\.png$/, INSTAGRAM_SLIDE_SUFFIX);
+        const igPath = path.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX);
         const { data: ig } = igPath !== path
           ? await admin.storage.from('videos').createSignedUrl(igPath, 3600)
           : { data: null };

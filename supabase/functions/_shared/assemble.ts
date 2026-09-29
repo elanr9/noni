@@ -65,7 +65,12 @@ export function uploadPostKey(): string {
   return key;
 }
 
-type FfmpegOutputExtension = 'mp4' | 'png' | 'txt';
+type FfmpegOutputExtension = 'mp4' | 'png' | 'jpg' | 'txt';
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+};
 
 const FFMPEG_JOBS_URL = 'https://api.upload-post.com/api/uploadposts/ffmpeg/jobs';
 // Upload-Post workers may pick a job up hours after creation when their queue
@@ -201,7 +206,7 @@ async function runFfmpegJob(params: {
   fullCommand: string;
   outputPath: string;
   label: string;
-  outputExtension?: 'mp4' | 'png';
+  outputExtension?: 'mp4' | 'png' | 'jpg';
   // Upload-Post rejects ';' in full_command, so a multi chain graph travels
   // as a file and the command reads it with -filter_complex_script. The
   // script is appended as the last input file; {graph} marks its placeholder.
@@ -231,7 +236,7 @@ async function runFfmpegJob(params: {
     console.log(`ffmpeg ${label} finished, storing ${outputPath}`);
     await streamToVideos({
       path: outputPath,
-      contentType: outputExtension === 'png' ? 'image/png' : 'video/mp4',
+      contentType: IMAGE_CONTENT_TYPES[outputExtension] ?? 'video/mp4',
       body,
       label,
     });
@@ -597,7 +602,9 @@ async function renderSlideWithFfmpeg(params: {
       files: [anchorUrl, baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
       fullCommand: textImageCommand({ vf: plan.vf }),
       outputPath,
-      outputExtension: 'png',
+      // TikTok's photo API takes JPEG or WebP only; a PNG would be converted
+      // (and possibly resized) on the way, so the final slide is a JPEG here.
+      outputExtension: 'jpg',
       label,
     });
   } finally {
@@ -1548,7 +1555,7 @@ async function runSlideshowAssembly(params: {
         );
         inset = { path: insetPath, ...placed };
       }
-      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.png`;
+      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.jpg`;
       await renderSlideWithFfmpeg({
         admin,
         photoPath: rawPath,
@@ -1560,7 +1567,7 @@ async function runSlideshowAssembly(params: {
       await renderInstagramSlide({
         admin,
         slidePath: outPath,
-        outputPath: outPath.replace(/\.png$/, INSTAGRAM_SLIDE_SUFFIX),
+        outputPath: outPath.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX),
         label: `slide ${i + 1} instagram`,
       });
       return outPath;

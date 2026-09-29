@@ -254,6 +254,19 @@ export function firstCampaignDayOf(
   return first;
 }
 
+/** The local day the company's first post went live (YYYY-MM-DD). */
+export function firstPostDayOf(
+  rows: Array<{ posted_at: string | null; status: string | null }>,
+): string | null {
+  let first: string | null = null;
+  for (const row of rows) {
+    if (row.posted_at === null || row.status === 'failed') continue;
+    const day = localDayKey(new Date(row.posted_at));
+    if (first === null || day < first) first = day;
+  }
+  return first;
+}
+
 export async function fetchCompanyAnalytics(
   companyId: string,
 ): Promise<CompanyAnalytics> {
@@ -296,12 +309,13 @@ export async function fetchCompanyAnalytics(
   if (payoutsRes.error) throw payoutsRes.error;
   if (campaignsRes.error) throw campaignsRes.error;
 
-  const firstCampaignDay = firstCampaignDayOf(campaignsRes.data ?? []);
+  const rows = (postsRes.data ?? []) as unknown as PostRow[];
+
+  // Sign-ups and sales only count from the day the first post went live.
+  const firstPostDay = firstPostDayOf(rows) ?? firstCampaignDayOf(campaignsRes.data ?? []);
   const conversions = (
     (conversionsRes.data ?? []) as ConversionRow[]
-  ).filter((r) => firstCampaignDay !== null && r.day >= firstCampaignDay);
-
-  const rows = (postsRes.data ?? []) as unknown as PostRow[];
+  ).filter((r) => firstPostDay !== null && r.day >= firstPostDay);
 
   const earnedByPostId = new Map<string, number>();
   for (const entry of ledgerRes.data ?? []) {
