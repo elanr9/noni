@@ -13,10 +13,19 @@ export interface ReviewTopBarProps {
   takeLabel?: string;
   onBack: () => void;
   onChat: () => void;
+  /** Opens edit mode over the media. Hidden when absent. */
+  onEdit?: () => void;
 }
 
 /** Admin handoff §3 top scrim bar — glass back, take pill, counter, glass chat. */
-export function ReviewTopBar({ topInset, counterLabel, takeLabel, onBack, onChat }: ReviewTopBarProps) {
+export function ReviewTopBar({
+  topInset,
+  counterLabel,
+  takeLabel,
+  onBack,
+  onChat,
+  onEdit,
+}: ReviewTopBarProps) {
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
       <Svg width="100%" height={topInset + 84} style={StyleSheet.absoluteFill}>
@@ -50,6 +59,16 @@ export function ReviewTopBar({ topInset, counterLabel, takeLabel, onBack, onChat
           <Text style={styles.counterText}>{counterLabel}</Text>
         </View>
 
+        {onEdit !== undefined && (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Edit text and pictures on this post"
+            onPress={onEdit}
+            style={styles.glassButton}
+          >
+            <Icon name="pencil" size={17} color={color.white} />
+          </PressableScale>
+        )}
         <PressableScale
           accessibilityRole="button"
           accessibilityLabel="Message the creator about this post"

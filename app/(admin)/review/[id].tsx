@@ -6,6 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApprovedOverlay } from '../../../components/admin/review/ApprovedOverlay';
 import { ReelSurface, type ReelClip } from '../../../components/admin/review/ReelSurface';
+import {
+  ReviewEditMode,
+  type EditTarget,
+} from '../../../components/admin/review/ReviewEditMode';
 import { ReviewMetaOverlay } from '../../../components/admin/review/ReviewMetaOverlay';
 import { ReviewTopBar } from '../../../components/admin/review/ReviewTopBar';
 import {
@@ -15,11 +19,13 @@ import {
 import { SentConfirmation } from '../../../components/admin/review/SentConfirmation';
 import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
 import { SkeletonCard, SkeletonLine } from '../../../components/admin/shared';
+import { SoftToast } from '../../../components/states';
 import { Button } from '../../../components/ui/Button';
 import {
   getSubmissionRenderState,
   latestSubmissionsByAssignment,
   listAssignmentQueue,
+  rerenderSubmission,
   restartRender,
   reviewAssignment,
   signedVideoUrl,
@@ -32,6 +38,7 @@ import {
   toAssignmentQueueRow,
 } from '../../../lib/admin-queue-map';
 import {
+  DEFAULT_SUBTITLES_Y,
   listBriefSegments,
   listPostTypes,
   parseHookOptions,
@@ -70,6 +77,21 @@ function timelineClipDurations(timeline: Json | null): number[] {
     const ms = (c as { duration_ms?: unknown }).duration_ms;
     return typeof ms === 'number' && ms > 0 ? [ms / 1000] : [];
   });
+}
+
+/** Index of the stitched clip playing at `positionSec`. */
+function clipIndexAt(clips: ReelClip[], positionSec: number): number {
+  let elapsed = 0;
+  for (let i = 0; i < clips.length; i += 1) {
+    elapsed += clips[i]?.durationSec ?? 0;
+    if (positionSec < elapsed) return i;
+  }
+  return Math.max(clips.length - 1, 0);
+}
+
+/** Seconds into the stitched edit where clip `index` starts. */
+function clipStartSec(clips: ReelClip[], index: number): number {
+  return clips.slice(0, index).reduce((sum, c) => sum + c.durationSec, 0);
 }
 
 /** One revision section per recorded clip, mirroring the creator's recording
@@ -156,6 +178,13 @@ export default function ReviewScreen() {
   const [approvedVisible, setApprovedVisible] = useState(false);
   const [sentVisible, setSentVisible] = useState(false);
 
+  const [editVisible, setEditVisible] = useState(false);
+  const [editIndex, setEditIndex] = useState(0);
+  const [subtitlesY, setSubtitlesY] = useState(DEFAULT_SUBTITLES_Y);
+  /** Submission whose re-render the manager asked for; gates Approve on slideshows too. */
+  const [rerenderPending, setRerenderPending] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
   /** Signed URLs by assignment id, so the next item starts instantly. */
   const urlCache = useRef(new Map<string, string>());
 
@@ -226,10 +255,12 @@ export default function ReviewScreen() {
   const current = queue[index] as ReviewItem | undefined;
   const currentId = current?.assignment.id;
   const submissionId = current?.submission?.id;
-  const renderStatus =
-    current?.row.format === 'video'
-      ? current?.submission?.render_status ?? 'ready'
-      : 'ready';
+  // Reels always wait on the edit job. Slideshows only do once the manager
+  // asked for a re-bake from edit mode.
+  const trackRender =
+    current?.row.format === 'video' ||
+    (submissionId !== undefined && rerenderPending === submissionId);
+  const renderStatus = trackRender ? current?.submission?.render_status ?? 'ready' : 'ready';
 
   // The edit job runs right after the creator submits. While it is still
   // going, poll until the finished video lands, then the load effect below
@@ -288,6 +319,7 @@ export default function ReviewScreen() {
     setClipUris([]);
     setSlideInsetUrls({});
     setHandle(null);
+    setSubtitlesY(current.assignment.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
     void (async () => {
       try {
         const url = await signedUrlFor(current);
@@ -311,16 +343,18 @@ export default function ReviewScreen() {
           setClipUris(segmentUrls);
         } else {
           setSlidePhotos(segmentUrls);
-          for (const seg of segments) {
-            if (seg.kind !== 'slide' || !seg.screenshot_url) continue;
-            void signedScreenshotUrl(seg.screenshot_url)
-              .then((url) => {
-                if (!cancelled) {
-                  setSlideInsetUrls((prev) => ({ ...prev, [seg.id]: url }));
-                }
-              })
-              .catch(() => undefined);
-          }
+        }
+        // Inset pictures: composited on slides while the bake runs, and
+        // placed on either format in edit mode.
+        for (const seg of segments) {
+          if (!seg.screenshot_url) continue;
+          void signedScreenshotUrl(seg.screenshot_url)
+            .then((url) => {
+              if (!cancelled) {
+                setSlideInsetUrls((prev) => ({ ...prev, [seg.id]: url }));
+              }
+            })
+            .catch(() => undefined);
         }
       } catch {
         if (!cancelled) setBriefSegments([]);
@@ -377,8 +411,8 @@ export default function ReviewScreen() {
   const { assignment, row, submission } = current;
   const briefRow = assignment.briefs;
   const isReel = row.format === 'video';
-  const editPending = isReel && submission !== null && submission.render_status !== 'ready';
-  const editFailed = isReel && submission?.render_status === 'failed';
+  const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
+  const editFailed = trackRender && submission?.render_status === 'failed';
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
   const caption = briefRow.caption ?? '';
   const attempt = submission?.version ?? 1;
@@ -462,6 +496,68 @@ export default function ReviewScreen() {
         }))
       : [];
   const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
+
+  // Edit mode works one brief segment at a time: spoken clips for reels
+  // (slot order, matched to their recorded clip), slides for slideshows.
+  const spokenSegments = briefSegments
+    .filter((s) => s.kind !== 'slide')
+    .sort((a, b) => a.slot_index - b.slot_index);
+  const editTargets: EditTarget[] = isReel
+    ? spokenSegments.flatMap((s, i) => {
+        const section = clipSections.find((c) => c.key === `segment-${s.slot_index}`);
+        const clipUri = section?.clipUri ?? null;
+        const stitched = videoUri !== null && submission?.render_status === 'ready';
+        const background =
+          clipUri !== null
+            ? { kind: 'video' as const, uri: clipUri, atSec: 0 }
+            : stitched
+              ? { kind: 'video' as const, uri: videoUri, atSec: clipStartSec(reelClips, i) }
+              : null;
+        if (background === null) return [];
+        return [
+          {
+            segment: s,
+            label: section?.label ?? sectionLabel(i, spokenSegments.length, true),
+            background,
+            insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
+          },
+        ];
+      })
+    : slideSegs.map((s, i) => ({
+        segment: s,
+        label: sectionLabel(i, slideSegs.length, false),
+        background: { kind: 'photo' as const, uri: slidePhotos[i] || undefined },
+        insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
+      }));
+
+  const openEdit = () => {
+    if (submission === null) return;
+    setPlaying(false);
+    setEditIndex(isReel ? clipIndexAt(reelClips, positionSec) : slideIndex);
+    setEditVisible(true);
+  };
+
+  const finishEdit = async (changed: boolean) => {
+    setEditVisible(false);
+    if (!changed || submissionId === undefined) return;
+    try {
+      await rerenderSubmission(submissionId);
+      setRerenderPending(submissionId);
+      setQueue((q) =>
+        q.map((it) =>
+          it.submission && it.submission.id === submissionId
+            ? {
+                ...it,
+                submission: { ...it.submission, render_status: 'rendering', render_error: null },
+              }
+            : it,
+        ),
+      );
+      setToast(isReel ? 'Re-editing the video…' : 'Re-editing the slides…');
+    } catch (e) {
+      Alert.alert('Could not re-edit', e instanceof Error ? e.message : 'Try again');
+    }
+  };
 
   const togglePlay = () => {
     if (!playing && durationSec > 0 && positionSec >= durationSec) setPositionSec(0);
@@ -596,7 +692,9 @@ export default function ReviewScreen() {
                 style={styles.editPill}
               >
                 <ActivityIndicator size="small" color={color.white} />
-                <Text style={styles.editPillText}>Editing final video</Text>
+                <Text style={styles.editPillText}>
+                  {isReel ? 'Editing final video' : 'Editing final slides'}
+                </Text>
               </Pressable>
             )}
           </View>
@@ -618,6 +716,7 @@ export default function ReviewScreen() {
           counterLabel={counterLabel}
           takeLabel={attempt > 1 ? `Take ${attempt}` : undefined}
           onBack={() => router.back()}
+          onEdit={submission !== null && editTargets.length > 0 ? openEdit : undefined}
           onChat={() =>
             router.push({
               pathname: '/(admin)/chat/[creatorId]',
@@ -649,6 +748,20 @@ export default function ReviewScreen() {
         </Button>
       </View>
 
+      {editVisible && (
+        <ReviewEditMode
+          format={row.format}
+          briefId={briefRow.id}
+          targets={editTargets}
+          index={editIndex}
+          onIndex={setEditIndex}
+          onSegments={setBriefSegments}
+          subtitles={
+            isReel && briefRow.subtitles ? { y: subtitlesY, onChange: setSubtitlesY } : null
+          }
+          onDone={(changed) => void finishEdit(changed)}
+        />
+      )}
       {revisionVisible && (
         <RevisionMode
           creatorShort={creatorShort}
@@ -676,6 +789,12 @@ export default function ReviewScreen() {
           onOpenThread={openThread}
         />
       )}
+      <SoftToast
+        visible={toast !== null}
+        message={toast ?? ''}
+        tone="info"
+        onHide={() => setToast(null)}
+      />
     </View>
   );
 }

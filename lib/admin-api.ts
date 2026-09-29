@@ -142,6 +142,12 @@ export async function rerenderSubmission(submissionId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Manager moves the burned-in subtitle block on a brief. Position only. */
+export async function setBriefSubtitlesY(briefId: string, y: number): Promise<void> {
+  const { error } = await supabase.from('briefs').update({ subtitles_y: y }).eq('id', briefId);
+  if (error) throw error;
+}
+
 /**
  * Review an assignment submission. Status moves through transitionAssignment
  * only; notify and the post-approved pipeline are assignment-keyed.
