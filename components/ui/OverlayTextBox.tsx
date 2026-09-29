@@ -27,6 +27,21 @@ export function overlayTextStyle(fontSize: number, bg: boolean): TextStyle {
   };
 }
 
+/** Wrap width in px for a box: its stored fraction, or the spec default. */
+export function overlayWrapWidth(width: number | undefined, stageWidth: number): number {
+  return (width ?? OVERLAY_TEXT_SPEC.maxWidth) * stageWidth;
+}
+
+/** Narrowest wrap width (px) that still fits the widest single word at this size. */
+export function overlayMinWrapWidth(text: string, bg: boolean, fontSize: number): number {
+  const font = bg ? 'bubble' : 'condensed';
+  const widest = text
+    .split(/\s+/)
+    .reduce((max, word) => Math.max(max, measureOverlayLine(word, font)), 0);
+  const pad = bg ? 2 * fontSize * OVERLAY_TEXT_SPEC.bubble.padX : 0;
+  return Math.ceil(widest * fontSize + pad);
+}
+
 export function OverlayTextBox(props: {
   text: string;
   color: string;

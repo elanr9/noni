@@ -11,16 +11,26 @@ import {
 
 import {
   MAX_BOX_SIZE,
+  MAX_BOX_WIDTH,
   MIN_BOX_SIZE,
-  OVERLAY_TEXT_SPEC,
+  MIN_BOX_WIDTH,
   type OverlayBox,
 } from '../../../lib/overlay-boxes';
 import { color } from '../../../theme/tokens';
-import { OverlayTextBox } from '../../ui/OverlayTextBox';
+import { OverlayTextBox, overlayMinWrapWidth, overlayWrapWidth } from '../../ui/OverlayTextBox';
+import {
+  WidthHandles,
+  scaledCentre,
+  snapToOriginal,
+  toStagePoint,
+  touchFocal,
+  useWidthDrag,
+  type Point,
+} from '../slides/GestureItem';
 import { rectsOverlap, type FrameRect } from './FrameGuides';
 import type { StageFrame } from './stageFrame';
 
-export type BoxPatch = Partial<Pick<OverlayBox, 'x' | 'y' | 'size'>>;
+export type BoxPatch = Partial<Pick<OverlayBox, 'x' | 'y' | 'size' | 'width'>>;
 
 const EDGE = 0.02;
 const SNAP = 0.025;
@@ -32,10 +42,23 @@ type BoxGesture = {
   moved: boolean;
   dx: number;
   dy: number;
-  pinchStart: number | null;
+  /** Finger distance and midpoint (stage px from the centre) when the pinch began. */
+  pinch: { distance: number; focal: Point } | null;
   scale: number;
   snapped: boolean;
   overlapping: boolean;
+};
+
+const IDLE_GESTURE: BoxGesture = {
+  startX: 0,
+  startY: 0,
+  moved: false,
+  dx: 0,
+  dy: 0,
+  pinch: null,
+  scale: 1,
+  snapped: false,
+  overlapping: false,
 };
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -54,29 +77,32 @@ function EditableTextBox(props: {
   editable: boolean;
   /** Area the box should stay clear of (the subtitle band); warns while dragging. */
   avoid: FrameRect | null;
+  /** Shows the width handles. */
+  selected: boolean;
   onChange: (patch: BoxPatch) => void;
   onTap: () => void;
   onGestureStart?: () => void;
 }): JSX.Element | null {
-  const { box, frame, editable, avoid, onChange, onTap, onGestureStart } = props;
+  const { box, frame, editable, avoid, selected, onChange, onTap, onGestureStart } = props;
   const [offset] = useState(() => new Animated.ValueXY({ x: 0, y: 0 }));
   const [scale] = useState(() => new Animated.Value(1));
   const [active, setActive] = useState(false);
   const [snapped, setSnapped] = useState(false);
   const [overlapping, setOverlapping] = useState(false);
   const sizeRef = useRef({ w: 0, h: 0 });
-  const gesture = useRef<BoxGesture>({
-    startX: 0,
-    startY: 0,
-    moved: false,
-    dx: 0,
-    dy: 0,
-    pinchStart: null,
-    scale: 1,
-    snapped: false,
-    overlapping: false,
-  });
+  const layerRef = useRef<View>(null);
+  const stageOrigin = useRef<Point>({ x: 0, y: 0 });
+  const gesture = useRef<BoxGesture>(IDLE_GESTURE);
   const pendingReset = useRef(false);
+  const fontSize = frame.width * box.size;
+  const { liveWidth, drag } = useWidthDrag({
+    start: () => sizeRef.current.w,
+    min: () =>
+      Math.max(MIN_BOX_WIDTH * frame.width, overlayMinWrapWidth(box.text, box.bg, fontSize)),
+    max: () => MAX_BOX_WIDTH * frame.width,
+    onStart: onGestureStart,
+    onCommit: (px) => onChange({ width: px / frame.width }),
+  });
 
   /** Live box rect in frame fractions for the current gesture offset and scale. */
   const checkOverlap = () => {
@@ -107,16 +133,13 @@ function EditableTextBox(props: {
 
   const onGrant = (evt: GestureResponderEvent) => {
     gesture.current = {
+      ...IDLE_GESTURE,
       startX: evt.nativeEvent.pageX,
       startY: evt.nativeEvent.pageY,
-      moved: false,
-      dx: 0,
-      dy: 0,
-      pinchStart: null,
-      scale: 1,
-      snapped: false,
-      overlapping: false,
     };
+    layerRef.current?.measureInWindow((px, py) => {
+      stageOrigin.current = { x: px, y: py };
+    });
     onGestureStart?.();
     setActive(true);
     checkOverlap();
@@ -127,16 +150,35 @@ function EditableTextBox(props: {
     if (evt.nativeEvent.touches.length >= 2) {
       const dist = touchDistance(evt);
       if (dist === null) return;
-      if (g.pinchStart === null) {
-        g.pinchStart = dist;
+      if (g.pinch === null) {
+        const centre = { x: (box.x - 0.5) * frame.width, y: (box.y - 0.5) * frame.height };
+        const focal = touchFocal(evt.nativeEvent.touches);
+        g.pinch = {
+          distance: dist,
+          focal:
+            focal === null
+              ? centre
+              : toStagePoint(focal, stageOrigin.current, frame.width, frame.height),
+        };
+        g.moved = true;
         return;
       }
-      g.scale = clamp(dist / g.pinchStart, MIN_BOX_SIZE / box.size, MAX_BOX_SIZE / box.size);
+      // Two fingers: size only, scaled about the pinch midpoint. The centre
+      // shift is carried as the drag offset so release commits it with the size.
+      g.scale = snapToOriginal(
+        clamp(dist / g.pinch.distance, MIN_BOX_SIZE / box.size, MAX_BOX_SIZE / box.size),
+        1,
+      );
+      const centre = { x: (box.x - 0.5) * frame.width, y: (box.y - 0.5) * frame.height };
+      const moved = scaledCentre(centre, g.pinch.focal, g.scale);
+      g.dx = moved.x - centre.x;
+      g.dy = moved.y - centre.y;
+      offset.setValue({ x: g.dx, y: g.dy });
       scale.setValue(g.scale);
       checkOverlap();
       return;
     }
-    if (g.pinchStart !== null) return;
+    if (g.pinch !== null) return;
     let dx = evt.nativeEvent.pageX - g.startX;
     const dy = evt.nativeEvent.pageY - g.startY;
     if (Math.abs(dx) + Math.abs(dy) > TAP_SLOP) g.moved = true;
@@ -155,7 +197,7 @@ function EditableTextBox(props: {
   const onRelease = () => {
     const g = gesture.current;
     const patch: BoxPatch = {};
-    if (g.pinchStart !== null && g.scale !== 1) {
+    if (g.pinch !== null && g.scale !== 1) {
       patch.size = clamp(box.size * g.scale, MIN_BOX_SIZE, MAX_BOX_SIZE);
     }
     if (g.moved) {
@@ -173,7 +215,7 @@ function EditableTextBox(props: {
       onChange(patch);
       return;
     }
-    if (!g.moved && g.pinchStart === null) onTap();
+    if (!g.moved && g.pinch === null) onTap();
     offset.setValue({ x: 0, y: 0 });
     scale.setValue(1);
   };
@@ -196,7 +238,7 @@ function EditableTextBox(props: {
   if (text.length === 0) return null;
 
   return (
-    <View style={styles.layer} pointerEvents={editable ? 'box-none' : 'none'}>
+    <View ref={layerRef} style={styles.layer} pointerEvents={editable ? 'box-none' : 'none'}>
       {snapped ? <View style={styles.guide} pointerEvents="none" /> : null}
       <Animated.View
         onStartShouldSetResponder={() => editable}
@@ -225,9 +267,10 @@ function EditableTextBox(props: {
           text={text}
           color={box.color}
           bg={box.bg}
-          fontSize={frame.width * box.size}
-          maxWidth={OVERLAY_TEXT_SPEC.maxWidth * frame.width}
+          fontSize={fontSize}
+          maxWidth={liveWidth ?? overlayWrapWidth(box.width, frame.width)}
         />
+        <WidthHandles visible={editable && selected} drag={drag} />
         {active ? (
           <View
             style={[styles.outline, overlapping && styles.outlineWarn]}
@@ -245,11 +288,22 @@ export function TextBoxLayer(props: {
   editable: boolean;
   /** Frame rect boxes should keep clear of; a dragged box overlapping it warns. */
   avoid?: FrameRect | null;
+  /** Box showing width handles; omitted means every editable box shows them. */
+  selectedBoxId?: string | null;
   onChangeBox?: (boxId: string, patch: BoxPatch) => void;
   onTapBox?: (boxId: string) => void;
   onGestureStart?: () => void;
 }): JSX.Element | null {
-  const { boxes, frame, editable, avoid = null, onChangeBox, onTapBox, onGestureStart } = props;
+  const {
+    boxes,
+    frame,
+    editable,
+    avoid = null,
+    selectedBoxId,
+    onChangeBox,
+    onTapBox,
+    onGestureStart,
+  } = props;
   if (boxes.length === 0) return null;
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={editable ? 'box-none' : 'none'}>
@@ -260,6 +314,7 @@ export function TextBoxLayer(props: {
           frame={frame}
           editable={editable}
           avoid={avoid}
+          selected={selectedBoxId === undefined || selectedBoxId === box.id}
           onChange={(patch) => onChangeBox?.(box.id, patch)}
           onTap={() => onTapBox?.(box.id)}
           onGestureStart={onGestureStart}

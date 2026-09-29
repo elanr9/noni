@@ -3,7 +3,7 @@
 // the admin-placed text boxes. Box geometry is stored as stage fractions, so
 // this scales from a card thumbnail to a full-screen preview and matches the
 // server-side bake in renderAdapter.renderSlideImage.
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   Image,
   StyleSheet,
@@ -15,21 +15,28 @@ import {
 
 import {
   MAX_BOX_SIZE,
+  MAX_BOX_WIDTH,
   MIN_BOX_SIZE,
-  OVERLAY_TEXT_SPEC,
+  MIN_BOX_WIDTH,
   type OverlayBox,
 } from '../lib/overlay-boxes';
 import { color } from '../theme/tokens';
 import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
-import { GestureItem } from './creator/slides/GestureItem';
+import { GestureItem, WidthHandles, useWidthDrag } from './creator/slides/GestureItem';
 import { TikTokChrome } from './creator/slides/TikTokChrome';
-import { OverlayTextBox } from './ui/OverlayTextBox';
+import { OverlayTextBox, overlayMinWrapWidth, overlayWrapWidth } from './ui/OverlayTextBox';
 import { SkeletonCard } from './ui/Skeleton';
+
+/** Geometry a gesture can change on a box in one commit. */
+export type BoxLayoutPatch = Partial<Pick<OverlayBox, 'x' | 'y' | 'size' | 'width'>>;
 
 /** Full creator editing: drag, pinch and tap on boxes, drag on the inset. */
 export type SlideStageEditing = {
   onMoveBox: (boxId: string, x: number, y: number) => void;
   onScaleBox: (boxId: string, size: number) => void;
+  /** One commit for a pinch (size plus the centre it scaled to) or a width
+   * handle drag. Without it a pinch falls back to onScaleBox and handles hide. */
+  onChangeBox?: (boxId: string, patch: BoxLayoutPatch) => void;
   onTapBox: (boxId: string) => void;
   onMoveInset?: PlacementMove;
   /** New inset width as a frame fraction; the stage keeps the aspect. */
@@ -54,6 +61,65 @@ export type SlideInset = {
 
 function isVideoUri(uri: string): boolean {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(uri);
+}
+
+/** One text box in edit mode: drag, focal pinch, tap, and side width handles. */
+function EditableSlideBox(props: {
+  box: OverlayBox;
+  stageWidth: number;
+  stageHeight: number;
+  editing: SlideStageEditing;
+  onDragStart?: () => void;
+}): JSX.Element {
+  const { box, stageWidth, stageHeight, editing, onDragStart } = props;
+  const fontSize = Math.max(6, box.size * stageWidth);
+  const contentWidth = useRef(0);
+  const { liveWidth, drag } = useWidthDrag({
+    start: () => contentWidth.current,
+    min: () =>
+      Math.max(MIN_BOX_WIDTH * stageWidth, overlayMinWrapWidth(box.text, box.bg, fontSize)),
+    max: () => MAX_BOX_WIDTH * stageWidth,
+    onStart: onDragStart,
+    onCommit: (px) => editing.onChangeBox?.(box.id, { width: px / stageWidth }),
+  });
+  const selected = editing.selectedBoxId === box.id;
+
+  return (
+    <GestureItem
+      x={box.x}
+      y={box.y}
+      size={box.size}
+      stageWidth={stageWidth}
+      stageHeight={stageHeight}
+      onMove={(nx, ny) => editing.onMoveBox(box.id, nx, ny)}
+      onScale={(ratio, nx, ny) => {
+        const size = box.size * ratio;
+        if (editing.onChangeBox) editing.onChangeBox(box.id, { size, x: nx, y: ny });
+        else editing.onScaleBox(box.id, size);
+      }}
+      minScale={MIN_BOX_SIZE / box.size}
+      maxScale={MAX_BOX_SIZE / box.size}
+      focalPinch
+      onTap={() => editing.onTapBox(box.id)}
+      onGestureStart={onDragStart}
+      selected={selected}
+    >
+      <View
+        onLayout={(e) => {
+          contentWidth.current = e.nativeEvent.layout.width;
+        }}
+      >
+        <OverlayTextBox
+          text={box.text}
+          color={box.color}
+          bg={box.bg}
+          fontSize={fontSize}
+          maxWidth={liveWidth ?? overlayWrapWidth(box.width, stageWidth)}
+        />
+      </View>
+      <WidthHandles visible={selected && editing.onChangeBox !== undefined} drag={drag} />
+    </GestureItem>
+  );
 }
 
 export function SlideStage(props: {
@@ -162,6 +228,7 @@ export function SlideStage(props: {
           }
           minScale={INSET_MIN_WIDTH / insetWidthFraction}
           maxScale={Math.max(1, insetMaxWidth / insetWidthFraction)}
+          size={insetWidthFraction}
           onGestureStart={onDragStart}
           style={[
             styles.inset,
@@ -197,33 +264,16 @@ export function SlideStage(props: {
       ) : null}
 
       {stage.w > 0 && editing !== undefined
-        ? boxes.map((box) => {
-            const fontSize = Math.max(6, box.size * stage.w);
-            return (
-              <GestureItem
-                key={box.id}
-                x={box.x}
-                y={box.y}
-                stageWidth={stage.w}
-                stageHeight={stage.h}
-                onMove={(nx, ny) => editing.onMoveBox(box.id, nx, ny)}
-                onScale={(ratio) => editing.onScaleBox(box.id, box.size * ratio)}
-                minScale={MIN_BOX_SIZE / box.size}
-                maxScale={MAX_BOX_SIZE / box.size}
-                onTap={() => editing.onTapBox(box.id)}
-                onGestureStart={onDragStart}
-                selected={editing.selectedBoxId === box.id}
-              >
-                <OverlayTextBox
-                  text={box.text}
-                  color={box.color}
-                  bg={box.bg}
-                  fontSize={fontSize}
-                  maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.w}
-                />
-              </GestureItem>
-            );
-          })
+        ? boxes.map((box) => (
+            <EditableSlideBox
+              key={box.id}
+              box={box}
+              stageWidth={stage.w}
+              stageHeight={stage.h}
+              editing={editing}
+              onDragStart={onDragStart}
+            />
+          ))
         : null}
 
       {stage.w > 0 && editing === undefined
@@ -248,7 +298,7 @@ export function SlideStage(props: {
                   color={box.color}
                   bg={box.bg}
                   fontSize={fontSize}
-                  maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stage.w}
+                  maxWidth={overlayWrapWidth(box.width, stage.w)}
                 />
               </DragPlacement>
             );

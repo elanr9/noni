@@ -63,6 +63,7 @@ import {
 import {
   SLIDE_INSET_DEFAULTS,
   SlideStage,
+  type BoxLayoutPatch,
   type SlideInset,
 } from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
@@ -549,6 +550,20 @@ export default function UploadScreen() {
     );
   }
 
+  function changeSlideBox(slideIndex: number, boxId: string, patch: BoxLayoutPatch) {
+    updateSlideBoxes(slideIndex, (boxes) =>
+      boxes.map((b) =>
+        b.id === boxId
+          ? {
+              ...b,
+              ...patch,
+              ...(patch.size !== undefined ? { size: clampBoxSize(patch.size) } : {}),
+            }
+          : b,
+      ),
+    );
+  }
+
   function editSlideBox(slideIndex: number, box: OverlayBox) {
     updateSlideBoxes(slideIndex, (boxes) =>
       boxes.map((b) => (b.id === box.id ? box : b)),
@@ -719,6 +734,7 @@ export default function UploadScreen() {
             editing={{
               onMoveBox: moveSlideBox,
               onScaleBox: scaleSlideBox,
+              onChangeBox: changeSlideBox,
               onTapBox: (_slideIndex, boxId) => {
                 setFreshBoxId(null);
                 setSelectedBoxId(boxId);

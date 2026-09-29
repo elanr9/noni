@@ -12,7 +12,12 @@ import {
 
 import type { OverlayBox } from '../../lib/overlay-boxes';
 import { color, motion, radius, shadow, type } from '../../theme/tokens';
-import { SlideStage, type SlideInset, type SlideStageEditing } from '../SlideStage';
+import {
+  SlideStage,
+  type BoxLayoutPatch,
+  type SlideInset,
+  type SlideStageEditing,
+} from '../SlideStage';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
 import { createPager } from './slides/pager';
@@ -62,6 +67,7 @@ export interface SlideNavProps {
 export interface SlideNavEditing {
   onMoveBox: (slideIndex: number, boxId: string, x: number, y: number) => void;
   onScaleBox: (slideIndex: number, boxId: string, size: number) => void;
+  onChangeBox?: (slideIndex: number, boxId: string, patch: BoxLayoutPatch) => void;
   onTapBox: (slideIndex: number, boxId: string) => void;
   onMoveInset: (slideIndex: number, x: number, y: number) => void;
   /** New inset width as a fraction of the frame width. */
@@ -144,6 +150,9 @@ function editingFor(
   return {
     onMoveBox: (boxId, x, y) => editing.onMoveBox(slideIndex, boxId, x, y),
     onScaleBox: (boxId, size) => editing.onScaleBox(slideIndex, boxId, size),
+    onChangeBox: editing.onChangeBox
+      ? (boxId, patch) => editing.onChangeBox?.(slideIndex, boxId, patch)
+      : undefined,
     onTapBox: (boxId) => editing.onTapBox(slideIndex, boxId),
     onMoveInset: (x, y) => editing.onMoveInset(slideIndex, x, y),
     onScaleInset: editing.onScaleInset

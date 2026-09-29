@@ -598,7 +598,15 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         d,
         currentSegment.id,
         docBoxes(d, currentSegment, true).map((b) =>
-          b.id === boxId ? { ...b, x: placement.x, y: placement.y, size: placement.size } : b,
+          b.id === boxId
+            ? {
+                ...b,
+                x: placement.x,
+                y: placement.y,
+                size: placement.size,
+                ...(placement.width !== undefined ? { width: placement.width } : {}),
+              }
+            : b,
         ),
       ),
     );

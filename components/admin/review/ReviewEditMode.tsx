@@ -232,6 +232,18 @@ export function ReviewEditMode(props: {
                 edits.updateBoxes(segment, (all) =>
                   all.map((b) => (b.id === boxId ? { ...b, size: clampBoxSize(size) } : b)),
                 ),
+              onChangeBox: (boxId, patch) =>
+                edits.updateBoxes(segment, (all) =>
+                  all.map((b) =>
+                    b.id === boxId
+                      ? {
+                          ...b,
+                          ...patch,
+                          ...(patch.size !== undefined ? { size: clampBoxSize(patch.size) } : {}),
+                        }
+                      : b,
+                  ),
+                ),
               onTapBox: (boxId) => {
                 setFreshBoxId(null);
                 setSelectedBoxId(boxId);
