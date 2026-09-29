@@ -723,6 +723,12 @@ Deno.serve(async (req) => {
         400,
       );
     }
+    // 'submitted' is fired by render-submission once the edit is ready to
+    // watch. Older app builds still fire it at submit time; ignore those so
+    // managers are never pushed to a post that is still rendering.
+    if (body.event === 'submitted' && !isService) {
+      return jsonResponse({ sent: 0, skipped: 'submitted fires when the render is ready' });
+    }
     const subject = await resolveSubject(admin, body);
     if (!subject) return jsonResponse({ error: 'subject not found' }, 404);
     if (
