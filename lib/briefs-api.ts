@@ -616,6 +616,7 @@ export async function creatorEditSegmentBoxes(params: {
       size: b.size,
       x: b.x,
       y: b.y,
+      width: b.width ?? null,
     })),
   });
   if (error) throw error;

@@ -500,7 +500,8 @@ export function buildShapeAss(timeline: RenderTimeline): string {
         bubbleShapeEvent({
           lines: wrapOverlayLines(
             t.text,
-            (OVERLAY_TEXT_SPEC.maxWidth - 2 * t.box.size * OVERLAY_TEXT_SPEC.bubble.padX) / t.box.size,
+            ((t.box.width ?? OVERLAY_TEXT_SPEC.maxWidth) -
+              2 * t.box.size * OVERLAY_TEXT_SPEC.bubble.padX) / t.box.size,
             'bubble',
           ),
           fontPx,

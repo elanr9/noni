@@ -15,7 +15,13 @@ export type OverlayBox = {
   size: number;
   x: number;
   y: number;
+  /** Wrap width as a fraction of the frame width; absent means the default maxWidth. */
+  width?: number;
 };
+
+/** Narrowest and widest a text box may wrap, as a fraction of the frame width. */
+export const MIN_BOX_WIDTH = 0.2;
+export const MAX_BOX_WIDTH = 0.95;
 
 /**
  * Two looks only. 'classic' is TikTok's default caption: white TikTok Sans
@@ -193,6 +199,9 @@ function parseBox(value: unknown, index: number): OverlayBox | null {
     size: clamp(num(value.size, auto.size), MIN_BOX_SIZE, MAX_BOX_SIZE),
     x: clamp(num(value.x, auto.x), 0.02, 0.98),
     y: clamp(num(value.y, auto.y), 0.02, 0.98),
+    ...(typeof value.width === 'number'
+      ? { width: clamp(value.width, MIN_BOX_WIDTH, MAX_BOX_WIDTH) }
+      : {}),
   };
 }
 
@@ -263,6 +272,7 @@ export function serializeOverlayBoxes(boxes: OverlayBox[]): {
         size: b.size,
         x: b.x,
         y: b.y,
+        ...(b.width !== undefined ? { width: b.width } : {}),
       })),
       // Legacy mirror of box 0 (px on the design stage) for old readers.
       color: first?.color ?? CLASSIC_TEXT_COLOR,

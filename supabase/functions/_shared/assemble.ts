@@ -520,7 +520,13 @@ async function renderSlideWithFfmpeg(params: {
       start_ms: 0,
       duration_ms: 1000,
       y: box.y,
-      box: { x: box.x, size: box.size, color: box.color, bg: box.bg },
+      box: {
+        x: box.x,
+        size: box.size,
+        color: box.color,
+        bg: box.bg,
+        ...(box.width !== undefined ? { width: box.width } : {}),
+      },
     })),
     images: inset
       ? [

@@ -48,6 +48,8 @@ export type TimelineText = {
     /** Admin-picked color; pastel-washed into the box fill when bg is true. */
     color: string;
     bg: boolean;
+    /** Wrap width as a fraction of the frame width; absent means OVERLAY_TEXT_SPEC.maxWidth. */
+    width?: number;
   };
 };
 
@@ -163,6 +165,7 @@ export type SegmentBox = {
   size: number;
   color: string;
   bg: boolean;
+  width?: number;
 };
 
 /** Text boxes for one segment: overlay_style.boxes, else the legacy columns. */
@@ -182,6 +185,9 @@ export function segmentBoxes(segment: BriefSegmentRow): SegmentBox[] {
           size: num(raw.size, auto.size),
           color: typeof raw.color === 'string' ? raw.color : CLASSIC_TEXT_COLOR,
           bg: typeof raw.bg === 'boolean' ? raw.bg : false,
+          ...(typeof raw.width === 'number'
+            ? { width: Math.min(0.95, Math.max(0.2, raw.width)) }
+            : {}),
         },
       ];
     });
@@ -450,6 +456,7 @@ export function buildRenderTimeline(params: {
               size: box.size,
               color: box.color,
               bg: box.bg,
+              ...(box.width !== undefined ? { width: box.width } : {}),
             },
           });
         }

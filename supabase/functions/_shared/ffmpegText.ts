@@ -157,12 +157,12 @@ export function buildDrawtextChain(params: {
     if (t.box) {
       const fontPx = t.box.size * frame.width;
       const centreX = t.box.x * frame.width;
+      const wrapWidth = t.box.width ?? OVERLAY_TEXT_SPEC.maxWidth;
       if (t.box.bg) {
         pushBlock({
           wrapped: wrapOverlayLines(
             t.text,
-            (OVERLAY_TEXT_SPEC.maxWidth - 2 * t.box.size * OVERLAY_TEXT_SPEC.bubble.padX) /
-              t.box.size,
+            (wrapWidth - 2 * t.box.size * OVERLAY_TEXT_SPEC.bubble.padX) / t.box.size,
             'bubble',
           ),
           font: 'bubble',
@@ -174,7 +174,7 @@ export function buildDrawtextChain(params: {
         });
       } else {
         pushBlock({
-          wrapped: wrapOverlayLines(t.text, OVERLAY_TEXT_SPEC.maxWidth / t.box.size, 'condensed'),
+          wrapped: wrapOverlayLines(t.text, wrapWidth / t.box.size, 'condensed'),
           font: 'condensed',
           fontPx,
           fill: t.box.color,
