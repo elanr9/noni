@@ -57,7 +57,7 @@ export const OVERLAY_TEXT_SPEC = {
     pairs: [{ hue: 210, fill: '#80B6F4', ink: '#000590' }],
     pairHueTolerance: 25,
   },
-  maxWidth: 0.9,
+  maxWidth: 0.84,
 } as const;
 
 export function fontUrl(file: string): string {

@@ -37,7 +37,7 @@ import {
 } from '../../../components/creator/record/useBackLenses';
 import { BetweenClipView } from '../../../components/creator/record/BetweenClipView';
 import {
-  coverFrame,
+  fitFrame,
   frameStyle,
 } from '../../../components/creator/record/stageFrame';
 import {
@@ -1780,7 +1780,14 @@ export default function RecordScreen() {
   const reviewData = brief ?? null;
   const promptMaxHeight = Math.round((stageSize?.h ?? 640) * 0.22);
   const headerTop = insets.top + 8 + (showPrompt ? promptHeight + 10 : 0);
-  const frame = stageSize !== null ? coverFrame(stageSize.w, stageSize.h) : null;
+  // The whole 9:16 frame stays visible under the script panel, so the
+  // creator sees exactly the video that will be posted while recording.
+  const frame = (() => {
+    if (stageSize === null) return null;
+    const reserved = showPrompt ? headerTop : 0;
+    const fit = fitFrame(stageSize.w, Math.max(200, stageSize.h - reserved));
+    return { ...fit, top: fit.top + reserved };
+  })();
   const queueLabel = openingEditor
     ? 'Getting your edit ready…'
     : clipQueueLabel(queueState);
@@ -1841,10 +1848,7 @@ export default function RecordScreen() {
     </View>
   );
 
-  const subtitlesGuideY =
-    brief?.subtitles && (phase === 'countdown' || phase === 'recording' || phase === 'between')
-      ? subtitlesY
-      : null;
+  const subtitlesGuideY = brief?.subtitles && phase !== 'review' ? subtitlesY : null;
   const insetMedia =
     activeSegment && activeShot && frame && activeSegment.layout !== 'green_screen' ? (
       <InsetMediaItem
@@ -2096,7 +2100,7 @@ export default function RecordScreen() {
             <Pressable
               accessibilityLabel="Camera preview. Double tap to flip."
               onPress={onStagePress}
-              style={StyleSheet.absoluteFill}
+              style={frame ? frameStyle(frame) : StyleSheet.absoluteFill}
             >
               <CameraView
                 ref={cameraRef}

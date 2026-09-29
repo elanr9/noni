@@ -64,7 +64,7 @@ export const OVERLAY_TEXT_SPEC = {
     pairHueTolerance: 25,
   },
   /** Widest a box may wrap, as a fraction of the stage width. */
-  maxWidth: 0.9,
+  maxWidth: 0.84,
 } as const;
 
 /**
