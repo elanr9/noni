@@ -1,0 +1,68 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/internal@^1.0.12": "1.0.14"
+  },
+  "jsr": {
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@expo-google-fonts/tiktok-sans@~0.4.3",
+        "npm:@expo/metro-runtime@~57.0.15",
+        "npm:@react-native-async-storage/async-storage@2.2.0",
+        "npm:@supabase/supabase-js@^2.111.0",
+        "npm:@types/node@^22.20.1",
+        "npm:@types/react@~19.2.4",
+        "npm:eslint-config-expo@~57.0.2",
+        "npm:eslint@9",
+        "npm:expo-asset@~57.0.16",
+        "npm:expo-audio@~57.0.4",
+        "npm:expo-auth-session@~57.0.11",
+        "npm:expo-blur@~57.0.2",
+        "npm:expo-brightness@~57.0.1",
+        "npm:expo-camera@~57.0.4",
+        "npm:expo-clipboard@~57.0.1",
+        "npm:expo-constants@~57.0.17",
+        "npm:expo-crypto@~57.0.2",
+        "npm:expo-device@~57.0.1",
+        "npm:expo-file-system@~57.0.6",
+        "npm:expo-font@~57.0.3",
+        "npm:expo-image-manipulator@~57.0.16",
+        "npm:expo-image-picker@~57.0.16",
+        "npm:expo-linking@~57.0.9",
+        "npm:expo-media-library@~57.0.4",
+        "npm:expo-notifications@~57.0.17",
+        "npm:expo-router@~57.0.20",
+        "npm:expo-share-intent@^8.0.1",
+        "npm:expo-splash-screen@~57.0.9",
+        "npm:expo-status-bar@~57.0.1",
+        "npm:expo-video-thumbnails@~57.0.1",
+        "npm:expo-video@~57.0.3",
+        "npm:expo-web-browser@~57.0.2",
+        "npm:expo@~57.0.21",
+        "npm:lucide-react-native@^1.28.0",
+        "npm:react-dom@19.2.3",
+        "npm:react-native-safe-area-context@5.7",
+        "npm:react-native-screens@4.26",
+        "npm:react-native-svg@15.15.4",
+        "npm:react-native-url-polyfill@4",
+        "npm:react-native-web@0.21",
+        "npm:react-native@0.86.3",
+        "npm:react@19.2.3",
+        "npm:typescript@~6.0.3",
+        "npm:vitest@^4.1.10"
+      ]
+    }
+  }
+}

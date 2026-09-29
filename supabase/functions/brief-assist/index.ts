@@ -334,8 +334,9 @@ Deno.serve(async (req) => {
           }
           const raw = await askClaude(
             system,
-            [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
-            4096,
+            lines.join('\n\n'),
+            8000,
+            { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
           );
           return normalizeGenerated(
             parseClaudeJson<RawGenerated>(raw),
@@ -456,8 +457,9 @@ Deno.serve(async (req) => {
           }
           const raw = await askClaude(
             system,
-            [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
-            4096,
+            lines.join('\n\n'),
+            8000,
+            { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
           );
           const parsed = parseClaudeJson<RawGenerated>(raw);
           revisionNote =
@@ -557,8 +559,9 @@ Deno.serve(async (req) => {
       }
       const raw = await askClaude(
         system,
-        [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
-        4096,
+        lines.join('\n\n'),
+        8000,
+        { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
       );
       return parseClaudeJson<RawFieldOut>(raw);
     };

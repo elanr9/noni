@@ -1714,6 +1714,56 @@ export type Database = {
           },
         ]
       }
+      company_research: {
+        Row: {
+          company_id: string
+          error: string | null
+          finished_at: string | null
+          playbook: Json | null
+          profile: Json | null
+          sources: Json
+          stage: string | null
+          started_at: string | null
+          status: string
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          company_id: string
+          error?: string | null
+          finished_at?: string | null
+          playbook?: Json | null
+          profile?: Json | null
+          sources?: Json
+          stage?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          company_id?: string
+          error?: string | null
+          finished_at?: string | null
+          playbook?: Json | null
+          profile?: Json | null
+          sources?: Json
+          stage?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_research_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       content_tasks: {
         Row: {
           assigned_to: string | null
@@ -3853,6 +3903,72 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reference_studies: {
+        Row: {
+          caption: string | null
+          company_id: string
+          created_at: string
+          error: string | null
+          format: string | null
+          id: string
+          library_item_id: string | null
+          pattern: Json | null
+          platform: string | null
+          slide_texts: Json | null
+          status: string
+          studied_at: string | null
+          transcript: string | null
+          url: string
+        }
+        Insert: {
+          caption?: string | null
+          company_id: string
+          created_at?: string
+          error?: string | null
+          format?: string | null
+          id?: string
+          library_item_id?: string | null
+          pattern?: Json | null
+          platform?: string | null
+          slide_texts?: Json | null
+          status?: string
+          studied_at?: string | null
+          transcript?: string | null
+          url: string
+        }
+        Update: {
+          caption?: string | null
+          company_id?: string
+          created_at?: string
+          error?: string | null
+          format?: string | null
+          id?: string
+          library_item_id?: string | null
+          pattern?: Json | null
+          platform?: string | null
+          slide_texts?: Json | null
+          status?: string
+          studied_at?: string | null
+          transcript?: string | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reference_studies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reference_studies_library_item_id_fkey"
+            columns: ["library_item_id"]
+            isOneToOne: false
+            referencedRelation: "library_items"
             referencedColumns: ["id"]
           },
         ]

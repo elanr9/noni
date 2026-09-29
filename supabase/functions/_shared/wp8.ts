@@ -138,14 +138,63 @@ export async function hasPermission(
   return permissions?.[key] === true;
 }
 
+/**
+ * Which model a call runs on. draft is the writer (ANTHROPIC_MODEL); fast is
+ * extraction and small rewrites (ANTHROPIC_FAST_MODEL, Haiku by default);
+ * research is the web search deep dive (ANTHROPIC_RESEARCH_MODEL).
+ */
+export type ClaudeTier = 'draft' | 'fast' | 'research';
+
+export function claudeModel(tier: ClaudeTier = 'draft'): string {
+  if (tier === 'fast') return Deno.env.get('ANTHROPIC_FAST_MODEL') ?? 'claude-haiku-4-5';
+  if (tier === 'research') {
+    return Deno.env.get('ANTHROPIC_RESEARCH_MODEL') ?? 'claude-sonnet-5-5';
+  }
+  return Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5';
+}
+
+export type AskClaudeOptions = {
+  tier?: ClaudeTier;
+  /**
+   * Stable per company text that leads the user message (brand docs,
+   * playbooks). It is cached with the system prompt, so a week of drafts and
+   * every validation retry pay about a tenth for it after the first call.
+   */
+  cachedPrefix?: string;
+};
+
+type ClaudeUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
+function logUsage(label: string, model: string, usage: ClaudeUsage | undefined) {
+  if (!usage) return;
+  console.log(
+    `claude ${label} ${model} in=${usage.input_tokens ?? 0} cache_read=${usage.cache_read_input_tokens ?? 0} cache_write=${usage.cache_creation_input_tokens ?? 0} out=${usage.output_tokens ?? 0}`,
+  );
+}
+
 export async function askClaude(
   system: string,
   user: string,
   maxTokens = 2048,
+  options: AskClaudeOptions = {},
 ): Promise<string> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-  const model = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-5';
+  const model = claudeModel(options.tier);
+  // Cache breakpoints: the system prompt, then the stable user prefix. Short
+  // prompts under the model's minimum simply do not cache; nothing breaks.
+  const cache = { type: 'ephemeral' as const };
+  const userContent = options.cachedPrefix?.trim()
+    ? [
+        { type: 'text' as const, text: options.cachedPrefix, cache_control: cache },
+        { type: 'text' as const, text: user },
+      ]
+    : user;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -156,8 +205,8 @@ export async function askClaude(
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: user }],
+      system: [{ type: 'text', text: system, cache_control: cache }],
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
   if (!res.ok) {
@@ -165,11 +214,96 @@ export async function askClaude(
   }
   const data = (await res.json()) as {
     content: Array<{ type: string; text?: string }>;
+    usage?: ClaudeUsage;
   };
+  logUsage(options.tier ?? 'draft', model, data.usage);
   return data.content
     .filter((b) => b.type === 'text' && b.text)
     .map((b) => b.text)
     .join('');
+}
+
+export type ResearchSource = { url: string; title: string };
+
+type ResearchBlock = {
+  type: string;
+  text?: string;
+  content?: unknown;
+};
+
+/**
+ * One research turn with Anthropic's server side web search. The search loop
+ * runs on Anthropic's side; a pause_turn is resumed by resending the
+ * assistant turn. max_uses caps what a single run can spend on searches.
+ */
+export async function askClaudeResearch(
+  system: string,
+  user: string,
+  options: { maxSearches?: number; maxTokens?: number } = {},
+): Promise<{ text: string; sources: ResearchSource[] }> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+  const model = claudeModel('research');
+  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [
+    { role: 'user', content: user },
+  ];
+  const sources = new Map<string, ResearchSource>();
+  let text = '';
+  for (let turn = 0; turn < 4; turn++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'server-side-fallback-2026-07-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: options.maxTokens ?? 16000,
+        system,
+        output_config: { effort: 'medium' },
+        fallbacks: 'default',
+        tools: [
+          {
+            type: 'web_search_20260209',
+            name: 'web_search',
+            max_uses: options.maxSearches ?? 10,
+          },
+        ],
+        messages,
+      }),
+      signal: AbortSignal.timeout(300000),
+    });
+    if (!res.ok) throw new Error(`Claude research ${res.status}: ${await res.text()}`);
+    const data = (await res.json()) as {
+      content: ResearchBlock[];
+      stop_reason: string;
+      usage?: ClaudeUsage & { server_tool_use?: { web_search_requests?: number } };
+    };
+    logUsage(
+      `research searches=${data.usage?.server_tool_use?.web_search_requests ?? 0}`,
+      model,
+      data.usage,
+    );
+    for (const block of data.content) {
+      if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+        for (const r of block.content as Array<{ url?: string; title?: string }>) {
+          if (r.url && !sources.has(r.url)) {
+            sources.set(r.url, { url: r.url, title: r.title ?? r.url });
+          }
+        }
+      }
+    }
+    text = data.content
+      .filter((b) => b.type === 'text' && b.text)
+      .map((b) => b.text)
+      .join('');
+    if (data.stop_reason === 'refusal') throw new Error('research was declined');
+    if (data.stop_reason !== 'pause_turn') break;
+    messages.push({ role: 'assistant', content: data.content });
+  }
+  return { text, sources: [...sources.values()] };
 }
 
 /** Cheap ChatGPT path for light edits (Brand Brain cleanup). */
@@ -266,6 +400,10 @@ export type BrandDocs = {
   audienceNiche: string;
   voice: string;
   learnings: string;
+  /** research-company: the industry, its calendar, insider facts and vocabulary. */
+  industryResearch: string;
+  /** study-reference: what the winning reference posts have in common. */
+  referencePlaybook: string;
 };
 
 export type SourcingTerm = {
@@ -400,6 +538,8 @@ const DOC_KIND_TO_KEY: Record<string, keyof BrandDocs> = {
   audience_niche: 'audienceNiche',
   voice: 'voice',
   learnings: 'learnings',
+  industry_research: 'industryResearch',
+  reference_playbook: 'referencePlaybook',
 };
 
 export async function loadBrandContext(
@@ -482,6 +622,8 @@ export async function loadBrandContext(
     audienceNiche: '',
     voice: '',
     learnings: '',
+    industryResearch: '',
+    referencePlaybook: '',
   };
   for (const row of docs ?? []) {
     const key = DOC_KIND_TO_KEY[row.kind as string];

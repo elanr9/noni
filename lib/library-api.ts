@@ -253,7 +253,21 @@ export async function saveReference(
   if (error) throw error;
 
   void enrichReference(data.id, url);
+  void studyReference(data.id);
   return data;
+}
+
+/**
+ * Queues the reference to be scraped and broken down once so the writer
+ * learns from it (study-reference). Fire and forget: the study runs in the
+ * background and nothing on screen waits on it.
+ */
+export async function studyReference(itemId: string): Promise<void> {
+  try {
+    await supabase.functions.invoke('study-reference', { body: { library_item_id: itemId } });
+  } catch {
+    // Best effort; the next draft from this reference studies it anyway.
+  }
 }
 
 type LinkPreview = { thumbnail_url?: string | null; title?: string | null };

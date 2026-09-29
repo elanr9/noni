@@ -196,7 +196,7 @@ const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points
 - name the viewer's specific high-stakes moment (the round, the deadline, the email, the tryout), never the general topic;
 - carry one specificity marker: a number, an absolute ("WILL", "never", "stop", "every"), or a named thing (the platform, the round, the person who judges you);
 - promise or threaten a concrete outcome for "you" (what you will be asked, why you got dropped, what you are doing wrong).
-Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email coaches always answer"), COUNTED VALUE ("3 things that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email college soccer coaches" is banned, "the 4 line email college soccer coaches answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever.`;
+Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email recruiters always answer"), COUNTED VALUE ("3 things that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email a recruiter" is banned, "the 4 line email recruiters answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever. Hooks sound like a person saying something true and specific, never a headline generator: no perfect, ultimate, elite, killer, formula, secret, hack or game changer, and no line a viewer has seen on a hundred other posts.`;
 
 function captionRules(requiresPlug: boolean): string {
   const product = requiresPlug
@@ -205,11 +205,17 @@ function captionRules(requiresPlug: boolean): string {
   return `CAPTION (after the hooks): exactly two sentences and under 200 characters (about 30 words, count them). Sentence one carries the search phrase verbatim and the promise of the post; sentence two is ${requiresPlug ? 'the product sentence with its nudge' : 'the one line moral'}. Never list or summarize the talking points in the caption. No hashtags inside it${product}. HASHTAGS: 3 to 5 tags chosen from the hashtag bank in the message by topical fit, not the same set every time.`;
 }
 
-const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to 22 words; 25 is the ceiling and 30 is a hard fail (the plug point may run to 40, hard fail at 45). Count the words of every point before you answer and cut the rationale clause first when over. A creator reads a point and starts talking; they do not recite it. Every point carries ONE concrete anchor the viewer can screenshot or repeat: an exact phrase to say or type, a named example, a number, or a two-second scenario ("even in freshman orientation you never know who is in your group"). A point with no anchor is filler; cut it or replace it. Each point is what to do plus why it works in one breath; "keep it short" alone is not a point, "keep it short: GPA, club team, one line on why their program, coaches read on their phone" is. THE MORAL: the post ends on one sentence that is a general truth about the viewer's situation, written fresh for this exact topic ("be kind to everyone and you will be totally okay" closes a post on getting dropped during rush; "the resume you send everywhere is the one nobody reads" closes a job hunt post); it is never the same sentence across two posts; it is never a step, never an instruction, never a stat, never a recap, and it has no verb of instruction (send, end with, lock in, email). It is 12 words or fewer. When the count is fixed by the source or title ("5 mistakes"), the final item is its anchor in one short clause plus the moral sentence; otherwise the final talking point is the moral alone. When the final point must be shortened, the instruction clause goes and the moral stays. No hedge words anywhere in spoken lines: really, truly, actually, honestly, simply, just, very. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label: the on-screen title card for its clip, 2 to 5 words, the noun phrase a viewer would screenshot, numbered when the type is a list ("4. Great thumbnail"); the plug point's label names the product.`;
+const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to 22 words; 25 is the ceiling and 30 is a hard fail (the plug point may run to 40, hard fail at 45). Count the words of every point before you answer and cut the rationale clause first when over. A creator reads a point and starts talking; they do not recite it. Every point carries ONE concrete anchor the viewer can screenshot or repeat: an exact phrase to say or type, a named example, a number, or a two-second scenario ("even in freshman orientation you never know who is in your group"). A point with no anchor is filler; cut it or replace it. Each point is what to do plus why it works in one breath; "keep it short" alone is not a point, "keep it short: role, one result with a number, one line on why this team, recruiters read on their phone" is. THE MORAL: the post ends on one sentence that is a general truth about the viewer's situation, written fresh for this exact topic ("be kind to everyone and you will be totally okay" closes a post on getting dropped during rush; "the resume you send everywhere is the one nobody reads" closes a job hunt post); it is never the same sentence across two posts; it is never a step, never an instruction, never a stat, never a recap, and it has no verb of instruction (send, end with, lock in, email). It is 12 words or fewer. When the count is fixed by the source or title ("5 mistakes"), the final item is its anchor in one short clause plus the moral sentence; otherwise the final talking point is the moral alone. When the final point must be shortened, the instruction clause goes and the moral stays. No hedge words anywhere in spoken lines: really, truly, actually, honestly, simply, just, very. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label (see ON-SCREEN TEXT).`;
+
+const SUBSTANCE_RULE = `SUBSTANCE (the bar every point clears): write as the most experienced insider in this niche talking to one person, never as a content marketer summarizing a topic. Every non plug point carries something a generic list would not: a real number, a named rule, date or deadline, a named tool, event, level or role, or a scenario only someone who has lived it knows. Take these facts from the Industry playbook and the Reference playbook in the message; never invent a statistic, rule or date, and when the playbooks do not have one, use a concrete scenario instead. THE GENERIC TEST: if the point could sit unchanged in a list for any sport, any job or any product ("start early", "stay consistent", "use multiple angles", "build a smart list", "stay visible", "track everything", "be professional", "quality over quantity"), it fails; replace it with the specific move behind it and the reason an insider knows. Off niche example of the fix: "tailor your resume to each job" fails; "paste three exact phrases from the job post into your resume, the screening software scores keyword matches before a person reads it" passes. Every point must be correct advice a real expert would sign; one wrong or made up detail loses the viewer's trust in the whole post.`;
+
+const SPOKEN_RULE = `SPOKEN LINES: every talking point is read off a teleprompter and burned into the video as subtitles, so it must be a sentence a person says out loud to a friend. Plain words, contractions welcome, short clauses. No em dashes, en dashes or semicolons anywhere in talking points, cta or hooks (use a period or a comma). No stacked noun phrases, no corporate or marketing words: elite, seamless, streamline, game changer, stand out, unlock, level up, leverage, journey, crucial, key, essential, perfect, ultimate, optimize, smart. Read each point aloud in your head; if it sounds like a blog summary or an ad, rewrite it.`;
+
+const ON_SCREEN_RULE = `ON-SCREEN TEXT (overlay_label): the text card on screen during that point's clip, read with the sound off in about a second. It is the point's actual advice compressed into a complete thought of 3 to 7 words: a verb plus the specific thing, or the specific fact, numbered when the type is a list. Someone who reads only the labels must get the real advice. Off niche examples that pass: "3. Quote their job post back", "2. Apply before Thursday noon", "5. Ask for the hiring manager". Labels that fail because they name a topic instead of saying the move: "Multiple angles matter", "Smart school list", "Auto-build option", "Stay visible", "Track everything", "Game film matters". Never use the adjectives smart, strategic, perfect, key, proper, right or good in a label. The plug point's label says what the product does for the viewer, with the product name ("4. Bidly drills your rush questions").`;
 
 const FEATURE_ID_RULE = `FEATURE ID: every talking point carries feature_id. On a product point it is the id of the one entry in the Feature library (in the message) that the point is about, copied exactly; null when the point is not about a specific feature. Non product points are always null. If the message says the Feature library is empty, feature_id is null on every point.`;
 
-const SEARCH_PHRASE_RULE = `SEARCH PHRASE: the search string a target viewer actually types with a deadline in mind, e.g. "why am i not getting recruited for college soccer".`;
+const SEARCH_PHRASE_RULE = `SEARCH PHRASE: the search string a target viewer actually types with a deadline in mind, e.g. "why am i not getting interviews after 100 applications".`;
 
 function plugRule(requiresPlug: boolean, productName: string, hasApprovedClaims: boolean): string {
   if (!requiresPlug) {
@@ -224,7 +230,7 @@ The plug point is spoken as the creator's own tool, first person. Three shapes t
 1. RESOURCE FRAMING, right after the hook: the creator names ${productName} as the tool they lean on, with one mechanism. Best for lists of mistakes or questions.
 2. I ASKED IT: the creator got the content of this post from ${productName}, then the content follows. Best for question or idea lists.
 3. THE FIX for a pain point: one action the viewer takes in ${productName} and the mechanism that follows. Best for contrarian or problem posts.
-The plug point is one of the counted items, numbered like the others (its overlay_label is "N. ${productName}" when the list is numbered), never an extra unnumbered beat squeezed between items. Its text opens with one advice beat of 8 to 15 words (the thing the viewer does) and ends with the plug sentence plus a short nudge on where to find it ("search ${productName}", "it is in my bio"); a plug point that is only the plug sentence fails validation. The whole point stays under 40 words and never carries a bracketed nudge. It is never an ad read on its own. Position: early, while retention is high, in the first half of the points and never the last point. Vague plugs are banned: "there are tools that help", "use a recruiting app", "check out the app" all fail. Never write "It is my biggest tip" or "I use it constantly"; those were examples, not lines.`;
+The plug point is one of the counted items, numbered like the others (its overlay_label is numbered like the others and says what ${productName} does for the viewer, with the name), never an extra unnumbered beat squeezed between items. Its text opens with one advice beat of 8 to 15 words (the thing the viewer does) and ends with the plug sentence plus a short nudge on where to find it ("search ${productName}", "it is in my bio"); a plug point that is only the plug sentence fails validation. The whole point stays under 40 words and never carries a bracketed nudge. It is never an ad read on its own. Position: early, while retention is high, in the first half of the points and never the last point. Vague plugs are banned: "there are tools that help", "use a recruiting app", "check out the app" all fail. Never write "It is my biggest tip" or "I use it constantly"; those were examples, not lines.`;
 }
 
 const POINT_COUNT_RULE =
@@ -251,7 +257,7 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
   );
   if (postType.key === 'contrast') {
     lines.push(
-      `CONTRAST: one speaker alternating between two sides (red flags vs green flags, D3 commit vs D1 commit, 10 offers vs 0 offers). Never two people talking.`,
+      `CONTRAST: one speaker alternating between two sides (red flags vs green flags, first round vs final round, 10 interviews vs 0 interviews). Never two people talking.`,
     );
   }
   if (postType.key === 'seven_second') {
@@ -269,22 +275,22 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
     case 'numbered_list':
     case 'numbered_tips':
       lines.push(
-        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic; e.g. "5 tips for a perfect highlight video", "8 things I wish I knew about college recruiting", "7 mistakes killing your film". Never paste the search phrase as the title.`,
+        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic; e.g. "5 rush mistakes that get you dropped", "8 things I wish I knew before my first job hunt", "7 resume lines recruiters skip". Never paste the search phrase as the title.`,
       );
       break;
     case 'talking_head':
       lines.push(
-        `TITLE SHAPE: first-person or direct address story beat, e.g. "How I got my first D1 offer", "What coaches actually reply to". Not a numbered list title.`,
+        `TITLE SHAPE: first-person or direct address story beat, e.g. "How I got my first job offer", "What recruiters reply to". Not a numbered list title.`,
       );
       break;
     case 'explainer':
       lines.push(
-        `TITLE SHAPE: why/how explainer, e.g. "Why coaches skip your email", "How NCSA actually works". Clear and specific.`,
+        `TITLE SHAPE: why/how explainer, e.g. "Why recruiters skip your email", "How rush bids get decided". Clear and specific.`,
       );
       break;
     case 'contrast':
       lines.push(
-        `TITLE SHAPE: two sides with "vs" or clear opposition, e.g. "D1 commit vs D3 commit", "10 offers vs 0 offers".`,
+        `TITLE SHAPE: two sides with "vs" or clear opposition, e.g. "First round vs final round", "10 interviews vs 0 interviews".`,
       );
       break;
     case 'replay_bait':
@@ -294,17 +300,17 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
       break;
     case 'seven_second':
       lines.push(
-        `TITLE SHAPE: the one idea as a blunt statement, under 8 words, e.g. "Coaches decide in 8 seconds", "Your film starts too late".`,
+        `TITLE SHAPE: the one idea as a blunt statement, under 8 words, e.g. "Recruiters decide in 8 seconds", "Your resume buries the lead".`,
       );
       break;
     case 'how_to':
       lines.push(
-        `TITLE SHAPE: how-to frame, e.g. "How to email college coaches", "How to build a highlight reel".`,
+        `TITLE SHAPE: how-to frame, e.g. "How to email a recruiter", "How to prep for rush week".`,
       );
       break;
     case 'getting_started':
       lines.push(
-        `TITLE SHAPE: beginner start frame, e.g. "Start recruiting with zero offers", "First steps to get on a coach radar".`,
+        `TITLE SHAPE: beginner start frame, e.g. "Start job hunting with zero connections", "First steps to get on a recruiter's radar".`,
       );
       break;
     default:
@@ -374,7 +380,10 @@ function briefSystemBlocks(
     `Rules, measured against real high performing posts. Follow the numbers exactly.`,
     plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
     SEARCH_PHRASE_RULE,
+    SUBSTANCE_RULE,
     POINT_RULES,
+    SPOKEN_RULE,
+    ON_SCREEN_RULE,
     EXPERT_CREATOR_RULE,
     FEATURE_ID_RULE,
     CREDENTIAL_RULE,
@@ -533,7 +542,10 @@ export function buildFieldSystem(
         winningPattern(requiresPlug),
         postTypeBlock(postType, fallbackFormat),
         plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
+        SUBSTANCE_RULE,
         POINT_RULES,
+        SPOKEN_RULE,
+        ON_SCREEN_RULE,
         EXPERT_CREATOR_RULE,
         FEATURE_ID_RULE,
         CREDENTIAL_RULE,
@@ -546,7 +558,10 @@ export function buildFieldSystem(
         KILL_RULE,
         `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}}`,
         `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim, naming "${options.productName}" out loud (the same sentence stays in cta, so keep it a single plug sentence riding with the point's advice).`,
+        SUBSTANCE_RULE,
         POINT_RULES,
+        SPOKEN_RULE,
+        ON_SCREEN_RULE,
         EXPERT_CREATOR_RULE,
         FEATURE_ID_RULE,
         CREDENTIAL_RULE,
@@ -609,6 +624,10 @@ export function brandValidationCtx(brand: BrandContext): {
   };
 }
 
+// Caps keep the cached per company prefix bounded as the docs grow.
+const INDUSTRY_DOC_CAP = 12000;
+const REFERENCE_DOC_CAP = 7000;
+
 export function brandDocBlocks(brand: BrandContext): string[] {
   const docBlocks: string[] = [
     `Brand: ${brand.companyName}`,
@@ -623,7 +642,17 @@ export function brandDocBlocks(brand: BrandContext): string[] {
   if (brand.docs.learnings.trim()) {
     docBlocks.push(`What has worked so far:\n${brand.docs.learnings.trim()}`);
   }
-  if (docBlocks.length === 1) docBlocks.push(legacyBrandLines(brand));
+  if (docBlocks.length === 2) docBlocks.push(legacyBrandLines(brand));
+  if (brand.docs.industryResearch.trim()) {
+    docBlocks.push(
+      `Industry playbook (researched; the source for every fact, number, date, rule and insider detail in the post; never contradict it):\n${brand.docs.industryResearch.trim().slice(0, INDUSTRY_DOC_CAP)}`,
+    );
+  }
+  if (brand.docs.referencePlaybook.trim()) {
+    docBlocks.push(
+      `Reference playbook (distilled from posts that already won in this niche; match their craft, specificity and on-screen text style, never copy their words):\n${brand.docs.referencePlaybook.trim().slice(0, REFERENCE_DOC_CAP)}`,
+    );
+  }
 
   docBlocks.push(
     brand.approvedClaims.length
@@ -900,7 +929,7 @@ function numberedListTitle(
   const isPhraseCopy =
     Boolean(phrase) && trimmed.toLowerCase() === phrase;
   if (startsWithCount && !isPhraseCopy) return trimmed;
-  const topic = (searchPhrase ?? 'college recruiting')
+  const topic = (searchPhrase ?? 'this topic')
     .replace(/^(is|are|does|do|how|why|what|when|should)\s+/i, '')
     .replace(/\?+$/g, '')
     .trim();

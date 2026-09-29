@@ -1,7 +1,8 @@
 // Admin draft flow: { query }, { url }, { feature_id } or { media_id }, optionally with { post_type }, in;
 // structured draft brief out (or { kill_reason } when generation refuses to
-// pad). URL path scrapes via Apify, transcribes (actor / Deepgram), OCRs
-// carousels, then drafts. Query path drafts from the search string alone.
+// pad). URL path reads the stored reference study, or scrapes via Apify,
+// transcribes (actor / Deepgram) or OCRs carousels and studies it once, then
+// drafts. Query path drafts from the search string alone.
 // Both paths share the generation core in _shared/generateBrief.ts and
 // validateBrief (one retry), and log to brief_validations (brief_id null,
 // joined later by generation_id). The brief itself is only saved by the
@@ -11,7 +12,6 @@
 import {
   adminClient,
   askClaude,
-  askClaudeVision,
   authenticate,
   handleCors,
   jsonResponse,
@@ -40,6 +40,13 @@ import {
   type RawGenerated,
 } from '../_shared/generateBrief.ts';
 import type { TalkingPoint } from '../_shared/validateBrief.ts';
+import { readSocialPost, socialHost } from '../_shared/scrapeSocial.ts';
+import {
+  loadStudy,
+  maybeDistillPlaybook,
+  patternLines,
+  studyReference,
+} from '../_shared/referenceStudy.ts';
 
 type Body = {
   url?: string;
@@ -133,150 +140,6 @@ function featureSourceLines(feature: BrainFeatureRow, context: string | null): s
   ];
 }
 
-type SourcePost = {
-  platform: 'tiktok' | 'instagram';
-  caption: string;
-  media_url: string | null;
-  transcript_url: string | null;
-  image_urls: string[];
-  format: 'video' | 'photo_carousel';
-};
-
-const MAX_OCR_SLIDES = 6;
-
-async function apifyRun(actor: string, input: Record<string, unknown>): Promise<unknown[]> {
-  const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) throw new Error('APIFY_API_TOKEN not set');
-  const res = await fetch(
-    `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${token}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(240000),
-    },
-  );
-  if (!res.ok) throw new Error(`Apify ${actor} ${res.status}: ${await res.text()}`);
-  return (await res.json()) as unknown[];
-}
-
-type TikTokItem = {
-  text?: string;
-  mediaUrls?: string[];
-  videoMeta?: { transcriptionLink?: string };
-  imagePost?: { images?: Array<{ imageURL?: { urlList?: string[] } }> };
-  slideshowImageLinks?: Array<{ downloadLink?: string }>;
-};
-
-async function scrapeTikTok(url: string): Promise<SourcePost | null> {
-  const items = (await apifyRun('clockworks~tiktok-scraper', {
-    postURLs: [url],
-    // Actor transcribes videos without captions; primary transcript source.
-    downloadSubtitlesOptions: 'DOWNLOAD_AND_TRANSCRIBE_VIDEOS_WITHOUT_SUBTITLES',
-  })) as TikTokItem[];
-  const i = items[0];
-  if (!i) return null;
-  const slides = (i.imagePost?.images ?? [])
-    .map((img) => img.imageURL?.urlList?.[0])
-    .filter((u): u is string => Boolean(u));
-  const fallbackSlides = (i.slideshowImageLinks ?? [])
-    .map((l) => l.downloadLink)
-    .filter((u): u is string => Boolean(u));
-  const imageUrls = slides.length > 0 ? slides : fallbackSlides;
-  const isCarousel = imageUrls.length > 0;
-  return {
-    platform: 'tiktok',
-    caption: i.text ?? '',
-    media_url: isCarousel ? null : i.mediaUrls?.[0] ?? null,
-    transcript_url: isCarousel ? null : i.videoMeta?.transcriptionLink ?? null,
-    image_urls: imageUrls,
-    format: isCarousel ? 'photo_carousel' : 'video',
-  };
-}
-
-type InstagramItem = {
-  type?: string;
-  caption?: string;
-  videoUrl?: string;
-  images?: string[];
-};
-
-async function scrapeInstagram(url: string): Promise<SourcePost | null> {
-  const items = (await apifyRun('apify~instagram-scraper', {
-    directUrls: [url],
-    resultsType: 'posts',
-    resultsLimit: 1,
-  })) as InstagramItem[];
-  const i = items[0];
-  if (!i) return null;
-  const isCarousel = i.type === 'Sidecar' && (i.images?.length ?? 0) > 0;
-  return {
-    platform: 'instagram',
-    caption: i.caption ?? '',
-    media_url: isCarousel ? null : i.videoUrl ?? null,
-    transcript_url: null,
-    image_urls: isCarousel ? (i.images ?? []) : [],
-    format: isCarousel ? 'photo_carousel' : 'video',
-  };
-}
-
-async function fetchApifyTranscript(url: string): Promise<string | null> {
-  const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) return null;
-  try {
-    const sep = url.includes('?') ? '&' : '?';
-    const res = await fetch(`${url}${sep}token=${token}`, {
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!res.ok) return null;
-    const text = (await res.text()).trim();
-    return text.length > 0 ? text : null;
-  } catch {
-    return null;
-  }
-}
-
-async function transcribe(mediaUrl: string): Promise<string | null> {
-  const key = Deno.env.get('DEEPGRAM_API_KEY');
-  if (!key) return null;
-  try {
-    const res = await fetch(
-      'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url: mediaUrl }),
-        signal: AbortSignal.timeout(90000),
-      },
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      results?: {
-        channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>;
-      };
-    };
-    return data.results?.channels?.[0]?.alternatives?.[0]?.transcript || null;
-  } catch {
-    return null;
-  }
-}
-
-async function ocrSlides(imageUrls: string[]): Promise<string[] | null> {
-  try {
-    const urls = imageUrls.slice(0, MAX_OCR_SLIDES);
-    const system = `You transcribe the text on social media slideshow images. Answer with a single JSON object: {"slides": string[]}, one string per image in order. Each string is all readable overlay/design text on that slide, cleaned up. Use "" for a slide with no text.`;
-    const raw = await askClaudeVision(system, urls, `Transcribe all ${urls.length} slides.`);
-    const { slides } = parseClaudeJson<{ slides: string[] }>(raw);
-    return Array.isArray(slides) ? slides.map((s) => String(s)) : null;
-  } catch (e) {
-    console.error('ingest-brief OCR failed:', e);
-    return null;
-  }
-}
-
 async function generateOnce(
   brand: BrandContext,
   postType: PostTypeRow | null,
@@ -292,8 +155,9 @@ async function generateOnce(
   }
   const raw = await askClaude(
     buildBriefSystem(postType, fallbackFormat, brandSystemOptions(brand)),
-    [...brandDocBlocks(brand), '', ...lines].join('\n\n'),
-    4096,
+    lines.join('\n\n'),
+    8000,
+    { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
   );
   return normalizeGenerated(
     parseClaudeJson<RawGenerated>(raw),
@@ -537,52 +401,78 @@ Deno.serve(async (req) => {
     });
   }
 
-  let host: string;
-  try {
-    host = new URL(url!).hostname;
-  } catch {
-    return jsonResponse({ error: 'That is not a valid link' }, 400);
-  }
-  const isTikTok = /(^|\.)tiktok\.com$/.test(host);
-  const isInstagram = /(^|\.)instagram\.com$/.test(host);
-  if (!isTikTok && !isInstagram) {
+  const host = socialHost(url!);
+  if (!host) {
+    try {
+      new URL(url!);
+    } catch {
+      return jsonResponse({ error: 'That is not a valid link' }, 400);
+    }
     return jsonResponse({ error: 'Paste a TikTok or Instagram link' }, 400);
   }
 
   return streamJsonResponse(async () => {
   try {
-    const post = isTikTok ? await scrapeTikTok(url!) : await scrapeInstagram(url!);
-    if (!post) {
-      return { error: 'Could not read that post. Check the link.' };
+    // A reference is scraped and studied once; every later draft from it
+    // reads the stored study instead of paying Apify and Deepgram again.
+    let study = await loadStudy(admin, caller.companyId, url!);
+    if (!study || !(study.transcript || study.slide_texts?.length || study.caption)) {
+      const read = await readSocialPost(url!);
+      if (!read) {
+        return { error: 'Could not read that post. Check the link.' };
+      }
+      study = await studyReference(admin, caller.companyId, url!, { alreadyRead: read }).catch(
+        (e) => {
+          console.warn('ingest-brief study failed:', e instanceof Error ? e.message : e);
+          return {
+            id: '',
+            url: url!,
+            status: 'failed' as const,
+            platform: read.post.platform,
+            format: read.post.format,
+            caption: read.post.caption,
+            transcript: read.transcript,
+            slide_texts: read.slideTexts,
+            pattern: null,
+          };
+        },
+      );
+      if (study?.status === 'done') {
+        maybeDistillPlaybook(admin, caller.companyId).catch((e) =>
+          console.warn('playbook distill failed:', e instanceof Error ? e.message : e),
+        );
+      }
     }
-
-    let transcript: string | null = null;
-    let slideTexts: string[] | null = null;
-    if (post.format === 'video') {
-      if (post.transcript_url) transcript = await fetchApifyTranscript(post.transcript_url);
-      if (!transcript && post.media_url) transcript = await transcribe(post.media_url);
-    } else {
-      slideTexts = await ocrSlides(post.image_urls);
-    }
+    if (!study) return { error: 'Could not read that post. Check the link.' };
+    const post = {
+      platform: study.platform ?? host,
+      format: (study.format === 'photo_carousel' ? 'photo_carousel' : 'video') as
+        | 'video'
+        | 'photo_carousel',
+      caption: study.caption ?? '',
+    };
+    const transcript = study.transcript;
+    const slideTexts = study.slide_texts;
 
     const brand = await loadBrandContext(admin, caller.companyId);
     const validationCtx = brandValidationCtx(brand);
 
     const sourceLines = [
-      `Base the brief on this ${post.platform} ${post.format === 'photo_carousel' ? 'photo slideshow' : 'video'} the admin pasted as a reference:`,
+      `Base the brief on this ${post.platform} ${post.format === 'photo_carousel' ? 'photo slideshow' : 'video'} the admin pasted as a reference. It already performed in this niche:`,
       ...(post.caption ? [`Caption: ${post.caption.slice(0, 400)}`] : []),
-      ...(transcript ? [`Transcript: ${transcript.slice(0, 2000)}`] : []),
+      ...(transcript ? [`Transcript: ${transcript.slice(0, 2500)}`] : []),
       ...(slideTexts?.length
         ? [
-            `Slide texts: ${slideTexts.map((s, i) => `[${i + 1}] ${s}`).join(' ').slice(0, 2000)}`,
+            `Slide texts: ${slideTexts.map((s, i) => `[${i + 1}] ${s}`).join(' ').slice(0, 2500)}`,
           ]
         : []),
+      ...(study.pattern ? [`Breakdown of why this reference works:\n${patternLines(study.pattern)}`] : []),
       ...(context
         ? [
-            `Admin angle / context (follow this closely when rewriting — keep the source structure but shift the story to this angle):\n${context.slice(0, 1500)}`,
+            `Admin angle / context (follow this closely when rewriting; keep the source structure but shift the story to this angle):\n${context.slice(0, 1500)}`,
           ]
         : []),
-      `Take ONLY the hook shape, the structure and the pacing from this reference. Every fact, example and beat is rewritten for this brand's audience from the brand documents; nothing from the reference's niche survives unless it is true for this brand too. The plug names ${brand.productName} out loud; the reference's product is never mentioned. Do not mention the original creator.`,
+      `Keep the hook shape, the structure, the pacing and the level of detail of this reference; match how specific its points are and how its on-screen text reads. Rewrite every line in fresh words. Its insider facts may be used when they are true for this brand's audience, reworded, never copied. The plug names ${brand.productName} out loud; the reference's product is never mentioned. Do not mention the original creator.`,
     ];
 
     // Nothing is saved yet, so brief_id stays null; generation_id joins the

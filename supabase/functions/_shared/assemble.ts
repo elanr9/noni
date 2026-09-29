@@ -614,24 +614,30 @@ async function renderSlideWithFfmpeg(params: {
 
 /** Instagram feed carousels are 4:5 at most; a 9:16 slide gets cropped. */
 export const INSTAGRAM_SLIDE_SUFFIX = '-ig.png';
+/** TikTok's photo viewer shows slides in a 3:4 box after a swipe and crops anything taller. */
+export const TIKTOK_SLIDE_SUFFIX = '-tt.jpg';
 
 /**
- * 1080x1350 version of a finished 9:16 slide for Instagram: the slide scaled
- * to full height and centred over a blurred, darkened cover copy of itself,
- * so nothing is cropped away and the text stays where the creator put it.
+ * Letterboxed copy of a finished 9:16 slide at another aspect: the slide
+ * scaled to full height and centred over a blurred, darkened cover copy of
+ * itself, so nothing is cropped away and the text stays where the creator
+ * put it. Instagram gets 1080x1350, TikTok 1080x1440.
  */
-async function renderInstagramSlide(params: {
+async function renderLetterboxedSlide(params: {
   admin: AdminClient;
   slidePath: string;
   outputPath: string;
+  width: number;
+  height: number;
+  outputExtension: 'png' | 'jpg';
   label: string;
 }): Promise<void> {
-  const { admin, slidePath, outputPath, label } = params;
+  const { admin, slidePath, outputPath, width, height, outputExtension, label } = params;
   const [slideUrl] = await signVideoUrls(admin, [slidePath]);
   const graph = [
     '[1:v]split[a][b]',
-    '[a]scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350,boxblur=40:8,eq=brightness=-0.15[bg]',
-    '[b]scale=-2:1350[fg]',
+    `[a]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=40:8,eq=brightness=-0.15[bg]`,
+    `[b]scale=-2:${height}[fg]`,
     '[bg][fg]overlay=(W-w)/2:0[outv]',
   ].join(';\n');
   await runFfmpegJob({
@@ -641,9 +647,9 @@ async function renderInstagramSlide(params: {
     filterGraph: graph,
     fullCommand:
       'ffmpeg -y -hide_banner -i {input0} -i {input1} -filter_complex_script {graph} ' +
-      '-map "[outv]" -frames:v 1 -update 1 {output}',
+      '-map "[outv]" -frames:v 1 -update 1 -q:v 2 {output}',
     outputPath,
-    outputExtension: 'png',
+    outputExtension,
     label,
   });
 }
@@ -1564,11 +1570,23 @@ async function runSlideshowAssembly(params: {
         outputPath: outPath,
         label: `slide ${i + 1}`,
       });
-      await renderInstagramSlide({
+      await renderLetterboxedSlide({
         admin,
         slidePath: outPath,
         outputPath: outPath.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX),
+        width: 1080,
+        height: 1350,
+        outputExtension: 'png',
         label: `slide ${i + 1} instagram`,
+      });
+      await renderLetterboxedSlide({
+        admin,
+        slidePath: outPath,
+        outputPath: outPath.replace(/\.(?:png|jpg)$/, TIKTOK_SLIDE_SUFFIX),
+        width: 1080,
+        height: 1440,
+        outputExtension: 'jpg',
+        label: `slide ${i + 1} tiktok`,
       });
       return outPath;
   });
