@@ -132,6 +132,17 @@ export async function restartRender(submissionId: string): Promise<void> {
 }
 
 /**
+ * Manager re-render after editing text or media placement on a submission:
+ * only the overlay pass (or the slide bake) runs again, on the stored cut.
+ */
+export async function rerenderSubmission(submissionId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('render-submission', {
+    body: { submission_id: submissionId, rerender: true },
+  });
+  if (error) throw error;
+}
+
+/**
  * Review an assignment submission. Status moves through transitionAssignment
  * only; notify and the post-approved pipeline are assignment-keyed.
  */

@@ -13,7 +13,16 @@ declare const EdgeRuntime:
   | { waitUntil(promise: Promise<unknown>): void }
   | undefined;
 
-type Body = { submission_id?: string; resume?: boolean; hop?: number };
+type Body = {
+  submission_id?: string;
+  resume?: boolean;
+  hop?: number;
+  /**
+   * Manager re-render after editing text or media placement: redo only the
+   * overlay pass on the stored cut (or re-bake slides), never the stitch.
+   */
+  rerender?: boolean;
+};
 
 const MAX_HOPS = 5;
 
@@ -103,7 +112,8 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'forbidden' }, 403);
     }
 
-    if (submission.render_status === 'ready') {
+    const rerender = body.rerender === true && isManager;
+    if (submission.render_status === 'ready' && !rerender) {
       return jsonResponse({ status: 'ready' });
     }
     // Photo submissions go through assembleSubmission too: it bakes the
@@ -114,7 +124,9 @@ Deno.serve(async (req) => {
     // an admin explicitly restarting a stuck job.
     const claimable = isOwner && !isManager
       ? ['queued', 'failed']
-      : ['queued', 'failed', 'rendering'];
+      : rerender
+        ? ['queued', 'failed', 'rendering', 'ready']
+        : ['queued', 'failed', 'rendering'];
     const { data: claimed } = await admin
       .from('submissions')
       .update({
@@ -128,6 +140,25 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!claimed) {
       return jsonResponse({ status: submission.render_status as string });
+    }
+
+    // A manager re-render starts from the stored stitched cut so only the
+    // overlay pass runs again; slides go back to the originals inside the
+    // slideshow assembly on their own.
+    if (rerender && typeof submission.video_path === 'string' && /\.mp4$/i.test(submission.video_path)) {
+      const version = (submission.version as number | null) ?? 1;
+      const folder = `${companyId}/${targetId}`;
+      const editedPath = `${folder}/${version}-edited.mp4`;
+      const { data: existing } = await admin.storage
+        .from('videos')
+        .list(folder, { search: `${version}-edited.mp4` });
+      if (existing?.some((f) => f.name === `${version}-edited.mp4`)) {
+        submission.video_path = editedPath;
+        await admin
+          .from('submissions')
+          .update({ video_path: editedPath, overlay_render_id: null })
+          .eq('id', submission.id);
+      }
     }
 
     // Stitch and overlays each get their own invocation (and wall clock):

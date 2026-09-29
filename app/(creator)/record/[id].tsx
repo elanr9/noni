@@ -162,6 +162,7 @@ import {
   submitRecording,
   uploadClip,
 } from '../../../lib/submissions';
+import { waitForStableFile } from '../../../lib/storage-upload';
 import { supabase } from '../../../lib/supabase';
 import type { ContentTask } from '../../../lib/tasks';
 import { flaggedSlotIndices } from './flagged';
@@ -1302,7 +1303,11 @@ export default function RecordScreen() {
   function speechBoundsFor(uri: string): Promise<SpeechBounds | null> {
     const cached = speechBoundsRef.current[uri];
     if (cached !== undefined) return cached;
-    const pending = speechBounds(uri).catch((): SpeechBounds | null => null);
+    // A take analysed right after Stop can still be flushing to disk; wait
+    // until its size stops changing before reading the audio.
+    const pending = waitForStableFile(uri)
+      .then(() => speechBounds(uri))
+      .catch((): SpeechBounds | null => null);
     speechBoundsRef.current[uri] = pending;
     return pending;
   }
@@ -1329,6 +1334,12 @@ export default function RecordScreen() {
       speechTrimmedPiecesRef.current.add(piece.id);
       const bounds = await speechBoundsFor(piece.sourceUri);
       if (bounds === null) continue;
+      // Only ever shave silence off the ends. A result that keeps less than
+      // 60% of the take means the analyzer missed the speech (quiet room,
+      // file still settling), so the take stays whole and the server's
+      // transcript-driven cut handles it.
+      const keptMs = bounds.endMs - bounds.startMs;
+      if (bounds.durationMs > 0 && keptMs < bounds.durationMs * 0.6) continue;
       const after = trimPiece(next, piece.id, { inMs: bounds.startMs, outMs: bounds.endMs });
       if (after !== next) {
         next = after;

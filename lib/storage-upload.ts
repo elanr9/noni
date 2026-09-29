@@ -71,3 +71,22 @@ export async function uploadFileToStorage(params: {
 
   throw lastError ?? new Error('The upload failed');
 }
+
+/**
+ * Resolves once a local file's size has stopped changing: a recording read
+ * right after Stop can still be flushing. Gives up after about two seconds.
+ */
+export async function waitForStableFile(localUri: string): Promise<void> {
+  let last = -1;
+  for (let i = 0; i < 8; i++) {
+    let size = 0;
+    try {
+      size = new File(localUri).size ?? 0;
+    } catch {
+      return;
+    }
+    if (size > 0 && size === last) return;
+    last = size;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
