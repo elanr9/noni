@@ -621,6 +621,12 @@ export async function creatorEditSegmentBoxes(params: {
   if (error) throw error;
 }
 
+/** Creator side: drop a slide from their own slideshow; later slides shift up. */
+export async function creatorRemoveSlide(segmentId: string): Promise<void> {
+  const { error } = await supabase.rpc('creator_remove_slide', { p_segment_id: segmentId });
+  if (error) throw error;
+}
+
 /** Default centre of the burned-in subtitle block, as a fraction of frame height. */
 export const DEFAULT_SUBTITLES_Y = 0.78;
 

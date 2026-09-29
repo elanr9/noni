@@ -4778,6 +4778,10 @@ export type Database = {
         Args: { p_brief_id: string; p_y: number }
         Returns: undefined
       }
+      creator_remove_slide: {
+        Args: { p_segment_id: string }
+        Returns: undefined
+      }
       creator_style_brief_boxes: {
         Args: { p_bg: boolean; p_brief_id: string; p_color: string }
         Returns: undefined
