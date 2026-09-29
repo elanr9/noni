@@ -24,6 +24,7 @@ import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
 import { GestureItem } from './creator/slides/GestureItem';
 import { TikTokChrome } from './creator/slides/TikTokChrome';
 import { OverlayTextBox } from './ui/OverlayTextBox';
+import { SkeletonCard } from './ui/Skeleton';
 
 /** Full creator editing: drag, pinch and tap on boxes, drag on the inset. */
 export type SlideStageEditing = {
@@ -89,6 +90,8 @@ export function SlideStage(props: {
   } = props;
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const [insetAspect, setInsetAspect] = useState(9 / 16);
+  /** Shimmer covers the photo until this uri has decoded. */
+  const [loadedUri, setLoadedUri] = useState<string | null>(null);
 
   const insetUri = inset && !isVideoUri(inset.uri) ? inset.uri : undefined;
 
@@ -122,11 +125,19 @@ export function SlideStage(props: {
       }}
     >
       {photoUri !== undefined ? (
-        <Image
-          source={{ uri: photoUri }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
+        <>
+          <Image
+            source={{ uri: photoUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onLoad={() => setLoadedUri(photoUri)}
+          />
+          {loadedUri !== photoUri ? (
+            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+              <SkeletonCard radius={0} style={styles.shimmer} />
+            </View>
+          ) : null}
+        </>
       ) : placeholder !== undefined && placeholder.length > 0 ? (
         <View style={styles.placeholderWrap} pointerEvents="none">
           <Text style={[styles.placeholderText, { fontSize: Math.max(9, 13 * k) }]}>
@@ -265,6 +276,10 @@ const styles = StyleSheet.create({
   inset: {
     overflow: 'hidden',
     backgroundColor: color.ink800,
+  },
+  shimmer: {
+    flex: 1,
+    opacity: 0.35,
   },
   insetImg: {
     width: '100%',

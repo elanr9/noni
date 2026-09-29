@@ -67,7 +67,17 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
   const [scale] = useState(() => new Animated.Value(1));
   const [dragOutline] = useState(() => new Animated.Value(0));
   const [overlapOutline] = useState(() => new Animated.Value(0));
+  const [selectedOutline] = useState(() => new Animated.Value(selected ? 1 : 0));
   const contentHeight = useRef(0);
+
+  useEffect(() => {
+    Animated.spring(selectedOutline, {
+      toValue: selected ? 1 : 0,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 6,
+    }).start();
+  }, [selected, selectedOutline]);
   const latest = useRef(props);
   useLayoutEffect(() => {
     latest.current = props;
@@ -195,7 +205,18 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
             maxWidth={OVERLAY_TEXT_SPEC.maxWidth * stageWidth}
           />
         </View>
-        {selected ? <View style={styles.selectedOutline} pointerEvents="none" /> : null}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.selectedOutline,
+            {
+              opacity: selectedOutline,
+              transform: [
+                { scale: selectedOutline.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) },
+              ],
+            },
+          ]}
+        />
         <Animated.View
           pointerEvents="none"
           style={[styles.dragOutline, { opacity: dragOutline }]}

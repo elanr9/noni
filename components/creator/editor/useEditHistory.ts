@@ -1,26 +1,24 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import type { EditTimeline } from '../../../lib/video-edit';
-
-type History = {
-  past: EditTimeline[];
-  present: EditTimeline;
-  future: EditTimeline[];
+type History<T> = {
+  past: T[];
+  present: T;
+  future: T[];
 };
 
 const MAX_PAST = 100;
 
-/** Undo/redo stack over the committed timeline. `commit` ignores no ops. */
-export function useEditHistory(initial: EditTimeline) {
-  const [history, setHistory] = useState<History>({
+/** Undo/redo stack over one immutable document. `commit` ignores no ops. */
+export function useEditHistory<T>(initial: T) {
+  const [history, setHistory] = useState<History<T>>({
     past: [],
     present: initial,
     future: [],
   });
 
-  const commit = useCallback((next: EditTimeline | ((prev: EditTimeline) => EditTimeline)) => {
+  const commit = useCallback((next: T | ((prev: T) => T)) => {
     setHistory((h) => {
-      const resolved = typeof next === 'function' ? next(h.present) : next;
+      const resolved = typeof next === 'function' ? (next as (prev: T) => T)(h.present) : next;
       if (resolved === h.present) return h;
       return {
         past: [...h.past.slice(-(MAX_PAST - 1)), h.present],
@@ -30,9 +28,18 @@ export function useEditHistory(initial: EditTimeline) {
     });
   }, []);
 
-  /** Replace the present without touching the stacks (used after a re-record
-   * or once edits are baked into a fresh clip). */
-  const reset = useCallback((next: EditTimeline) => {
+  /** Replace the present without adding an undo step (edits owned elsewhere). */
+  const amend = useCallback((next: T | ((prev: T) => T)) => {
+    setHistory((h) => {
+      const resolved = typeof next === 'function' ? (next as (prev: T) => T)(h.present) : next;
+      if (resolved === h.present) return h;
+      return { ...h, present: resolved };
+    });
+  }, []);
+
+  /** Replace the present and drop both stacks (used after a re-record or once
+   * edits are baked into a fresh clip). */
+  const reset = useCallback((next: T) => {
     setHistory({ past: [], present: next, future: [] });
   }, []);
 
@@ -60,13 +67,12 @@ export function useEditHistory(initial: EditTimeline) {
     });
   }, []);
 
-  return {
-    timeline: history.present,
-    canUndo: history.past.length > 0,
-    canRedo: history.future.length > 0,
-    commit,
-    reset,
-    undo,
-    redo,
-  };
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+  const present = history.present;
+
+  return useMemo(
+    () => ({ present, canUndo, canRedo, commit, amend, reset, undo, redo }),
+    [present, canUndo, canRedo, commit, amend, reset, undo, redo],
+  );
 }

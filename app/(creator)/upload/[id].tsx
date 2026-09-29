@@ -21,6 +21,11 @@ import { PostPreview } from '../../../components/creator/PostPreview';
 import { SlideNav } from '../../../components/creator/SlideNav';
 import { FrameFit } from '../../../components/creator/slides/FrameFit';
 import {
+  ensurePreview,
+  usePhotoPreviews,
+} from '../../../components/creator/slides/photo-previews';
+import { RetryToast, type Failure } from '../../../components/creator/slides/RetryToast';
+import {
   clampBoxSize,
   nextBoxId,
   segmentBoxes,
@@ -257,7 +262,12 @@ export default function UploadScreen() {
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   const [picking, setPicking] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  /** Height of the bottom panel at rest; the stage reserves it so nothing jumps. */
+  const [sheetHeight, setSheetHeight] = useState(0);
+  const previewUris = usePhotoPreviews(photos);
   const [placedOnce, setPlacedOnce] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -300,6 +310,7 @@ export default function UploadScreen() {
           if (cancelled) return;
           setBriefSegments(segs);
           setPhotos(draft);
+          setDraftLoaded(true);
           for (const seg of segs) {
             if (!seg.screenshot_url) continue;
             void signedScreenshotUrl(seg.screenshot_url)
@@ -352,7 +363,26 @@ export default function UploadScreen() {
   const pickedCount = slides.filter((s) => photos[s.slotIndex] !== undefined).length;
   const allPicked = slides.length > 0 && pickedCount === slides.length;
   const nextEmpty = slides.find((s) => photos[s.slotIndex] === undefined);
-  const missingCount = slides.length - pickedCount;
+  const missingSlideNumbers = slides
+    .map((s, i) => (photos[s.slotIndex] === undefined ? i + 1 : null))
+    .filter((n): n is number => n !== null);
+  const missingLabel =
+    missingSlideNumbers.length === 1
+      ? `Add a photo to slide ${missingSlideNumbers[0]}`
+      : `Photos missing on slides ${missingSlideNumbers.join(', ')}`;
+
+  // Every photo change persists at once, so backgrounding or a crash between
+  // picks never loses the draft. Waits for the stored draft to load first.
+  const draftAssignmentId = draftLoaded ? assignment?.id ?? null : null;
+  useEffect(() => {
+    if (draftAssignmentId === null) return;
+    savePhotoDraft(draftAssignmentId, photos).catch(() => undefined);
+  }, [draftAssignmentId, photos]);
+
+  function fail(message: string, retry?: () => void) {
+    if (retry) setFailure({ message, retry });
+    else setErrorToast(message);
+  }
 
   async function pickPhoto(slotIndex: number) {
     if (picking || phase === 'processing' || !assignment) return;
@@ -364,16 +394,14 @@ export default function UploadScreen() {
       });
       const asset = result.canceled ? null : result.assets[0];
       if (asset) {
-        const next = {
-          ...photos,
-          [slotIndex]: { uri: asset.uri, mimeType: asset.mimeType ?? null },
-        };
-        setPhotos(next);
-        await savePhotoDraft(assignment.id, next);
+        const picked = { uri: asset.uri, mimeType: asset.mimeType ?? null };
+        setPhotos((prev) => ({ ...prev, [slotIndex]: picked }));
+        void ensurePreview(picked.uri);
       }
     } catch (e) {
-      setErrorToast(
-        e instanceof Error ? e.message : 'Could not open your photos. Try again.',
+      fail(
+        e instanceof Error ? e.message : 'Could not open your photos.',
+        () => void pickPhoto(slotIndex),
       );
     } finally {
       setPicking(false);
@@ -420,31 +448,26 @@ export default function UploadScreen() {
   }
 
   async function confirmRemoveSlide(slot: number, segment: BriefSegment | null) {
-    if (!assignment || removing) return;
+    if (!assignment || !brief || removing) return;
     setRemoving(true);
+    const lastIndex = slides.length - 2;
     try {
-      if (segment) await creatorRemoveSlide(segment.id);
       if (segment) {
-        setBriefSegments((prev) =>
-          prev
-            .filter((s) => s.id !== segment.id)
-            .map((s) =>
-              s.kind === 'slide' && s.slot_index > slot
-                ? { ...s, slot_index: s.slot_index - 1 }
-                : s,
-            ),
-        );
+        await creatorRemoveSlide(segment.id);
+        // The server owns slot numbering; read it back rather than guess.
+        const fresh = await listBriefSegments(brief.id);
+        setBriefSegments(fresh);
       }
-      const nextPhotos = photosWithoutSlot(photos, slot);
-      setPhotos(nextPhotos);
+      // Photos shift with the same rule the server applied to slot_index.
+      setPhotos((prev) => photosWithoutSlot(prev, slot));
       setSelectedBoxId(null);
       setFreshBoxId(null);
-      setReviewIndex((i) => Math.max(0, Math.min(i, slides.length - 2)));
-      await savePhotoDraft(assignment.id, nextPhotos);
+      setReviewIndex((i) => Math.max(0, Math.min(i, lastIndex)));
       toast.show('Slide removed.');
     } catch (e) {
-      setErrorToast(
-        e instanceof Error ? e.message : 'Could not remove that slide. Try again.',
+      fail(
+        e instanceof Error ? e.message : 'Could not remove that slide.',
+        () => void confirmRemoveSlide(slot, segment),
       );
     } finally {
       setRemoving(false);
@@ -454,9 +477,7 @@ export default function UploadScreen() {
   async function sendForApproval() {
     if (!profile || !assignment || submitting) return;
     if (!allPicked) {
-      setErrorToast(
-        `Add a photo to ${missingCount === 1 ? 'the last slide' : `${missingCount} slides`} first.`,
-      );
+      setErrorToast(missingLabel);
       return;
     }
     setSubmitting(true);
@@ -484,7 +505,7 @@ export default function UploadScreen() {
       router.replace('/(creator)/(tabs)');
     } catch (e) {
       setSubmitting(false);
-      setErrorToast(e instanceof Error ? e.message : 'Upload failed. Try again.');
+      fail(e instanceof Error ? e.message : 'Upload failed.', () => void sendForApproval());
     }
   }
 
@@ -508,11 +529,12 @@ export default function UploadScreen() {
     setBriefSegments((prev) =>
       prev.map((s) => (s.id === segment.id ? segmentWithBoxes(s, next) : s)),
     );
-    schedule(`boxes:${segment.id}`, () => {
+    const save = () => {
       creatorEditSegmentBoxes({ segmentId: segment.id, boxes: next }).catch(() =>
-        setErrorToast('Could not save that text. Try again.'),
+        fail('Could not save that text.', save),
       );
-    });
+    };
+    schedule(`boxes:${segment.id}`, save);
   }
 
   function moveSlideBox(slideIndex: number, boxId: string, x: number, y: number) {
@@ -601,11 +623,12 @@ export default function UploadScreen() {
           : s,
       ),
     );
-    schedule(`inset:${segment.id}`, () => {
+    const save = () => {
       creatorPlaceSegment({ segmentId: segment.id, screenshot: next }).catch(() =>
-        setErrorToast('Could not save that picture. Try again.'),
+        fail('Could not save that picture.', save),
       );
-    });
+    };
+    schedule(`inset:${segment.id}`, save);
   }
 
   function changeReviewIndex(next: number) {
@@ -684,11 +707,15 @@ export default function UploadScreen() {
             initialIndex={reviewIndex}
             variant="dark"
             slides={slides.map((s) => ({
-              image: photos[s.slotIndex]?.uri,
+              image: previewUris[s.slotIndex],
               boxes: s.boxes,
               inset: s.inset,
             }))}
             style={StyleSheet.absoluteFill}
+            onTapEmpty={() => {
+              setSelectedBoxId(null);
+              setFreshBoxId(null);
+            }}
             editing={{
               onMoveBox: moveSlideBox,
               onScaleBox: scaleSlideBox,
@@ -731,17 +758,24 @@ export default function UploadScreen() {
             </View>
           ) : null}
         </FrameFit>
-        {selectedBox === null && reviewBoxes.length > 0 && reviewSegmentId !== null ? (
-          <View style={styles.colorPicker}>
+        {/* Fixed height slot so paging to a slide without text never shifts the stage. */}
+        <View style={[styles.colorPicker, { marginBottom: sheetHeight }]}>
+          {reviewBoxes.length > 0 && reviewSegmentId !== null ? (
             <TextColorPicker
               key={reviewSegmentId}
               boxes={reviewBoxes}
               onChange={(_boxId, pick) => styleSlideBox(pick.color, pick.bg)}
             />
-          </View>
-        ) : null}
+          ) : null}
+        </View>
 
         <Animated.View
+          onLayout={(e) => {
+            // Measure the panel at rest only; the text panel and keyboard overlay the stage.
+            if (selectedBox === null && keyboardHeight === 0) {
+              setSheetHeight(e.nativeEvent.layout.height);
+            }
+          }}
           style={[
             styles.reviewSheet,
             {
@@ -811,12 +845,8 @@ export default function UploadScreen() {
                   ) : (
                     <Icon name="send" size={19} color={color.white} />
                   )}
-                  <Text style={styles.sendText}>
-                    {submitting
-                      ? 'Sending…'
-                      : allPicked
-                        ? 'Send for approval'
-                        : `${missingCount} ${missingCount === 1 ? 'photo' : 'photos'} missing`}
+                  <Text style={styles.sendText} numberOfLines={1}>
+                    {submitting ? 'Sending…' : allPicked ? 'Send for approval' : missingLabel}
                   </Text>
                 </PressableScale>
               </View>
@@ -848,6 +878,11 @@ export default function UploadScreen() {
           message={errorToast ?? ''}
           tone="error"
           onHide={() => setErrorToast(null)}
+        />
+        <RetryToast
+          failure={failure}
+          bottom={sheetHeight + keyboardHeight + space[3]}
+          onDismiss={() => setFailure(null)}
         />
       </View>
     );
@@ -1190,6 +1225,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   reviewSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: color.white,
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
@@ -1198,7 +1237,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   colorPicker: {
-    paddingBottom: space[3],
+    height: 84,
+    justifyContent: 'center',
   },
   placeHint: {
     position: 'absolute',

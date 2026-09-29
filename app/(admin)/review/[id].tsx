@@ -309,17 +309,24 @@ export default function ReviewScreen() {
   }, [submissionId]);
 
   // Load the current item's video and segments, autoplay, prefetch the next one.
+  // A render finishing on the same item swaps media in place: position, slide
+  // and the already loaded segments stay so nothing jumps.
+  const loadedId = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (currentId === undefined || current === undefined) return;
     let cancelled = false;
-    setPositionSec(0);
-    setSlideIndex(0);
-    setBriefSegments([]);
-    setSlidePhotos([]);
-    setClipUris([]);
-    setSlideInsetUrls({});
-    setHandle(null);
-    setSubtitlesY(current.assignment.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
+    const sameItem = loadedId.current === currentId;
+    loadedId.current = currentId;
+    if (!sameItem) {
+      setPositionSec(0);
+      setSlideIndex(0);
+      setBriefSegments([]);
+      setSlidePhotos([]);
+      setClipUris([]);
+      setSlideInsetUrls({});
+      setHandle(null);
+      setSubtitlesY(current.assignment.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
+    }
     void (async () => {
       try {
         const url = await signedUrlFor(current);
@@ -502,23 +509,24 @@ export default function ReviewScreen() {
   const spokenSegments = briefSegments
     .filter((s) => s.kind !== 'slide')
     .sort((a, b) => a.slot_index - b.slot_index);
+  // Background still: the raw clip at 0, falling back to the stitched edit at
+  // the clip start when the raw URL is missing or fails to load.
+  const stitchedStill = (i: number) =>
+    videoUri !== null && submission?.render_status === 'ready'
+      ? { uri: videoUri, atSec: clipStartSec(reelClips, i) }
+      : undefined;
   const editTargets: EditTarget[] = isReel
     ? spokenSegments.flatMap((s, i) => {
         const section = clipSections.find((c) => c.key === `segment-${s.slot_index}`);
         const clipUri = section?.clipUri ?? null;
-        const stitched = videoUri !== null && submission?.render_status === 'ready';
-        const background =
-          clipUri !== null
-            ? { kind: 'video' as const, uri: clipUri, atSec: 0 }
-            : stitched
-              ? { kind: 'video' as const, uri: videoUri, atSec: clipStartSec(reelClips, i) }
-              : null;
-        if (background === null) return [];
+        const fallback = stitchedStill(i);
+        const still = clipUri !== null ? { uri: clipUri, atSec: 0 } : fallback;
+        if (still === undefined) return [];
         return [
           {
             segment: s,
             label: section?.label ?? sectionLabel(i, spokenSegments.length, true),
-            background,
+            background: { kind: 'video' as const, still, fallback },
             insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
           },
         ];
@@ -537,26 +545,43 @@ export default function ReviewScreen() {
     setEditVisible(true);
   };
 
+  // Edit mode keeps its spinner up until this resolves; a throw keeps it open
+  // with a Retry.
   const finishEdit = async (changed: boolean) => {
-    setEditVisible(false);
-    if (!changed || submissionId === undefined) return;
-    try {
-      await rerenderSubmission(submissionId);
-      setRerenderPending(submissionId);
-      setQueue((q) =>
-        q.map((it) =>
-          it.submission && it.submission.id === submissionId
-            ? {
-                ...it,
-                submission: { ...it.submission, render_status: 'rendering', render_error: null },
-              }
-            : it,
-        ),
-      );
-      setToast(isReel ? 'Re-editing the video…' : 'Re-editing the slides…');
-    } catch (e) {
-      Alert.alert('Could not re-edit', e instanceof Error ? e.message : 'Try again');
+    if (!changed || submissionId === undefined) {
+      setEditVisible(false);
+      return;
     }
+    await rerenderSubmission(submissionId);
+    // The finished file lands on the same path; a fresh signed URL makes the
+    // player reload it instead of replaying the cached cut.
+    urlCache.current.delete(`${assignment.id}:edit`);
+    setRerenderPending(submissionId);
+    setQueue((q) =>
+      q.map((it) =>
+        it.submission && it.submission.id === submissionId
+          ? {
+              ...it,
+              submission: { ...it.submission, render_status: 'rendering', render_error: null },
+            }
+          : it,
+      ),
+    );
+    setEditVisible(false);
+    setToast(isReel ? 'Re-editing the video…' : 'Re-editing the slides…');
+  };
+
+  // Touched rows are already restored server side; pick up the truth again.
+  const cancelEdit = async () => {
+    try {
+      const fresh = await listBriefSegments(assignment.brief_id);
+      setBriefSegments(fresh);
+    } catch {
+      // The load effect refetches on the next status change; local state is
+      // restored below either way.
+    }
+    setSubtitlesY(briefRow.subtitles_y ?? DEFAULT_SUBTITLES_Y);
+    setEditVisible(false);
   };
 
   const togglePlay = () => {
@@ -757,9 +782,12 @@ export default function ReviewScreen() {
           onIndex={setEditIndex}
           onSegments={setBriefSegments}
           subtitles={
-            isReel && briefRow.subtitles ? { y: subtitlesY, onChange: setSubtitlesY } : null
+            isReel && briefRow.subtitles === true
+              ? { y: subtitlesY, onChange: setSubtitlesY }
+              : null
           }
-          onDone={(changed) => void finishEdit(changed)}
+          onDone={finishEdit}
+          onCancel={cancelEdit}
         />
       )}
       {revisionVisible && (

@@ -20,7 +20,8 @@ import { CENTER_SNAP, PLACE_EDGE, clamp } from './frame';
 const TAP_MAX_MOVE = 6;
 const TAP_MAX_MS = 350;
 const LIFT_SCALE = 1.03;
-const HIT_SLOP = 8;
+const HIT_SLOP = 14;
+const OUTLINE_MS = 120;
 
 type Touch = { pageX: number; pageY: number };
 
@@ -64,12 +65,19 @@ function createItemGesture(initial: ItemProps) {
   const pan = new Animated.ValueXY(start);
   const scale = new Animated.Value(1);
   const guide = new Animated.Value(0);
-  const lift = new Animated.Value(0);
+  const outline = new Animated.Value(initial.selected ? 1 : 0);
   driveNatively(pan.x, start.x);
   driveNatively(pan.y, start.y);
   driveNatively(scale, 1);
   driveNatively(guide, 0);
-  driveNatively(lift, 0);
+  driveNatively(outline, initial.selected ? 1 : 0);
+
+  const showOutline = (on: boolean) =>
+    Animated.timing(outline, {
+      toValue: on ? 1 : 0,
+      duration: OUTLINE_MS,
+      useNativeDriver: true,
+    }).start();
 
   let props = initial;
   let origin = { x: initial.x, y: initial.y };
@@ -107,7 +115,7 @@ function createItemGesture(initial: ItemProps) {
     dragging = true;
     startedAt = Date.now();
     props.onGestureStart?.();
-    lift.setValue(1);
+    showOutline(true);
     springScale(LIFT_SCALE);
   };
 
@@ -144,7 +152,7 @@ function createItemGesture(initial: ItemProps) {
 
   const finish = () => {
     dragging = false;
-    lift.setValue(0);
+    showOutline(props.selected === true);
     setSnapped(false);
   };
 
@@ -186,10 +194,12 @@ function createItemGesture(initial: ItemProps) {
     pan,
     scale,
     guide,
-    lift,
+    outline,
     panHandlers: responder.panHandlers,
     setProps(next: ItemProps) {
+      const selectionChanged = (next.selected === true) !== (props.selected === true);
       props = next;
+      if (selectionChanged && !dragging) showOutline(next.selected === true);
     },
     /** Snap the item to its stored position when nothing is being dragged. */
     settle() {
@@ -199,7 +209,7 @@ function createItemGesture(initial: ItemProps) {
 }
 
 export function GestureItem(props: ItemProps): JSX.Element {
-  const { x, y, stageWidth, stageHeight, selected = false, style, children } = props;
+  const { x, y, stageWidth, stageHeight, style, children } = props;
   const [item] = useState(() => createItemGesture(props));
 
   useEffect(() => {
@@ -229,7 +239,7 @@ export function GestureItem(props: ItemProps): JSX.Element {
       >
         {children}
         <Animated.View
-          style={[styles.outline, { opacity: selected ? 1 : item.lift }]}
+          style={[styles.outline, { opacity: item.outline }]}
           pointerEvents="none"
         />
       </Animated.View>

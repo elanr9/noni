@@ -1,8 +1,8 @@
 // Body of the "When it shows" tool: the slot's transcript with the word at
 // the cue highlighted, tap a word to snap the cue there, plus a reset (text
 // goes back to the whole clip, the screenshot back to the AI suggestion).
-import { useEffect, useRef, type JSX } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useEffect, useRef, type JSX } from 'react';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 
 import type { TranscriptWord } from '../../../lib/video-edit';
 import { color, type } from '../../../theme/tokens';
@@ -19,6 +19,33 @@ export function wordIndexAt(words: TranscriptWord[], sourceMs: number): number {
   return hit;
 }
 
+const WORD_H = 30;
+const WORD_GAP = 4;
+
+const WordChip = memo(function WordChip(props: {
+  word: TranscriptWord;
+  on: boolean;
+  onPick: (word: TranscriptWord) => void;
+}): JSX.Element {
+  const { word, on, onPick } = props;
+  const press = useCallback(() => onPick(word), [onPick, word]);
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Show at "${word.w}"`}
+      accessibilityState={{ selected: on }}
+      onPress={press}
+      style={[styles.word, on && styles.wordOn]}
+    >
+      <Text style={[styles.wordText, on && styles.wordTextOn]}>{word.w}</Text>
+    </PressableScale>
+  );
+});
+
+function wordKey(word: TranscriptWord, index: number): string {
+  return `${word.s}-${index}`;
+}
+
 export function CuePanel(props: {
   words: TranscriptWord[];
   sourceMs: number;
@@ -31,14 +58,19 @@ export function CuePanel(props: {
 }): JSX.Element {
   const { words, sourceMs, kindLabel, pending, canReset, resetLabel, onPickWord, onReset } = props;
   const active = wordIndexAt(words, sourceMs);
-  const scrollRef = useRef<ScrollView>(null);
-  const wordX = useRef<Record<number, number>>({});
+  const listRef = useRef<FlatList<TranscriptWord>>(null);
 
   useEffect(() => {
-    const x = wordX.current[active];
-    if (x === undefined) return;
-    scrollRef.current?.scrollTo({ x: Math.max(0, x - 80), animated: true });
-  }, [active]);
+    if (active < 0 || active >= words.length) return;
+    listRef.current?.scrollToIndex({ index: active, animated: true, viewPosition: 0.3 });
+  }, [active, words.length]);
+
+  const renderWord = useCallback(
+    ({ item, index }: { item: TranscriptWord; index: number }) => (
+      <WordChip word={item} on={index === active} onPick={onPickWord} />
+    ),
+    [active, onPickWord],
+  );
 
   return (
     <View style={styles.wrap}>
@@ -49,34 +81,26 @@ export function CuePanel(props: {
         </View>
       ) : words.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>No transcript for this clip yet. Drag the marker to set when it shows.</Text>
+          <Text style={styles.emptyText}>
+            No transcript for this clip yet. Drag the marker to set when it shows.
+          </Text>
         </View>
       ) : (
-        <ScrollView
-          ref={scrollRef}
+        <FlatList
+          ref={listRef}
           horizontal
+          data={words}
+          extraData={active}
+          keyExtractor={wordKey}
+          renderItem={renderWord}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.words}
-        >
-          {words.map((word, i) => {
-            const on = i === active;
-            return (
-              <PressableScale
-                key={`${word.s}-${i}`}
-                accessibilityRole="button"
-                accessibilityLabel={`Show at "${word.w}"`}
-                accessibilityState={{ selected: on }}
-                onPress={() => onPickWord(word)}
-                onLayout={(e) => {
-                  wordX.current[i] = e.nativeEvent.layout.x;
-                }}
-                style={[styles.word, on && styles.wordOn]}
-              >
-                <Text style={[styles.wordText, on && styles.wordTextOn]}>{word.w}</Text>
-              </PressableScale>
-            );
-          })}
-        </ScrollView>
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={24}
+          windowSize={5}
+          removeClippedSubviews
+          onScrollToIndexFailed={() => undefined}
+        />
       )}
       <View style={styles.row}>
         <Text style={styles.caption} numberOfLines={1}>
@@ -100,15 +124,14 @@ export function CuePanel(props: {
 const styles = StyleSheet.create({
   wrap: { gap: 10 },
   words: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: WORD_GAP,
     paddingHorizontal: 2,
     minHeight: 36,
   },
   word: {
     paddingHorizontal: 8,
-    height: 30,
+    height: WORD_H,
     borderRadius: 8,
     justifyContent: 'center',
     backgroundColor: '#1C1C1E',

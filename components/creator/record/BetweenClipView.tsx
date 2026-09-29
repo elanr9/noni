@@ -3,6 +3,7 @@
 // fix the text, move the picture, then Redo or move on.
 import type { JSX, ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import type { VideoPlayer } from 'expo-video';
 
 import type { OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radius, space, type } from '../../../theme/tokens';
@@ -13,8 +14,12 @@ import { FrameGuides, subtitleBandRect } from './FrameGuides';
 import { frameStyle, type StageFrame } from './stageFrame';
 import { TextBoxLayer, type BoxPatch } from './TextBoxLayer';
 
+/** Height of the bottom panel above the safe area; the screen reserves it. */
+export const BETWEEN_PANEL_HEIGHT = 128;
+
 export function BetweenClipView(props: {
-  uri: string;
+  /** Screen owned player, already loading the take. */
+  player: VideoPlayer;
   durationMs: number;
   frame: StageFrame;
   /** Progress segments, close and clip pill, drawn over the video. */
@@ -38,7 +43,7 @@ export function BetweenClipView(props: {
   railTop: number;
 }): JSX.Element {
   const {
-    uri,
+    player,
     durationMs,
     frame,
     header,
@@ -58,7 +63,7 @@ export function BetweenClipView(props: {
     bottomInset,
     railTop,
   } = props;
-  const playback = useClipPlayback(uri, durationMs);
+  const playback = useClipPlayback(player, durationMs);
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -94,10 +99,22 @@ export function BetweenClipView(props: {
         </PressableScale>
       ) : null}
 
-      <View style={[styles.panel, { paddingBottom: Math.max(bottomInset, 14) + 6 }]}>
+      <View
+        style={[
+          styles.panel,
+          {
+            height: BETWEEN_PANEL_HEIGHT + Math.max(bottomInset, 14),
+            paddingBottom: Math.max(bottomInset, 14),
+          },
+        ]}
+      >
         <View style={styles.panelText}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
         </View>
         <ScrubBar playback={playback} />
         <View style={styles.actions}>
@@ -157,12 +174,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: space[7],
-    paddingTop: space[6],
-    gap: 10,
+    paddingTop: space[2],
+    gap: 4,
     backgroundColor: color.scrimStrong,
   },
   panelText: {
-    gap: 2,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   title: {
     color: color.white,
@@ -170,8 +190,10 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.heavy,
   },
   subtitle: {
+    flexShrink: 1,
     color: color.whiteA75,
-    fontSize: type.size.chip,
+    fontSize: type.size.label,
+    textAlign: 'right',
   },
   actions: {
     flexDirection: 'row',

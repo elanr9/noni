@@ -22,11 +22,18 @@ export function TextEditSheet(props: {
   initialText: string;
   title: string;
   bottomInset: number;
+  /** Every keystroke, so the stage can show the words live. */
+  onChange?: (text: string) => void;
   onCancel: () => void;
   onSave: (text: string) => void;
 }): JSX.Element {
-  const { initialText, title, bottomInset, onCancel, onSave } = props;
+  const { initialText, title, bottomInset, onChange, onCancel, onSave } = props;
   const [text, setText] = useState(initialText);
+
+  function changeText(next: string) {
+    setText(next);
+    onChange?.(next);
+  }
 
   const trimmed = text.trim();
   const canSave = trimmed.length > 0;
@@ -63,7 +70,7 @@ export function TextEditSheet(props: {
           </View>
           <TextInput
             value={text}
-            onChangeText={setText}
+            onChangeText={changeText}
             multiline
             autoFocus
             maxLength={TEXT_BOX_MAX_CHARS}
@@ -88,7 +95,7 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
   panel: {
     backgroundColor: '#111114',

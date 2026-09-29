@@ -13,6 +13,7 @@ import {
   type JSX,
 } from 'react';
 import {
+  Animated,
   Image,
   PanResponder,
   Pressable,
@@ -105,6 +106,8 @@ const MAX_PX_PER_SEC = 320;
 const DEFAULT_PX_PER_SEC = 56;
 const THROTTLE_MS = 33;
 const LABEL_W = 44;
+/** A trim edge this close to the playhead line locks onto it. */
+const SNAP_PX = 6;
 
 type PieceLayout = { range: PieceRange; x: number; width: number };
 type StripLayout = { pieces: PieceLayout[]; totalWidth: number; totalMs: number };
@@ -188,6 +191,10 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
   const momentumRef = useRef(false);
   const settleFrameRef = useRef<number | null>(null);
   const lastScrubAtRef = useRef(0);
+  const offsetRef = useRef(0);
+  const trimRef = useRef<{ pieceId: string; side: TrimSide; offset: number; endX: number } | null>(
+    null,
+  );
   const latest = useRef({
     layout,
     pxPerMs,
@@ -253,7 +260,8 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
   }, []);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (!interactingRef.current) return;
+    offsetRef.current = e.nativeEvent.contentOffset.x;
+    if (!interactingRef.current || trimRef.current !== null) return;
     const now = Date.now();
     if (now - lastScrubAtRef.current < THROTTLE_MS) return;
     lastScrubAtRef.current = now;
@@ -307,17 +315,50 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
     latest.current.onTrimPreview(pieceId, edges);
   }, []);
 
-  const beginTrim = useCallback(() => {
+  const beginCueDrag = useCallback(() => {
     interactingRef.current = true;
     setScrollEnabled(false);
     latest.current.onScrubStart();
   }, []);
 
+  // A left trim keeps the piece's end still on screen (the strip scrolls
+  // under the handle), so the handle itself is what moves with the finger.
+  const beginTrim = useCallback((pieceId: string, side: TrimSide) => {
+    interactingRef.current = true;
+    setScrollEnabled(false);
+    const hit = latest.current.layout.pieces.find((p) => p.range.piece.id === pieceId);
+    trimRef.current = {
+      pieceId,
+      side,
+      offset: offsetRef.current,
+      endX: hit ? hit.x + hit.width : 0,
+    };
+    latest.current.onScrubStart();
+  }, []);
+
   const endTrim = useCallback((pieceId: string, edges: TrimEdges) => {
     interactingRef.current = false;
+    trimRef.current = null;
     setScrollEnabled(true);
     latest.current.onTrimCommit(pieceId, edges);
   }, []);
+
+  useEffect(() => {
+    const trim = trimRef.current;
+    if (trim === null || trim.side !== 'left') return;
+    const hit = layout.pieces.find((p) => p.range.piece.id === trim.pieceId);
+    if (!hit) return;
+    const offset = trim.offset + (hit.x + hit.width - trim.endX);
+    scrollRef.current?.scrollTo({ x: offset, animated: false });
+  }, [layout]);
+
+  const snapSourceMs = useEvent((pieceId: string): number | null => {
+    const hit = latest.current.layout.pieces.find((p) => p.range.piece.id === pieceId);
+    if (!hit) return null;
+    const t = playhead.get();
+    if (t < hit.range.startMs || t > hit.range.endMs) return null;
+    return hit.range.piece.inMs + (t - hit.range.startMs) * hit.range.piece.speed;
+  });
 
   const selectCue = useCallback((selection: CueSelection) => {
     latest.current.onSelectCue(selection);
@@ -391,7 +432,7 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
                     showMediaRow={cueSlots.some((s) => s.hasMedia)}
                     selected={selectedCue}
                     onSelect={selectCue}
-                    onDragStart={beginTrim}
+                    onDragStart={beginCueDrag}
                     onDragPreview={cuePreview}
                     onDragEnd={endCueDrag}
                   />
@@ -411,6 +452,7 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
                     width={p.width}
                     pxPerMs={pxPerMs}
                     selected={p.range.piece.id === selectedPieceId}
+                    snapSourceMs={snapSourceMs}
                     onSelectPiece={selectPiece}
                     onTrimStart={beginTrim}
                     onTrimPreview={trimPreview}
@@ -496,8 +538,9 @@ const PieceStrip = memo(function PieceStrip(props: {
   width: number;
   pxPerMs: number;
   selected: boolean;
+  snapSourceMs: (pieceId: string) => number | null;
   onSelectPiece: (pieceId: string | null) => void;
-  onTrimStart: () => void;
+  onTrimStart: (pieceId: string, side: TrimSide) => void;
   onTrimPreview: (pieceId: string, edges: TrimEdges) => void;
   onTrimEnd: (pieceId: string, edges: TrimEdges) => void;
 }): JSX.Element {
@@ -542,6 +585,7 @@ const PieceStrip = memo(function PieceStrip(props: {
               side={side}
               piece={piece}
               pxPerMs={pxPerMs}
+              snapSourceMs={props.snapSourceMs}
               onTrimStart={props.onTrimStart}
               onTrimPreview={props.onTrimPreview}
               onTrimEnd={props.onTrimEnd}
@@ -582,73 +626,136 @@ function createPinchResponder(hooks: {
   });
 }
 
+type TrimSide = 'left' | 'right';
+
 type TrimHandleProps = {
-  side: 'left' | 'right';
+  side: TrimSide;
   piece: EditPiece;
   pxPerMs: number;
-  onTrimStart: () => void;
+  /** Source ms of this piece under the playhead line, if it is inside the piece. */
+  snapSourceMs: (pieceId: string) => number | null;
+  onTrimStart: (pieceId: string, side: TrimSide) => void;
   onTrimPreview: (pieceId: string, edges: TrimEdges) => void;
   onTrimEnd: (pieceId: string, edges: TrimEdges) => void;
 };
 
-/** Drag of one trim handle. Built once; `latest` returns the current props. */
-function createTrimResponder(latest: () => TrimHandleProps): PanResponderInstance {
+type TrimLive = {
+  /** Finger position minus what the (throttled) layout has already applied. */
+  translate: Animated.Value;
+  setLabelMs: (ms: number | null) => void;
+};
+
+/** Px the committed layout has moved this handle since the grab. */
+function appliedTrimPx(props: TrimHandleProps, origin: { inMs: number; outMs: number }): number {
+  const { piece, side, pxPerMs } = props;
+  const from = side === 'left' ? origin.inMs : origin.outMs;
+  const to = side === 'left' ? piece.inMs : piece.outMs;
+  return ((to - from) / piece.speed) * pxPerMs;
+}
+
+/**
+ * Drag of one trim handle. Built once; `latest` returns the current props.
+ * The handle follows the finger 1:1 on an Animated translate while the strip
+ * layout catches up at the preview rate; the edge is clamped to the piece and
+ * snaps to the playhead within SNAP_PX.
+ */
+function createTrimResponder(latest: () => TrimHandleProps, live: TrimLive) {
   let origin = { inMs: 0, outMs: 0 };
   let edges: TrimEdges = {};
+  let targetPx = 0;
+  let snapMs: number | null = null;
   let lastSent = { at: 0, inMs: -1, outMs: -1 };
+
+  const syncTranslate = () => {
+    live.translate.setValue(targetPx - appliedTrimPx(latest(), origin));
+  };
+
   const finish = () => {
     const { piece, onTrimEnd } = latest();
+    live.setLabelMs(null);
+    targetPx = 0;
+    live.translate.setValue(0);
     onTrimEnd(piece.id, edges);
   };
-  return PanResponder.create({
+
+  const responder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
-      const { piece, onTrimStart } = latest();
+      const { piece, side, onTrimStart, snapSourceMs } = latest();
       origin = { inMs: piece.inMs, outMs: piece.outMs };
       edges = {};
+      targetPx = 0;
+      snapMs = snapSourceMs(piece.id);
       lastSent = { at: 0, inMs: piece.inMs, outMs: piece.outMs };
-      onTrimStart();
+      onTrimStart(piece.id, side);
     },
     onPanResponderMove: (_evt, gs) => {
-      const { piece, pxPerMs, side, onTrimPreview } = latest();
+      const props = latest();
+      const { piece, pxPerMs, side, onTrimPreview } = props;
       if (pxPerMs <= 0) return;
-      const delta = (gs.dx / pxPerMs) * piece.speed;
-      edges =
-        side === 'left'
-          ? { inMs: Math.round(origin.inMs + delta) }
-          : { outMs: Math.round(origin.outMs + delta) };
+      const from = side === 'left' ? origin.inMs : origin.outMs;
+      let edgeMs = from + (gs.dx / pxPerMs) * piece.speed;
+      if (snapMs !== null && Math.abs(((edgeMs - snapMs) / piece.speed) * pxPerMs) < SNAP_PX) {
+        edgeMs = snapMs;
+      }
+      const wanted: TrimEdges =
+        side === 'left' ? { inMs: Math.round(edgeMs) } : { outMs: Math.round(edgeMs) };
+      const clamped = clampTrim({ ...piece, inMs: origin.inMs, outMs: origin.outMs }, wanted);
+      const clampedEdge = side === 'left' ? clamped.inMs : clamped.outMs;
+      edges = side === 'left' ? { inMs: clampedEdge } : { outMs: clampedEdge };
+      targetPx = ((clampedEdge - from) / piece.speed) * pxPerMs;
+      syncTranslate();
+
       const now = Date.now();
       if (now - lastSent.at < THROTTLE_MS) return;
-      const clamped = clampTrim(piece, edges);
       if (clamped.inMs === lastSent.inMs && clamped.outMs === lastSent.outMs) return;
       lastSent = { at: now, ...clamped };
+      live.setLabelMs(clampedEdge);
       onTrimPreview(piece.id, edges);
     },
     onPanResponderRelease: finish,
     onPanResponderTerminate: finish,
   });
+
+  return { panHandlers: responder.panHandlers, syncTranslate };
 }
 
 function TrimHandle(props: TrimHandleProps): JSX.Element {
-  const { side } = props;
+  const { side, piece, pxPerMs } = props;
   const latest = useRef(props);
   useLayoutEffect(() => {
     latest.current = props;
   });
   const getLatest = useEvent(() => latest.current);
-  const [pan] = useState(() => createTrimResponder(getLatest));
+  const [labelMs, setLabelMs] = useState<number | null>(null);
+  const [translate] = useState(() => new Animated.Value(0));
+  const [gesture] = useState(() => createTrimResponder(getLatest, { translate, setLabelMs }));
+
+  // The layout caught up with the finger: shrink the residual offset.
+  useEffect(() => {
+    gesture.syncTranslate();
+  }, [gesture, piece.inMs, piece.outMs, pxPerMs]);
 
   return (
-    <View
-      {...pan.panHandlers}
+    <Animated.View
+      {...gesture.panHandlers}
       accessibilityRole="adjustable"
       accessibilityLabel={side === 'left' ? 'Trim start' : 'Trim end'}
-      style={[styles.handle, side === 'left' ? styles.handleLeft : styles.handleRight]}
+      style={[
+        styles.handle,
+        side === 'left' ? styles.handleLeft : styles.handleRight,
+        { transform: [{ translateX: translate }] },
+      ]}
     >
       <Icon name={side === 'left' ? 'chevron-left' : 'chevron-right'} size={14} color={color.ink} />
-    </View>
+      {labelMs !== null ? (
+        <View style={[styles.trimLabel, side === 'left' ? styles.trimLabelLeft : styles.trimLabelRight]} pointerEvents="none">
+          <Text style={styles.trimLabelText}>{formatSeconds(labelMs)}</Text>
+        </View>
+      ) : null}
+    </Animated.View>
   );
 }
 
@@ -729,6 +836,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.white,
+  },
+  trimLabel: {
+    position: 'absolute',
+    top: -22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: color.white,
+  },
+  trimLabelLeft: { left: 0 },
+  trimLabelRight: { right: 0 },
+  trimLabelText: {
+    fontSize: type.size.micro11,
+    lineHeight: 14,
+    fontWeight: type.weight.semibold,
+    color: color.ink,
+    fontVariant: ['tabular-nums'],
   },
   handleLeft: { left: 0, borderTopLeftRadius: PIECE_RADIUS, borderBottomLeftRadius: PIECE_RADIUS },
   handleRight: { right: 0, borderTopRightRadius: PIECE_RADIUS, borderBottomRightRadius: PIECE_RADIUS },

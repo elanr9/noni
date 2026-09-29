@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Image,
-  PanResponder,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -15,6 +15,7 @@ import { color, motion, radius, shadow, type } from '../../theme/tokens';
 import { SlideStage, type SlideInset, type SlideStageEditing } from '../SlideStage';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
+import { createPager } from './slides/pager';
 
 /**
  * The slideshow scroller used everywhere a post is viewed (SCREENS §8):
@@ -46,6 +47,8 @@ export interface SlideNavProps {
   onMoveInset?: (slideIndex: number, x: number, y: number) => void;
   /** Fires when the creator pages to another slide. */
   onIndexChange?: (slideIndex: number) => void;
+  /** Swipe mode: a tap on the bare photo (not on a box or the inset). */
+  onTapEmpty?: () => void;
   /** Full stage editing on the current slide; every slide renders on the stage. */
   editing?: SlideNavEditing;
   /** Ghost TikTok UI on every slide as safe area guides. */
@@ -64,35 +67,6 @@ export interface SlideNavEditing {
   /** New inset width as a fraction of the frame width. */
   onScaleInset?: (slideIndex: number, width: number) => void;
   selectedBoxId: string | null;
-}
-
-const SWIPE_MIN_DX = 48;
-
-/**
- * Horizontal swipe pager whose targets are refreshed after each render.
- * Bubble phase only (no capture): a box or the inset that claimed the touch
- * on start keeps it, so the pager only ever sees swipes on the bare photo.
- */
-function createSwipeGesture() {
-  let page = { go: (_next: number) => undefined as void, index: 0, enabled: false };
-  const responder = PanResponder.create({
-    onMoveShouldSetPanResponder: (_evt, gs) =>
-      page.enabled &&
-      gs.numberActiveTouches === 1 &&
-      Math.abs(gs.dx) > 8 &&
-      Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderRelease: (_evt, gs) => {
-      if (Math.abs(gs.dx) < SWIPE_MIN_DX) return;
-      page.go(page.index + (gs.dx < 0 ? 1 : -1));
-    },
-  });
-  return {
-    panHandlers: responder.panHandlers,
-    setPage(go: (next: number) => void, index: number, enabled: boolean) {
-      page = { go, index, enabled };
-    },
-  };
 }
 
 const DARK_TINTS = ['#16324A', '#242C3B', '#2E2838', '#1E3A30'];
@@ -162,6 +136,23 @@ function SlideLayer({
   );
 }
 
+function editingFor(
+  editing: SlideNavEditing | undefined,
+  slideIndex: number,
+): SlideStageEditing | undefined {
+  if (!editing) return undefined;
+  return {
+    onMoveBox: (boxId, x, y) => editing.onMoveBox(slideIndex, boxId, x, y),
+    onScaleBox: (boxId, size) => editing.onScaleBox(slideIndex, boxId, size),
+    onTapBox: (boxId) => editing.onTapBox(slideIndex, boxId),
+    onMoveInset: (x, y) => editing.onMoveInset(slideIndex, x, y),
+    onScaleInset: editing.onScaleInset
+      ? (width) => editing.onScaleInset?.(slideIndex, width)
+      : undefined,
+    selectedBoxId: editing.selectedBoxId,
+  };
+}
+
 export function SlideNav({
   slides,
   variant = 'dark',
@@ -169,6 +160,7 @@ export function SlideNav({
   onMoveBox,
   onMoveInset,
   onIndexChange,
+  onTapEmpty,
   editing,
   chrome = false,
   swipe = false,
@@ -176,6 +168,7 @@ export function SlideNav({
 }: SlideNavProps) {
   const dark = variant === 'dark';
   const [index, setIndex] = useState(initialIndex);
+  const [trackWidth, setTrackWidth] = useState(0);
   const prevIndexRef = useRef(initialIndex);
   const fade = useRef(new Animated.Value(1)).current;
 
@@ -183,11 +176,32 @@ export function SlideNav({
   const safeIndex = Math.min(index, Math.max(count - 1, 0));
   const prevIndex = Math.min(prevIndexRef.current, Math.max(count - 1, 0));
 
-  const go = (next: number) => {
-    if (next === safeIndex || next < 0 || next >= count) return;
+  const commit = (next: number) => {
     prevIndexRef.current = safeIndex;
     setIndex(next);
     onIndexChange?.(next);
+  };
+
+  // Swipe mode: the whole row of slides slides under the finger and springs
+  // to a page. Otherwise the old 240ms crossfade.
+  const [pager] = useState(() => createPager());
+  useEffect(() => {
+    pager.setPage({
+      index: safeIndex,
+      count,
+      width: trackWidth,
+      enabled: swipe,
+      onSettle: commit,
+    });
+  });
+
+  const go = (next: number) => {
+    if (next === safeIndex || next < 0 || next >= count) return;
+    if (swipe) {
+      pager.goTo(next);
+      return;
+    }
+    commit(next);
     fade.setValue(0);
     Animated.timing(fade, {
       toValue: 1,
@@ -197,57 +211,73 @@ export function SlideNav({
     }).start();
   };
 
-  // Boxes and the inset claim touches on start, so this only sees swipes on
-  // the bare photo.
-  const [swipeGesture] = useState(() => createSwipeGesture());
-  useEffect(() => {
-    swipeGesture.setPage(go, safeIndex, swipe);
-  });
-
   if (count === 0) return <View style={[styles.root, style]} />;
 
   const current = slides[safeIndex];
   const previous = slides[prevIndex];
-  const stageEditing: SlideStageEditing | undefined = editing
-    ? {
-        onMoveBox: (boxId, x, y) => editing.onMoveBox(safeIndex, boxId, x, y),
-        onScaleBox: (boxId, size) => editing.onScaleBox(safeIndex, boxId, size),
-        onTapBox: (boxId) => editing.onTapBox(safeIndex, boxId),
-        onMoveInset: (x, y) => editing.onMoveInset(safeIndex, x, y),
-        onScaleInset: editing.onScaleInset
-          ? (width) => editing.onScaleInset?.(safeIndex, width)
-          : undefined,
-        selectedBoxId: editing.selectedBoxId,
-      }
-    : undefined;
 
   return (
-    <View style={[styles.root, style]} {...(swipe ? swipeGesture.panHandlers : {})}>
-      {prevIndex !== safeIndex && (
-        <SlideLayer
-          slide={previous}
-          tint={tintFor(previous, prevIndex, dark)}
-          dark={dark}
-          chrome={chrome}
-        />
+    <View
+      style={[styles.root, style]}
+      onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+      {...(swipe ? pager.panHandlers : {})}
+    >
+      {swipe ? (
+        <Animated.View
+          style={[
+            styles.track,
+            {
+              width: Math.max(1, trackWidth) * count,
+              transform: [{ translateX: pager.translateX }],
+            },
+          ]}
+        >
+          {slides.map((slide, i) => (
+            <Pressable
+              key={i}
+              style={{ width: Math.max(1, trackWidth) }}
+              onPress={onTapEmpty}
+              accessibilityLabel={`Slide ${i + 1}`}
+            >
+              <SlideLayer
+                slide={slide}
+                tint={tintFor(slide, i, dark)}
+                dark={dark}
+                editing={editingFor(editing, i)}
+                chrome={chrome}
+              />
+            </Pressable>
+          ))}
+        </Animated.View>
+      ) : (
+        <>
+          {prevIndex !== safeIndex && (
+            <SlideLayer
+              slide={previous}
+              tint={tintFor(previous, prevIndex, dark)}
+              dark={dark}
+              chrome={chrome}
+            />
+          )}
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
+            <SlideLayer
+              slide={current}
+              tint={tintFor(current, safeIndex, dark)}
+              dark={dark}
+              onMoveBox={
+                onMoveBox
+                  ? (boxId, x, y) => onMoveBox(safeIndex, boxId, x, y)
+                  : undefined
+              }
+              onMoveInset={
+                onMoveInset ? (x, y) => onMoveInset(safeIndex, x, y) : undefined
+              }
+              editing={editingFor(editing, safeIndex)}
+              chrome={chrome}
+            />
+          </Animated.View>
+        </>
       )}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
-        <SlideLayer
-          slide={current}
-          tint={tintFor(current, safeIndex, dark)}
-          dark={dark}
-          onMoveBox={
-            onMoveBox
-              ? (boxId, x, y) => onMoveBox(safeIndex, boxId, x, y)
-              : undefined
-          }
-          onMoveInset={
-            onMoveInset ? (x, y) => onMoveInset(safeIndex, x, y) : undefined
-          }
-          editing={stageEditing}
-          chrome={chrome}
-        />
-      </Animated.View>
 
       {safeIndex > 0 && (
         <PressableScale
@@ -313,6 +343,11 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     overflow: 'hidden',
+  },
+  track: {
+    ...StyleSheet.absoluteFill,
+    right: undefined,
+    flexDirection: 'row',
   },
   textWrap: {
     ...StyleSheet.absoluteFill,

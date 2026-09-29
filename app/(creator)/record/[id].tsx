@@ -35,7 +35,15 @@ import {
   lensForZoom,
   useBackLenses,
 } from '../../../components/creator/record/useBackLenses';
-import { BetweenClipView } from '../../../components/creator/record/BetweenClipView';
+import {
+  BETWEEN_PANEL_HEIGHT,
+  BetweenClipView,
+} from '../../../components/creator/record/BetweenClipView';
+import {
+  Countdown,
+  RecClock,
+  RecordingSegment,
+} from '../../../components/creator/record/CaptureChrome';
 import {
   fitFrame,
   frameStyle,
@@ -190,12 +198,15 @@ type PendingClip = { uri: string; durationMs: number };
 
 type EditorClip = Pick<EditorSlot, 'slotIndex' | 'label' | 'sourceUri' | 'durationMs'>;
 
-const COUNTDOWN_STEP_MS = 800;
 const SPEEDS: PrompterSpeed[] = [0.75, 1, 1.25, 1.5];
 /** The visual fill reference: the current segment fills by elapsed / 20s. */
 const PROGRESS_REF_MS = 20_000;
 const STOP_WATCHDOG_MS = 5_000;
 const RECORD_ARM_MS = 350;
+/** Shortest take AVFoundation reliably writes; Stop waits this long. */
+const MIN_TAKE_MS = 700;
+/** The subtitle band ends about here; the frame below it may run under controls. */
+const FRAME_CLEAR_FRACTION = 0.8;
 /** Time for the capture session to settle after a lens or facing swap. */
 const SWITCH_SETTLE_MS = 450;
 const OUTRO_FALLBACK = 'Close it out and tell them what to do next.';
@@ -438,7 +449,6 @@ export default function RecordScreen() {
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [countdown, setCountdown] = useState(3);
   const [cameraReady, setCameraReady] = useState(false);
   const [facing, setFacing] = useState<CameraType>('front');
   const [flashOn, setFlashOn] = useState(false);
@@ -461,7 +471,7 @@ export default function RecordScreen() {
     boxId: string | null;
     session: number;
   } | null>(null);
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const [recordStartedAt, setRecordStartedAt] = useState(0);
   const [speed, setSpeed] = useState<PrompterSpeed>(1);
   const [takeCount, setTakeCount] = useState(0);
   const [errorToast, setErrorToast] = useState<string | null>(null);
@@ -535,6 +545,8 @@ export default function RecordScreen() {
   const switchingRef = useRef(false);
   const recordSessionRef = useRef(0);
   const stopWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordStartAtRef = useRef(0);
+  const stopDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBrightnessRef = useRef<number | null>(null);
   const saveTokenRef = useRef(0);
 
@@ -587,6 +599,12 @@ export default function RecordScreen() {
   const clipsLeft = plan.length - keptCount;
 
   const reviewSource = phase === 'review' ? reviewUris[reviewIndex] ?? null : null;
+  // Preloads the take the moment recording stops so the between screen
+  // plays instantly; also carries a revisited clip.
+  const betweenPlayer = useVideoPlayer(null, (p) => {
+    p.loop = true;
+    p.timeUpdateEventInterval = 0.05;
+  });
   const reviewPlayer = useVideoPlayer(reviewSource, (p) => {
     p.loop = false;
   });
@@ -757,24 +775,6 @@ export default function RecordScreen() {
   }, [briefSegments]);
 
   useEffect(() => {
-    if (phase !== 'countdown') return;
-    if (countdown <= 0) {
-      void startClip();
-      return;
-    }
-    const t = setTimeout(() => setCountdown((c) => c - 1), COUNTDOWN_STEP_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, countdown]);
-
-  useEffect(() => {
-    if (phase !== 'recording') return;
-    const startedAt = Date.now();
-    const t = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
-    return () => clearInterval(t);
-  }, [phase]);
-
-  useEffect(() => {
     if (phase !== 'review') {
       reviewSheet.setValue(0);
       return;
@@ -789,6 +789,7 @@ export default function RecordScreen() {
 
   useEffect(() => {
     return () => {
+      if (stopDelayRef.current) clearTimeout(stopDelayRef.current);
       void restoreBrightness();
     };
   }, []);
@@ -866,7 +867,6 @@ export default function RecordScreen() {
       return;
     }
     setTakeCount((c) => c + 1);
-    setCountdown(3);
     setPhase('countdown');
   }
 
@@ -887,7 +887,7 @@ export default function RecordScreen() {
     recordStartedRef.current = false;
     switchingRef.current = false;
     partsRef.current = [];
-    setElapsedMs(0);
+    setRecordStartedAt(Date.now());
     setPhase('recording');
     if (flashOn && facing === 'front') {
       try {
@@ -906,6 +906,8 @@ export default function RecordScreen() {
       return;
     }
     const startedAt = Date.now();
+    recordStartAtRef.current = startedAt;
+    setRecordStartedAt(startedAt);
     try {
       recordStartedRef.current = true;
       let keepGoing = true;
@@ -943,6 +945,7 @@ export default function RecordScreen() {
           uri,
           durationMs: Math.max(500, Date.now() - startedAt),
         };
+        preloadTake(uri);
         setPendingClip(captured);
         setPendingSaved(false);
         setPendingDurationMs(captured.durationMs);
@@ -980,7 +983,15 @@ export default function RecordScreen() {
       void restoreBrightness();
       return;
     }
-    cameraRef.current?.stopRecording();
+    // A tap right after start would hand AVFoundation nothing to write; wait
+    // out the minimum so the take, and its last moments, land on disk.
+    const sinceStart = Date.now() - recordStartAtRef.current;
+    const stopIn = Math.max(0, MIN_TAKE_MS - sinceStart);
+    if (stopDelayRef.current) clearTimeout(stopDelayRef.current);
+    stopDelayRef.current = setTimeout(() => {
+      stopDelayRef.current = null;
+      cameraRef.current?.stopRecording();
+    }, stopIn);
     if (stopWatchdogRef.current) clearTimeout(stopWatchdogRef.current);
     stopWatchdogRef.current = setTimeout(() => {
       if (recordingRef.current) {
@@ -993,7 +1004,17 @@ export default function RecordScreen() {
           'That clip could not be saved. Record it again.',
         );
       }
-    }, STOP_WATCHDOG_MS);
+    }, STOP_WATCHDOG_MS + stopIn);
+  }
+
+  /** Load a take into the between player right away so playback is instant. */
+  function preloadTake(uri: string) {
+    betweenPlayer
+      .replaceAsync(uri)
+      .then(() => {
+        betweenPlayer.play();
+      })
+      .catch(() => undefined);
   }
 
   /** One native recording. Right after a lens swap the session can still be
@@ -1208,6 +1229,7 @@ export default function RecordScreen() {
 
   function redoClip() {
     saveTokenRef.current += 1;
+    betweenPlayer.pause();
     setPendingClip(null);
     setPendingSaved(false);
     if (revisit !== null) setRevisit({ newTake: true });
@@ -1226,6 +1248,7 @@ export default function RecordScreen() {
   function acceptClip() {
     if (!pendingSaved || activeClip === null) return;
     const fresh = revisit === null || revisit.newTake;
+    betweenPlayer.pause();
     setPendingClip(null);
     if (fresh) uploadQueue.enqueue(activeClip.slotIndex, runSlotJob);
     if (returnToEditorRef.current) {
@@ -1277,6 +1300,7 @@ export default function RecordScreen() {
     clipUri(k)
       .then((uri) => {
         if (saveTokenRef.current !== token) return;
+        preloadTake(uri);
         setPendingClip({ uri, durationMs: k.durationMs });
         setPendingSaved(true);
       })
@@ -1849,14 +1873,24 @@ export default function RecordScreen() {
 
   const reviewData = brief ?? null;
   const promptMaxHeight = Math.round((stageSize?.h ?? 640) * 0.22);
-  const headerTop = insets.top + 8 + (showPrompt ? promptHeight + 10 : 0);
-  // The whole 9:16 frame stays visible under the script panel, so the
-  // creator sees exactly the video that will be posted while recording.
+  // The script panel's room is reserved in every capture phase so the frame
+  // never jumps between idle, countdown, recording and between.
+  const headerTop = insets.top + 8 + (activeClip !== null ? promptHeight + 10 : 0);
+  const bottomReserved = BETWEEN_PANEL_HEIGHT + Math.max(insets.bottom, 14);
+  // The whole 9:16 frame stays visible under the script panel; its subtitle
+  // band and everything above it stay clear of the shutter row and Finish.
   const frame = (() => {
     if (stageSize === null) return null;
-    const reserved = showPrompt ? headerTop : 0;
-    const fit = fitFrame(stageSize.w, Math.max(200, stageSize.h - reserved));
-    return { ...fit, top: fit.top + reserved };
+    const availableH = Math.max(200, stageSize.h - headerTop - bottomReserved);
+    const byClear = fitFrame(stageSize.w, availableH / FRAME_CLEAR_FRACTION);
+    const byWidth = fitFrame(stageSize.w, stageSize.h - headerTop);
+    const fit = byClear.height <= byWidth.height ? byClear : byWidth;
+    return {
+      width: fit.width,
+      height: fit.height,
+      left: (stageSize.w - fit.width) / 2,
+      top: headerTop,
+    };
   })();
   const queueLabel = openingEditor
     ? 'Getting your edit ready…'
@@ -1883,10 +1917,6 @@ export default function RecordScreen() {
         {plan.map((c, i) => {
           const isDone = kept[c.slotIndex] !== undefined;
           const isActive = i === activeIndex;
-          const fill =
-            isActive && phase === 'recording'
-              ? Math.min(elapsedMs / PROGRESS_REF_MS, 1)
-              : 0;
           return (
             <Pressable
               key={c.slotIndex}
@@ -1897,13 +1927,14 @@ export default function RecordScreen() {
               onPress={() => openClip(i)}
               style={[styles.progressTrack, isActive && styles.progressTrackActive]}
             >
-              {isDone ? (
+              {isActive && phase === 'recording' ? (
+                <RecordingSegment
+                  running
+                  fillMs={PROGRESS_REF_MS}
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : isDone ? (
                 <View style={styles.progressDone} />
-              ) : fill > 0 ? (
-                <>
-                  <View style={[styles.progressActive, { flex: fill }]} />
-                  <View style={{ flex: 1 - fill }} />
-                </>
               ) : null}
             </Pressable>
           );
@@ -1920,10 +1951,7 @@ export default function RecordScreen() {
           <Icon name="x" size={24} color={color.white} />
         </Pressable>
         {phase === 'recording' ? (
-          <View style={styles.recPill}>
-            <View style={styles.recDot} />
-            <Text style={styles.recPillText}>{formatMs(elapsedMs)}</Text>
-          </View>
+          <RecClock startedAt={recordStartedAt} />
         ) : (
           <View style={styles.clipNav}>
             <Pressable
@@ -2271,7 +2299,7 @@ export default function RecordScreen() {
 
           {phase === 'between' && pendingClip !== null && frame !== null ? (
             <BetweenClipView
-              uri={pendingClip.uri}
+              player={betweenPlayer}
               durationMs={pendingDurationMs}
               frame={frame}
               header={headerBar}
@@ -2372,12 +2400,10 @@ export default function RecordScreen() {
               ) : null}
 
               {phase === 'countdown' ? (
-                <Pressable
-                  style={styles.countdownWrap}
-                  onPress={() => setPhase('idle')}
-                >
-                  <Text style={styles.countdown}>{countdown}</Text>
-                </Pressable>
+                <Countdown
+                  onDone={() => void startClip()}
+                  onCancel={() => setPhase('idle')}
+                />
               ) : null}
 
               {frame !== null ? (
@@ -2391,7 +2417,7 @@ export default function RecordScreen() {
               <View
                 style={[
                   styles.bottomBar,
-                  { paddingBottom: Math.max(insets.bottom, 14) },
+                  { height: bottomReserved, paddingBottom: Math.max(insets.bottom, 14) },
                 ]}
                 pointerEvents="box-none"
               >
@@ -2418,16 +2444,16 @@ export default function RecordScreen() {
                     ) : null}
                   </View>
                   {phase === 'recording' ? (
-                    <Pressable
+                    <PressableScale
                       accessibilityRole="button"
                       accessibilityLabel="Stop recording"
                       onPress={stopClip}
                       style={[styles.shutter, styles.shutterRecording]}
                     >
                       <View style={styles.stopSquare} />
-                    </Pressable>
+                    </PressableScale>
                   ) : (
-                    <Pressable
+                    <PressableScale
                       accessibilityRole="button"
                       accessibilityLabel="Start recording"
                       style={[styles.shutter, !cameraReady && styles.shutterOff]}
@@ -2435,7 +2461,7 @@ export default function RecordScreen() {
                       onPress={onShutterPress}
                     >
                       <View style={styles.shutterInner} />
-                    </Pressable>
+                    </PressableScale>
                   )}
                   <View style={styles.shutterSide}>
                     <Text style={styles.clipsLeft}>
@@ -2461,7 +2487,12 @@ export default function RecordScreen() {
           ]}
           pointerEvents="none"
         >
-          <UploadPill label={queueLabel} />
+          <UploadPill
+            label={queueLabel}
+            clips={plan
+              .map((c) => queueState.jobs[c.slotIndex]?.status)
+              .filter((st): st is NonNullable<typeof st> => st !== undefined)}
+          />
         </View>
       ) : null}
       {failedLabel !== null && failedSlot !== undefined ? (
@@ -2666,9 +2697,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.white,
   },
-  progressActive: {
-    backgroundColor: color.accent,
-  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2711,27 +2739,6 @@ const styles = StyleSheet.create({
     color: color.white,
     fontSize: type.size.label,
     fontWeight: type.weight.bold,
-  },
-  recPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    backgroundColor: color.inkA55,
-  },
-  recDot: {
-    width: 8,
-    height: 8,
-    borderRadius: radius.pill,
-    backgroundColor: color.danger,
-  },
-  recPillText: {
-    color: color.white,
-    fontSize: type.size.label,
-    fontWeight: type.weight.heavy,
-    fontVariant: ['tabular-nums'],
   },
   promptSlot: {
     position: 'absolute',
@@ -2776,26 +2783,13 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.semibold,
     color: color.white,
   },
-  countdownWrap: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.scrim,
-    zIndex: 6,
-  },
-  countdown: {
-    color: color.white,
-    fontSize: 96,
-    fontWeight: type.weight.heavy,
-  },
   bottomBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     paddingHorizontal: space[7],
-    paddingTop: space[4],
-    gap: 14,
+    justifyContent: 'center',
     zIndex: 8,
   },
   shutterRow: {

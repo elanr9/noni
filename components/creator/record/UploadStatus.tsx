@@ -3,13 +3,30 @@
 import type { JSX } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { ClipJobStatus } from '../../../lib/clip-upload-queue';
 import { color, radius, type } from '../../../theme/tokens';
 
-export function UploadPill(props: { label: string }): JSX.Element {
+const DOT_COLOR: Record<ClipJobStatus, string> = {
+  queued: color.whiteA45,
+  working: color.accent,
+  done: color.white,
+  failed: color.danger,
+};
+
+/** Slim status pill; one dot per clip in the current batch. */
+export function UploadPill(props: { label: string; clips?: ClipJobStatus[] }): JSX.Element {
+  const { label, clips = [] } = props;
   return (
     <View style={styles.pill} accessibilityLiveRegion="polite">
       <ActivityIndicator size="small" color={color.white} />
-      <Text style={styles.pillText}>{props.label}</Text>
+      <Text style={styles.pillText}>{label}</Text>
+      {clips.length > 1 ? (
+        <View style={styles.dots}>
+          {clips.map((status, i) => (
+            <View key={i} style={[styles.dot, { backgroundColor: DOT_COLOR[status] }]} />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -51,6 +68,16 @@ const styles = StyleSheet.create({
     color: color.white,
     fontSize: type.size.label,
     fontWeight: type.weight.bold,
+  },
+  dots: {
+    flexDirection: 'row',
+    gap: 4,
+    marginLeft: 2,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.pill,
   },
   toast: {
     flexDirection: 'row',
