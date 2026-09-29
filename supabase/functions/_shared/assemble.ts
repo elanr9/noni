@@ -605,6 +605,42 @@ async function renderSlideWithFfmpeg(params: {
   }
 }
 
+/** Instagram feed carousels are 4:5 at most; a 9:16 slide gets cropped. */
+export const INSTAGRAM_SLIDE_SUFFIX = '-ig.png';
+
+/**
+ * 1080x1350 version of a finished 9:16 slide for Instagram: the slide scaled
+ * to full height and centred over a blurred, darkened cover copy of itself,
+ * so nothing is cropped away and the text stays where the creator put it.
+ */
+async function renderInstagramSlide(params: {
+  admin: AdminClient;
+  slidePath: string;
+  outputPath: string;
+  label: string;
+}): Promise<void> {
+  const { admin, slidePath, outputPath, label } = params;
+  const [slideUrl] = await signVideoUrls(admin, [slidePath]);
+  const graph = [
+    '[1:v]split[a][b]',
+    '[a]scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350,boxblur=40:8,eq=brightness=-0.15[bg]',
+    '[b]scale=-2:1350[fg]',
+    '[bg][fg]overlay=(W-w)/2:0[outv]',
+  ].join(';\n');
+  await runFfmpegJob({
+    admin,
+    apiKey: uploadPostKey(),
+    files: [fontUrl(QUOTA_ANCHOR_FILE), slideUrl],
+    filterGraph: graph,
+    fullCommand:
+      'ffmpeg -y -hide_banner -i {input0} -i {input1} -filter_complex_script {graph} ' +
+      '-map "[outv]" -frames:v 1 -update 1 {output}',
+    outputPath,
+    outputExtension: 'png',
+    label,
+  });
+}
+
 // Run an FFmpeg job whose {output} is a text file and return its contents.
 async function runFfmpegTextJob(params: {
   apiKey: string;
@@ -1519,6 +1555,12 @@ async function runSlideshowAssembly(params: {
         inset,
         outputPath: outPath,
         label: `slide ${i + 1}`,
+      });
+      await renderInstagramSlide({
+        admin,
+        slidePath: outPath,
+        outputPath: outPath.replace(/\.png$/, INSTAGRAM_SLIDE_SUFFIX),
+        label: `slide ${i + 1} instagram`,
       });
       return outPath;
   });

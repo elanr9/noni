@@ -3,6 +3,7 @@ import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import {
   assembleSubmission,
   uploadPostKey,
+  INSTAGRAM_SLIDE_SUFFIX,
   type AdminClient,
 } from '../_shared/assemble.ts';
 import { isManagerOf } from '../_shared/membership.ts';
@@ -320,17 +321,19 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'no platforms to post to' }, 400);
     }
 
+    // Common fields; platforms and media are appended per request below.
     const form = new FormData();
     form.append('user', creator.upload_post_profile);
     form.append('title', target.caption);
     form.append('async_upload', 'true');
-    for (const p of platforms) form.append('platform[]', p);
     if (target.isSlideshow && platforms.includes('tiktok')) {
       // TikTok rejects photo posts whose title runs past 90 characters; the
       // full caption travels as the description instead.
       form.append('tiktok_title', tiktokPhotoTitle(target.caption));
       form.append('tiktok_description', target.caption.slice(0, 4000));
     }
+    /** Instagram gets its own 4:5 slide set when the bake produced one. */
+    let instagramPhotoUrls: string[] | null = null;
 
     let overlayWarning: string | null = null;
     let uploadUrl = 'https://api.upload-post.com/api/upload';
@@ -376,6 +379,7 @@ Deno.serve(async (req) => {
       if (slidePaths.length === 0) {
         return jsonResponse({ error: 'submission has no slides' }, 400);
       }
+      const igUrls: string[] = [];
       for (const path of slidePaths) {
         const { data: slide, error: slideError } = await admin.storage
           .from('videos')
@@ -387,6 +391,16 @@ Deno.serve(async (req) => {
           );
         }
         form.append('photos[]', slide.signedUrl);
+        // Instagram feed carousels crop 9:16 to 4:5; the bake stores a 4:5
+        // letterboxed copy next to each finished slide.
+        const igPath = path.replace(/\.png$/, INSTAGRAM_SLIDE_SUFFIX);
+        const { data: ig } = igPath !== path
+          ? await admin.storage.from('videos').createSignedUrl(igPath, 3600)
+          : { data: null };
+        igUrls.push(ig?.signedUrl ?? slide.signedUrl);
+      }
+      if (platforms.includes('instagram') && igUrls.some((u, i) => u !== form.getAll('photos[]')[i])) {
+        instagramPhotoUrls = igUrls;
       }
     } else {
       // The edit pass (stitch + overlays) runs at submit time now, via the
@@ -431,33 +445,14 @@ Deno.serve(async (req) => {
       form.append('video', signed.signedUrl);
     }
 
-    const uploadRes = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: { Authorization: `Apikey ${apiKey}` },
-      body: form,
-    });
-    const uploadJson = (await uploadRes.json()) as {
-      success?: boolean;
-      request_id?: string;
-      results?: unknown;
-      message?: string;
-      error?: string;
-    };
-    if (!uploadRes.ok || uploadJson.success === false) {
-      const detail = uploadJson.message ?? uploadJson.error ?? JSON.stringify(uploadJson);
-      return jsonResponse(
-        { error: `upload-post failed: ${String(detail).slice(0, 300)}`, detail },
-        uploadRes.status >= 500 ? 502 : 400,
-      );
-    }
-
-    let results = normalizeResults(uploadJson.results);
-    const requestId = uploadJson.request_id ?? null;
-    if (requestId && Object.keys(results).length === 0) {
-      // Upload-Post needs a minute or two; a poll that runs out leaves the
-      // rows pending and publish-due reconciles them on its next tick.
-      results = await pollStatus(requestId, apiKey).catch(() => ({}));
-    }
+    /** One Upload-Post request per media set: everything, or Instagram alone with its 4:5 slides. */
+    const groups: Array<{ platforms: string[]; photos: string[] | null }> =
+      instagramPhotoUrls !== null
+        ? [
+            { platforms: platforms.filter((p) => p !== 'instagram'), photos: null },
+            { platforms: ['instagram'], photos: instagramPhotoUrls },
+          ].filter((g) => g.platforms.length > 0)
+        : [{ platforms, photos: null }];
 
     const postRows: Array<{
       task_id: string | null;
@@ -468,18 +463,65 @@ Deno.serve(async (req) => {
       post_url: string | null;
       status: string;
     }> = [];
+    let requestId: string | null = null;
+    let results: Record<string, PlatformResult> = {};
 
-    for (const platform of platforms) {
-      const r = results[platform];
-      postRows.push({
-        task_id: target.taskId,
-        assignment_id: target.assignmentId,
-        submission_id: submission.id,
-        platform,
-        provider_post_id: requestId ?? r?.post_id ?? null,
-        post_url: r?.url ?? null,
-        status: r?.success === false ? 'failed' : r?.url ? 'posted' : 'pending',
+    for (const group of groups) {
+      const groupForm = new FormData();
+      for (const [key, value] of form.entries()) {
+        if (key === 'photos[]' && group.photos !== null) continue;
+        groupForm.append(key, value);
+      }
+      for (const url of group.photos ?? []) groupForm.append('photos[]', url);
+      for (const p of group.platforms) groupForm.append('platform[]', p);
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { Authorization: `Apikey ${apiKey}` },
+        body: groupForm,
       });
+      const uploadJson = (await uploadRes.json()) as {
+        success?: boolean;
+        request_id?: string;
+        results?: unknown;
+        message?: string;
+        error?: string;
+      };
+      if (!uploadRes.ok || uploadJson.success === false) {
+        const detail = uploadJson.message ?? uploadJson.error ?? JSON.stringify(uploadJson);
+        // Rows already written for an earlier group stay; publish-due
+        // reconciles them. The caller sees the failing platforms' error.
+        if (postRows.length > 0) await admin.from('posts').insert(postRows);
+        return jsonResponse(
+          {
+            error: `upload-post failed (${group.platforms.join(', ')}): ${String(detail).slice(0, 300)}`,
+            detail,
+          },
+          uploadRes.status >= 500 ? 502 : 400,
+        );
+      }
+
+      let groupResults = normalizeResults(uploadJson.results);
+      const groupRequestId = uploadJson.request_id ?? null;
+      if (groupRequestId && Object.keys(groupResults).length === 0) {
+        // Upload-Post needs a minute or two; a poll that runs out leaves the
+        // rows pending and publish-due reconciles them on its next tick.
+        groupResults = await pollStatus(groupRequestId, apiKey).catch(() => ({}));
+      }
+      requestId = requestId ?? groupRequestId;
+      results = { ...results, ...groupResults };
+      for (const platform of group.platforms) {
+        const r = groupResults[platform];
+        postRows.push({
+          task_id: target.taskId,
+          assignment_id: target.assignmentId,
+          submission_id: submission.id,
+          platform,
+          provider_post_id: groupRequestId ?? r?.post_id ?? null,
+          post_url: r?.url ?? null,
+          status: r?.success === false ? 'failed' : r?.url ? 'posted' : 'pending',
+        });
+      }
     }
 
     if (postRows.length > 0) {
