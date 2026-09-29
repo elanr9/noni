@@ -92,6 +92,7 @@ import {
   signedScreenshotUrl,
   updateBrief,
   updateBriefSegment,
+  deleteBriefSegments,
   type BriefDraft,
   type BriefSegment,
   type CampaignBriefItem,
@@ -264,6 +265,14 @@ export default function PostEditorScreen() {
   const [placedNote, setPlacedNote] = useState<string | null>(null);
   /** Screenshots a regenerate picked from the feature library; the next save places them. */
   const pendingPointMedia = useRef<(PointMedia | null)[]>([]);
+  /** Segments whose talking_point_index moved locally and still need writing. */
+  const segmentIndexDirty = useRef(false);
+  /** Segments of removed points, deleted on the next save before deriving. */
+  const droppedSegmentIds = useRef<string[]>([]);
+  const latestPoints = useRef<TalkingPoint[]>([]);
+  useEffect(() => {
+    latestPoints.current = points;
+  }, [points]);
 
   const postTypeId = pickedTypeId;
   const currentType = useMemo(
@@ -552,6 +561,39 @@ export default function PostEditorScreen() {
     return [body, tags].filter(Boolean).join('\n\n');
   }
 
+  /**
+   * Points editor edits. Segments hang off a point's index, so a reorder or
+   * a delete moves each slide's segment (its text boxes and picture) along
+   * with its point instead of leaving them at the old slot.
+   */
+  function changePoints(next: TalkingPoint[]) {
+    const prev = latestPoints.current;
+    latestPoints.current = next;
+    const newIndexByOld = new Map<number, number>();
+    prev.forEach((p, oldIndex) => {
+      const newIndex = next.findIndex((n) => n.id === p.id);
+      if (newIndex !== oldIndex) newIndexByOld.set(oldIndex, newIndex);
+    });
+    if (newIndexByOld.size > 0) {
+      segmentIndexDirty.current = true;
+      setSegments((rows) =>
+        rows.flatMap((s) => {
+          if ((s.kind !== 'point' && s.kind !== 'slide') || s.talking_point_index === null) {
+            return [s];
+          }
+          const moved = newIndexByOld.get(s.talking_point_index);
+          if (moved === undefined) return [s];
+          if (moved < 0) {
+            droppedSegmentIds.current.push(s.id);
+            return [];
+          }
+          return [{ ...s, talking_point_index: moved }];
+        }),
+      );
+    }
+    setPoints(next);
+  }
+
   function segmentForPointIndex(index: number): BriefSegment | undefined {
     return segments.find(
       (s) =>
@@ -626,6 +668,22 @@ export default function PostEditorScreen() {
         (points.length > 0 || chosenHook !== null) &&
         (snapshot !== baseline || segments.length === 0);
       if (deriveNeeded) {
+        if (segmentIndexDirty.current) {
+          await deleteBriefSegments(droppedSegmentIds.current);
+          await Promise.all(
+            segments
+              .filter(
+                (s) =>
+                  (s.kind === 'point' || s.kind === 'slide') &&
+                  s.talking_point_index !== null,
+              )
+              .map((s) =>
+                updateBriefSegment(s.id, { talking_point_index: s.talking_point_index }),
+              ),
+          );
+          droppedSegmentIds.current = [];
+          segmentIndexDirty.current = false;
+        }
         let rows = await seedOverlayBoxes(
           await assistDeriveSegments(id, pendingOverlayLabels ?? undefined),
           themeColor,
@@ -1538,7 +1596,7 @@ export default function PostEditorScreen() {
               hookOverlayBoxes={hookOverlayBoxes}
               onOpenHookOverlay={() => void openOverlay(-1, 'text')}
               cta={cta}
-              onChange={setPoints}
+              onChange={changePoints}
               onDragStateChange={setPointsDragging}
               scrollRef={scrollRef}
               scrollMetrics={scrollMetrics}

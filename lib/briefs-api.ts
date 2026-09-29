@@ -582,12 +582,20 @@ export async function updateBriefSegment(
     screenshot_width?: number | null;
     layout?: 'standard' | 'green_screen';
     overlay_style?: Json;
+    talking_point_index?: number | null;
   },
 ): Promise<void> {
   const { error } = await supabase
     .from('brief_segments')
     .update(patch)
     .eq('id', id);
+  if (error) throw error;
+}
+
+/** Drops the segments of points the editor removed, before re-deriving. */
+export async function deleteBriefSegments(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('brief_segments').delete().in('id', ids);
   if (error) throw error;
 }
 
