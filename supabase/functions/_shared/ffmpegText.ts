@@ -258,7 +258,7 @@ export function needsCompositePass(timeline: RenderTimeline): boolean {
 export function textVideoCommand(params: { vf: string; fps: number }): string {
   return (
     `ffmpeg -y -hide_banner -i {input0} -vf "${params.vf}" ` +
-    `-map 0:v -map 0:a? -c:v h264_nvenc -preset p5 -cq 23 -pix_fmt yuv420p -r ${params.fps} ` +
+    `-map 0:v -map 0:a? -c:v h264_nvenc -preset p6 -rc vbr -cq 19 -b:v 0 -maxrate 16M -bufsize 32M -profile:v high -pix_fmt yuv420p -r ${params.fps} ` +
     `-c:a copy -movflags +faststart {output}`
   );
 }

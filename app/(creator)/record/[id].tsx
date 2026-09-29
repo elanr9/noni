@@ -2248,7 +2248,7 @@ export default function RecordScreen() {
                 mode="video"
                 mute={false}
                 mirror={facing === 'front'}
-                videoQuality="720p"
+                videoQuality="1080p"
                 enableTorch={flashOn && facing === 'back'}
                 onCameraReady={() => setCameraReady(true)}
                 onMountError={(e) => {

@@ -1118,7 +1118,8 @@ export async function signVideoUrls(
   return urls;
 }
 
-const VIDEO_CODEC = '-c:v h264_nvenc -preset p5 -cq 23 -pix_fmt yuv420p -movflags +faststart';
+const VIDEO_CODEC =
+  '-c:v h264_nvenc -preset p6 -rc vbr -cq 19 -b:v 0 -maxrate 16M -bufsize 32M -profile:v high -pix_fmt yuv420p -movflags +faststart';
 const AUDIO_CODEC = '-c:a aac -b:a 128k';
 const CONFORM_1080x1920 =
   'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1';

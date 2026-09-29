@@ -883,7 +883,7 @@ export function overlayCommand(params: { inputCount: number; hasImages: boolean 
   const inputs = Array.from({ length: params.inputCount }, (_v, i) => `-i {input${i}}`).join(' ');
   return (
     `ffmpeg -y -hide_banner ${inputs} -filter_complex_script {graph} ` +
-    `-map "[outv]" -map 0:a? -c:v h264_nvenc -preset p5 -cq 23 -pix_fmt yuv420p -r ${OUTPUT_FPS} ` +
+    `-map "[outv]" -map 0:a? -c:v h264_nvenc -preset p6 -rc vbr -cq 19 -b:v 0 -maxrate 16M -bufsize 32M -profile:v high -pix_fmt yuv420p -r ${OUTPUT_FPS} ` +
     `-c:a copy -movflags +faststart${params.hasImages ? ' -shortest' : ''} {output}`
   );
 }
