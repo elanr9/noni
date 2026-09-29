@@ -263,7 +263,14 @@ export function textVideoCommand(params: { vf: string; fps: number }): string {
   );
 }
 
-/** full_command burning the drawtext chain onto a still (input 0), out as one PNG frame. */
+/**
+ * full_command burning the drawtext chain onto a still, out as one PNG
+ * frame. Input 0 is the one second quota anchor (Upload-Post bills a still
+ * as 60 seconds when the first input has no duration), input 1 the picture.
+ */
 export function textImageCommand(params: { vf: string }): string {
-  return `ffmpeg -y -hide_banner -i {input0} -vf "${params.vf}" -frames:v 1 -update 1 {output}`;
+  return (
+    `ffmpeg -y -hide_banner -i {input0} -i {input1} -filter_complex "[1:v]${params.vf}[outv]" ` +
+    `-map "[outv]" -frames:v 1 -update 1 {output}`
+  );
 }

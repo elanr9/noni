@@ -77,6 +77,8 @@ const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 // Upload-Post rejects `;` `|` `&` `$` and backticks anywhere in the command,
 // so no inline filtergraph may use `;` to separate chains.
 const FFMPEG_POLL_MS = 270_000;
+/** One second silent clip in the public render-fonts bucket; see renderSlideWithFfmpeg. */
+const QUOTA_ANCHOR_FILE = 'quota-anchor.mp4';
 /** overlay_render_id prefix marking an Upload-Post ffmpeg job rather than a Creatomate render. */
 const FFMPEG_JOB_PREFIX = 'ffmpeg:';
 
@@ -543,6 +545,10 @@ async function renderSlideWithFfmpeg(params: {
   };
   const font = await fetchFont(OVERLAY_TEXT_SPEC.condensed.file);
   const scratch: string[] = [];
+  // Upload-Post bills a job by its first input's duration and assumes 60
+  // seconds when a still has none; a one second anchor video first makes a
+  // slide cost one second of quota instead of a minute.
+  const anchorUrl = fontUrl(QUOTA_ANCHOR_FILE);
   try {
     let basePath = photoPath;
     let prefix = [CONFORM_1080x1920];
@@ -553,14 +559,15 @@ async function renderSlideWithFfmpeg(params: {
       await runFfmpegJob({
         admin,
         apiKey,
-        files: [photoUrl, ...imageUrls],
+        files: [anchorUrl, photoUrl, ...imageUrls],
         filterGraph: buildOverlayGraph({
           timeline,
-          images: inset ? [{ index: 1, isVideo: false }] : [],
+          images: inset ? [{ index: 2, isVideo: false }] : [],
           ass: buildShapeAss(timeline),
           baseFilters: CONFORM_1080x1920,
+          baseInput: 1,
         }),
-        fullCommand: slideCommand({ inputCount: 1 + imageUrls.length }),
+        fullCommand: slideCommand({ inputCount: 2 + imageUrls.length }),
         outputPath: compositedPath,
         outputExtension: 'png',
         label: `${label} composite`,
@@ -573,8 +580,8 @@ async function renderSlideWithFfmpeg(params: {
     const plan = buildDrawtextChain({
       timeline,
       font,
-      fontPlaceholder: '{input1}',
-      textfilePlaceholder: (i) => `{input${2 + i}}`,
+      fontPlaceholder: '{input2}',
+      textfilePlaceholder: (i) => `{input${3 + i}}`,
       prefix,
     });
     for (const [i, text] of plan.textfiles.entries()) {
@@ -587,7 +594,7 @@ async function renderSlideWithFfmpeg(params: {
     await runFfmpegJob({
       admin,
       apiKey,
-      files: [baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
+      files: [anchorUrl, baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
       fullCommand: textImageCommand({ vf: plan.vf }),
       outputPath,
       outputExtension: 'png',

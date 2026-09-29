@@ -787,10 +787,13 @@ export function buildOverlayGraph(params: {
   images: Array<{ index: number; isVideo: boolean }>;
   /** ASS script embedded in the graph (buildShapeAss); empty burns nothing. */
   ass: string;
-  /** Filters applied to input 0 before compositing (a slide photo is conformed to the frame). */
+  /** Filters applied to the base input before compositing (a slide photo is conformed to the frame). */
   baseFilters?: string;
+  /** Input index of the base video or photo; 0 unless a quota anchor sits first. */
+  baseInput?: number;
 }): string {
   const { timeline, images, ass } = params;
+  const baseIndex = params.baseInput ?? 0;
   const frame = { width: timeline.width, height: timeline.height };
   const vmin = Math.min(frame.width, frame.height) / 100;
   const radius = px(IMAGE_RADIUS_VMIN * vmin);
@@ -801,9 +804,9 @@ export function buildOverlayGraph(params: {
     `clip(${radius}+0.5-hypot(max(abs(X+0.5-W/2)-(W/2-${pad}-${radius}),0),` +
     `max(abs(Y+0.5-H/2)-(H/2-${pad}-${radius}),0)),0,1)`;
   const chains: string[] = [];
-  let base = '[0:v]';
+  let base = `[${baseIndex}:v]`;
   if (params.baseFilters) {
-    chains.push(`[0:v]${params.baseFilters}[bg]`);
+    chains.push(`[${baseIndex}:v]${params.baseFilters}[bg]`);
     base = '[bg]';
   }
 
