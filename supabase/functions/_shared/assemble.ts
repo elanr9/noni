@@ -251,6 +251,18 @@ async function fetchFont(file: string): Promise<Uint8Array> {
   return bytes;
 }
 
+async function storageObjectExists(
+  admin: AdminClient,
+  bucket: string,
+  path: string,
+): Promise<boolean> {
+  const slash = path.lastIndexOf('/');
+  const folder = path.slice(0, slash);
+  const name = path.slice(slash + 1);
+  const { data } = await admin.storage.from(bucket).list(folder, { search: name });
+  return (data ?? []).some((f) => f.name === name);
+}
+
 async function uploadTextToVideos(
   admin: AdminClient,
   path: string,
@@ -261,6 +273,16 @@ async function uploadTextToVideos(
     .from('videos')
     .upload(path, new TextEncoder().encode(text), { contentType: 'video/mp4', upsert: true });
   if (error) throw new Error(`could not store ${label}: ${error.message}`);
+}
+
+/** The render_timeline stored by the previous render, if it parses. */
+function parseStoredTimeline(raw: unknown): RenderTimeline | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const t = raw as Partial<RenderTimeline>;
+  if (!Array.isArray(t.texts) || !Array.isArray(t.images) || typeof t.width !== 'number') {
+    return null;
+  }
+  return t as RenderTimeline;
 }
 
 type OverlayStage = 'composite' | 'text';
@@ -364,6 +386,25 @@ async function createTextJob(params: {
   });
 }
 
+/**
+ * Everything the composite stage draws. Two timelines with the same
+ * signature produce the same composited video, so a re-render that only
+ * moved text or subtitles reuses the stored one.
+ */
+function compositeSignature(timeline: RenderTimeline): string {
+  const overlay = timeline.text_overlay ?? DEFAULT_TEXT_OVERLAY;
+  const bubbles = timeline.texts
+    .filter((t) => (t.box ? t.box.bg : overlay.mode !== 'outline' && overlay.mode !== 'plain'))
+    .map((t) => ({ text: t.text, s: t.start_ms, d: t.duration_ms, y: t.y, box: t.box ?? null }));
+  return JSON.stringify({
+    w: timeline.width,
+    h: timeline.height,
+    images: timeline.images,
+    bubbles,
+    accent: overlay.accent_color,
+  });
+}
+
 // Overlay pass on Upload-Post ffmpeg in up to two jobs: a composite stage
 // (pictures, recordings, bubble shapes) when the timeline has any, then the
 // text stage. Resolves null when the current job is still running at the
@@ -377,6 +418,8 @@ async function renderOverlaysWithFfmpeg(params: {
   resume: { stage: OverlayStage; jobId: string } | null;
   deadline: number;
   onJobCreated: (stage: OverlayStage, jobId: string) => Promise<void>;
+  /** Timeline of the previous render of this version, when one exists. */
+  previousTimeline: RenderTimeline | null;
 }): Promise<{ path: string; warning: string | null } | null> {
   const { admin, timeline, videoPath, outputPath } = params;
   const apiKey = uploadPostKey();
@@ -388,8 +431,18 @@ async function renderOverlaysWithFfmpeg(params: {
   const graphPath = `${compositedPath}.graph`;
   const textfilePaths: string[] = [];
   const composite = needsCompositePass(timeline);
+  // The composited cut is kept after a render; when pictures and bubbles are
+  // unchanged since then, the text stage runs straight on it.
+  const reuseComposite =
+    composite &&
+    params.resume === null &&
+    params.previousTimeline !== null &&
+    compositeSignature(params.previousTimeline) === compositeSignature(timeline) &&
+    (await storageObjectExists(admin, 'videos', compositedPath));
+  if (reuseComposite) console.log(`reusing composited cut ${compositedPath}`);
 
-  let stage: OverlayStage = params.resume?.stage ?? (composite ? 'composite' : 'text');
+  let stage: OverlayStage =
+    params.resume?.stage ?? (composite && !reuseComposite ? 'composite' : 'text');
   let jobId: string | null = params.resume?.jobId ?? null;
 
   if (stage === 'composite') {
@@ -434,9 +487,8 @@ async function renderOverlaysWithFfmpeg(params: {
     const body = await downloadFfmpegJob({ apiKey, jobId, label: 'text' });
     await streamToVideos({ path: outputPath, contentType: 'video/mp4', body, label: 'text' });
   } finally {
-    if (settled) {
-      const scratch = [...textfilePaths, ...(composite ? [compositedPath] : [])];
-      if (scratch.length > 0) await admin.storage.from('videos').remove(scratch);
+    if (settled && textfilePaths.length > 0) {
+      await admin.storage.from('videos').remove(textfilePaths);
     }
   }
   return { path: outputPath, warning };
@@ -1701,12 +1753,13 @@ async function runAssembly(params: {
         overlayWarning =
           'overlays skipped: this submission has no per-clip durations, subtitles still applied';
       }
+      const storedCues = parseSubmissionCues(submission.cues);
       const cues =
         durationsMs && briefSegments.length > 0
           ? await resolveCues({
               admin,
               companyId,
-              submissionCues: parseSubmissionCues(submission.cues),
+              submissionCues: storedCues,
               briefSegments,
               transcripts,
               durationsMs,
@@ -1714,6 +1767,11 @@ async function runAssembly(params: {
               productName,
             })
           : [];
+      // Newly placed cues are stored so a re-render (manager nudging text or
+      // subtitles) never asks Claude again.
+      if (cues.some((c) => !storedCues.some((s) => s.slot_index === c.slot_index))) {
+        await admin.from('submissions').update({ cues }).eq('id', submission.id);
+      }
       const mediaAspects = durationsMs
         ? await insetAspects(
             admin,
@@ -1758,6 +1816,7 @@ async function runAssembly(params: {
               outputPath: `${companyId}/${targetId}/${version}-rendered.mp4`,
               resume,
               deadline: Date.now() + OVERLAY_WAIT_MS,
+              previousTimeline: parseStoredTimeline(submission.render_timeline),
               onJobCreated: async (stage, jobId) => {
                 await admin
                   .from('submissions')

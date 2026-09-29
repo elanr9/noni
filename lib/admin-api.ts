@@ -278,6 +278,25 @@ export async function signedVideoUrl(path: string): Promise<string> {
   return data.signedUrl;
 }
 
+/**
+ * Signed URL of the creator's original photo behind a baked slide
+ * (`{v}-slide-{n}-final.png` back to `{v}-slide-{n}.{ext}`), so an edit stage
+ * never draws editable text over text already burned into the picture. Falls
+ * back to the given path when it is not a baked slide or the original is gone.
+ */
+export async function signedOriginalSlideUrl(path: string): Promise<string> {
+  const match = /^(.*\/)(\d+-slide-\d+)-final\.(?:png|jpg)$/.exec(path);
+  if (!match) return signedVideoUrl(path);
+  const [, folder, stem] = match;
+  const { data } = await supabase.storage
+    .from('videos')
+    .list(folder.replace(/\/$/, ''), { search: stem });
+  const original = (data ?? []).find(
+    (f) => f.name.startsWith(`${stem}.`) && !f.name.includes('-final'),
+  );
+  return signedVideoUrl(original ? `${folder}${original.name}` : path);
+}
+
 export async function reviewTask(params: {
   task: ContentTask;
   submissionId: string;

@@ -628,7 +628,7 @@ export async function creatorRemoveSlide(segmentId: string): Promise<void> {
 }
 
 /** Default centre of the burned-in subtitle block, as a fraction of frame height. */
-export const DEFAULT_SUBTITLES_Y = 0.78;
+export const DEFAULT_SUBTITLES_Y = 0.7;
 
 /** Creator side: move the subtitle block up or down. Position only. */
 export async function creatorPlaceSubtitles(params: {

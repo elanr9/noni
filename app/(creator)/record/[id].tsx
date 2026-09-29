@@ -205,6 +205,8 @@ const STOP_WATCHDOG_MS = 5_000;
 const RECORD_ARM_MS = 350;
 /** Shortest take AVFoundation reliably writes; Stop waits this long. */
 const MIN_TAKE_MS = 700;
+/** Trim takes to detected speech before upload. Off: see trimToSpeech. */
+const AUTO_SPEECH_TRIM = false;
 /** The subtitle band ends about here; the frame below it may run under controls. */
 const FRAME_CLEAR_FRACTION = 0.8;
 /** Time for the capture session to settle after a lens or facing swap. */
@@ -1343,6 +1345,11 @@ export default function RecordScreen() {
     timeline: EditTimeline,
     onlySlots?: number[],
   ): Promise<{ timeline: EditTimeline; trimmed: boolean }> {
+    // Automatic speech trimming is off: on-device analysis cut takes short
+    // while creators were still talking. Takes upload whole; the server's
+    // transcript-driven cut removes silence at the edges without losing
+    // words. Creators can still trim by hand in the editor.
+    if (!AUTO_SPEECH_TRIM) return { timeline, trimmed: false };
     let next = timeline;
     let trimmed = false;
     for (const slot of slotIndices(timeline)) {

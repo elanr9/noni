@@ -356,7 +356,7 @@ export const TEXT_Y = 0.22;
 // Lower right, clear of a talking head's face and above the subtitle block.
 const IMAGE_X = 0.72;
 const IMAGE_Y = 0.56;
-const DEFAULT_SUBTITLES_Y = 0.78;
+const DEFAULT_SUBTITLES_Y = 0.7;
 const IMAGE_WIDTH = 0.34;
 
 /**

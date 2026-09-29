@@ -28,6 +28,7 @@ import {
   rerenderSubmission,
   restartRender,
   reviewAssignment,
+  signedOriginalSlideUrl,
   signedVideoUrl,
   type AssignmentQueueItem,
   type Submission,
@@ -167,6 +168,8 @@ export default function ReviewScreen() {
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
   /** Signed URLs for the creator's submitted slide photos, slot order. */
   const [slidePhotos, setSlidePhotos] = useState<string[]>([]);
+  /** Originals behind baked slides, for the edit stage. */
+  const [slideOriginals, setSlideOriginals] = useState<string[]>([]);
   /** Signed URLs for the creator's raw clips, slot order. Revision mode only. */
   const [clipUris, setClipUris] = useState<string[]>([]);
   /** Signed URLs for admin inset pictures, keyed by segment id. */
@@ -350,6 +353,10 @@ export default function ReviewScreen() {
           setClipUris(segmentUrls);
         } else {
           setSlidePhotos(segmentUrls);
+          const originals = await Promise.all(
+            paths.map((p) => signedOriginalSlideUrl(p).catch(() => '')),
+          );
+          if (!cancelled) setSlideOriginals(originals);
         }
         // Inset pictures: composited on slides while the bake runs, and
         // placed on either format in edit mode.
@@ -534,7 +541,7 @@ export default function ReviewScreen() {
     : slideSegs.map((s, i) => ({
         segment: s,
         label: sectionLabel(i, slideSegs.length, false),
-        background: { kind: 'photo' as const, uri: slidePhotos[i] || undefined },
+        background: { kind: 'photo' as const, uri: slideOriginals[i] || slidePhotos[i] || undefined },
         insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
       }));
 
