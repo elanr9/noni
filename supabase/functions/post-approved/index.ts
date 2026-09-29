@@ -55,6 +55,15 @@ export function normalizeResults(raw: unknown): Record<string, PlatformResult> {
     const r = row as Record<string, unknown>;
     const platform = typeof r.platform === 'string' ? r.platform : null;
     if (!platform) continue;
+    // Status rows carry success:false while still processing; only a
+    // terminal status (or a url / error) decides the outcome.
+    const state = typeof r.status === 'string' ? r.status.toLowerCase() : null;
+    const inFlight =
+      state !== null && ['processing', 'pending', 'queued', 'running', 'retrying'].includes(state);
+    if (inFlight) {
+      out[platform] = {};
+      continue;
+    }
     const url = [r.url, r.post_url].find((v): v is string => typeof v === 'string' && v.length > 0);
     const error = [r.error, r.error_message].find(
       (v): v is string => typeof v === 'string' && v.length > 0,

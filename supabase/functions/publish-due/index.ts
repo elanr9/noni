@@ -80,8 +80,11 @@ async function reconcilePending(admin: ReturnType<typeof adminClient>): Promise<
       for (const post of posts) {
         const r = rows.find((x) => x.platform === post.platform);
         if (!r) continue;
+        const state = (r.status ?? '').toLowerCase();
+        const inFlight = ['processing', 'pending', 'queued', 'running', 'retrying'].includes(state);
+        if (inFlight) continue;
         const posted = r.success === true || Boolean(r.post_url);
-        const failed = r.success === false || Boolean(r.error_message);
+        const failed = !posted && (r.success === false || Boolean(r.error_message));
         if (!posted && !failed) continue;
         await admin
           .from('posts')
