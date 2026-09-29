@@ -85,6 +85,7 @@ export type Database = {
           scheduled_date: string
           slot_index: number
           status: string
+          storage_cleaned_at: string | null
           submission_id: string | null
           task_id: string | null
         }
@@ -108,6 +109,7 @@ export type Database = {
           scheduled_date: string
           slot_index?: number
           status?: string
+          storage_cleaned_at?: string | null
           submission_id?: string | null
           task_id?: string | null
         }
@@ -131,6 +133,7 @@ export type Database = {
           scheduled_date?: string
           slot_index?: number
           status?: string
+          storage_cleaned_at?: string | null
           submission_id?: string | null
           task_id?: string | null
         }

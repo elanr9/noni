@@ -107,6 +107,41 @@ async function reconcilePending(admin: ReturnType<typeof adminClient>): Promise<
   }
 }
 
+/** Files a finished post no longer needs: raw takes, cuts and scratch. */
+const DISPOSABLE = /(^draft-.*\.mp4$|-edited\.mp4$|-composited\.(mp4|png)$|-gs-\d+\.mp4$|-norm-\d+\.mp4$|\.graph$|\.text\d+$|-overlay\.ass$|^\d+-slide-\d+\.(jpe?g|png|heic|webp)$)/i;
+
+/**
+ * Deletes the raw takes and intermediate renders of assignments whose every
+ * platform is posted, keeping the finished video and slides for playback.
+ */
+async function cleanPostedStorage(admin: ReturnType<typeof adminClient>): Promise<void> {
+  const { data } = await admin
+    .from('assignments')
+    .select('id, company_id, posts(status)')
+    .eq('status', 'posted')
+    .is('storage_cleaned_at', null)
+    .limit(20);
+  type Row = { id: string; company_id: string; posts: Array<{ status: string }> };
+  for (const row of (data ?? []) as Row[]) {
+    if (row.posts.length === 0 || row.posts.some((p) => p.status !== 'posted')) continue;
+    const folder = `${row.company_id}/${row.id}`;
+    try {
+      const { data: files } = await admin.storage.from('videos').list(folder, { limit: 500 });
+      const doomed = (files ?? [])
+        .map((f) => f.name)
+        .filter((name) => DISPOSABLE.test(name))
+        .map((name) => `${folder}/${name}`);
+      if (doomed.length > 0) await admin.storage.from('videos').remove(doomed);
+      await admin
+        .from('assignments')
+        .update({ storage_cleaned_at: new Date().toISOString() })
+        .eq('id', row.id);
+    } catch (e) {
+      console.error('publish-due cleanup error:', row.id, e);
+    }
+  }
+}
+
 async function notifyPostLive(assignmentId: string): Promise<void> {
   try {
     await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/notify`, {
@@ -180,8 +215,9 @@ Deno.serve(async (req) => {
     );
 
     // Posts left 'pending' when the approve-time poll ran out: ask Upload-Post
-    // how each request ended and record the live URL or the failure.
-    EdgeRuntime.waitUntil(reconcilePending(admin));
+    // how each request ended and record the live URL or the failure. Then
+    // free the storage of posts that are live everywhere.
+    EdgeRuntime.waitUntil(reconcilePending(admin).then(() => cleanPostedStorage(admin)));
 
     return jsonResponse({ due: rows.length, claimed: claimedIds.length });
   } catch (e) {
