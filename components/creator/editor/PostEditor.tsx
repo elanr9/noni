@@ -75,7 +75,7 @@ import { EditorToolbar, type ToolId } from './EditorToolbar';
 import { Playhead } from './playhead';
 import type { InsetPlacement } from './StageInset';
 import type { BoxPlacement } from './StageTextBox';
-import { subtitleBand, subtitleChunks, subtitleTextAt } from './subtitles';
+import { SUBTITLE_PLACEHOLDER, subtitleBand, subtitleChunks, subtitleTextAt } from './subtitles';
 import { TextEditSheet } from './TextEditSheet';
 import { Timeline, type TrimEdges } from './Timeline';
 import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
@@ -450,10 +450,13 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     () => (currentSlot ? subtitleChunks(words[String(currentSlot.slotIndex)] ?? []) : []),
     [words, currentSlot],
   );
+  // With a transcript, gaps between spoken lines show nothing (as the render
+  // does); the placeholder only stands in while no transcript exists yet.
   const subtitleText = useMemo(() => {
     if (subtitles === null || current === null) return null;
+    if (currentChunks.length === 0) return SUBTITLE_PLACEHOLDER;
     const sourceMs = current.piece.inMs + (positionMs - current.startMs) * current.piece.speed;
-    return subtitleTextAt(currentChunks, sourceMs);
+    return subtitleTextAt(currentChunks, sourceMs) ?? '';
   }, [subtitles, current, positionMs, currentChunks]);
   const stageSubtitles = useMemo(
     () => (subtitles !== null ? { y: subtitles.y, text: subtitleText } : null),

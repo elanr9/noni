@@ -17,7 +17,6 @@ import { PLACE_EDGE, clamp } from '../slides/frame';
 import {
   SUBTITLE_FONT_VMIN,
   SUBTITLE_LINES,
-  SUBTITLE_PLACEHOLDER,
   SUBTITLE_WIDTH,
 } from './subtitles';
 import { useEvent } from './useEvent';
@@ -114,7 +113,7 @@ export const StageSubtitles = memo(function StageSubtitles(props: StageSubtitles
       >
         <View style={styles.block}>
           <OutlinedText
-            text={text ?? SUBTITLE_PLACEHOLDER}
+            text={text ?? ''}
             fontSize={fontSize}
             color={CLASSIC_TEXT_COLOR}
             style={{ lineHeight, textAlign: 'center' }}

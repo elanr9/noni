@@ -16,7 +16,7 @@ export function TikTokChrome(props: {
   const { stageWidth: w, stageHeight: h } = props;
   if (w <= 0 || h <= 0) return null;
 
-  const { actionColumn, captionArea, topBand, bottomBand } = TIKTOK_CHROME;
+  const { actionColumn, captionArea } = TIKTOK_CHROME;
   const diameter = actionColumn.diameter * w;
   const columnSpan = (actionColumn.bottom - actionColumn.top) * h - diameter;
   const gap = columnSpan / (ACTION_COUNT - 1);
@@ -25,8 +25,6 @@ export function TikTokChrome(props: {
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[styles.band, { top: 0, height: topBand.bottom * h }]} />
-      <View style={[styles.band, { top: bottomBand.top * h, bottom: 0 }]} />
 
       {Array.from({ length: ACTION_COUNT }, (_, i) => (
         <View
@@ -74,12 +72,6 @@ export function TikTokChrome(props: {
 }
 
 const styles = StyleSheet.create({
-  band: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-  },
   action: {
     position: 'absolute',
     backgroundColor: color.whiteA28,

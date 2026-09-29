@@ -713,14 +713,21 @@ export default function ReviewScreen() {
         {editPending && (
           <View style={styles.editPillRow} pointerEvents="box-none">
             {editFailed ? (
-              <Pressable
-                onPress={() => void restartEdit()}
-                style={[styles.editPill, styles.editPillFailed]}
-                accessibilityRole="button"
-              >
-                <Text style={styles.editPillText}>Edit failed</Text>
-                <Text style={styles.editPillAction}>Retry</Text>
-              </Pressable>
+              <View style={styles.editFailedStack}>
+                <Pressable
+                  onPress={() => void restartEdit()}
+                  style={[styles.editPill, styles.editPillFailed]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.editPillText}>Edit failed</Text>
+                  <Text style={styles.editPillAction}>Retry</Text>
+                </Pressable>
+                {submission?.render_error ? (
+                  <Text style={styles.editErrorDetail} numberOfLines={3}>
+                    {submission.render_error}
+                  </Text>
+                ) : null}
+              </View>
             ) : (
               <Pressable
                 onPress={
@@ -897,6 +904,18 @@ const styles = StyleSheet.create({
   },
   editPillFailed: {
     backgroundColor: 'rgba(200, 40, 40, 0.85)',
+  },
+  editFailedStack: {
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 24,
+  },
+  editErrorDetail: {
+    fontSize: type.size.label,
+    color: color.white,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 4,
   },
   editPillText: {
     fontSize: type.size.bodySm,
