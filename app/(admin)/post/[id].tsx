@@ -47,7 +47,10 @@ import {
   type PreviewClipSpec,
 } from '../../../components/admin/editor/TikTokPreview';
 import type { ShotPreview } from '../../../components/creator/SegmentOverlayPreview';
-import { PointsEditor } from '../../../components/admin/editor/PointsEditor';
+import {
+  PointsEditor,
+  type DragScrollMetrics,
+} from '../../../components/admin/editor/PointsEditor';
 import { PortSheet, type PortOption } from '../../../components/admin/editor/PortSheet';
 import {
   LibraryPickerSheet,
@@ -230,6 +233,8 @@ export default function PostEditorScreen() {
   const [savedFlash, setSavedFlash] = useState(false);
   /** True while a talking point card drags, so the page scroll pauses. */
   const [pointsDragging, setPointsDragging] = useState(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollMetrics = useRef<DragScrollMetrics>({ y: 0, viewportHeight: 0, contentHeight: 0 });
   const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
   /** Which point the camera roll sheet is picking for; null means closed. */
   const [shotPickerIndex, setShotPickerIndex] = useState<number | null>(null);
@@ -1358,6 +1363,17 @@ export default function PostEditorScreen() {
         automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
         scrollEnabled={!pointsDragging}
+        ref={scrollRef}
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          scrollMetrics.current.y = e.nativeEvent.contentOffset.y;
+        }}
+        onLayout={(e) => {
+          scrollMetrics.current.viewportHeight = e.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_w, h) => {
+          scrollMetrics.current.contentHeight = h;
+        }}
       >
         {summaryMode === 'view' ? (
           <View style={styles.summaryStack}>
@@ -1524,6 +1540,8 @@ export default function PostEditorScreen() {
               cta={cta}
               onChange={setPoints}
               onDragStateChange={setPointsDragging}
+              scrollRef={scrollRef}
+              scrollMetrics={scrollMetrics}
               screenshotUrlForIndex={(i) => {
                 const seg = segmentForPointIndex(i);
                 return seg?.screenshot_url

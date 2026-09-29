@@ -602,9 +602,7 @@ async function renderSlideWithFfmpeg(params: {
       files: [anchorUrl, baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
       fullCommand: textImageCommand({ vf: plan.vf }),
       outputPath,
-      // TikTok's photo API takes JPEG or WebP only; a PNG would be converted
-      // (and possibly resized) on the way, so the final slide is a JPEG here.
-      outputExtension: 'jpg',
+      outputExtension: 'png',
       label,
     });
   } finally {
@@ -614,14 +612,14 @@ async function renderSlideWithFfmpeg(params: {
 
 /** Instagram feed carousels are 4:5 at most; a 9:16 slide gets cropped. */
 export const INSTAGRAM_SLIDE_SUFFIX = '-ig.png';
-/** TikTok's photo viewer shows slides in a 3:4 box after a swipe and crops anything taller. */
-export const TIKTOK_SLIDE_SUFFIX = '-tt.jpg';
 
 /**
  * Letterboxed copy of a finished 9:16 slide at another aspect: the slide
  * scaled to full height and centred over a blurred, darkened cover copy of
  * itself, so nothing is cropped away and the text stays where the creator
- * put it. Instagram gets 1080x1350, TikTok 1080x1440.
+ * put it. Instagram gets 1080x1350. TikTok keeps the 9:16 slide: its photo
+ * viewer shows that full width for viewers (the owner's view crops only
+ * because of the promo banner TikTok adds under your own posts).
  */
 async function renderLetterboxedSlide(params: {
   admin: AdminClient;
@@ -1561,7 +1559,7 @@ async function runSlideshowAssembly(params: {
         );
         inset = { path: insetPath, ...placed };
       }
-      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.jpg`;
+      const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.png`;
       await renderSlideWithFfmpeg({
         admin,
         photoPath: rawPath,
@@ -1578,15 +1576,6 @@ async function runSlideshowAssembly(params: {
         height: 1350,
         outputExtension: 'png',
         label: `slide ${i + 1} instagram`,
-      });
-      await renderLetterboxedSlide({
-        admin,
-        slidePath: outPath,
-        outputPath: outPath.replace(/\.(?:png|jpg)$/, TIKTOK_SLIDE_SUFFIX),
-        width: 1080,
-        height: 1440,
-        outputExtension: 'jpg',
-        label: `slide ${i + 1} tiktok`,
       });
       return outPath;
   });

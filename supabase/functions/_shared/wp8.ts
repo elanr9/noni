@@ -170,6 +170,18 @@ type ClaudeUsage = {
   cache_creation_input_tokens?: number;
 };
 
+/**
+ * Draft calls want the answer, not a reasoning pass: Sonnet 5 and newer
+ * think by default and can spend the whole max_tokens budget thinking,
+ * returning no text at all. Turn it off where the model allows, and drop
+ * effort to the floor where it cannot be turned off.
+ */
+function noThinking(model: string): Record<string, unknown> {
+  if (/sonnet-5-5/.test(model)) return { thinking: { type: 'between_tools' } };
+  if (/opus-5-5|fable|mythos/.test(model)) return { output_config: { effort: 'low' } };
+  return { thinking: { type: 'disabled' } };
+}
+
 function logUsage(label: string, model: string, usage: ClaudeUsage | undefined) {
   if (!usage) return;
   console.log(
@@ -205,6 +217,7 @@ export async function askClaude(
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
+      ...noThinking(model),
       system: [{ type: 'text', text: system, cache_control: cache }],
       messages: [{ role: 'user', content: userContent }],
     }),
@@ -217,10 +230,14 @@ export async function askClaude(
     usage?: ClaudeUsage;
   };
   logUsage(options.tier ?? 'draft', model, data.usage);
-  return data.content
+  const text = data.content
     .filter((b) => b.type === 'text' && b.text)
     .map((b) => b.text)
     .join('');
+  if (!text) {
+    throw new Error(`Claude returned no text: ${JSON.stringify(data).slice(0, 1500)}`);
+  }
+  return text;
 }
 
 export type ResearchSource = { url: string; title: string };
@@ -369,6 +386,7 @@ export async function askClaudeVision(
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
+      ...noThinking(model),
       system,
       messages: [{ role: 'user', content }],
     }),

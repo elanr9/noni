@@ -108,11 +108,12 @@ export function ReviseChatSheet({
         ...prev,
         { role: 'ai', text: result.revisionNote || 'Rewrote the post.', applied: true },
       ]);
-    } catch {
+    } catch (e) {
       // Drop the failed turn so a retry does not send it twice in history.
       setTurns((prev) => prev.slice(0, -1));
       setInput(text);
-      setError('Something went wrong. Try again.');
+      const detail = e instanceof Error && e.message ? e.message : '';
+      setError(detail ? `Could not rewrite: ${detail}` : 'Something went wrong. Try again.');
     } finally {
       setBusy(false);
     }

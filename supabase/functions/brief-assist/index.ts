@@ -32,6 +32,7 @@ import {
   authenticate,
   handleCors,
   jsonResponse,
+  streamJsonResponse,
   loadBrandContext,
   parseClaudeJson,
 } from '../_shared/wp8.ts';
@@ -430,31 +431,34 @@ Deno.serve(async (req) => {
       const exampleTranscript = body.example_transcript?.trim() || null;
       let revisionNote = '';
 
-      const { outcome, warnings } = await generateValidated(
-        admin,
-        caller.companyId,
-        generationId,
-        postType,
-        async (priorFailures) => {
-          const lines = [...draftContext(draft)];
-          if (exampleTranscript) {
-            lines.push(
-              `Reference post this brief was modeled on (structure and hook shape only, never its niche or product):\n${exampleTranscript.slice(0, 2000)}`,
-            );
-          }
-          if (history.length) {
-            lines.push(
-              `Conversation so far:\n${history
-                .map((t) => `${t.role === 'manager' ? 'Manager' : 'You'}: ${t.text.trim()}`)
-                .join('\n')}`,
-            );
-          }
-          lines.push(`Newest feedback from the manager (apply all of it):\n${feedback.slice(0, 3000)}`);
-          if (priorFailures.length) {
-            lines.push(
-              retryMessage(priorFailures, 'revision'),
-            );
-          }
+      // A full rewrite runs past the gateway's 150s idle timeout; stream
+      // keepalive bytes until the draft is ready.
+      return streamJsonResponse(async () => {
+        const { outcome, warnings } = await generateValidated(
+          admin,
+          caller.companyId,
+          generationId,
+          postType,
+          async (priorFailures) => {
+            const lines = [...draftContext(draft)];
+            if (exampleTranscript) {
+              lines.push(
+                `Reference post this brief was modeled on (structure and hook shape only, never its niche or product):\n${exampleTranscript.slice(0, 2000)}`,
+              );
+            }
+            if (history.length) {
+              lines.push(
+                `Conversation so far:\n${history
+                  .map((t) => `${t.role === 'manager' ? 'Manager' : 'You'}: ${t.text.trim()}`)
+                  .join('\n')}`,
+              );
+            }
+            lines.push(`Newest feedback from the manager (apply all of it):\n${feedback.slice(0, 3000)}`);
+            if (priorFailures.length) {
+              lines.push(
+                retryMessage(priorFailures, 'revision'),
+              );
+            }
           const raw = await askClaude(
             system,
             lines.join('\n\n'),
@@ -463,34 +467,35 @@ Deno.serve(async (req) => {
           );
           const parsed = parseClaudeJson<RawGenerated>(raw);
           revisionNote =
-            typeof parsed.revision_note === 'string' ? parsed.revision_note.trim() : '';
-          return normalizeGenerated(
-            parsed,
-            postType ? postType.family : draft.format,
-            postType?.key ?? null,
-            new Set(brand.features.map((f) => f.id)),
-          );
-        },
-        brandValidationCtx(brand),
-      );
-      if (isKill(outcome)) {
-        return jsonResponse({ kill_reason: outcome.kill_reason, generation_id: generationId });
-      }
-      return jsonResponse({
-        ...outcome.draft,
-        revision_note: revisionNote || 'Revised the post against your feedback.',
-        overlay_labels: outcome.overlayLabels,
-        point_media: await resolvePointMedia(
-          admin,
-          caller.companyId,
-          brand.features,
-          outcome.featureIds,
-          outcome.draft.talking_points,
-          postType?.family ?? draft.format,
-        ),
-        post_type_id: postType?.id ?? null,
-        generation_id: generationId,
-        warnings,
+              typeof parsed.revision_note === 'string' ? parsed.revision_note.trim() : '';
+            return normalizeGenerated(
+              parsed,
+              postType ? postType.family : draft.format,
+              postType?.key ?? null,
+              new Set(brand.features.map((f) => f.id)),
+            );
+          },
+          brandValidationCtx(brand),
+        );
+        if (isKill(outcome)) {
+          return { kill_reason: outcome.kill_reason, generation_id: generationId };
+        }
+        return {
+          ...outcome.draft,
+          revision_note: revisionNote || 'Revised the post against your feedback.',
+          overlay_labels: outcome.overlayLabels,
+          point_media: await resolvePointMedia(
+            admin,
+            caller.companyId,
+            brand.features,
+            outcome.featureIds,
+            outcome.draft.talking_points,
+            postType?.family ?? draft.format,
+          ),
+          post_type_id: postType?.id ?? null,
+          generation_id: generationId,
+          warnings,
+        };
       });
     }
 

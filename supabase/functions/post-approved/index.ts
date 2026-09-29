@@ -4,7 +4,6 @@ import {
   assembleSubmission,
   uploadPostKey,
   INSTAGRAM_SLIDE_SUFFIX,
-  TIKTOK_SLIDE_SUFFIX,
   type AdminClient,
 } from '../_shared/assemble.ts';
 import { isManagerOf } from '../_shared/membership.ts';
@@ -345,9 +344,8 @@ Deno.serve(async (req) => {
       form.append('tiktok_title', tiktokPhotoTitle(target.caption));
       form.append('tiktok_description', target.caption.slice(0, 4000));
     }
-    /** Instagram gets a 4:5 slide set and TikTok a 3:4 one when the bake produced them. */
+    /** Instagram gets its own 4:5 slide set when the bake produced one. */
     let instagramPhotoUrls: string[] | null = null;
-    let tiktokPhotoUrls: string[] | null = null;
 
     let overlayWarning: string | null = null;
     let uploadUrl = 'https://api.upload-post.com/api/upload';
@@ -394,7 +392,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'submission has no slides' }, 400);
       }
       const igUrls: string[] = [];
-      const ttUrls: string[] = [];
       /** Signed URL of a letterboxed sibling of the slide, or null when the bake never made one. */
       const signVariant = async (path: string, suffix: string): Promise<string | null> => {
         const variantPath = path.replace(/\.(?:png|jpg)$/, suffix);
@@ -413,18 +410,13 @@ Deno.serve(async (req) => {
           );
         }
         form.append('photos[]', slide.signedUrl);
-        // Instagram feed carousels crop 9:16 to 4:5 and TikTok's photo viewer
-        // crops to 3:4 after a swipe; the bake stores a letterboxed copy for
-        // each next to the finished slide.
+        // Instagram feed carousels crop 9:16 to 4:5; the bake stores a 4:5
+        // letterboxed copy next to each finished slide. TikTok gets the 9:16.
         igUrls.push((await signVariant(path, INSTAGRAM_SLIDE_SUFFIX)) ?? slide.signedUrl);
-        ttUrls.push((await signVariant(path, TIKTOK_SLIDE_SUFFIX)) ?? slide.signedUrl);
       }
       const baseUrls = form.getAll('photos[]');
       if (platforms.includes('instagram') && igUrls.some((u, i) => u !== baseUrls[i])) {
         instagramPhotoUrls = igUrls;
-      }
-      if (platforms.includes('tiktok') && ttUrls.some((u, i) => u !== baseUrls[i])) {
-        tiktokPhotoUrls = ttUrls;
       }
     } else {
       // The edit pass (stitch + overlays) runs at submit time now, via the
@@ -472,7 +464,6 @@ Deno.serve(async (req) => {
     /** One Upload-Post request per media set: a platform with its own slide set posts alone. */
     const ownSet: Record<string, string[] | null> = {
       instagram: instagramPhotoUrls,
-      tiktok: tiktokPhotoUrls,
     };
     const groups: Array<{ platforms: string[]; photos: string[] | null }> = [
       { platforms: platforms.filter((p) => !ownSet[p]), photos: null },

@@ -3,8 +3,17 @@
 // one delete control (confirm before removing). The plug sentence renders
 // as script inside its point. Overlay chrome lives on brief_segments and
 // opens OverlayEditor.
-import { useRef, useState, type JSX } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState, type JSX, type RefObject } from 'react';
+import {
+  Alert,
+  Animated,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import type { TalkingPoint } from '../../../lib/briefs-api';
@@ -18,6 +27,20 @@ import { type OverlayEditorMode } from './OverlayEditor';
 
 /** Matches styles.section gap so drag swap distances line up. */
 const CARD_GAP = 10;
+/** Screen-edge band, in points, where a held drag scrolls the list. */
+const AUTO_SCROLL_ZONE = 150;
+
+export type DragScrollMetrics = { y: number; viewportHeight: number; contentHeight: number };
+
+function swapAt<T>(list: T[], a: number, b: number): T[] {
+  const next = [...list];
+  const itemA = next[a];
+  const itemB = next[b];
+  if (itemA === undefined || itemB === undefined) return list;
+  next[a] = itemB;
+  next[b] = itemA;
+  return next;
+}
 
 function shotLabel(url: string): string {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url) ? 'Recording' : 'Screenshot';
@@ -49,6 +72,10 @@ export function PointsEditor(props: {
   onOpenOverlay: (index: number, mode: OverlayEditorMode) => void;
   /** Fires while a card drags so the parent scroll can pause. */
   onDragStateChange: (dragging: boolean) => void;
+  /** The parent scroll view, so a drag near the screen edge scrolls the list. */
+  scrollRef?: RefObject<ScrollView | null>;
+  /** Live scroll metrics of that scroll view, kept current by the parent. */
+  scrollMetrics?: RefObject<DragScrollMetrics>;
 }): JSX.Element {
   const {
     points,
@@ -68,18 +95,26 @@ export function PointsEditor(props: {
     insetForIndex,
     onOpenOverlay,
     onDragStateChange,
+    scrollRef,
+    scrollMetrics,
   } = props;
 
   const pointsRef = useRef(points);
-  pointsRef.current = points;
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
+  const windowHeight = useWindowDimensions().height;
 
   // Slideshows have no spoken script: no hook card, no plug, and each card
   // is a slide numbered from 1 carrying only its text and screenshot.
   const slideshow = family === 'photo_carousel';
 
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState(0);
-  const drag = useRef({ id: '', index: 0, prevY: 0, offset: 0 });
+  const [dragY] = useState(() => new Animated.Value(0));
+  const drag = useRef({ id: '', index: 0, prevY: 0, pageY: 0, offset: 0 });
+  const autoScroll = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Where the list is scrolled to during a drag; only autoscroll moves it. */
+  const autoY = useRef(0);
   const cardHeights = useRef<Record<string, number>>({});
 
   function updatePoint(id: string, text: string) {
@@ -127,10 +162,41 @@ export function PointsEditor(props: {
   function startDrag(pointId: string, pageY: number) {
     const index = pointsRef.current.findIndex((p) => p.id === pointId);
     if (index < 0) return;
-    drag.current = { id: pointId, index, prevY: pageY, offset: 0 };
+    drag.current = { id: pointId, index, prevY: pageY, pageY, offset: 0 };
+    autoY.current = scrollMetrics?.current.y ?? 0;
+    dragY.setValue(0);
     setDragId(pointId);
-    setDragOffset(0);
     onDragStateChange(true);
+  }
+
+  /** Swaps neighbours the dragged card has crossed, then paints the offset. */
+  function settleDrag() {
+    const d = drag.current;
+    let list = pointsRef.current;
+    let swapped = false;
+    while (d.offset > 0 && d.index < list.length - 1) {
+      const next = list[d.index + 1];
+      const nextH = (next ? cardHeights.current[next.id] : undefined) ?? 120;
+      if (d.offset <= (nextH + CARD_GAP) / 2) break;
+      list = swapAt(list, d.index, d.index + 1);
+      d.offset -= nextH + CARD_GAP;
+      d.index += 1;
+      swapped = true;
+    }
+    while (d.offset < 0 && d.index > 0) {
+      const prev = list[d.index - 1];
+      const prevH = (prev ? cardHeights.current[prev.id] : undefined) ?? 120;
+      if (-d.offset <= (prevH + CARD_GAP) / 2) break;
+      list = swapAt(list, d.index, d.index - 1);
+      d.offset += prevH + CARD_GAP;
+      d.index -= 1;
+      swapped = true;
+    }
+    if (swapped) {
+      pointsRef.current = list;
+      onChange(list);
+    }
+    dragY.setValue(d.offset);
   }
 
   function moveDrag(pageY: number) {
@@ -138,45 +204,53 @@ export function PointsEditor(props: {
     if (!d.id) return;
     d.offset += pageY - d.prevY;
     d.prevY = pageY;
-    const list = pointsRef.current;
-    if (d.offset > 0 && d.index < list.length - 1) {
-      const next = list[d.index + 1];
-      const nextH = (next ? cardHeights.current[next.id] : undefined) ?? 120;
-      if (d.offset > (nextH + CARD_GAP) / 2) {
-        const swapped = [...list];
-        const dragged = swapped[d.index];
-        const other = swapped[d.index + 1];
-        if (dragged && other) {
-          swapped[d.index] = other;
-          swapped[d.index + 1] = dragged;
-          onChange(swapped);
-          d.offset -= nextH + CARD_GAP;
-          d.index += 1;
-        }
-      }
-    } else if (d.offset < 0 && d.index > 0) {
-      const prev = list[d.index - 1];
-      const prevH = (prev ? cardHeights.current[prev.id] : undefined) ?? 120;
-      if (-d.offset > (prevH + CARD_GAP) / 2) {
-        const swapped = [...list];
-        const dragged = swapped[d.index];
-        const other = swapped[d.index - 1];
-        if (dragged && other) {
-          swapped[d.index] = other;
-          swapped[d.index - 1] = dragged;
-          onChange(swapped);
-          d.offset += prevH + CARD_GAP;
-          d.index -= 1;
-        }
-      }
+    d.pageY = pageY;
+    settleDrag();
+    syncAutoScroll();
+  }
+
+  // A finger held near the top or bottom of the screen scrolls the list
+  // underneath the card, and the card follows so it stays under the finger.
+  function syncAutoScroll() {
+    const inZone =
+      drag.current.pageY < AUTO_SCROLL_ZONE ||
+      drag.current.pageY > windowHeight - AUTO_SCROLL_ZONE;
+    if (inZone && !autoScroll.current) {
+      autoScroll.current = setInterval(autoScrollTick, 16);
+    } else if (!inZone && autoScroll.current) {
+      clearInterval(autoScroll.current);
+      autoScroll.current = null;
     }
-    setDragOffset(d.offset);
+  }
+
+  function autoScrollTick() {
+    const d = drag.current;
+    const metrics = scrollMetrics?.current;
+    const scroller = scrollRef?.current;
+    if (!d.id || !metrics || !scroller) return;
+    const depth =
+      d.pageY < AUTO_SCROLL_ZONE
+        ? -(AUTO_SCROLL_ZONE - d.pageY)
+        : d.pageY - (windowHeight - AUTO_SCROLL_ZONE);
+    const step = Math.sign(depth) * (4 + 14 * Math.min(1, Math.abs(depth) / AUTO_SCROLL_ZONE));
+    const maxY = Math.max(0, metrics.contentHeight - metrics.viewportHeight);
+    const nextY = Math.min(maxY, Math.max(0, autoY.current + step));
+    const moved = nextY - autoY.current;
+    if (moved === 0) return;
+    autoY.current = nextY;
+    scroller.scrollTo({ y: nextY, animated: false });
+    d.offset += moved;
+    settleDrag();
   }
 
   function endDrag() {
-    drag.current = { id: '', index: 0, prevY: 0, offset: 0 };
+    if (autoScroll.current) {
+      clearInterval(autoScroll.current);
+      autoScroll.current = null;
+    }
+    drag.current = { id: '', index: 0, prevY: 0, pageY: 0, offset: 0 };
+    dragY.setValue(0);
     setDragId(null);
-    setDragOffset(0);
     onDragStateChange(false);
   }
 
@@ -235,7 +309,7 @@ export function PointsEditor(props: {
         const plug = !slideshow && point.is_product;
         const dragging = dragId === point.id;
         return (
-          <View
+          <Animated.View
             key={point.id}
             onLayout={(e) => {
               cardHeights.current[point.id] = e.nativeEvent.layout.height;
@@ -244,10 +318,7 @@ export function PointsEditor(props: {
               styles.card,
               shadow.shadowCard,
               plug && styles.cardPlug,
-              dragging && [
-                styles.cardDragging,
-                { transform: [{ translateY: dragOffset }] },
-              ],
+              dragging && [styles.cardDragging, { transform: [{ translateY: dragY }] }],
             ]}
           >
             <View style={styles.cardHead}>
@@ -492,7 +563,7 @@ export function PointsEditor(props: {
             )}
               </>
             )}
-          </View>
+          </Animated.View>
         );
       })}
 
