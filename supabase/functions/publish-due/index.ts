@@ -36,6 +36,74 @@ async function publish(assignmentId: string): Promise<PublishOutcome> {
   return { ok: true };
 }
 
+type PendingPost = {
+  id: string;
+  assignment_id: string | null;
+  platform: string;
+  provider_post_id: string | null;
+};
+
+type StatusRow = {
+  platform?: string;
+  success?: boolean;
+  post_url?: string | null;
+  error_message?: string | null;
+  status?: string;
+};
+
+async function reconcilePending(admin: ReturnType<typeof adminClient>): Promise<void> {
+  const apiKey = Deno.env.get('UPLOAD_POST_API_KEY');
+  if (!apiKey) return;
+  const { data } = await admin
+    .from('posts')
+    .select('id, assignment_id, platform, provider_post_id')
+    .eq('status', 'pending')
+    .not('provider_post_id', 'is', null)
+    .limit(40);
+  const pending = (data ?? []) as PendingPost[];
+  const byRequest = new Map<string, PendingPost[]>();
+  for (const p of pending) {
+    if (!p.provider_post_id) continue;
+    byRequest.set(p.provider_post_id, [...(byRequest.get(p.provider_post_id) ?? []), p]);
+  }
+  for (const [requestId, posts] of byRequest) {
+    try {
+      const res = await fetch(
+        `https://api.upload-post.com/api/uploadposts/status?request_id=${encodeURIComponent(requestId)}`,
+        { headers: { Authorization: `Apikey ${apiKey}` } },
+      );
+      if (!res.ok) continue;
+      const json = (await res.json()) as { status?: string; results?: StatusRow[] | Record<string, StatusRow> };
+      const rows: StatusRow[] = Array.isArray(json.results)
+        ? json.results
+        : Object.entries(json.results ?? {}).map(([platform, r]) => ({ platform, ...r }));
+      for (const post of posts) {
+        const r = rows.find((x) => x.platform === post.platform);
+        if (!r) continue;
+        const posted = r.success === true || Boolean(r.post_url);
+        const failed = r.success === false || Boolean(r.error_message);
+        if (!posted && !failed) continue;
+        await admin
+          .from('posts')
+          .update({
+            status: posted ? 'posted' : 'failed',
+            post_url: r.post_url ?? null,
+          })
+          .eq('id', post.id);
+        if (posted && post.assignment_id && r.post_url) {
+          await admin
+            .from('assignments')
+            .update({ post_url: r.post_url })
+            .eq('id', post.assignment_id)
+            .is('post_url', null);
+        }
+      }
+    } catch (e) {
+      console.error('publish-due reconcile error:', requestId, e);
+    }
+  }
+}
+
 async function notifyPostLive(assignmentId: string): Promise<void> {
   try {
     await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/notify`, {
@@ -107,6 +175,10 @@ Deno.serve(async (req) => {
         }),
       ),
     );
+
+    // Posts left 'pending' when the approve-time poll ran out: ask Upload-Post
+    // how each request ended and record the live URL or the failure.
+    EdgeRuntime.waitUntil(reconcilePending(admin));
 
     return jsonResponse({ due: rows.length, claimed: claimedIds.length });
   } catch (e) {

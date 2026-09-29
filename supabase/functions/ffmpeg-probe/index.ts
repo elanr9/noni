@@ -10,6 +10,8 @@ type Body = {
   multipart?: { files: string[]; fields: Record<string, string> };
   /** Return the response body base64 encoded (binary downloads). */
   raw?: boolean;
+  /** Plain multipart form fields, repeated names allowed. */
+  form?: Array<[string, string]>;
 };
 
 Deno.serve(async (req) => {
@@ -20,6 +22,10 @@ Deno.serve(async (req) => {
   if (body.json !== undefined) {
     headers['Content-Type'] = 'application/json';
     init = { ...init, body: JSON.stringify(body.json) };
+  } else if (body.form) {
+    const form = new FormData();
+    for (const [k, v] of body.form) form.append(k, v);
+    init = { ...init, body: form };
   } else if (body.multipart) {
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const form = new FormData();

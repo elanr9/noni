@@ -36,6 +36,51 @@ type PlatformResult = {
   post_id?: string;
 };
 
+/**
+ * Upload-Post returns `results` either keyed by platform (sync uploads) or as
+ * an array of per-platform rows with post_url / platform_post_id /
+ * error_message (status endpoint). Normalise to one shape keyed by platform.
+ */
+export function normalizeResults(raw: unknown): Record<string, PlatformResult> {
+  const out: Record<string, PlatformResult> = {};
+  const rows: unknown[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'object' && raw !== null
+      ? Object.entries(raw as Record<string, unknown>).map(([platform, value]) =>
+          typeof value === 'object' && value !== null ? { platform, ...(value as object) } : { platform },
+        )
+      : [];
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) continue;
+    const r = row as Record<string, unknown>;
+    const platform = typeof r.platform === 'string' ? r.platform : null;
+    if (!platform) continue;
+    const url = [r.url, r.post_url].find((v): v is string => typeof v === 'string' && v.length > 0);
+    const error = [r.error, r.error_message].find(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    const postId = [r.post_id, r.platform_post_id].find(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    out[platform] = {
+      ...(typeof r.success === 'boolean' ? { success: r.success } : {}),
+      ...(url ? { url } : {}),
+      ...(error ? { error } : {}),
+      ...(postId ? { post_id: postId } : {}),
+    };
+  }
+  return out;
+}
+
+/** TikTok photo posts take a 90 character title; the rest goes to the description. */
+export function tiktokPhotoTitle(caption: string): string {
+  const flat = caption.replace(/\s+/g, ' ').trim();
+  if (flat.length <= 90) return flat;
+  const cut = flat.slice(0, 90);
+  const space = cut.lastIndexOf(' ');
+  return (space > 40 ? cut.slice(0, space) : cut).trim();
+}
+
 async function pollStatus(
   requestId: string,
   apiKey: string,
@@ -46,18 +91,16 @@ async function pollStatus(
       `https://api.upload-post.com/api/uploadposts/status?request_id=${encodeURIComponent(requestId)}`,
       { headers: { Authorization: `Apikey ${apiKey}` } },
     );
-    const data = (await res.json()) as {
-      status?: string;
-      results?: Record<string, PlatformResult>;
-    };
-    if (data.results && (data.status === 'completed' || data.status === 'done')) {
-      return data.results;
+    const data = (await res.json()) as { status?: string; results?: unknown };
+    const results = normalizeResults(data.results);
+    if (Object.keys(results).length > 0 && (data.status === 'completed' || data.status === 'done')) {
+      return results;
     }
-    if (data.results && Object.keys(data.results).length > 0 && i > 5) {
-      const pending = Object.values(data.results).some(
+    if (Object.keys(results).length > 0 && i > 5) {
+      const pending = Object.values(results).some(
         (r) => r.success === undefined && !r.error && !r.url,
       );
-      if (!pending) return data.results;
+      if (!pending) return results;
     }
   }
   throw new Error('Upload-Post status poll timed out');
@@ -273,6 +316,12 @@ Deno.serve(async (req) => {
     form.append('title', target.caption);
     form.append('async_upload', 'true');
     for (const p of platforms) form.append('platform[]', p);
+    if (target.isSlideshow && platforms.includes('tiktok')) {
+      // TikTok rejects photo posts whose title runs past 90 characters; the
+      // full caption travels as the description instead.
+      form.append('tiktok_title', tiktokPhotoTitle(target.caption));
+      form.append('tiktok_description', target.caption.slice(0, 4000));
+    }
 
     let overlayWarning: string | null = null;
     let uploadUrl = 'https://api.upload-post.com/api/upload';
@@ -381,24 +430,24 @@ Deno.serve(async (req) => {
     const uploadJson = (await uploadRes.json()) as {
       success?: boolean;
       request_id?: string;
-      results?: Record<string, PlatformResult>;
+      results?: unknown;
       message?: string;
       error?: string;
     };
     if (!uploadRes.ok || uploadJson.success === false) {
+      const detail = uploadJson.message ?? uploadJson.error ?? JSON.stringify(uploadJson);
       return jsonResponse(
-        {
-          error: 'upload-post failed',
-          detail: uploadJson.message ?? uploadJson.error ?? uploadJson,
-        },
-        502,
+        { error: `upload-post failed: ${String(detail).slice(0, 300)}`, detail },
+        uploadRes.status >= 500 ? 502 : 400,
       );
     }
 
-    let results = uploadJson.results ?? {};
+    let results = normalizeResults(uploadJson.results);
     const requestId = uploadJson.request_id ?? null;
     if (requestId && Object.keys(results).length === 0) {
-      results = await pollStatus(requestId, apiKey);
+      // Upload-Post needs a minute or two; a poll that runs out leaves the
+      // rows pending and publish-due reconciles them on its next tick.
+      results = await pollStatus(requestId, apiKey).catch(() => ({}));
     }
 
     const postRows: Array<{
