@@ -60,6 +60,8 @@ export function ReviewEditMode(props: {
   /** Slideshows: the frame every slide was cut to, so the stage matches the post. */
   slideAspect: SlideAspect;
   briefId: string;
+  assignmentId: string;
+  companyId: string;
   targets: EditTarget[];
   index: number;
   onIndex: (index: number) => void;
@@ -75,6 +77,8 @@ export function ReviewEditMode(props: {
     format,
     slideAspect,
     briefId,
+    assignmentId,
+    companyId,
     targets,
     index,
     onIndex,
@@ -101,7 +105,7 @@ export function ReviewEditMode(props: {
     (message: string, retry: () => void) => setToast({ message, retry }),
     [],
   );
-  const edits = useReviewEdits({ briefId, onSegments, onError });
+  const edits = useReviewEdits({ briefId, assignmentId, companyId, onSegments, onError });
 
   const isReel = format === 'video';
   const target = targets[Math.min(index, Math.max(targets.length - 1, 0))];

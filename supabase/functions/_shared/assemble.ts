@@ -1462,6 +1462,52 @@ async function notifyReadyForReview(admin: AdminClient, submissionId: string): P
   }).catch((e) => console.warn(`notify submitted failed: ${e}`));
 }
 
+type SegmentEditRow = {
+  segment_id: string;
+  overlay_style: unknown;
+  overlay_text: string | null;
+  text_y: number | null;
+  show_on_screen: boolean | null;
+  screenshot_x: number | null;
+  screenshot_y: number | null;
+  screenshot_width: number | null;
+};
+
+/**
+ * The brief's segments as this assignment sees them: the template with the
+ * creator's or manager's own placement laid over it (assignment_segment_edits,
+ * same rule as segment_for_assignment in the database).
+ */
+async function segmentsForAssignment(
+  admin: AdminClient,
+  rows: (BriefSegmentRow & { id: string })[],
+  assignmentId: string,
+): Promise<BriefSegmentRow[]> {
+  if (rows.length === 0) return rows;
+  const { data } = await admin
+    .from('assignment_segment_edits')
+    .select(
+      'segment_id, overlay_style, overlay_text, text_y, show_on_screen, screenshot_x, screenshot_y, screenshot_width',
+    )
+    .eq('assignment_id', assignmentId);
+  const edits = new Map(((data ?? []) as SegmentEditRow[]).map((e) => [e.segment_id, e]));
+  return rows.map((row) => {
+    const edit = edits.get(row.id);
+    if (!edit) return row;
+    const next: BriefSegmentRow = { ...row };
+    if (edit.overlay_style !== null) {
+      next.overlay_style = edit.overlay_style;
+      next.overlay_text = edit.overlay_text;
+      next.text_y = edit.text_y;
+      next.show_on_screen = edit.show_on_screen ?? row.show_on_screen;
+    }
+    next.screenshot_x = edit.screenshot_x ?? row.screenshot_x;
+    next.screenshot_y = edit.screenshot_y ?? row.screenshot_y;
+    next.screenshot_width = edit.screenshot_width ?? row.screenshot_width;
+    return next;
+  });
+}
+
 export async function assembleSubmission(params: {
   admin: AdminClient;
   submission: SubmissionRow;
@@ -1541,13 +1587,18 @@ async function runSlideshowAssembly(params: {
     const { data: segmentRows } = await admin
       .from('brief_segments')
       .select(
-        'slot_index, kind, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+        'id, slot_index, kind, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
       )
       .eq('brief_id', briefId)
       .eq('company_id', companyId)
       .eq('kind', 'slide')
       .order('slot_index', { ascending: true });
-    slideSegments = (segmentRows ?? []) as BriefSegmentRow[];
+    // briefId is only set for assignments, whose id keys the storage folder.
+    slideSegments = await segmentsForAssignment(
+      admin,
+      (segmentRows ?? []) as (BriefSegmentRow & { id: string })[],
+      targetId,
+    );
   }
 
   let overlayWarning: string | null = null;
@@ -1666,12 +1717,16 @@ async function runAssembly(params: {
     const { data: segmentRows } = await admin
       .from('brief_segments')
       .select(
-        'slot_index, kind, talking_point_index, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
+        'id, slot_index, kind, talking_point_index, layout, overlay_text, show_on_screen, text_y, overlay_style, screenshot_url, screenshot_x, screenshot_y, screenshot_width',
       )
       .eq('brief_id', briefId)
       .eq('company_id', companyId)
       .order('slot_index', { ascending: true });
-    briefSegments = (segmentRows ?? []) as BriefSegmentRow[];
+    briefSegments = await segmentsForAssignment(
+      admin,
+      (segmentRows ?? []) as (BriefSegmentRow & { id: string })[],
+      targetId,
+    );
 
     const { data: briefRow } = await admin
       .from('briefs')

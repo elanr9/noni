@@ -88,7 +88,7 @@ export default function ChangesRequestedScreen() {
       setAssignment(a);
       if (a) {
         const [segs, ev] = await Promise.all([
-          listBriefSegments(a.briefs.id),
+          listBriefSegments(a.briefs.id, a.id),
           listAssignmentReviewEvents(a.id),
         ]);
         setSegments(segs);

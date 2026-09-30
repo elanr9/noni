@@ -375,7 +375,7 @@ export default function UploadScreen() {
         setAssignment(a);
         if (a) {
           const [segs, draft] = await Promise.all([
-            listBriefSegments(a.briefs.id),
+            listBriefSegments(a.briefs.id, a.id),
             loadPhotoDraft(a.id),
           ]);
           if (cancelled) return;
@@ -592,7 +592,7 @@ export default function UploadScreen() {
       if (segment) {
         await creatorRemoveSlide(segment.id);
         // The server owns slot numbering; read it back rather than guess.
-        const fresh = await listBriefSegments(brief.id);
+        const fresh = await listBriefSegments(brief.id, assignment.id);
         setBriefSegments(fresh);
       }
       // Photos shift with the same rule the server applied to slot_index.

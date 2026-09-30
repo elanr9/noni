@@ -1,11 +1,13 @@
 // Manager edits on a submission's clips or slides: optimistic local state,
-// one debounced write per key straight to brief_segments / briefs. `flush`
+// one debounced write per key to this creator's assignment_segment_edits row
+// (the brief's template and the other creators stay untouched) and to briefs
+// for subtitles. `flush`
 // runs anything still pending so a re-render never races a save; `discard`
 // drops pending writes and puts every touched row back the way it was.
 import { useCallback, useEffect, useRef } from 'react';
 
 import { setBriefSubtitlesY } from '../../../lib/admin-api';
-import { updateBriefSegment, type BriefSegment } from '../../../lib/briefs-api';
+import { upsertAssignmentSegmentEdit, type BriefSegment } from '../../../lib/briefs-api';
 import type { OverlayBox } from '../../../lib/overlay-boxes';
 import { segmentBoxes, segmentWithBoxes } from '../../creator/slides/segment-boxes';
 
@@ -23,6 +25,9 @@ function settle(promises: Iterable<Promise<void>>): Promise<void> {
 
 export function useReviewEdits(params: {
   briefId: string;
+  /** The reviewed creator's assignment; every segment write is scoped to it. */
+  assignmentId: string;
+  companyId: string;
   onSegments: (update: (prev: BriefSegment[]) => BriefSegment[]) => void;
   /** A save failed; `retry` queues that same write again. */
   onError: (message: string, retry: () => void) => void;
@@ -40,7 +45,7 @@ export function useReviewEdits(params: {
   discard: (snapshot: EditSnapshot) => Promise<void>;
   isDirty: () => boolean;
 } {
-  const { briefId, onSegments, onError } = params;
+  const { briefId, assignmentId, companyId, onSegments, onError } = params;
   const timers = useRef(new Map<string, Pending>());
   const inflight = useRef(new Set<Promise<void>>());
   const dirty = useRef(false);
@@ -83,14 +88,19 @@ export function useReviewEdits(params: {
         const original = snapshot.segments.find((s) => s.id === id);
         if (original === undefined) continue;
         restores.push(
-          updateBriefSegment(id, {
-            overlay_style: original.overlay_style,
-            overlay_text: original.overlay_text,
-            text_y: original.text_y,
-            show_on_screen: original.show_on_screen,
-            screenshot_x: original.screenshot_x,
-            screenshot_y: original.screenshot_y,
-            screenshot_width: original.screenshot_width,
+          upsertAssignmentSegmentEdit({
+            assignmentId,
+            segmentId: id,
+            companyId,
+            patch: {
+              overlay_style: original.overlay_style,
+              overlay_text: original.overlay_text,
+              text_y: original.text_y,
+              show_on_screen: original.show_on_screen,
+              screenshot_x: original.screenshot_x,
+              screenshot_y: original.screenshot_y,
+              screenshot_width: original.screenshot_width,
+            },
           }),
         );
       }
@@ -102,7 +112,7 @@ export function useReviewEdits(params: {
       touchedSubtitles.current = false;
       dirty.current = false;
     },
-    [briefId],
+    [assignmentId, briefId, companyId],
   );
 
   useEffect(() => {
@@ -124,16 +134,21 @@ export function useReviewEdits(params: {
       schedule(
         `boxes:${segment.id}`,
         () =>
-          updateBriefSegment(segment.id, {
-            overlay_style: next.overlay_style,
-            overlay_text: next.overlay_text,
-            text_y: next.text_y,
-            show_on_screen: next.show_on_screen,
+          upsertAssignmentSegmentEdit({
+            assignmentId,
+            segmentId: segment.id,
+            companyId,
+            patch: {
+              overlay_style: next.overlay_style,
+              overlay_text: next.overlay_text,
+              text_y: next.text_y,
+              show_on_screen: next.show_on_screen,
+            },
           }),
         'Could not save that text.',
       );
     },
-    [onSegments, schedule],
+    [assignmentId, companyId, onSegments, schedule],
   );
 
   const placeInset = useCallback(
@@ -154,15 +169,16 @@ export function useReviewEdits(params: {
       schedule(
         `inset:${segment.id}`,
         () =>
-          updateBriefSegment(segment.id, {
-            screenshot_x: next.x,
-            screenshot_y: next.y,
-            screenshot_width: next.width,
+          upsertAssignmentSegmentEdit({
+            assignmentId,
+            segmentId: segment.id,
+            companyId,
+            patch: { screenshot_x: next.x, screenshot_y: next.y, screenshot_width: next.width },
           }),
         'Could not save that picture.',
       );
     },
-    [onSegments, schedule],
+    [assignmentId, companyId, onSegments, schedule],
   );
 
   const placeSubtitles = useCallback(

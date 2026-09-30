@@ -64,6 +64,70 @@ export type Database = {
           },
         ]
       }
+      assignment_segment_edits: {
+        Row: {
+          assignment_id: string
+          company_id: string
+          overlay_style: Json | null
+          overlay_text: string | null
+          screenshot_width: number | null
+          screenshot_x: number | null
+          screenshot_y: number | null
+          segment_id: string
+          show_on_screen: boolean | null
+          text_y: number | null
+          updated_at: string
+        }
+        Insert: {
+          assignment_id: string
+          company_id: string
+          overlay_style?: Json | null
+          overlay_text?: string | null
+          screenshot_width?: number | null
+          screenshot_x?: number | null
+          screenshot_y?: number | null
+          segment_id: string
+          show_on_screen?: boolean | null
+          text_y?: number | null
+          updated_at?: string
+        }
+        Update: {
+          assignment_id?: string
+          company_id?: string
+          overlay_style?: Json | null
+          overlay_text?: string | null
+          screenshot_width?: number | null
+          screenshot_x?: number | null
+          screenshot_y?: number | null
+          segment_id?: string
+          show_on_screen?: boolean | null
+          text_y?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assignment_segment_edits_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_segment_edits_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_segment_edits_segment_id_fkey"
+            columns: ["segment_id"]
+            isOneToOne: false
+            referencedRelation: "brief_segments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assignments: {
         Row: {
           bounty_amount_cents: number | null
@@ -4868,6 +4932,10 @@ export type Database = {
         Args: { p_source_brief_id: string; p_target_brief_id: string }
         Returns: undefined
       }
+      creator_assignment_for_brief: {
+        Args: { p_brief_id: string }
+        Returns: string
+      }
       creator_earnings_by_company: {
         Args: never
         Returns: {
@@ -5056,6 +5124,33 @@ export type Database = {
       seed_company_post_types: {
         Args: { p_company_id: string }
         Returns: undefined
+      }
+      segment_for_assignment: {
+        Args: { p_assignment_id: string; p_segment_id: string }
+        Returns: {
+          brief_id: string
+          company_id: string
+          created_at: string
+          id: string
+          kind: string
+          layout: string
+          overlay_style: Json
+          overlay_text: string | null
+          screenshot_url: string | null
+          screenshot_width: number | null
+          screenshot_x: number | null
+          screenshot_y: number | null
+          show_on_screen: boolean
+          slot_index: number
+          talking_point_index: number | null
+          text_y: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "brief_segments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_active_company: {
         Args: { p_company_id: string }

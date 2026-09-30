@@ -668,7 +668,7 @@ export default function RecordScreen() {
           if (a) setSubtitlesY(a.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
           if (a && profile) {
             const [segs, draft, events, edits] = await Promise.all([
-              listBriefSegments(a.briefs.id),
+              listBriefSegments(a.briefs.id, a.id),
               loadDraftSegments(profile.active_company_id, a.id),
               a.status === 'changes_requested'
                 ? listAssignmentReviewEvents(a.id)

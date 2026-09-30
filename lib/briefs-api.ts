@@ -567,8 +567,45 @@ export async function assistDeriveSegments(
 // ---------------------------------------------------------------------------
 // brief_segments: direct reads and render-field writes (admin RLS)
 
+/** One creator's placement on top of the brief's template segment. */
+export type AssignmentSegmentEdit =
+  Database['public']['Tables']['assignment_segment_edits']['Row'];
+
+export type AssignmentSegmentPatch = Partial<
+  Pick<
+    AssignmentSegmentEdit,
+    | 'overlay_style'
+    | 'overlay_text'
+    | 'text_y'
+    | 'show_on_screen'
+    | 'screenshot_x'
+    | 'screenshot_y'
+    | 'screenshot_width'
+  >
+>;
+
+/** The template with one assignment's edits laid over it (mirrors segment_for_assignment). */
+export function applySegmentEdit(segment: BriefSegment, edit: AssignmentSegmentEdit): BriefSegment {
+  const next = { ...segment };
+  if (edit.overlay_style !== null) {
+    next.overlay_style = edit.overlay_style;
+    next.overlay_text = edit.overlay_text;
+    next.text_y = edit.text_y;
+    next.show_on_screen = edit.show_on_screen ?? segment.show_on_screen;
+  }
+  next.screenshot_x = edit.screenshot_x ?? segment.screenshot_x;
+  next.screenshot_y = edit.screenshot_y ?? segment.screenshot_y;
+  next.screenshot_width = edit.screenshot_width ?? segment.screenshot_width;
+  return next;
+}
+
+/**
+ * The brief's segments. With an assignment id, each segment carries that
+ * creator's own text and picture placement instead of the shared template.
+ */
 export async function listBriefSegments(
   briefId: string,
+  assignmentId?: string,
 ): Promise<BriefSegment[]> {
   const { data, error } = await supabase
     .from('brief_segments')
@@ -576,7 +613,39 @@ export async function listBriefSegments(
     .eq('brief_id', briefId)
     .order('slot_index', { ascending: true });
   if (error) throw error;
-  return data ?? [];
+  const rows = data ?? [];
+  if (assignmentId === undefined || rows.length === 0) return rows;
+  const { data: edits, error: editsError } = await supabase
+    .from('assignment_segment_edits')
+    .select('*')
+    .eq('assignment_id', assignmentId);
+  if (editsError) throw editsError;
+  const bySegment = new Map((edits ?? []).map((e) => [e.segment_id, e] as const));
+  return rows.map((row) => {
+    const edit = bySegment.get(row.id);
+    return edit === undefined ? row : applySegmentEdit(row, edit);
+  });
+}
+
+/** Manager places text or the inset on one creator's post only (admin RLS). */
+export async function upsertAssignmentSegmentEdit(params: {
+  assignmentId: string;
+  segmentId: string;
+  companyId: string;
+  patch: AssignmentSegmentPatch;
+}): Promise<void> {
+  const { assignmentId, segmentId, companyId, patch } = params;
+  const { error } = await supabase.from('assignment_segment_edits').upsert(
+    {
+      assignment_id: assignmentId,
+      segment_id: segmentId,
+      company_id: companyId,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'assignment_id,segment_id' },
+  );
+  if (error) throw error;
 }
 
 /** Company wide on-screen text color, null until a manager picks one. */

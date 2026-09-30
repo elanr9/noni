@@ -83,6 +83,7 @@ function isVideoUrl(url: string): boolean {
 
 export function ManagerVideoEditor(props: {
   brief: Brief;
+  assignmentId: string;
   submissionId: string;
   clips: ManagerClip[];
   /** Signed URLs of inset pictures keyed by segment id. */
@@ -101,6 +102,7 @@ export function ManagerVideoEditor(props: {
 }): JSX.Element {
   const {
     brief,
+    assignmentId,
     submissionId,
     clips,
     insetUrls,
@@ -130,7 +132,13 @@ export function ManagerVideoEditor(props: {
     (message: string, retry: () => void) => setToast({ message, retry }),
     [],
   );
-  const edits = useReviewEdits({ briefId: brief.id, onSegments, onError });
+  const edits = useReviewEdits({
+    briefId: brief.id,
+    assignmentId,
+    companyId: brief.company_id,
+    onSegments,
+    onError,
+  });
 
   // Inset pictures need their aspect for the stage; video insets keep the
   // signed URL as both poster and source.

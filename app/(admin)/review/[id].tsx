@@ -373,7 +373,10 @@ export default function ReviewScreen() {
         if (!cancelled) setVideoUri(null);
       }
       try {
-        const segments = await listBriefSegments(current.assignment.brief_id);
+        const segments = await listBriefSegments(
+          current.assignment.brief_id,
+          current.assignment.id,
+        );
         if (!cancelled) setBriefSegments(segments);
         // Slideshows review the real thing: the creator's photos, plus the
         // admin's inset pictures composited while the bake is still running.
@@ -656,7 +659,7 @@ export default function ReviewScreen() {
   // Touched rows are already restored server side; pick up the truth again.
   const cancelEdit = async () => {
     try {
-      const fresh = await listBriefSegments(assignment.brief_id);
+      const fresh = await listBriefSegments(assignment.brief_id, assignment.id);
       setBriefSegments(fresh);
     } catch {
       // The load effect refetches on the next status change; local state is
@@ -869,6 +872,7 @@ export default function ReviewScreen() {
         <ManagerVideoEditor
           key={submission.id}
           brief={briefRow}
+          assignmentId={assignment.id}
           submissionId={submission.id}
           clips={managerClips}
           insetUrls={slideInsetUrls}
@@ -888,6 +892,8 @@ export default function ReviewScreen() {
           format={row.format}
           slideAspect={slideAspect}
           briefId={briefRow.id}
+          assignmentId={assignment.id}
+          companyId={briefRow.company_id}
           targets={editTargets}
           index={editIndex}
           onIndex={setEditIndex}
