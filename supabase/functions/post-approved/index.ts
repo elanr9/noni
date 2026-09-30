@@ -238,14 +238,14 @@ async function resolveSubmission(
     if (assignment?.submission_id) {
       const { data } = await admin
         .from('submissions')
-        .select('id, video_path, segment_paths, version, render_status')
+        .select('id, video_path, segment_paths, version, render_status, slide_aspect')
         .eq('id', assignment.submission_id)
         .maybeSingle();
       if (data) return data as Row;
     }
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version, render_status')
+      .select('id, video_path, segment_paths, version, render_status, slide_aspect')
       .eq('assignment_id', target.assignmentId)
       .order('version', { ascending: false })
       .limit(1)
@@ -255,7 +255,7 @@ async function resolveSubmission(
   if (target.taskId) {
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version, render_status')
+      .select('id, video_path, segment_paths, version, render_status, slide_aspect')
       .eq('task_id', target.taskId)
       .order('version', { ascending: false })
       .limit(1)
@@ -328,9 +328,23 @@ Deno.serve(async (req) => {
 
     const apiKey = uploadPostKey();
 
-    const platforms = target.platforms;
+    // A platform that already carries a live or in-flight post for this
+    // submission never gets the same content again: reposting identical
+    // media stacks duplicate-content strikes on the creator's account.
+    const { data: priorRows } = await admin
+      .from('posts')
+      .select('platform, status')
+      .eq('submission_id', submission.id)
+      .in('status', ['posted', 'pending']);
+    const alreadyPosted = new Set((priorRows ?? []).map((r) => r.platform as string));
+    const platforms = target.platforms.filter((p) => !alreadyPosted.has(p));
     if (platforms.length === 0) {
-      return jsonResponse({ error: 'no platforms to post to' }, 400);
+      return jsonResponse(
+        {
+          error: `already posted to ${target.platforms.join(', ')}; refusing to post the same content twice`,
+        },
+        409,
+      );
     }
 
     // Common fields; platforms and media are appended per request below.

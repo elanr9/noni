@@ -10,7 +10,42 @@ import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
-type DueRow = { id: string; company_id: string };
+type DueRow = { id: string; company_id: string; brief_id: string | null; publish_at: string };
+
+/** Minimum gap between two creators posting the same brief. Identical text
+ *  slideshows landing on several accounts within minutes reads as
+ *  mass-produced content to TikTok and every copy gets pulled. */
+const SAME_BRIEF_GAP_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * When another creator posted this brief inside the gap, push this
+ * assignment to gap-end and report true so the sweep skips it this tick.
+ */
+async function deferIfBriefRecentlyPosted(
+  admin: ReturnType<typeof adminClient>,
+  row: DueRow,
+): Promise<boolean> {
+  if (!row.brief_id) return false;
+  const since = new Date(Date.now() - SAME_BRIEF_GAP_MS).toISOString();
+  const { data } = await admin
+    .from('posts')
+    .select('posted_at, assignments!inner(id, brief_id, company_id)')
+    .eq('assignments.brief_id', row.brief_id)
+    .eq('assignments.company_id', row.company_id)
+    .neq('assignments.id', row.id)
+    .gte('posted_at', since)
+    .order('posted_at', { ascending: false })
+    .limit(1);
+  const latest = (data ?? [])[0] as { posted_at: string | null } | undefined;
+  if (!latest?.posted_at) return false;
+  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_BRIEF_GAP_MS);
+  await admin
+    .from('assignments')
+    .update({ publish_at: nextAt.toISOString() })
+    .eq('id', row.id)
+    .is('publish_claimed_at', null);
+  return true;
+}
 
 type PublishOutcome =
   | { ok: true }
@@ -170,7 +205,7 @@ Deno.serve(async (req) => {
   try {
     const { data: due, error } = await admin
       .from('assignments')
-      .select('id, company_id')
+      .select('id, company_id, brief_id, publish_at')
       .eq('status', 'approved')
       .lte('publish_at', new Date().toISOString())
       .is('publish_claimed_at', null)
@@ -180,14 +215,29 @@ Deno.serve(async (req) => {
     const rows = (due ?? []) as DueRow[];
 
     const claimedIds: string[] = [];
+    // One creator per brief per sweep: the first claimant's post makes the
+    // rest of the brief wait out the gap on the next tick.
+    const briefsClaimedThisTick = new Set<string>();
     for (const row of rows) {
+      if (row.brief_id && briefsClaimedThisTick.has(row.brief_id)) {
+        await admin
+          .from('assignments')
+          .update({ publish_at: new Date(Date.now() + SAME_BRIEF_GAP_MS).toISOString() })
+          .eq('id', row.id)
+          .is('publish_claimed_at', null);
+        continue;
+      }
+      if (await deferIfBriefRecentlyPosted(admin, row)) continue;
       const { data: claimedRows } = await admin
         .from('assignments')
         .update({ publish_claimed_at: new Date().toISOString() })
         .eq('id', row.id)
         .is('publish_claimed_at', null)
         .select('id');
-      if (claimedRows && claimedRows.length > 0) claimedIds.push(row.id);
+      if (claimedRows && claimedRows.length > 0) {
+        claimedIds.push(row.id);
+        if (row.brief_id) briefsClaimedThisTick.add(row.brief_id);
+      }
     }
 
     // Upload-Post polling can take a minute per post; the cron client times
