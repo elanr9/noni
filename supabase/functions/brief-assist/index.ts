@@ -52,6 +52,7 @@ import {
   generateValidated,
   isKill,
   loadPostType,
+  managerRuleLines,
   normalizeGenerated,
   resolvePointMedia,
   sanitizeFeatureId,
@@ -70,6 +71,8 @@ import {
 } from '../_shared/validateBrief.ts';
 import {
   applyLocked,
+  banTermsForCompany,
+  bannedCarryoverLines,
   captureLocked,
   constraintFailures,
   constraintLines,
@@ -330,6 +333,7 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
   } else {
     askLines.push('Regenerate the search phrase for the brief above.');
   }
+  askLines.push(...managerRuleLines(brand));
   if (args.standingInstructions?.length) {
     askLines.push(
       `Standing instructions from the manager (always in force):\n${args.standingInstructions.map((s) => `- ${s}`).join('\n')}`,
@@ -692,7 +696,7 @@ Deno.serve(async (req) => {
       if (body.post_type?.trim() && !loadedType) {
         return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
       }
-      const [brand, constraints] = await Promise.all([
+      const [loadedBrand, constraints] = await Promise.all([
         loadBrandContext(admin, caller.companyId),
         extractConstraints(
           history.filter((t) => t.role === 'manager').map((t) => t.text),
@@ -707,14 +711,23 @@ Deno.serve(async (req) => {
       }
       // "We do not have that feature, do not do that again" is saved for
       // every future post and applied to this one right now.
-      const remembered = await rememberForCompany(admin, caller.companyId, constraints.remember);
+      const [remembered, bannedNow] = await Promise.all([
+        rememberForCompany(admin, caller.companyId, constraints.remember),
+        banTermsForCompany(admin, caller.companyId, constraints.bannedTerms),
+      ]);
+      // This turn validates against the new bans too; the loaded brand predates them.
+      const brand: BrandContext = {
+        ...loadedBrand,
+        bannedPhrases: [...new Set([...loadedBrand.bannedPhrases, ...constraints.bannedTerms])],
+      };
       const standing = [
         ...constraints.standingInstructions,
         ...constraints.remember.map((r) => r.insight),
       ];
-      const rememberedNote = remembered.length
-        ? ` Noted for every future post: ${remembered.map((r) => r.insight).join(' ')}`
-        : '';
+      const rememberedNote = [
+        remembered.length ? ` Noted for every future post: ${remembered.map((r) => r.insight).join(' ')}` : '',
+        bannedNow.length ? ` Banned from every post: ${bannedNow.map((t) => `"${t}"`).join(', ')}.` : '',
+      ].join('');
       // The manager's count outranks the post type's range, in the prompt
       // and in validation alike.
       const postType: PostTypeRow | null =
@@ -781,6 +794,7 @@ Deno.serve(async (req) => {
           return {
             ...out,
             scope: 'field',
+            constraints,
             field: targeted.field,
             revision_note: `${fieldNote(targeted.field, targeted.index)}${keptPoints}${rememberedNote}`,
           };
@@ -815,6 +829,8 @@ Deno.serve(async (req) => {
               );
             }
             lines.push(`Newest feedback from the manager (apply all of it):\n${feedback.slice(0, 3000)}`);
+            lines.push(...managerRuleLines(brand));
+            lines.push(...bannedCarryoverLines(draft, brand.bannedPhrases));
             lines.push(...constraintLines({ ...constraints, standingInstructions: standing }, locked));
             if (priorFailures.length) {
               lines.push(
@@ -851,6 +867,38 @@ Deno.serve(async (req) => {
         if (isKill(outcome)) {
           return { kill_reason: outcome.kill_reason, generation_id: generationId };
         }
+        // A banned word that survived the rewrite is repaired one point at a
+        // time; the targeted path is reliable where the whole rewrite is not.
+        let finalWarnings = warnings;
+        const bannedLeft = finalWarnings.filter((w) => w.includes('which the manager banned'));
+        if (bannedLeft.length) {
+          const plugIndex = outcome.draft.talking_points.findIndex((p) => p.is_product);
+          const hitIndexes = new Set<number>();
+          for (const w of bannedLeft) {
+            const m = w.match(/^talking point (\d+)/);
+            if (m) hitIndexes.add(Number(m[1]) - 1);
+            if (w.startsWith('cta') && plugIndex >= 0) hitIndexes.add(plugIndex);
+          }
+          for (const at of hitIndexes) {
+            const fixed = await regenerateField({
+              admin,
+              companyId: caller.companyId,
+              brand,
+              draft: outcome.draft,
+              postType,
+              field: 'talking_point',
+              index: at,
+              knownFeatureIds,
+              feedback: `Rewrite this point without the banned words (${brand.bannedPhrases.map((b) => `"${b}"`).join(', ')}); the product does not have that feature.`,
+            });
+            if (typeof fixed.kill_reason === 'string' || !fixed.talking_point) continue;
+            outcome.draft.talking_points[at] = fixed.talking_point as TalkingPoint;
+            if (typeof fixed.cta === 'string' && (fixed.talking_point as TalkingPoint).is_product) {
+              outcome.draft.cta = fixed.cta;
+            }
+            finalWarnings = Array.isArray(fixed.warnings) ? (fixed.warnings as string[]) : finalWarnings;
+          }
+        }
         // The report is computed from the drafts, never taken from the model,
         // so the chat never claims a change that did not happen.
         const report = changeReport(draft, chosenHook, outcome.draft);
@@ -859,6 +907,7 @@ Deno.serve(async (req) => {
         return {
           ...outcome.draft,
           scope: 'full',
+          constraints,
           hook: locked.hook ?? outcome.draft.hook_options[0] ?? null,
           revision_note: [report, why, kept, rememberedNote.trim()].filter(Boolean).join(' '),
           overlay_labels: outcome.overlayLabels,
@@ -872,7 +921,7 @@ Deno.serve(async (req) => {
           ),
           post_type_id: postType?.id ?? null,
           generation_id: generationId,
-          warnings,
+          warnings: finalWarnings,
         };
       });
     }

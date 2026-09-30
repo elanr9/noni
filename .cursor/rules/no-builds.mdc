@@ -1,0 +1,5 @@
+---
+description: Never trigger builds, submissions, or OTA updates
+alwaysApply: true
+---
+Never run `eas build`, `eas submit`, `eas update`, `npx expo publish`, `expo export`, or any command that creates a build, submits to a store, or publishes an OTA update. This applies after every edit, no matter how large. The user triggers builds and updates manually. If a change requires a new build or update, say so in one sentence and stop.

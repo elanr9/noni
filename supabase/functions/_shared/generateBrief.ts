@@ -609,7 +609,7 @@ export function retryMessage(priorFailures: string[], what: 'draft' | 'revision'
   return [
     `Your previous ${what} failed validation. Fix every one of these and return the corrected JSON:`,
     ...priorFailures.map((f) => `- ${f}`),
-    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and its bracketed nudge stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. Everything not flagged stays exactly as it was.`,
+    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and its bracketed nudge stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A line flagged for a banned word is written again from scratch without that word or any synonym for it; when it is the cta, compose a new plug sentence from the approved claims or Product truth and put the same new sentence in the plug point. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. Everything not flagged stays exactly as it was.`,
   ].join('\n');
 }
 
@@ -626,6 +626,7 @@ export function brandValidationCtx(brand: BrandContext): {
   hashtagBank: string[];
   approvedClaimIds: string[];
   productNames: string[];
+  bannedPhrases: string[];
 } {
   const names = [brand.productName, brand.companyName].filter(
     (n, i, all) => n.trim().length > 0 && all.indexOf(n) === i,
@@ -634,6 +635,7 @@ export function brandValidationCtx(brand: BrandContext): {
     hashtagBank: brand.hashtagBank,
     approvedClaimIds: brand.approvedClaims.map((c) => c.id),
     productNames: names,
+    bannedPhrases: brand.bannedPhrases,
   };
 }
 
@@ -694,6 +696,19 @@ export function brandDocBlocks(brand: BrandContext): string[] {
   const learned = learningBlocks(brand.learnings);
   if (learned) docBlocks.push(learned);
   return docBlocks;
+}
+
+/**
+ * Rules the manager stated out loud in revise chat (saved at confidence 1).
+ * They ride next to the ask in every generation, not only in the cached
+ * brand prefix, so a fresh rewrite cannot miss them.
+ */
+export function managerRuleLines(brand: BrandContext): string[] {
+  const rules = brand.learnings.filter((l) => l.company_id !== null && l.confidence >= 1);
+  if (!rules.length) return [];
+  return [
+    `RULES THE MANAGER STATED (absolute; breaking one fails the post):\n${rules.map((r) => `- ${r.insight}`).join('\n')}`,
+  ];
 }
 
 /**
@@ -1082,7 +1097,7 @@ export async function generateValidated(
   generationId: string,
   postType: PostTypeRow | null,
   draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
-  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[]; productNames?: string[] },
+  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[]; productNames?: string[]; bannedPhrases?: string[] },
   options: GenerateOptions = {},
 ): Promise<{ outcome: GenOutcome; warnings: string[] }> {
   const ctx = {

@@ -9,6 +9,12 @@ import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 
 const INCOMPLETE = ['assigned', 'recorded', 'changes_requested'] as const;
 type ReminderKind = 'due_today' | 'overdue';
+
+const SLOT_HOURS: Record<number, readonly number[]> = {
+  1: [12],
+  2: [12, 18],
+  3: [10, 14, 19],
+};
 const WARMUP_START = '2026-09-28';
 const WARMUP_TITLE = 'Warm up account time!';
 const WARMUP_BODY =
@@ -156,6 +162,207 @@ function overdueTitle(streak: number): string {
   return 'You have a post to catch up on';
 }
 
+type DayAssignment = {
+  id: string;
+  company_id: string;
+  creator_id: string;
+  slot_index: number;
+  status: string;
+  briefs: { format: string } | { format: string }[] | null;
+};
+
+function briefFormat(row: DayAssignment): string {
+  const b = row.briefs;
+  if (Array.isArray(b)) return b[0]?.format ?? 'video';
+  return b?.format ?? 'video';
+}
+
+function postLabel(format: string, videoRank: number): string {
+  if (format === 'photo_carousel') return 'slideshow';
+  if (videoRank <= 1) return 'first post';
+  if (videoRank === 2) return 'second post';
+  return 'third post';
+}
+
+function firstName(full: string | null): string {
+  const name = full?.trim().split(/\s+/)[0];
+  return name || 'Hey';
+}
+
+async function claimReminder(
+  admin: ReturnType<typeof adminClient>,
+  companyId: string,
+  creatorId: string,
+  kind: string,
+  sentOn: string,
+): Promise<boolean> {
+  const { error } = await admin.from('creator_reminders').insert({
+    company_id: companyId,
+    creator_id: creatorId,
+    kind,
+    sent_on: sentOn,
+  });
+  if (error) {
+    if (error.code === '23505') return false;
+    throw new Error(error.message);
+  }
+  return true;
+}
+
+async function loadTodayAssignments(
+  admin: ReturnType<typeof adminClient>,
+): Promise<{ today: string; rows: DayAssignment[] }> {
+  const today = todayInTz('America/New_York');
+  const { data, error } = await admin
+    .from('assignments')
+    .select('id, company_id, creator_id, slot_index, status, briefs(format)')
+    .eq('scheduled_date', today);
+  if (error) throw new Error(error.message);
+  return { today, rows: (data ?? []) as DayAssignment[] };
+}
+
+function groupByCreator(rows: DayAssignment[]): Map<string, DayAssignment[]> {
+  const grouped = new Map<string, DayAssignment[]>();
+  for (const row of rows) {
+    const key = `${row.company_id}:${row.creator_id}`;
+    const list = grouped.get(key) ?? [];
+    list.push(row);
+    grouped.set(key, list);
+  }
+  return grouped;
+}
+
+async function sendSlotReminders(
+  admin: ReturnType<typeof adminClient>,
+  hour: number,
+): Promise<{ slot_claimed: number; slot_pushes: number }> {
+  const { today, rows } = await loadTodayAssignments(admin);
+  let slotClaimed = 0;
+  let slotPushes = 0;
+  for (const [, list] of groupByCreator(rows)) {
+    const sorted = [...list].sort((a, b) => a.slot_index - b.slot_index);
+    const total = Math.min(Math.max(sorted.length, 1), 3);
+    const hours = SLOT_HOURS[total] ?? SLOT_HOURS[3];
+    let videoRank = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const row = sorted[i];
+      const format = briefFormat(row);
+      if (format !== 'photo_carousel') videoRank += 1;
+      const slotHour = hours[Math.min(i, hours.length - 1)];
+      if (slotHour !== hour) continue;
+      if (!INCOMPLETE.includes(row.status as (typeof INCOMPLETE)[number])) continue;
+      if (row.slot_index > 2) continue;
+      const claimed = await claimReminder(
+        admin,
+        row.company_id,
+        row.creator_id,
+        `slot_${row.slot_index}`,
+        today,
+      );
+      if (!claimed) continue;
+      slotClaimed += 1;
+      const label = postLabel(format, videoRank);
+      const recipients = await creatorRecipients(admin, row.creator_id, row.company_id);
+      slotPushes += await sendPush(admin, recipients, {
+        title: `It's time for your ${label}`,
+        body: `It's time for your ${label}`,
+        data: {
+          event: 'slot_due',
+          company_id: row.company_id,
+          assignment_id: row.id,
+          deep_link: creatorLink(row.company_id, 'assignment', row.id),
+        },
+      });
+    }
+  }
+  return { slot_claimed: slotClaimed, slot_pushes: slotPushes };
+}
+
+async function sendAfternoonNudge(
+  admin: ReturnType<typeof adminClient>,
+): Promise<{ afternoon_claimed: number; afternoon_pushes: number }> {
+  const { today, rows } = await loadTodayAssignments(admin);
+  const open = rows.filter((row) =>
+    INCOMPLETE.includes(row.status as (typeof INCOMPLETE)[number]),
+  );
+  const grouped = groupByCreator(open);
+  const creatorIds = [...new Set(open.map((row) => row.creator_id))];
+  const names = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    const { data, error } = await admin
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', creatorIds);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      names.set(row.id as string, firstName(row.full_name as string | null));
+    }
+  }
+  let afternoonClaimed = 0;
+  let afternoonPushes = 0;
+  for (const [, list] of grouped) {
+    const first = list[0];
+    const claimed = await claimReminder(
+      admin,
+      first.company_id,
+      first.creator_id,
+      'afternoon_nudge',
+      today,
+    );
+    if (!claimed) continue;
+    afternoonClaimed += 1;
+    const name = names.get(first.creator_id) ?? 'Hey';
+    const line = `${name}, don't forget about today's posts!`;
+    const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
+    afternoonPushes += await sendPush(admin, recipients, {
+      title: line,
+      body: line,
+      data: {
+        event: 'afternoon_nudge',
+        company_id: first.company_id,
+        assignment_id: first.id,
+        deep_link: creatorLink(first.company_id, 'assignment', first.id),
+      },
+    });
+  }
+  return { afternoon_claimed: afternoonClaimed, afternoon_pushes: afternoonPushes };
+}
+
+async function sendPostsReady(
+  admin: ReturnType<typeof adminClient>,
+): Promise<{ ready_claimed: number; ready_pushes: number }> {
+  const { today, rows } = await loadTodayAssignments(admin);
+  const open = rows.filter((row) =>
+    INCOMPLETE.includes(row.status as (typeof INCOMPLETE)[number]),
+  );
+  let readyClaimed = 0;
+  let readyPushes = 0;
+  for (const [, list] of groupByCreator(open)) {
+    const first = [...list].sort((a, b) => a.slot_index - b.slot_index)[0];
+    const claimed = await claimReminder(
+      admin,
+      first.company_id,
+      first.creator_id,
+      'posts_ready',
+      today,
+    );
+    if (!claimed) continue;
+    readyClaimed += 1;
+    const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
+    readyPushes += await sendPush(admin, recipients, {
+      title: "Today's posts are ready",
+      body: "Today's posts are ready",
+      data: {
+        event: 'posts_ready',
+        company_id: first.company_id,
+        assignment_id: first.id,
+        deep_link: creatorLink(first.company_id, 'assignment', first.id),
+      },
+    });
+  }
+  return { ready_claimed: readyClaimed, ready_pushes: readyPushes };
+}
+
 function overdueBody(count: number, streak: number): string {
   if (count === 1) {
     return streak > 0
@@ -179,10 +386,12 @@ Deno.serve(async (req) => {
 
   let force = false;
   let warmupForce = false;
+  let ready = false;
   try {
-    const body = (await req.json()) as { force?: boolean; warmup?: boolean };
+    const body = (await req.json()) as { force?: boolean; warmup?: boolean; ready?: boolean };
     force = body.force === true;
     warmupForce = body.warmup === true;
+    ready = body.ready === true;
   } catch {
     // empty body from cron is fine
   }
@@ -191,6 +400,14 @@ Deno.serve(async (req) => {
   const inWindow = nyHour === 8 || nyHour === 9;
 
   try {
+    if (ready) {
+      const readyResult = await sendPostsReady(admin);
+      return jsonResponse({ ...readyResult, ny_hour: nyHour });
+    }
+
+    const slotResult = await sendSlotReminders(admin, nyHour);
+    const afternoonResult = nyHour === 16 ? await sendAfternoonNudge(admin) : null;
+
     const warmupResult =
       nyHour === 14 || warmupForce ? await sendAccountWarmup(admin, warmupForce) : null;
 
@@ -199,6 +416,8 @@ Deno.serve(async (req) => {
         skipped: true,
         reason: warmupResult ? 'warmup window' : 'outside 8–9 America/New_York',
         ny_hour: nyHour,
+        ...slotResult,
+        ...(afternoonResult ?? {}),
         ...(warmupResult ?? {}),
       });
     }

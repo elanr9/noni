@@ -248,6 +248,8 @@ export function runTier1Checks(
     postType?: PostTypeShape | null;
     /** Names the plug may use for the product; empty skips the name check. */
     productNames?: string[];
+    /** Words or phrases the manager banned (a feature the product does not have); a hard fail wherever they appear. */
+    bannedPhrases?: string[];
   },
 ): ReviewCheck[] {
   const checks: ReviewCheck[] = [];
@@ -257,6 +259,31 @@ export function runTier1Checks(
     checks.push({ check_id, tier: 1, section, severity: 'fail', message });
   const warn = (check_id: string, section: ReviewSection, message: string) =>
     checks.push({ check_id, tier: 1, section, severity: 'warn', message });
+
+  // --- Manager bans: absolute, every field ---------------------------------
+  const banned = (ctx.bannedPhrases ?? []).map((b) => b.trim()).filter((b) => b.length > 1);
+  if (banned.length) {
+    const fields: Array<[string, ReviewSection, string | null]> = [
+      ['title', 'hook', draft.title],
+      ['cta', 'cta', draft.cta],
+      ['caption', 'caption', draft.caption],
+      ['script', 'talking_points', draft.script],
+      ...draft.hook_options.map((h, i): [string, ReviewSection, string | null] => [`hook option ${i + 1}`, 'hook', h]),
+      ...draft.talking_points.map((p, i): [string, ReviewSection, string | null] => [`talking point ${i + 1}`, 'talking_points', p.text]),
+    ];
+    for (const phrase of banned) {
+      const re = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      for (const [name, section, text] of fields) {
+        if (text && re.test(text)) {
+          fail(
+            'banned_phrase',
+            section,
+            `${name} says "${phrase}", which the manager banned (the product does not have it or never says it); rewrite that line without it and without a synonym for it`,
+          );
+        }
+      }
+    }
+  }
 
   // --- Hard fails -----------------------------------------------------------
 

@@ -31,6 +31,7 @@ import {
   generateValidated,
   isKill,
   loadPostType,
+  managerRuleLines,
   normalizeGenerated,
   pickPostType,
   resolvePointMedia,
@@ -149,7 +150,7 @@ async function generateOnce(
   sourceLines: string[],
   priorFailures: string[],
 ): Promise<GenOutcome> {
-  const lines = [...sourceLines];
+  const lines = [...sourceLines, ...managerRuleLines(brand)];
   if (priorFailures.length) {
     lines.push(
       retryMessage(priorFailures, 'draft'),

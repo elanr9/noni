@@ -40,6 +40,8 @@ export type ReviseConstraints = {
   pointIndex: number | null;
   /** Durable rules the manager stated ("we do not have a roster feature"), saved for every future post. */
   remember: Remembered[];
+  /** Words that must never appear again; saved to the brand's banned phrases and validated as hard fails. */
+  bannedTerms: string[];
   pointCount: number | null;
   lockHook: boolean;
   lockTitle: boolean;
@@ -55,6 +57,7 @@ export const EMPTY_CONSTRAINTS: ReviseConstraints = {
   scope: 'full',
   pointIndex: null,
   remember: [],
+  bannedTerms: [],
   pointCount: null,
   lockHook: false,
   lockTitle: false,
@@ -65,11 +68,12 @@ export const EMPTY_CONSTRAINTS: ReviseConstraints = {
 };
 
 const EXTRACT_SYSTEM = `You read a campaign manager's feedback on a short form content brief and turn it into a work order. The brief has: a title, a hook (the opening line, also the title slide of a slideshow), numbered talking points (one of them is the product plug, whose sentence is the cta), a caption with hashtags, a search phrase. Answer with one JSON object only, no prose:
-{"scope": "hook" | "title" | "caption" | "cta" | "point" | "points" | "search_phrase" | "undo" | "full", "point_index": number | null, "remember": [{"category": string, "insight": string}], "point_count": number | null, "lock_hook": boolean, "lock_title": boolean, "lock_caption": boolean, "lock_search_phrase": boolean, "lock_point_indexes": number[], "standing_instructions": string[]}
+{"scope": "hook" | "title" | "caption" | "cta" | "point" | "points" | "search_phrase" | "undo" | "full", "point_index": number | null, "remember": [{"category": string, "insight": string}], "banned_terms": string[], "point_count": number | null, "lock_hook": boolean, "lock_title": boolean, "lock_caption": boolean, "lock_search_phrase": boolean, "lock_point_indexes": number[], "standing_instructions": string[]}
 Rules:
 - scope is the smallest part that fixes the newest turn. "the hook needs to be better", "no title slide", "the opening line is weak" is hook. "the title is wrong" is title. Caption or hashtag complaints are caption. Complaints about the plug, the product sentence, the cta, a made up feature or a wrong product claim are cta. One specific point ("point 3 is generic", "the second tip is wrong") is point with point_index (point 1 is index 0). Complaints about the points as a group, the count, the order, the substance of the body ("the points are generic", "give me 5 points") are points. Anything about the post as a whole, the tone everywhere, the topic, the angle, or "it all reads like AI slop" is full. When the newest turn also asks for a new point count, scope is points or full, never a smaller one. "Put it back", "go back to what I had", "undo that", "revert", "restore the original", "no you didn't, put it back" is undo: the manager wants the previous version back, nothing is rewritten.
 - "Only change X" or "do not edit anything other than X" locks everything else. "Do not edit anything other than points 2 to 6" (or "slides 2 to 6") locks the hook, title, caption, search phrase and every point outside that range (here index 0). Slides and points are the same thing numbered from 1; on a slideshow "slide 1" may mean the title slide, treat "slides 2 to N" as points 1 to N minus 1 in one-based numbering, so lock_point_indexes names the zero-based indexes NOT in the range.
-- remember: durable facts or rules the manager states that apply to every future post, not just this one ("we do not have a roster feature", "never say elite", "always talk to the athlete, not the parent", "do not do that again" about a specific mistake). Each is one plain sentence in the imperative or as a fact, with category one of: hook, talking_points, script, caption, hashtags, cta, overlay_text, screenshots, layout, structure, voice, other. A made up product feature is category cta ("Inkbound has no roster feature; never mention or invent one"). Empty when the feedback is only about this post.
+- remember: ONLY things that must hold for every future post, never instructions about this post. Two kinds qualify: a fact about the product or company ("we do not have a roster feature", "Inkbound only does email, not texting", "our creators are all current players") or an explicit permanent rule signalled by "always", "never", "from now on", "every post", "stop doing", "do not do that again". Each is one plain sentence, with category one of: hook, talking_points, script, caption, hashtags, cta, overlay_text, screenshots, layout, structure, voice, other. A made up product feature is category cta ("Inkbound has no roster feature; never mention or invent one"). Instructions that shape this post ("explain each point as the mistake then the fix", "give me 5 points", "make the hook scarier") are standing_instructions, NOT remember. When unsure, do not remember.
+- banned_terms: the exact words or short phrases that must never appear in a post again, taken from what the manager said: the name of a feature the product does not have ("roster"), a word they banned ("elite"). Lowercase, one to three words each, no sentences. Empty unless the manager banned something or denied a feature.
 - point_count: the exact number of talking points the manager asked for ("give me 5 points", "make it 4", "seven tips"), else null. Number words count. A number that is not about how many points there should be is ignored.
 - lock_*: true when the manager said to keep, not change, not touch, or leave alone that part ("do not change the hook or the title", "keep the caption"). Also true when the manager wrote that part themselves this turn and said to use it as is.
 - lock_point_indexes: zero-based indexes of points the manager said to keep as they are ("keep point 2", "the first point is good"); point 1 is index 0. Empty when none.
@@ -104,6 +108,7 @@ export function regexConstraints(feedback: string): ReviseConstraints {
     scope: 'full',
     pointIndex: null,
     remember: [],
+    bannedTerms: [],
     pointCount: count !== null && count >= 1 && count <= 12 ? count : null,
     lockHook: locked(/\bhook\b/i),
     lockTitle: locked(/\btitle\b/i),
@@ -112,6 +117,18 @@ export function regexConstraints(feedback: string): ReviseConstraints {
     lockPointIndexes: [],
     standingInstructions: [],
   };
+}
+
+/**
+ * A rule is only saved for every future post when the manager's own words
+ * say it is permanent or state a fact about the product; the model alone is
+ * not trusted with that call.
+ */
+const PERMANENCE =
+  /\b(always|never|from now on|going forward|every post|all posts|any post|stop (doing|saying|using|making)|(do not|don'?t)( ever)? (do|say|use|make) (that|this|it) again|(we|you|it) (don'?t|do not|doesn'?t|does not|never) (have|offer|do|support|track|include)|there is no|is not a real|isn'?t a real|doesn'?t exist|does not exist|made (that|it|this) up|we (do )?have|our product|not a feature|no such)\b/i;
+
+export function feedbackAllowsMemory(feedback: string): boolean {
+  return PERMANENCE.test(feedback);
 }
 
 const SCOPES: ReviseScope[] = ['hook', 'title', 'caption', 'cta', 'point', 'points', 'search_phrase', 'undo', 'full'];
@@ -169,6 +186,34 @@ export async function rememberForCompany(
   return fresh;
 }
 
+/** Adds the manager's banned terms to brand_profiles.banned_phrases; returns the ones that were new. */
+export async function banTermsForCompany(
+  admin: SupabaseClient,
+  companyId: string,
+  terms: string[],
+): Promise<string[]> {
+  if (!terms.length) return [];
+  const { data } = await admin
+    .from('brand_profiles')
+    .select('id, banned_phrases')
+    .eq('company_id', companyId)
+    .maybeSingle();
+  const current = Array.isArray(data?.banned_phrases) ? (data.banned_phrases as string[]) : [];
+  const known = new Set(current.map((t) => t.trim().toLowerCase()));
+  const fresh = terms.filter((t) => !known.has(t));
+  if (!fresh.length) return [];
+  const next = [...current, ...fresh];
+  // A company that skipped brand setup has no profile row yet; create it.
+  const { error } = data?.id
+    ? await admin.from('brand_profiles').update({ banned_phrases: next }).eq('id', data.id)
+    : await admin.from('brand_profiles').insert({ company_id: companyId, banned_phrases: next });
+  if (error) {
+    console.error('banned_phrases update failed:', error.message);
+    return [];
+  }
+  return fresh;
+}
+
 function clampIndexes(value: unknown, pointCount: number): number[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((n): n is number => Number.isInteger(n) && n >= 0 && n < pointCount))];
@@ -206,7 +251,12 @@ export async function extractConstraints(
     return {
       scope: scope === 'point' && pointIndex === null ? 'points' : scope,
       pointIndex,
-      remember: parseRemembered(parsed.remember),
+      remember: feedbackAllowsMemory(feedback) ? parseRemembered(parsed.remember) : [],
+      bannedTerms: feedbackAllowsMemory(feedback) && Array.isArray(parsed.banned_terms)
+        ? [...new Set(parsed.banned_terms
+            .filter((t): t is string => typeof t === 'string' && t.trim().length > 1)
+            .map((t) => t.trim().toLowerCase().slice(0, 40)))].slice(0, 8)
+        : [],
       pointCount:
         typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= 12
           ? count
@@ -324,6 +374,28 @@ export function lockedTexts(locked: LockedValues): string[] {
     locked.caption,
     ...locked.points.map((p) => p.point.text),
   ].filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+}
+
+/** The current draft's lines that carry a banned word; the model must not carry them over. */
+export function bannedCarryoverLines(draft: BriefDraftShape, banned: string[]): string[] {
+  const terms = banned.map((b) => b.trim()).filter((b) => b.length > 1);
+  if (!terms.length) return [];
+  const hits: string[] = [];
+  const test = (label: string, text: string | null) => {
+    if (!text) return;
+    for (const t of terms) {
+      const re = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (re.test(text)) hits.push(`${label} (says "${t}")`);
+    }
+  };
+  test('the plug sentence (cta)', draft.cta);
+  test('the title', draft.title);
+  test('the caption', draft.caption);
+  draft.talking_points.forEach((p, i) => test(`talking point [${i}]`, p.text));
+  if (!hits.length) return [];
+  return [
+    `BANNED WORDS IN THE CURRENT BRIEF: ${hits.join('; ')}. The manager banned these words (${terms.map((t) => `"${t}"`).join(', ')}); the product does not have that feature or never says it. Do NOT carry those lines over: write each of them again from scratch without the word or a synonym. When the plug sentence is one of them, compose a brand new plug sentence from the approved claims or the Product truth and put the same new sentence in cta and in the plug point.`,
+  ];
 }
 
 /** Lines appended to the revise message right after the newest feedback. */
