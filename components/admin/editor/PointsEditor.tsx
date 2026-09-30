@@ -105,8 +105,9 @@ export function PointsEditor(props: {
   }, [points]);
   const windowHeight = useWindowDimensions().height;
 
-  // Slideshows have no spoken script: no hook card, no plug, and each card
-  // is a slide numbered from 1 carrying only its text and screenshot.
+  // Slideshows have no spoken script: the hook card is the title slide, there
+  // is no plug, and each card is a slide numbered from 1 carrying only its
+  // text and screenshot.
   const slideshow = family === 'photo_carousel';
 
   const [dragId, setDragId] = useState<string | null>(null);
@@ -256,23 +257,24 @@ export function PointsEditor(props: {
 
   return (
     <View style={styles.section}>
-      {slideshow ? null : (
       <View style={[styles.card, shadow.shadowCard]}>
         <View style={styles.cardHead}>
           <View style={styles.hookTag}>
             <Icon name="megaphone" size={13} color={color.blue600} />
-            <Text style={styles.hookTagText}>Hook</Text>
+            <Text style={styles.hookTagText}>{slideshow ? 'Title slide' : 'Hook'}</Text>
           </View>
         </View>
         <TextInput
           multiline
           value={hook}
           onChangeText={onChangeHook}
-          placeholder="The opening line, spoken first"
+          placeholder={
+            slideshow ? 'The title over the cover photo' : 'The opening line, spoken first'
+          }
           placeholderTextColor={color.slate400}
           style={styles.text}
         />
-        {hookOverlayBoxes.length > 0 ? (
+        {slideshow ? null : hookOverlayBoxes.length > 0 ? (
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Edit overlay text on the hook"
@@ -300,7 +302,6 @@ export function PointsEditor(props: {
           </PressableScale>
         )}
       </View>
-      )}
 
       {points.map((point, i) => {
         const shotBusy = screenshotBusyIndex === i;

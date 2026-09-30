@@ -7,7 +7,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { readSocialPost, type ReadPost } from './scrapeSocial.ts';
-import { askClaude, parseClaudeJson } from './wp8.ts';
+import { askClaude, parseClaudeJson, softenDashes } from './wp8.ts';
 
 export type PatternCard = {
   topic: string;
@@ -281,7 +281,7 @@ export async function maybeDistillPlaybook(
         `Reference ${i + 1} (${c.format === 'photo_carousel' ? 'slideshow' : 'video'}, quality ${c.pattern.quality}/5):\n${patternLines(c.pattern)}`,
     )
     .join('\n\n');
-  const content = (await askClaude(DISTILL_SYSTEM, user, 3000)).trim();
+  const content = softenDashes((await askClaude(DISTILL_SYSTEM, user, 3000)).trim());
   if (!content) return false;
   const { error } = await admin.from('brand_docs').upsert(
     {

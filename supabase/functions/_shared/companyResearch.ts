@@ -7,7 +7,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { crawlSite } from './crawlSite.ts';
-import { askClaude, askClaudeResearch, parseClaudeJson, type ResearchSource } from './wp8.ts';
+import { askClaude, askClaudeResearch, parseClaudeJson, softenDashes, type ResearchSource } from './wp8.ts';
 
 export type ProductProfile = {
   product_name: string;
@@ -207,7 +207,7 @@ export async function runCompanyResearch(
         {
           company_id: companyId,
           kind: 'industry_research',
-          content: playbookMarkdown(profile, playbook),
+          content: softenDashes(playbookMarkdown(profile, playbook)),
           human_edited: false,
           updated_at: new Date().toISOString(),
         },

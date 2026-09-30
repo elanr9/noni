@@ -13,7 +13,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import type { BrainFeature, BrandContext } from './wp8.ts';
-import { askClaude, legacyBrandLines, parseClaudeJson } from './wp8.ts';
+import { askClaude, legacyBrandLines, parseClaudeJson, stripDashes } from './wp8.ts';
 import { validateBrief } from './validateBrief.ts';
 import type {
   BriefDraftShape,
@@ -209,7 +209,9 @@ const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to
 
 const SUBSTANCE_RULE = `SUBSTANCE (the bar every point clears): write as the most experienced insider in this niche talking to one person, never as a content marketer summarizing a topic. Every non plug point carries something a generic list would not: a real number, a named rule, date or deadline, a named tool, event, level or role, or a scenario only someone who has lived it knows. Take these facts from the Industry playbook and the Reference playbook in the message; never invent a statistic, rule or date, and when the playbooks do not have one, use a concrete scenario instead. THE GENERIC TEST: if the point could sit unchanged in a list for any sport, any job or any product ("start early", "stay consistent", "use multiple angles", "build a smart list", "stay visible", "track everything", "be professional", "quality over quantity"), it fails; replace it with the specific move behind it and the reason an insider knows. Off niche example of the fix: "tailor your resume to each job" fails; "paste three exact phrases from the job post into your resume, the screening software scores keyword matches before a person reads it" passes. Every point must be correct advice a real expert would sign; one wrong or made up detail loses the viewer's trust in the whole post.`;
 
-const SPOKEN_RULE = `SPOKEN LINES: every talking point is read off a teleprompter and burned into the video as subtitles, so it must be a sentence a person says out loud to a friend. Plain words, contractions welcome, short clauses. No em dashes, en dashes or semicolons anywhere in talking points, cta or hooks (use a period or a comma). No stacked noun phrases, no corporate or marketing words: elite, seamless, streamline, game changer, stand out, unlock, level up, leverage, journey, crucial, key, essential, perfect, ultimate, optimize, smart. Read each point aloud in your head; if it sounds like a blog summary or an ad, rewrite it.`;
+const NO_DASH_RULE = `NO DASHES, ANYWHERE: never write an em dash, an en dash or a hyphen in any text field (title, hooks, points, cta, caption, script, labels, notes). Not between clauses, not between words ("follow up", never "follow-up"), not in number ranges ("3 to 5"). A dash is the tell of machine written copy and every one is removed anyway; write the comma, period or word you meant.`;
+
+const SPOKEN_RULE = `SPOKEN LINES: every talking point is read off a teleprompter and burned into the video as subtitles, so it must be a sentence a person says out loud to a friend. Plain words, contractions welcome, short clauses. No dashes of any kind or semicolons anywhere in talking points, cta or hooks (use a period or a comma). No stacked noun phrases, no corporate or marketing words: elite, seamless, streamline, game changer, stand out, unlock, level up, leverage, journey, crucial, key, essential, perfect, ultimate, optimize, smart. Read each point aloud in your head; if it sounds like a blog summary or an ad, rewrite it.`;
 
 const ON_SCREEN_RULE = `ON-SCREEN TEXT (overlay_label): the text card on screen during that point's clip, read with the sound off in about a second. It is the point's actual advice compressed into a complete thought of 3 to 7 words: a verb plus the specific thing, or the specific fact, numbered when the type is a list. Someone who reads only the labels must get the real advice. Off niche examples that pass: "3. Quote their job post back", "2. Apply before Thursday noon", "5. Ask for the hiring manager". Labels that fail because they name a topic instead of saying the move: "Multiple angles matter", "Smart school list", "Auto-build option", "Stay visible", "Track everything", "Game film matters". Never use the adjectives smart, strategic, perfect, key, proper, right or good in a label. The plug point's label says what the product does for the viewer, with the product name ("4. Bidly drills your rush questions").`;
 
@@ -378,6 +380,7 @@ function briefSystemBlocks(
     postTypeBlock(postType, fallbackFormat),
     portRule,
     `Rules, measured against real high performing posts. Follow the numbers exactly.`,
+    NO_DASH_RULE,
     plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
     SEARCH_PHRASE_RULE,
     SUBSTANCE_RULE,
@@ -417,7 +420,7 @@ export function buildBriefSystem(
 const REVISE_CONTRACT =
   '{"revision_note": string, "claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
 
-const REVISE_PREAMBLE = `You revise a structured UGC content brief after the campaign manager reviewed it and gave feedback in plain language. The current brief, the conversation so far and the newest feedback are in the message. The feedback is law: rewrite every part it touches and fix the root cause across the whole brief (if the manager says the product was never mentioned, the plug, the caption and the plug point's on-screen label all change). Parts the manager did not complain about stay as close to the current brief as the feedback allows, so the manager recognizes their post. Never argue with the feedback and never ask a question back; make the change. Product mechanisms come only from the approved claims or the Product truth in the message, never invented. When feedback targets the hook, EVERY hook option is rewritten to that angle as a fresh grammatical headline; carrying over old hooks or bolting the feedback's keywords onto existing lines is a failed revision. Start the JSON with revision_note: two or three plain sentences to the manager about the post itself, naming exactly what changed and why it is stronger; never mention validation, rules, claims tables, hashtag banks or anything about how you work, no bullet points, no markdown.`;
+const REVISE_PREAMBLE = `You revise a structured UGC content brief after the campaign manager reviewed it and gave feedback in plain language. The current brief, the conversation so far and the newest feedback are in the message. The feedback is law: rewrite every part it touches and fix the root cause across the whole brief (if the manager says the product was never mentioned, the plug, the caption and the plug point's on-screen label all change). Parts the manager did not complain about stay as close to the current brief as the feedback allows, so the manager recognizes their post; a talking point marked "edited by the manager" is kept word for word unless the feedback names it. Never argue with the feedback and never ask a question back; make the change. THE MANAGER OUTRANKS EVERY RULE BELOW: when the message carries a LOCKED block, a REQUIRED POINT COUNT or STANDING INSTRUCTIONS, obey them exactly even where a rule below says otherwise (a locked hook is returned unchanged even if it breaks a hook rule; a required count wins over the post type range). Product mechanisms come only from the approved claims or the Product truth in the message, never invented. When feedback targets the hook and the hook is not locked, EVERY hook option is rewritten to that angle as a fresh grammatical headline; carrying over old hooks or bolting the feedback's keywords onto existing lines is a failed revision. Start the JSON with revision_note: two or three plain sentences to the manager about the post itself, naming exactly what changed and why it is stronger; never mention validation, rules, claims tables, hashtag banks or anything about how you work, no bullet points, no markdown.`;
 
 /** Full-brief rewrite driven by manager feedback (chat revise). */
 export function buildReviseSystem(
@@ -509,7 +512,8 @@ export type RegenField =
   | 'talking_points'
   | 'talking_point'
   | 'hook'
-  | 'caption';
+  | 'caption'
+  | 'title';
 
 /**
  * Per-field regeneration prompts. Each returns JSON holding only the
@@ -527,7 +531,7 @@ export function buildFieldSystem(
   const banned = options.bannedPhrases.length
     ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${options.bannedPhrases.join(' | ')}`
     : null;
-  const blocks: (string | null)[] = [preamble];
+  const blocks: (string | null)[] = [preamble, NO_DASH_RULE];
   switch (field) {
     case 'search_phrase':
       blocks.push(
@@ -556,8 +560,9 @@ export function buildFieldSystem(
     case 'talking_point':
       blocks.push(
         KILL_RULE,
-        `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}}`,
-        `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim, naming "${options.productName}" out loud (the same sentence stays in cta, so keep it a single plug sentence riding with the point's advice).`,
+        `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}, "cta": string | null}`,
+        `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim, naming "${options.productName}" out loud; put that exact plug sentence in cta and inside the point text (advice beat first, then the plug sentence, then the nudge). cta is null when the point is not the plug point.`,
+        plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
         SUBSTANCE_RULE,
         POINT_RULES,
         SPOKEN_RULE,
@@ -581,6 +586,14 @@ export function buildFieldSystem(
       blocks.push(
         `JSON: {"caption": string, "hashtags": string[]}`,
         captionRules(requiresPlug),
+        banned,
+      );
+      break;
+    case 'title':
+      blocks.push(
+        `JSON: {"title": string}`,
+        postTypeBlock(postType, fallbackFormat),
+        `TITLE: the admin-facing name of this post; never copy the search phrase into it. Follow TITLE SHAPE above when one is given; a numbered list title starts with the number of talking points in the message. Under 12 words.`,
         banned,
       );
       break;
@@ -943,26 +956,26 @@ export function normalizeGenerated(
   knownFeatureIds: ReadonlySet<string> = new Set(),
 ): GenOutcome {
   if (typeof raw.kill_reason === 'string' && raw.kill_reason.trim()) {
-    return { kill_reason: raw.kill_reason.trim() };
+    return { kill_reason: stripDashes(raw.kill_reason) };
   }
   const rawPoints = raw.talking_points ?? [];
   const points: TalkingPoint[] = rawPoints.map((p, i) => ({
     id: p.id?.trim() || `p${i + 1}-${crypto.randomUUID().slice(0, 8)}`,
-    text: typeof p.text === 'string' ? p.text : null,
+    text: typeof p.text === 'string' ? stripDashes(p.text) : null,
     is_product: Boolean(p.is_product),
     edited_by_admin: false,
     claim_id: p.claim_id ?? null,
   }));
   const overlayLabels = rawPoints.map((p) =>
     typeof p.overlay_label === 'string' && p.overlay_label.trim()
-      ? p.overlay_label.trim()
+      ? stripDashes(p.overlay_label)
       : null,
   );
   const featureIds = rawPoints.map((p) => sanitizeFeatureId(p.feature_id, knownFeatureIds));
   const pointCount =
     typeof raw.point_count === 'number' ? raw.point_count : points.length;
-  const searchPhrase = raw.search_phrase?.trim() || null;
-  let title = raw.title ?? '';
+  const searchPhrase = raw.search_phrase?.trim() ? stripDashes(raw.search_phrase) : null;
+  let title = stripDashes(raw.title ?? '');
   if (postTypeKey === 'numbered_list' || postTypeKey === 'numbered_tips') {
     title = numberedListTitle(title, searchPhrase, pointCount);
   }
@@ -973,13 +986,15 @@ export function normalizeGenerated(
       format,
       point_count: pointCount,
       target_words: typeof raw.target_words === 'number' ? raw.target_words : 380,
-      hook_options: sortHooks(raw.hook_options),
+      hook_options: sortHooks(raw.hook_options).map(stripDashes),
       talking_points: points,
-      cta: typeof raw.cta === 'string' && raw.cta.trim() ? raw.cta.trim() : null,
-      caption: raw.caption ?? '',
-      hashtags: Array.isArray(raw.hashtags) ? raw.hashtags.map((h) => String(h)) : [],
-      why_it_works: raw.why_it_works ?? '',
-      script: format === 'photo_carousel' ? (raw.script ?? null) : null,
+      cta: typeof raw.cta === 'string' && raw.cta.trim() ? stripDashes(raw.cta) : null,
+      caption: stripDashes(raw.caption ?? ''),
+      hashtags: Array.isArray(raw.hashtags)
+        ? raw.hashtags.map((h) => String(h).replace(/[-–—]/g, ''))
+        : [],
+      why_it_works: stripDashes(raw.why_it_works ?? ''),
+      script: format === 'photo_carousel' && raw.script ? stripDashes(raw.script) : null,
     },
     overlayLabels,
     featureIds,
@@ -999,12 +1014,13 @@ const COMPRESS_HOOK_SYSTEM = `You shorten one hook line of a UGC brief to 9 word
 async function compressOverLongItems(
   outcome: GeneratedDraft,
   failures: string[],
+  isLocked: (text: string) => boolean,
 ): Promise<GeneratedDraft | null> {
   if (!failures.some((f) => LENGTH_CHECK.test(f))) return null;
   const draft = outcome.draft;
   const points = await Promise.all(
     draft.talking_points.map(async (point) => {
-      if (!point.text) return point;
+      if (!point.text || isLocked(point.text)) return point;
       const budget = point.is_product ? 40 : 22;
       const cap = point.is_product ? 45 : 30;
       if (point.text.split(/\s+/).filter(Boolean).length <= cap) return point;
@@ -1014,7 +1030,7 @@ async function compressOverLongItems(
         ...(point.is_product && draft.cta ? [`cta sentence that must stay verbatim: ${draft.cta}`] : []),
       ].join('\n');
       try {
-        const text = (await askClaude(COMPRESS_POINT_SYSTEM, user, 200)).trim();
+        const text = stripDashes(await askClaude(COMPRESS_POINT_SYSTEM, user, 200));
         return text ? { ...point, text } : point;
       } catch (error) {
         console.warn('point compression failed:', error instanceof Error ? error.message : error);
@@ -1024,9 +1040,9 @@ async function compressOverLongItems(
   );
   const hooks = await Promise.all(
     draft.hook_options.map(async (hook) => {
-      if (hook.split(/\s+/).filter(Boolean).length <= 9) return hook;
+      if (isLocked(hook) || hook.split(/\s+/).filter(Boolean).length <= 9) return hook;
       try {
-        const text = (await askClaude(COMPRESS_HOOK_SYSTEM, hook, 60)).trim();
+        const text = stripDashes(await askClaude(COMPRESS_HOOK_SYSTEM, hook, 60));
         return text || hook;
       } catch {
         return hook;
@@ -1042,6 +1058,22 @@ async function compressOverLongItems(
  * logged to brief_validations against the generation_id, which joins to the
  * brief once the client saves it.
  */
+export type GenerateOptions = {
+  /** Texts the manager locked: never flagged, never compressed, so a retry never rewrites them. */
+  lockedTexts?: string[];
+  /** Failures the standard validator cannot know about (the manager's point count). */
+  extraFailures?: (draft: BriefDraftShape) => string[];
+};
+
+const normalizeText = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** A failure that quotes a locked text (or part of one) is about that text. */
+function failureIsAboutLocked(failure: string, locked: string[]): boolean {
+  if (!locked.length) return false;
+  const quoted = [...failure.matchAll(/"([^"]+)"/g)].map((m) => normalizeText(m[1]));
+  return quoted.some((q) => locked.some((l) => l.includes(q) || q.includes(l)));
+}
+
 export async function generateValidated(
   admin: SupabaseClient,
   companyId: string,
@@ -1049,10 +1081,21 @@ export async function generateValidated(
   postType: PostTypeRow | null,
   draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
   validationCtx: { hashtagBank: string[]; approvedClaimIds: string[]; productNames?: string[] },
+  options: GenerateOptions = {},
 ): Promise<{ outcome: GenOutcome; warnings: string[] }> {
   const ctx = {
     ...validationCtx,
     postType: postType ? toPostTypeShape(postType) : null,
+  };
+  const locked = (options.lockedTexts ?? []).map(normalizeText);
+  const isLocked = (text: string) => locked.includes(normalizeText(text));
+  const validate = (draft: BriefDraftShape): ValidationResult => {
+    const base = validateBrief(draft, ctx);
+    const failures = [
+      ...base.failures.filter((f) => !failureIsAboutLocked(f, locked)),
+      ...(options.extraFailures?.(draft) ?? []),
+    ];
+    return { passed: failures.length === 0, failures, warnings: base.warnings };
   };
   const logAttempt = async (attempt: number, res: ValidationResult) => {
     const { error } = await admin.from('brief_validations').insert({
@@ -1078,7 +1121,7 @@ export async function generateValidated(
     ]);
   }
   if (isKill(outcome)) return { outcome, warnings: [] };
-  let result = validateBrief(outcome.draft, ctx);
+  let result = validate(outcome.draft);
   await logAttempt(1, result);
   if (!result.passed) {
     let retry: GenOutcome;
@@ -1094,16 +1137,16 @@ export async function generateValidated(
     }
     if (isKill(retry)) return { outcome: retry, warnings: [] };
     outcome = retry;
-    result = validateBrief(outcome.draft, ctx);
+    result = validate(outcome.draft);
     await logAttempt(2, result);
   }
   // Length is the one failure a whole-brief retry never fixes (it trims a
   // word or drifts the untouched fields), so over-long items are compressed
   // one at a time and spliced back in. Nothing else in the draft moves.
   if (!result.passed && !isKill(outcome)) {
-    const repaired = await compressOverLongItems(outcome, result.failures);
+    const repaired = await compressOverLongItems(outcome, result.failures, isLocked);
     if (repaired) {
-      const repairedResult = validateBrief(repaired.draft, ctx);
+      const repairedResult = validate(repaired.draft);
       await logAttempt(3, repairedResult);
       if (repairedResult.failures.length < result.failures.length) {
         outcome = repaired;
@@ -1140,8 +1183,9 @@ function fallbackLabel(index: number, text: string | null): string | null {
  * point overlay = short label. No separate outro clip: the product CTA rides
  * inside one of the point clips (is_product).
  * single_clip: one hook-kind segment carrying the hook line.
- * slide_per_point: one slide per point, overlay = the point text (read, not
- * spoken); no hook or outro clip.
+ * slide_per_point: a title slide carrying the hook (talking_point_index
+ * null), then one slide per point, overlay = the point text (read, not
+ * spoken); no outro.
  */
 export function deriveSegments(params: {
   clipStructure: PostTypeRow['clip_structure'];
@@ -1162,13 +1206,28 @@ export function deriveSegments(params: {
     ];
   }
   if (clipStructure === 'slide_per_point') {
-    return talkingPoints.map((p, i) => ({
-      slot_index: i,
-      kind: 'slide' as const,
-      talking_point_index: i,
-      overlay_text: p.text,
-      show_on_screen: true,
-    }));
+    // The title slide: the hook over the cover photo, then one slide per point.
+    const cover: SegmentDraft[] = hook?.trim()
+      ? [
+          {
+            slot_index: 0,
+            kind: 'slide',
+            talking_point_index: null,
+            overlay_text: hook.trim(),
+            show_on_screen: true,
+          },
+        ]
+      : [];
+    return [
+      ...cover,
+      ...talkingPoints.map((p, i) => ({
+        slot_index: i + cover.length,
+        kind: 'slide' as const,
+        talking_point_index: i,
+        overlay_text: p.text,
+        show_on_screen: true,
+      })),
+    ];
   }
   const segments: SegmentDraft[] = [
     {

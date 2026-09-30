@@ -8,6 +8,8 @@ import {
   handleCors,
   jsonResponse,
   parseClaudeJson,
+  softenDashes,
+  stripDashes,
 } from '../_shared/wp8.ts';
 import { crawlSite } from '../_shared/crawlSite.ts';
 
@@ -134,7 +136,12 @@ async function generateProfileFields(src: SourceMaterial): Promise<BrandResult> 
   if (!result.audience || !result.products || !Array.isArray(result.pillars)) {
     throw new Error('Claude returned an incomplete brand profile');
   }
-  return result;
+  return {
+    tone: stripDashes(result.tone ?? ''),
+    audience: stripDashes(result.audience),
+    products: stripDashes(result.products),
+    pillars: result.pillars.map((p) => (typeof p === 'string' ? stripDashes(p) : p)),
+  };
 }
 
 const DOC_SPECS: Record<HumanDocKind, string> = {
@@ -155,6 +162,10 @@ async function draftDocs(
   const result = parseClaudeJson<Partial<Record<HumanDocKind, string>>>(
     await askClaude(system, sourceLines(src), 8192),
   );
+  for (const kind of kinds) {
+    const content = result[kind];
+    if (typeof content === 'string') result[kind] = softenDashes(content);
+  }
   return result;
 }
 
@@ -264,7 +275,7 @@ async function refreshLearnings(admin: SupabaseClient, companyId: string): Promi
   if (!Array.isArray(findings) || findings.length === 0) return;
 
   const date = new Date().toISOString().slice(0, 10);
-  const note = `\n\n## Site refresh ${date}\n${findings.map((f) => `- ${f}`).join('\n')}`;
+  const note = `\n\n## Site refresh ${date}\n${findings.map((f) => `- ${softenDashes(f)}`).join('\n')}`;
   await upsertDoc(admin, companyId, 'learnings', `${learnings}${note}`.trim());
 }
 
@@ -318,7 +329,7 @@ const CLEANUP_SPECS: Record<CleanupKind, string> = {
 
 async function cleanupDoc(kind: CleanupKind, content: string): Promise<string> {
   const system = `You clean up brand knowledge documents for a UGC content engine. ${CLEANUP_SPECS[kind]} Rewrite the user's draft into tight markdown: short sections, concrete specifics, no filler, no invented facts or features. Keep every real claim. Do not wrap the answer in JSON or code fences — return only the cleaned markdown document.`;
-  return askOpenAI(system, content.slice(0, 12000), 4096);
+  return softenDashes(await askOpenAI(system, content.slice(0, 12000), 4096));
 }
 
 Deno.serve(async (req) => {

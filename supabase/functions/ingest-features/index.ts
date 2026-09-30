@@ -8,6 +8,7 @@ import {
   handleCors,
   jsonResponse,
   parseClaudeJson,
+  stripDashes,
 } from '../_shared/wp8.ts';
 import { crawlSite } from '../_shared/crawlSite.ts';
 import { isManagerOf } from '../_shared/membership.ts';
@@ -99,9 +100,9 @@ function normalizeName(name: string): string {
 }
 
 function sanitizeFeature(raw: Record<string, unknown>): ExtractedFeature | null {
-  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
-  const what = typeof raw.what_it_does === 'string' ? raw.what_it_does.trim() : '';
-  const claim = typeof raw.claim === 'string' ? raw.claim.trim() : '';
+  const name = typeof raw.name === 'string' ? stripDashes(raw.name.trim()) : '';
+  const what = typeof raw.what_it_does === 'string' ? stripDashes(raw.what_it_does.trim()) : '';
+  const claim = typeof raw.claim === 'string' ? stripDashes(raw.claim.trim()) : '';
   const sourceRef =
     typeof raw.source_ref === 'string' ? raw.source_ref.trim() : '';
   if (!name || !what || !claim || !sourceRef) return null;

@@ -323,7 +323,8 @@ export type RegenField =
   | 'talking_points'
   | 'talking_point'
   | 'hook'
-  | 'caption';
+  | 'caption'
+  | 'title';
 
 /** The editor's current state, sent as context. Nothing is saved. */
 export type RegenDraftPayload = {
@@ -332,6 +333,8 @@ export type RegenDraftPayload = {
   format: BriefFormat;
   point_count: number;
   target_words: number;
+  /** The hook the manager chose or typed; the AI keeps it when told to. */
+  hook: string | null;
   hook_options: string[];
   talking_points: TalkingPoint[];
   cta: string | null;
@@ -362,12 +365,15 @@ export type RegenResult =
       /** Media for the regenerated point alone, or null. */
       point_media: PointMedia | null;
       overlay_label: string | null;
+      /** New plug sentence when the regenerated point is the plug point. */
+      cta: string | null;
       index: number;
       hook_may_be_stale: boolean;
       warnings: string[];
     }
   | { kind: 'hook'; hook_options: string[]; warnings: string[] }
-  | { kind: 'caption'; caption: string; hashtags: string[]; warnings: string[] };
+  | { kind: 'caption'; caption: string; hashtags: string[]; warnings: string[] }
+  | { kind: 'title'; title: string; warnings: string[] };
 
 export async function assistRegenerateField(params: {
   field: RegenField;
@@ -385,7 +391,15 @@ export async function assistRegenerateField(params: {
     },
   });
   if (error) throw error;
-  const raw = data as Record<string, unknown> & { error?: string };
+  return parseRegenResult(data as Record<string, unknown>, params.field, params.index);
+}
+
+/** Shared by the Regenerate buttons and targeted chat revise. */
+function parseRegenResult(
+  raw: Record<string, unknown> & { error?: string },
+  field: RegenField,
+  index?: number,
+): RegenResult {
   if (raw.error) throw new Error(raw.error);
   if (typeof raw.kill_reason === 'string') {
     return { kind: 'kill', kill_reason: raw.kill_reason };
@@ -393,12 +407,18 @@ export async function assistRegenerateField(params: {
   const warnings = Array.isArray(raw.warnings)
     ? raw.warnings.filter((w): w is string => typeof w === 'string')
     : [];
-  switch (params.field) {
+  switch (field) {
     case 'search_phrase':
       return {
         kind: 'search_phrase',
         search_phrase:
           typeof raw.search_phrase === 'string' ? raw.search_phrase : null,
+        warnings,
+      };
+    case 'title':
+      return {
+        kind: 'title',
+        title: typeof raw.title === 'string' ? raw.title : '',
         warnings,
       };
     case 'talking_points':
@@ -427,7 +447,8 @@ export async function assistRegenerateField(params: {
         point_media: parsePointMedia(raw.point_media)[0] ?? null,
         overlay_label:
           typeof raw.overlay_label === 'string' ? raw.overlay_label : null,
-        index: typeof raw.index === 'number' ? raw.index : params.index ?? 0,
+        cta: typeof raw.cta === 'string' ? raw.cta : null,
+        index: typeof raw.index === 'number' ? raw.index : index ?? 0,
         hook_may_be_stale: raw.hook_may_be_stale === true,
         warnings,
       };
@@ -453,7 +474,9 @@ export async function assistRegenerateField(params: {
 export type ReviseTurn = { role: 'manager' | 'ai'; text: string };
 
 export type ReviseResult =
-  | { kind: 'draft'; draft: BriefDraft; revisionNote: string }
+  | { kind: 'draft'; draft: BriefDraft; hook: string | null; revisionNote: string }
+  /** Targeted feedback: one part changed, applied like a Regenerate button. */
+  | { kind: 'field'; result: RegenResult; revisionNote: string }
   | { kind: 'kill'; kill_reason: string };
 
 /**
@@ -479,7 +502,22 @@ export async function assistRevise(params: {
     },
   });
   if (error) throw error;
-  const raw = data as RawDraftResponse & { revision_note?: string };
+  const raw = data as RawDraftResponse & {
+    revision_note?: string;
+    hook?: string | null;
+    scope?: string;
+    field?: RegenField;
+    index?: number;
+  };
+  if (raw.scope === 'field' && raw.field) {
+    const result = parseRegenResult(
+      raw as unknown as Record<string, unknown>,
+      raw.field,
+      raw.index,
+    );
+    if (result.kind === 'kill') return { kind: 'kill', kill_reason: result.kill_reason };
+    return { kind: 'field', result, revisionNote: raw.revision_note ?? '' };
+  }
   const result = toDraftResult(raw, '');
   if (result.kind === 'kill') {
     return { kind: 'kill', kill_reason: result.kill_reason };
@@ -491,6 +529,7 @@ export async function assistRevise(params: {
       example_transcript:
         result.draft.example_transcript ?? params.exampleTranscript ?? null,
     },
+    hook: typeof raw.hook === 'string' && raw.hook.trim() ? raw.hook : null,
     revisionNote: raw.revision_note ?? '',
   };
 }

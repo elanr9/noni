@@ -12,8 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   assistRevise,
-  type BriefDraft,
   type RegenDraftPayload,
+  type ReviseResult,
   type ReviseTurn,
 } from '../../../lib/briefs-api';
 import { useKeyboardHeight } from '../../../lib/keyboard';
@@ -30,7 +30,8 @@ export interface ReviseChatSheetProps {
   getDraft: () => RegenDraftPayload;
   postTypeKey?: string | null;
   exampleTranscript?: string | null;
-  onApply: (draft: BriefDraft) => void;
+  /** A whole rewrite or a single regenerated part; the editor applies either. */
+  onApply: (result: Exclude<ReviseResult, { kind: 'kill' }>) => void;
 }
 
 const STARTERS: readonly string[] = [
@@ -41,9 +42,9 @@ const STARTERS: readonly string[] = [
 
 const REVISE_STEPS: readonly string[] = [
   'Reading your feedback',
-  'Rewriting talking points',
-  'Placing the plug',
-  'Rewriting hooks and caption',
+  'Working out what to change',
+  'Rewriting that part',
+  'Checking it against the rest',
 ];
 
 const APPLIED_NOTE = 'Applied to the editor. Tap Save when you are happy.';
@@ -103,10 +104,10 @@ export function ReviseChatSheet({
         setTurns((prev) => [...prev, { role: 'ai', text: result.kill_reason }]);
         return;
       }
-      onApply(result.draft);
+      onApply(result);
       setTurns((prev) => [
         ...prev,
-        { role: 'ai', text: result.revisionNote || 'Rewrote the post.', applied: true },
+        { role: 'ai', text: result.revisionNote || 'Applied your feedback.', applied: true },
       ]);
     } catch (e) {
       // Drop the failed turn so a retry does not send it twice in history.
@@ -126,12 +127,12 @@ export function ReviseChatSheet({
       visible={visible}
       onClose={onClose}
       title="Revise with AI"
-      subtitle="Tell it what is wrong. It rewrites the post and keeps what you liked."
+      subtitle="Say what is wrong. It fixes that part and leaves the rest alone."
       footer={
         <View onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height + 12)}>
           {busy ? (
             <AiWorkingCard
-              title="Rewriting the post"
+              title="Revising the post"
               steps={REVISE_STEPS}
               family="video"
               style={styles.working}

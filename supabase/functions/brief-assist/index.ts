@@ -26,6 +26,8 @@
 //   Called by the client right after createBrief and after edits that change
 //   points or type.
 
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
+
 import {
   adminClient,
   askClaude,
@@ -35,6 +37,8 @@ import {
   streamJsonResponse,
   loadBrandContext,
   parseClaudeJson,
+  stripDashes,
+  type BrandContext,
 } from '../_shared/wp8.ts';
 import {
   brandDocBlocks,
@@ -64,6 +68,34 @@ import {
   type BriefDraftShape,
   type TalkingPoint,
 } from '../_shared/validateBrief.ts';
+import {
+  applyLocked,
+  captureLocked,
+  constraintFailures,
+  constraintLines,
+  extractConstraints,
+  keptNote,
+  lockedTexts,
+  rememberForCompany,
+} from '../_shared/reviseConstraints.ts';
+
+/** The one line the chat shows after a targeted fix. */
+function fieldNote(field: RegenField, index?: number): string {
+  switch (field) {
+    case 'hook':
+      return 'Rewrote the hook options against your feedback. Everything else is untouched.';
+    case 'title':
+      return 'Rewrote the title. Everything else is untouched.';
+    case 'caption':
+      return 'Rewrote the caption and hashtags. Everything else is untouched.';
+    case 'search_phrase':
+      return 'Rewrote the search phrase. Everything else is untouched.';
+    case 'talking_point':
+      return `Rewrote point ${(index ?? 0) + 1} against your feedback. The other points, the hook and the caption are untouched.`;
+    default:
+      return 'Rewrote the talking points and the plug against your feedback. The hook, title and caption are untouched.';
+  }
+}
 
 type ReviseTurn = { role: 'manager' | 'ai'; text: string };
 
@@ -112,6 +144,7 @@ const REGEN_FIELDS: RegenField[] = [
   'talking_point',
   'hook',
   'caption',
+  'title',
 ];
 
 function parsePoints(value: unknown): TalkingPoint[] {
@@ -154,6 +187,12 @@ function segmentText(overlayText: unknown, overlayStyle: unknown): string | null
   return null;
 }
 
+/** The hook the manager actually chose or typed; hook_options[0] otherwise. */
+function parseChosenHook(raw: Record<string, unknown>, draft: BriefDraftShape): string | null {
+  if (typeof raw.hook === 'string' && raw.hook.trim()) return raw.hook.trim();
+  return draft.hook_options[0]?.trim() || null;
+}
+
 /** Tolerant read of the editor's current draft state. */
 function parseClientDraft(raw: Record<string, unknown>): BriefDraftShape {
   const points = parsePoints(raw.talking_points);
@@ -181,7 +220,7 @@ function parseClientDraft(raw: Record<string, unknown>): BriefDraftShape {
   };
 }
 
-function draftContext(draft: BriefDraftShape): string[] {
+function draftContext(draft: BriefDraftShape, chosenHook: string | null = null): string[] {
   return [
     'Current brief:',
     `Title: ${draft.title || '(none)'}`,
@@ -190,10 +229,11 @@ function draftContext(draft: BriefDraftShape): string[] {
     `Talking points (${draft.talking_points.length}):\n${draft.talking_points
       .map(
         (p, i) =>
-          `[${i}]${p.is_product ? ` (product point, claim ${p.claim_id})` : ''} ${p.text ?? '(empty)'}`,
+          `[${i}]${p.is_product ? ` (product point, claim ${p.claim_id})` : ''}${p.edited_by_admin ? ' (edited by the manager)' : ''} ${p.text ?? '(empty)'}`,
       )
       .join('\n')}`,
     `Plug sentence (cta): ${draft.cta ?? '(none)'}`,
+    ...(chosenHook ? [`Hook the manager is using: ${chosenHook}`] : []),
     `Hook options (best first): ${draft.hook_options.join(' | ') || '(none)'}`,
     `Caption: ${draft.caption || '(none)'}`,
     `Hashtags: ${draft.hashtags.join(' ') || '(none)'}`,
@@ -213,6 +253,7 @@ type RawPointOut = {
 type RawFieldOut = {
   kill_reason?: string;
   search_phrase?: string;
+  title?: string;
   claim_id?: string | null;
   point_count?: number;
   talking_points?: RawPointOut[];
@@ -228,11 +269,213 @@ type RawFieldOut = {
 function toPoint(raw: RawPointOut, fallbackId: string): TalkingPoint {
   return {
     id: raw.id?.trim() || fallbackId,
-    text: typeof raw.text === 'string' ? raw.text : null,
+    text: typeof raw.text === 'string' ? stripDashes(raw.text) : null,
     is_product: raw.is_product === true,
     edited_by_admin: false,
     claim_id: raw.claim_id ?? null,
   };
+}
+
+type FieldRegenArgs = {
+  admin: SupabaseClient;
+  companyId: string;
+  brand: BrandContext;
+  draft: BriefDraftShape;
+  postType: PostTypeRow | null;
+  field: RegenField;
+  index?: number;
+  knownFeatureIds: Set<string>;
+  /** Chat revise: the manager's words, applied to this one part. */
+  feedback?: string;
+  standingInstructions?: string[];
+  requiredPointCount?: number | null;
+};
+
+/**
+ * Regenerates one part of the draft against the rest of it and returns the
+ * response body the editor applies. Shared by the Regenerate buttons and by
+ * chat revise when the feedback only touches one part, so "the hook needs to
+ * be better" costs one small call instead of a whole rewrite.
+ */
+async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unknown>> {
+  const { admin, companyId, brand, draft, postType, field, index, knownFeatureIds } = args;
+  const validationCtx = {
+    ...brandValidationCtx(brand),
+    postType: postType ? toPostTypeShape(postType) : null,
+  };
+  const system = buildFieldSystem(field, postType, draft.format, brandSystemOptions(brand));
+
+  const askLines: string[] = [];
+  if (field === 'talking_point') {
+    askLines.push(
+      `Regenerate the talking point at index ${index}. Every other point stays exactly as given.`,
+    );
+  } else if (field === 'talking_points') {
+    askLines.push('Regenerate the full set of talking points (and the plug).');
+  } else if (field === 'hook') {
+    askLines.push('Regenerate the hook options against the talking points above.');
+  } else if (field === 'caption') {
+    askLines.push('Regenerate the caption and hashtags for the brief above.');
+  } else if (field === 'title') {
+    askLines.push('Rewrite the title for the brief above.');
+  } else {
+    askLines.push('Regenerate the search phrase for the brief above.');
+  }
+  if (args.standingInstructions?.length) {
+    askLines.push(
+      `Standing instructions from the manager (always in force):\n${args.standingInstructions.map((s) => `- ${s}`).join('\n')}`,
+    );
+  }
+  if (args.feedback) {
+    askLines.push(
+      `The manager's feedback on this part (it is law; the new version must fix exactly this):\n${args.feedback.slice(0, 3000)}`,
+    );
+  }
+  const requiredCount = field === 'talking_points' ? args.requiredPointCount ?? null : null;
+  if (requiredCount !== null) {
+    askLines.push(
+      `REQUIRED POINT COUNT: the manager asked for exactly ${requiredCount} talking points. point_count is ${requiredCount} and talking_points has exactly ${requiredCount} entries; this overrides the post type's range.`,
+    );
+  }
+  const validate = (merged: BriefDraftShape) => {
+    const base = validateBrief(merged, validationCtx);
+    if (requiredCount !== null && merged.talking_points.length !== requiredCount) {
+      base.failures.push(
+        `the manager asked for exactly ${requiredCount} talking points and you returned ${merged.talking_points.length}; write exactly ${requiredCount}`,
+      );
+      base.passed = false;
+    }
+    return base;
+  };
+
+  const generate = async (priorFailures: string[]): Promise<RawFieldOut> => {
+    const lines = [...draftContext(draft), '', ...askLines];
+    if (priorFailures.length) {
+      lines.push(retryMessage(priorFailures, 'answer'));
+    }
+    const raw = await askClaude(system, lines.join('\n\n'), 8000, {
+      cachedPrefix: brandDocBlocks(brand).join('\n\n'),
+    });
+    return parseClaudeJson<RawFieldOut>(raw);
+  };
+
+  // Merge the regenerated field into the draft so validation sees the
+  // post as the editor will after applying it.
+  const merge = (
+    out: RawFieldOut,
+  ): {
+    merged: BriefDraftShape;
+    overlayLabels: (string | null)[];
+    featureIds: (string | null)[];
+  } => {
+    const merged: BriefDraftShape = { ...draft };
+    let overlayLabels: (string | null)[] = [];
+    let featureIds: (string | null)[] = [];
+    if (field === 'search_phrase') {
+      merged.search_phrase = out.search_phrase?.trim()
+        ? stripDashes(out.search_phrase)
+        : draft.search_phrase;
+    } else if (field === 'title') {
+      merged.title = out.title?.trim() ? stripDashes(out.title) : draft.title;
+    } else if (field === 'talking_points') {
+      const points = (out.talking_points ?? []).map((p, i) =>
+        toPoint(p, `p${i + 1}-${crypto.randomUUID().slice(0, 8)}`),
+      );
+      overlayLabels = (out.talking_points ?? []).map((p) =>
+        typeof p.overlay_label === 'string' && p.overlay_label.trim()
+          ? stripDashes(p.overlay_label)
+          : null,
+      );
+      featureIds = (out.talking_points ?? []).map((p) =>
+        sanitizeFeatureId(p.feature_id, knownFeatureIds),
+      );
+      merged.talking_points = points;
+      merged.point_count =
+        typeof out.point_count === 'number' ? out.point_count : points.length;
+      merged.cta =
+        typeof out.cta === 'string' && out.cta.trim() ? stripDashes(out.cta) : null;
+      merged.script =
+        draft.format === 'photo_carousel' && out.script ? stripDashes(out.script) : null;
+      if (typeof out.target_words === 'number') merged.target_words = out.target_words;
+    } else if (field === 'talking_point') {
+      const at = index!;
+      const current = draft.talking_points[at];
+      // Force the original id; the point is regenerated in place and the
+      // model cannot be trusted to keep it.
+      const point = out.talking_point
+        ? { ...toPoint(out.talking_point, current.id), id: current.id, script: current.script }
+        : current;
+      merged.talking_points = draft.talking_points.map((p, i) => (i === at ? point : p));
+      // The plug sentence lives in cta too; a regenerated plug point carries
+      // its new sentence there.
+      if (point.is_product && typeof out.cta === 'string' && out.cta.trim()) {
+        merged.cta = stripDashes(out.cta);
+      }
+      overlayLabels =
+        typeof out.talking_point?.overlay_label === 'string'
+          ? [stripDashes(out.talking_point.overlay_label)]
+          : [null];
+      featureIds = [sanitizeFeatureId(out.talking_point?.feature_id, knownFeatureIds)];
+    } else if (field === 'hook') {
+      merged.hook_options = sortHooks(out.hook_options).map(stripDashes);
+    } else {
+      merged.caption = out.caption ? stripDashes(out.caption) : draft.caption;
+      merged.hashtags = Array.isArray(out.hashtags)
+        ? out.hashtags.map((h) => String(h).replace(/[-–—]/g, ''))
+        : draft.hashtags;
+    }
+    return { merged, overlayLabels, featureIds };
+  };
+
+  let out = await generate([]);
+  if (out.kill_reason?.trim()) return { kill_reason: stripDashes(out.kill_reason) };
+  let { merged, overlayLabels, featureIds } = merge(out);
+  let result = validate(merged);
+  if (!result.passed) {
+    out = await generate(result.failures);
+    if (out.kill_reason?.trim()) return { kill_reason: stripDashes(out.kill_reason) };
+    ({ merged, overlayLabels, featureIds } = merge(out));
+    result = validate(merged);
+  }
+  const warnings = result.passed
+    ? result.warnings
+    : [...result.failures, ...result.warnings];
+
+  // Body changed under the hook: it was written against different content.
+  // Flag it; never regenerate the hook silently, the admin may have
+  // hand-written it.
+  const hookMayBeStale = field === 'talking_points' || field === 'talking_point';
+  const family = postType?.family ?? draft.format;
+
+  if (field === 'search_phrase') return { search_phrase: merged.search_phrase, warnings };
+  if (field === 'title') return { title: merged.title, warnings };
+  if (field === 'talking_points') {
+    return {
+      talking_points: merged.talking_points,
+      cta: merged.cta,
+      point_count: merged.point_count,
+      script: merged.script,
+      target_words: merged.target_words,
+      overlay_labels: overlayLabels,
+      point_media: await resolvePointMedia(admin, companyId, brand.features, featureIds, merged.talking_points, family),
+      hook_may_be_stale: hookMayBeStale,
+      warnings,
+    };
+  }
+  if (field === 'talking_point') {
+    const point = merged.talking_points[index!];
+    return {
+      talking_point: point,
+      cta: merged.cta,
+      overlay_label: overlayLabels[0] ?? null,
+      point_media: await resolvePointMedia(admin, companyId, brand.features, featureIds, [point], family),
+      index,
+      hook_may_be_stale: hookMayBeStale,
+      warnings,
+    };
+  }
+  if (field === 'hook') return { hook_options: merged.hook_options, warnings };
+  return { caption: merged.caption, hashtags: merged.hashtags, warnings };
 }
 
 Deno.serve(async (req) => {
@@ -417,18 +660,96 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'draft required' }, 400);
       }
       const draft = parseClientDraft(body.draft);
-      let postType: PostTypeRow | null = null;
-      if (body.post_type?.trim()) {
-        postType = await loadPostType(admin, caller.companyId, body.post_type.trim());
-        if (!postType) {
-          return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
-        }
-      }
-      const brand = await loadBrandContext(admin, caller.companyId);
-      const generationId = crypto.randomUUID();
-      const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
+      const chosenHook = parseChosenHook(body.draft, draft);
       const history = parseHistory(body.history);
       const exampleTranscript = body.example_transcript?.trim() || null;
+      const loadedType = body.post_type?.trim()
+        ? await loadPostType(admin, caller.companyId, body.post_type.trim())
+        : null;
+      if (body.post_type?.trim() && !loadedType) {
+        return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
+      }
+      const [brand, constraints] = await Promise.all([
+        loadBrandContext(admin, caller.companyId),
+        extractConstraints(
+          history.filter((t) => t.role === 'manager').map((t) => t.text),
+          feedback,
+          draft.talking_points.length,
+        ),
+      ]);
+      // "We do not have that feature, do not do that again" is saved for
+      // every future post and applied to this one right now.
+      const remembered = await rememberForCompany(admin, caller.companyId, constraints.remember);
+      const standing = [
+        ...constraints.standingInstructions,
+        ...constraints.remember.map((r) => r.insight),
+      ];
+      const rememberedNote = remembered.length
+        ? ` Noted for every future post: ${remembered.map((r) => r.insight).join(' ')}`
+        : '';
+      // The manager's count outranks the post type's range, in the prompt
+      // and in validation alike.
+      const postType: PostTypeRow | null =
+        loadedType && constraints.pointCount !== null
+          ? { ...loadedType, min_points: constraints.pointCount, max_points: constraints.pointCount }
+          : loadedType;
+      const knownFeatureIds = new Set(brand.features.map((f) => f.id));
+
+      // Targeted feedback regenerates one part and leaves the rest untouched;
+      // "the hook needs to be better" never costs a whole rewrite.
+      const productIndex = draft.talking_points.findIndex((p) => p.is_product);
+      const targeted: { field: RegenField; index?: number } | null = (() => {
+        switch (constraints.scope) {
+          case 'hook':
+            return draft.talking_points.length ? { field: 'hook' } : null;
+          case 'title':
+            return { field: 'title' };
+          case 'caption':
+            return { field: 'caption' };
+          case 'search_phrase':
+            return { field: 'search_phrase' };
+          case 'cta':
+            return productIndex >= 0
+              ? { field: 'talking_point', index: productIndex }
+              : { field: 'talking_points' };
+          case 'point':
+            return constraints.pointIndex !== null
+              ? { field: 'talking_point', index: constraints.pointIndex }
+              : { field: 'talking_points' };
+          case 'points':
+            return { field: 'talking_points' };
+          default:
+            return null;
+        }
+      })();
+      if (targeted) {
+        return streamJsonResponse(async () => {
+          const out = await regenerateField({
+            admin,
+            companyId: caller.companyId,
+            brand,
+            draft,
+            postType,
+            field: targeted.field,
+            index: targeted.index,
+            knownFeatureIds,
+            feedback,
+            standingInstructions: standing,
+            requiredPointCount: constraints.pointCount,
+          });
+          if (typeof out.kill_reason === 'string') return out;
+          return {
+            ...out,
+            scope: 'field',
+            field: targeted.field,
+            revision_note: `${fieldNote(targeted.field, targeted.index)}${rememberedNote}`,
+          };
+        });
+      }
+
+      const locked = captureLocked(draft, chosenHook, constraints);
+      const generationId = crypto.randomUUID();
+      const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
       let revisionNote = '';
 
       // A full rewrite runs past the gateway's 150s idle timeout; stream
@@ -440,7 +761,7 @@ Deno.serve(async (req) => {
           generationId,
           postType,
           async (priorFailures) => {
-            const lines = [...draftContext(draft)];
+            const lines = [...draftContext(draft, chosenHook)];
             if (exampleTranscript) {
               lines.push(
                 `Reference post this brief was modeled on (structure and hook shape only, never its niche or product):\n${exampleTranscript.slice(0, 2000)}`,
@@ -454,6 +775,7 @@ Deno.serve(async (req) => {
               );
             }
             lines.push(`Newest feedback from the manager (apply all of it):\n${feedback.slice(0, 3000)}`);
+            lines.push(...constraintLines({ ...constraints, standingInstructions: standing }, locked));
             if (priorFailures.length) {
               lines.push(
                 retryMessage(priorFailures, 'revision'),
@@ -468,21 +790,33 @@ Deno.serve(async (req) => {
           const parsed = parseClaudeJson<RawGenerated>(raw);
           revisionNote =
               typeof parsed.revision_note === 'string' ? parsed.revision_note.trim() : '';
-            return normalizeGenerated(
+            const generated = normalizeGenerated(
               parsed,
               postType ? postType.family : draft.format,
               postType?.key ?? null,
               new Set(brand.features.map((f) => f.id)),
             );
+            if (isKill(generated)) return generated;
+            // Locks are enforced here, not trusted: the model's output is
+            // overwritten before validation ever sees it.
+            return { ...generated, draft: applyLocked(generated.draft, locked) };
           },
           brandValidationCtx(brand),
+          {
+            lockedTexts: lockedTexts(locked),
+            extraFailures: (d) => constraintFailures(d, constraints),
+          },
         );
         if (isKill(outcome)) {
           return { kill_reason: outcome.kill_reason, generation_id: generationId };
         }
+        const kept = keptNote(constraints, locked);
+        const note = stripDashes(revisionNote) || 'Revised the post against your feedback.';
         return {
           ...outcome.draft,
-          revision_note: revisionNote || 'Revised the post against your feedback.',
+          scope: 'full',
+          hook: locked.hook ?? outcome.draft.hook_options[0] ?? null,
+          revision_note: `${kept ? `${note} ${kept}` : note}${rememberedNote}`,
           overlay_labels: outcome.overlayLabels,
           point_media: await resolvePointMedia(
             admin,
@@ -533,158 +867,18 @@ Deno.serve(async (req) => {
       }
     }
     const brand = await loadBrandContext(admin, caller.companyId);
-    const validationCtx = {
-      ...brandValidationCtx(brand),
-      postType: postType ? toPostTypeShape(postType) : null,
-    };
-    const system = buildFieldSystem(field, postType, draft.format, brandSystemOptions(brand));
-    const knownFeatureIds = new Set(brand.features.map((f) => f.id));
-
-    const askLines: string[] = [];
-    if (field === 'talking_point') {
-      askLines.push(
-        `Regenerate the talking point at index ${body.index}. Every other point stays exactly as given.`,
-      );
-    } else if (field === 'talking_points') {
-      askLines.push('Regenerate the full set of talking points (and the plug).');
-    } else if (field === 'hook') {
-      askLines.push('Regenerate the hook options against the talking points above.');
-    } else if (field === 'caption') {
-      askLines.push('Regenerate the caption and hashtags for the brief above.');
-    } else {
-      askLines.push('Regenerate the search phrase for the brief above.');
-    }
-
-    const generate = async (priorFailures: string[]): Promise<RawFieldOut> => {
-      const lines = [...draftContext(draft), '', ...askLines];
-      if (priorFailures.length) {
-        lines.push(
-          retryMessage(priorFailures, 'answer'),
-        );
-      }
-      const raw = await askClaude(
-        system,
-        lines.join('\n\n'),
-        8000,
-        { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
-      );
-      return parseClaudeJson<RawFieldOut>(raw);
-    };
-
-    // Merge the regenerated field into the draft so validation sees the
-    // post as the editor will after applying it.
-    const merge = (
-      out: RawFieldOut,
-    ): {
-      merged: BriefDraftShape;
-      overlayLabels: (string | null)[];
-      featureIds: (string | null)[];
-    } => {
-      const merged: BriefDraftShape = { ...draft };
-      let overlayLabels: (string | null)[] = [];
-      let featureIds: (string | null)[] = [];
-      if (field === 'search_phrase') {
-        merged.search_phrase = out.search_phrase?.trim() || draft.search_phrase;
-      } else if (field === 'talking_points') {
-        const points = (out.talking_points ?? []).map((p, i) =>
-          toPoint(p, `p${i + 1}-${crypto.randomUUID().slice(0, 8)}`),
-        );
-        overlayLabels = (out.talking_points ?? []).map((p) =>
-          typeof p.overlay_label === 'string' && p.overlay_label.trim()
-            ? p.overlay_label.trim()
-            : null,
-        );
-        featureIds = (out.talking_points ?? []).map((p) =>
-          sanitizeFeatureId(p.feature_id, knownFeatureIds),
-        );
-        merged.talking_points = points;
-        merged.point_count =
-          typeof out.point_count === 'number' ? out.point_count : points.length;
-        merged.cta =
-          typeof out.cta === 'string' && out.cta.trim() ? out.cta.trim() : null;
-        merged.script =
-          draft.format === 'photo_carousel' ? (out.script ?? null) : null;
-        if (typeof out.target_words === 'number') merged.target_words = out.target_words;
-      } else if (field === 'talking_point') {
-        const index = body.index!;
-        const current = draft.talking_points[index];
-        // Force the original id; the point is regenerated in place and the
-        // model cannot be trusted to keep it.
-        const point = out.talking_point
-          ? { ...toPoint(out.talking_point, current.id), id: current.id, script: current.script }
-          : current;
-        merged.talking_points = draft.talking_points.map((p, i) =>
-          i === index ? point : p,
-        );
-        overlayLabels =
-          typeof out.talking_point?.overlay_label === 'string'
-            ? [out.talking_point.overlay_label.trim()]
-            : [null];
-        featureIds = [sanitizeFeatureId(out.talking_point?.feature_id, knownFeatureIds)];
-      } else if (field === 'hook') {
-        merged.hook_options = sortHooks(out.hook_options);
-      } else {
-        merged.caption = out.caption ?? draft.caption;
-        merged.hashtags = Array.isArray(out.hashtags)
-          ? out.hashtags.map((h) => String(h))
-          : draft.hashtags;
-      }
-      return { merged, overlayLabels, featureIds };
-    };
-
-    let out = await generate([]);
-    if (out.kill_reason?.trim()) {
-      return jsonResponse({ kill_reason: out.kill_reason.trim() });
-    }
-    let { merged, overlayLabels, featureIds } = merge(out);
-    let result = validateBrief(merged, validationCtx);
-    if (!result.passed) {
-      out = await generate(result.failures);
-      if (out.kill_reason?.trim()) {
-        return jsonResponse({ kill_reason: out.kill_reason.trim() });
-      }
-      ({ merged, overlayLabels, featureIds } = merge(out));
-      result = validateBrief(merged, validationCtx);
-    }
-    const warnings = result.passed
-      ? result.warnings
-      : [...result.failures, ...result.warnings];
-
-    // Body changed under the hook: it was written against different content.
-    // Flag it; never regenerate the hook silently, the admin may have
-    // hand-written it.
-    const hookMayBeStale = field === 'talking_points' || field === 'talking_point';
-
-    if (field === 'search_phrase') {
-      return jsonResponse({ search_phrase: merged.search_phrase, warnings });
-    }
-    if (field === 'talking_points') {
-      return jsonResponse({
-        talking_points: merged.talking_points,
-        cta: merged.cta,
-        point_count: merged.point_count,
-        script: merged.script,
-        target_words: merged.target_words,
-        overlay_labels: overlayLabels,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, merged.talking_points, postType?.family ?? draft.format),
-        hook_may_be_stale: hookMayBeStale,
-        warnings,
-      });
-    }
-    if (field === 'talking_point') {
-      return jsonResponse({
-        talking_point: merged.talking_points[body.index!],
-        overlay_label: overlayLabels[0] ?? null,
-        point_media: await resolvePointMedia(admin, caller.companyId, brand.features, featureIds, [merged.talking_points[body.index!]], postType?.family ?? draft.format),
+    return jsonResponse(
+      await regenerateField({
+        admin,
+        companyId: caller.companyId,
+        brand,
+        draft,
+        postType,
+        field,
         index: body.index,
-        hook_may_be_stale: hookMayBeStale,
-        warnings,
-      });
-    }
-    if (field === 'hook') {
-      return jsonResponse({ hook_options: merged.hook_options, warnings });
-    }
-    return jsonResponse({ caption: merged.caption, hashtags: merged.hashtags, warnings });
+        knownFeatureIds: new Set(brand.features.map((f) => f.id)),
+      }),
+    );
   } catch (e) {
     console.error('brief-assist error:', e);
     return jsonResponse(

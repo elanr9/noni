@@ -101,6 +101,8 @@ import {
   type PostType,
   type RegenDraftPayload,
   type RegenField,
+  type RegenResult,
+  type ReviseResult,
   type TalkingPoint,
   type TextOverlay,
 } from '../../../lib/briefs-api';
@@ -455,6 +457,7 @@ export default function PostEditorScreen() {
       format: currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video',
       point_count: points.length,
       target_words: targetWords,
+      hook: resolvedHook(),
       hook_options: hookOptions,
       talking_points: points,
       cta: cta.trim() || null,
@@ -466,12 +469,20 @@ export default function PostEditorScreen() {
   }
 
   /** Mirrors the talking_points regen path: labels and media land on Save. */
-  function applyRevisedDraft(draft: BriefDraft) {
+  function applyRevisedDraft(draft: BriefDraft, hook: string | null) {
     setTitle(draft.title);
     setSearchPhrase(draft.search_phrase ?? '');
     setHookOptions(draft.hook_options);
-    setChosenHookIndex(0);
-    setUseCustomHook(false);
+    // A locked hook comes back at the front; a typed hook the server did
+    // not fold into the options is kept as the custom hook.
+    const hookIndex = hook ? draft.hook_options.indexOf(hook) : 0;
+    if (hook && hookIndex < 0) {
+      setCustomHook(hook);
+      setUseCustomHook(true);
+    } else {
+      setChosenHookIndex(Math.max(0, hookIndex));
+      setUseCustomHook(false);
+    }
     setPoints(draft.talking_points);
     setCta(draft.cta ?? '');
     setCaption(draft.caption);
@@ -484,6 +495,62 @@ export default function PostEditorScreen() {
     setPendingOverlayLabels(draft.overlay_labels);
     pendingPointMedia.current = draft.point_media;
     if (family === 'photo_carousel') slideRegenPending.current = true;
+  }
+
+  /** Applies one regenerated part; shared by the Regenerate buttons and chat revise. */
+  function applyRegenResult(result: Exclude<RegenResult, { kind: 'kill' }>) {
+    setWarnings(result.warnings);
+    switch (result.kind) {
+      case 'search_phrase':
+        if (result.search_phrase) setSearchPhrase(result.search_phrase);
+        break;
+      case 'title':
+        if (result.title) setTitle(result.title);
+        break;
+      case 'talking_points':
+        setPoints(result.talking_points);
+        setCta(result.cta ?? '');
+        if (result.script !== null) setScript(result.script);
+        if (result.target_words !== null) setTargetWords(result.target_words);
+        setPendingOverlayLabels(result.overlay_labels);
+        pendingPointMedia.current = result.point_media;
+        if (family === 'photo_carousel') slideRegenPending.current = true;
+        break;
+      case 'talking_point': {
+        setPoints((prev) =>
+          prev.map((p, i) => (i === result.index ? result.talking_point : p)),
+        );
+        if (result.talking_point.is_product && result.cta) setCta(result.cta);
+        if (result.point_media) {
+          const sparse: (PointMedia | null)[] = [...pendingPointMedia.current];
+          sparse[result.index] = result.point_media;
+          pendingPointMedia.current = sparse;
+        }
+        setPendingOverlayLabels((prev) => {
+          const next = prev ? [...prev] : points.map(() => null);
+          next[result.index] = result.overlay_label;
+          return next;
+        });
+        break;
+      }
+      case 'hook':
+        setHookOptions(result.hook_options);
+        setChosenHookIndex(0);
+        setUseCustomHook(false);
+        break;
+      case 'caption':
+        setCaption(result.caption);
+        setHashtags(result.hashtags);
+        break;
+    }
+  }
+
+  function applyRevise(result: Exclude<ReviseResult, { kind: 'kill' }>) {
+    if (result.kind === 'field') {
+      if (result.result.kind !== 'kill') applyRegenResult(result.result);
+      return;
+    }
+    applyRevisedDraft(result.draft, result.hook);
   }
 
   async function regenerate(field: RegenField, index?: number) {
@@ -499,45 +566,7 @@ export default function PostEditorScreen() {
         Alert.alert('Generation refused', result.kill_reason);
         return;
       }
-      setWarnings(result.warnings);
-      switch (result.kind) {
-        case 'search_phrase':
-          if (result.search_phrase) setSearchPhrase(result.search_phrase);
-          break;
-        case 'talking_points':
-          setPoints(result.talking_points);
-          setCta(result.cta ?? '');
-          if (result.script !== null) setScript(result.script);
-          if (result.target_words !== null) setTargetWords(result.target_words);
-          setPendingOverlayLabels(result.overlay_labels);
-          pendingPointMedia.current = result.point_media;
-          if (family === 'photo_carousel') slideRegenPending.current = true;
-          break;
-        case 'talking_point': {
-          setPoints((prev) =>
-            prev.map((p, i) => (i === result.index ? result.talking_point : p)),
-          );
-          if (result.point_media) {
-            const sparse: (PointMedia | null)[] = [...pendingPointMedia.current];
-            sparse[result.index] = result.point_media;
-            pendingPointMedia.current = sparse;
-          }
-          setPendingOverlayLabels((prev) => {
-            const next = prev ? [...prev] : points.map(() => null);
-            next[result.index] = result.overlay_label;
-            return next;
-          });
-          break;
-        }
-        case 'hook':
-          setHookOptions(result.hook_options);
-          setChosenHookIndex(0);
-          break;
-        case 'caption':
-          setCaption(result.caption);
-          setHashtags(result.hashtags);
-          break;
-      }
+      applyRegenResult(result);
     } catch (e) {
       Alert.alert(
         'Could not regenerate',
@@ -547,6 +576,7 @@ export default function PostEditorScreen() {
       setRegenBusy(null);
     }
   }
+
 
   function resolvedHook(): string | null {
     if (useCustomHook) return customHook.trim() || null;
@@ -690,23 +720,26 @@ export default function PostEditorScreen() {
           textStyle,
         );
         // Regenerated slide copy replaces each surviving slide's text boxes;
-        // derivation alone only seeds brand-new segments.
-        if (
-          slideRegenPending.current &&
-          currentType?.family === 'photo_carousel'
-        ) {
+        // derivation alone only seeds brand-new segments. The title slide
+        // follows the hook whenever the hook changed.
+        if (currentType?.family === 'photo_carousel') {
+          const regenAll = slideRegenPending.current;
           slideRegenPending.current = false;
+          const coverText = resolvedHook() ?? '';
           rows = await Promise.all(
             rows.map(async (row) => {
-              if (row.kind !== 'slide' || row.talking_point_index === null) {
-                return row;
-              }
-              const text = points[row.talking_point_index]?.text?.trim() ?? '';
+              if (row.kind !== 'slide') return row;
+              const isCover = row.talking_point_index === null;
+              if (isCover && !regenAll && (row.overlay_text ?? '') === coverText) return row;
+              if (!isCover && !regenAll) return row;
+              const text = isCover
+                ? coverText
+                : points[row.talking_point_index ?? -1]?.text?.trim() ?? '';
               const patch = serializeOverlayBoxes(
                 text
                   ? [
                       newOverlayBox({
-                        id: `slide-${row.talking_point_index}-box-0`,
+                        id: `slide-${isCover ? 'cover' : row.talking_point_index}-box-0`,
                         text,
                         style: textStyle,
                         themeColor,
@@ -1270,6 +1303,18 @@ export default function PostEditorScreen() {
           spokenText: hookText,
         });
       }
+    } else {
+      const cover = segments.find((s) => s.kind === 'slide' && s.talking_point_index === null);
+      if (cover) {
+        const hookText = useCustomHook ? customHook : hookOptions[chosenHookIndex] ?? null;
+        clips.push({
+          key: cover.id,
+          label: 'Title',
+          segment: unsavedCopy ? withPreviewText(cover, hookText) : cover,
+          shot: shotFor(cover),
+          spokenText: null,
+        });
+      }
     }
     points.forEach((point, i) => {
       const segment = segments.find(
@@ -1770,7 +1815,7 @@ export default function PostEditorScreen() {
         getDraft={buildRegenPayload}
         postTypeKey={currentType?.key ?? null}
         exampleTranscript={exampleTranscript}
-        onApply={applyRevisedDraft}
+        onApply={applyRevise}
       />
       <PortSheet
         visible={portSheet !== null}

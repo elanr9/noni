@@ -34,11 +34,13 @@ import {
   normalizeGenerated,
   pickPostType,
   resolvePointMedia,
+  type GenerateOptions,
   type GenOutcome,
   type PointMedia,
   type PostTypeRow,
   type RawGenerated,
 } from '../_shared/generateBrief.ts';
+import { regexConstraints } from '../_shared/reviseConstraints.ts';
 import type { TalkingPoint } from '../_shared/validateBrief.ts';
 import { readSocialPost, socialHost } from '../_shared/scrapeSocial.ts';
 import {
@@ -205,13 +207,33 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
     }
   }
+  // A count the manager typed into the angle ("give me 5 points") is
+  // enforced, not hoped for: it overrides the type's range and a wrong count
+  // is a validation failure.
+  const askedCount = context ? regexConstraints(context).pointCount : null;
+  const countLine =
+    askedCount !== null
+      ? `REQUIRED POINT COUNT: the manager asked for exactly ${askedCount} talking points. point_count is ${askedCount} and talking_points has exactly ${askedCount} entries; this overrides the post type's range. A numbered list title leads with ${askedCount}.`
+      : null;
+  const countOptions: GenerateOptions = {
+    extraFailures: (d) =>
+      askedCount !== null && d.talking_points.length !== askedCount
+        ? [
+            `the manager asked for exactly ${askedCount} talking points and you returned ${d.talking_points.length}; write exactly ${askedCount}, each a real point, never padding and never merging`,
+          ]
+        : [],
+  };
   const resolvePostType = async (
     sourceLines: string[],
     fallbackFamily: 'video' | 'photo_carousel',
     mode: 'fit' | 'mirror' = 'fit',
   ): Promise<PostTypeRow | null> => {
-    if (!autoType) return requestedType;
-    return pickPostType(admin, caller.companyId, body.family ?? fallbackFamily, sourceLines, mode);
+    const type = autoType
+      ? await pickPostType(admin, caller.companyId, body.family ?? fallbackFamily, sourceLines, mode)
+      : requestedType;
+    return type && askedCount !== null
+      ? { ...type, min_points: askedCount, max_points: askedCount }
+      : type;
   };
 
   // Query path: no scrape / transcribe / OCR. This is the grid's path: the
@@ -227,6 +249,7 @@ Deno.serve(async (req) => {
         `Search phrase (set search_phrase in the JSON to exactly this string): ${query}`,
         'Invent the structure from the search phrase and brand.',
         ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
+        ...(countLine ? [countLine] : []),
       ];
       const postType = await resolvePostType(sourceLines, 'video');
       const { outcome, warnings } = await generateValidated(
@@ -237,6 +260,7 @@ Deno.serve(async (req) => {
         (priorFailures) =>
           generateOnce(brand, postType, 'video', sourceLines, priorFailures),
         validationCtx,
+        countOptions,
       );
       if (isKill(outcome)) {
         return {
@@ -302,7 +326,7 @@ Deno.serve(async (req) => {
       const brand: BrandContext = { ...loaded, features };
       const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
-      const sourceLines = featureSourceLines(feature, context);
+      const sourceLines = [...featureSourceLines(feature, context), ...(countLine ? [countLine] : [])];
       const postType = await resolvePostType(sourceLines, 'video');
       const { outcome, warnings } = await generateValidated(
         admin,
@@ -312,6 +336,7 @@ Deno.serve(async (req) => {
         (priorFailures) =>
           generateOnce(brand, postType, 'video', sourceLines, priorFailures),
         validationCtx,
+        countOptions,
       );
       if (isKill(outcome)) {
         return {
@@ -353,7 +378,7 @@ Deno.serve(async (req) => {
       const brand = await loadBrandContext(admin, caller.companyId);
       const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
-      const sourceLines = mediaSourceLines(media, context);
+      const sourceLines = [...mediaSourceLines(media, context), ...(countLine ? [countLine] : [])];
       const postType = await resolvePostType(sourceLines, 'video');
       const mediaFamily = postType?.family ?? body.family ?? 'video';
       if (mediaFamily === 'photo_carousel' && media.kind === 'recording') {
@@ -367,6 +392,7 @@ Deno.serve(async (req) => {
         (priorFailures) =>
           generateOnce(brand, postType, 'video', sourceLines, priorFailures),
         validationCtx,
+        countOptions,
       );
       if (isKill(outcome)) {
         return {
@@ -473,6 +499,7 @@ Deno.serve(async (req) => {
           ]
         : []),
       `Keep the hook shape, the structure, the pacing and the level of detail of this reference; match how specific its points are and how its on-screen text reads. Rewrite every line in fresh words. Its insider facts may be used when they are true for this brand's audience, reworded, never copied. The plug names ${brand.productName} out loud; the reference's product is never mentioned. Do not mention the original creator.`,
+      ...(countLine ? [countLine] : []),
     ];
 
     // Nothing is saved yet, so brief_id stays null; generation_id joins the
@@ -487,6 +514,7 @@ Deno.serve(async (req) => {
       (priorFailures) =>
         generateOnce(brand, postType, post.format, sourceLines, priorFailures),
       validationCtx,
+      countOptions,
     );
     if (isKill(outcome)) {
       return {

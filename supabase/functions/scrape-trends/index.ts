@@ -18,6 +18,7 @@ import {
   loadBrandContext,
   loadGoldenExamples,
   parseClaudeJson,
+  stripDashes,
   type BrandContext,
   type SourcingTerm,
 } from '../_shared/wp8.ts';
@@ -534,7 +535,12 @@ async function annotate(items: EnrichedItem[]): Promise<Annotation[]> {
       return `Item ${i} (${it.platform} ${it.format}, ${it.views} views)\nCaption: ${it.caption.slice(0, 300)}\n${body}`;
     })
     .join('\n\n');
-  return parseClaudeJson<Annotation[]>(await askClaude(system, user, 4096));
+  const notes = parseClaudeJson<Annotation[]>(await askClaude(system, user, 4096));
+  return notes.map((n) => ({
+    ...n,
+    hook: typeof n.hook === 'string' ? stripDashes(n.hook) : n.hook,
+    why_it_works: typeof n.why_it_works === 'string' ? stripDashes(n.why_it_works) : n.why_it_works,
+  }));
 }
 
 // Relevance gate: niche corpus only. Format donors are cross-vertical by

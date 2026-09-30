@@ -10,6 +10,7 @@ import type {
   ReviewSuggestion,
   TalkingPoint,
 } from './validateBrief.ts';
+import { stripDashes } from './wp8.ts';
 
 export type ReviewScores = {
   overall: number;
@@ -162,7 +163,7 @@ function toSuggestion(raw: RawTier2Item['suggestion']): ReviewSuggestion | undef
   return {
     field,
     ...(typeof raw.index === 'number' ? { index: raw.index } : {}),
-    replacement: raw.replacement.trim(),
+    replacement: stripDashes(raw.replacement.trim()),
   };
 }
 
@@ -176,7 +177,7 @@ export function parseTier2(raw: RawTier2): ReviewCheck[] {
   ) => {
     if (!item?.fired) return;
     const evidence = typeof item.evidence === 'string' && item.evidence.trim()
-      ? `: "${item.evidence.trim()}"`
+      ? `: "${stripDashes(item.evidence.trim())}"`
       : '';
     checks.push({
       check_id,
@@ -213,7 +214,7 @@ export function parseTier3(raw: RawTier3): { result: Tier3Result; checks: Review
   const spoken = raw.spoken !== false;
   const worstLine =
     typeof raw.worst_line === 'string' && raw.worst_line.trim()
-      ? raw.worst_line.trim()
+      ? stripDashes(raw.worst_line.trim())
       : null;
   const result: Tier3Result = { spoken, worst_line: spoken ? null : worstLine };
   const checks: ReviewCheck[] = spoken

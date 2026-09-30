@@ -413,6 +413,40 @@ export function parseClaudeJson<T>(text: string): T {
   return JSON.parse(stripped.slice(start)) as T;
 }
 
+/**
+ * No dashes, ever, in anything a viewer or manager reads. Em and en dashes
+ * and spaced hyphens become a comma; a hyphen between words becomes a space
+ * ("follow-up" reads "follow up"); a hyphen between numbers becomes "to".
+ * Bullet dashes at the start of a line are dropped.
+ */
+export function stripDashes(text: string): string {
+  return text
+    .replace(/^[ \t]*[-–—]+[ \t]+/gm, '')
+    .replace(/(\d)\s*[-–—]\s*(\d)/g, '$1 to $2')
+    .replace(/\s*[—–]+\s*/g, ', ')
+    .replace(/\s+-{1,3}\s+/g, ', ')
+    .replace(/(\w)-(?=\w)/g, '$1 ')
+    .replace(/-{2,}/g, ', ')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*([.!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * The document flavor of the same rule: em and en dashes and spaced hyphens
+ * become commas, but markdown bullets and hyphenated words are left alone so
+ * a playbook keeps its lists.
+ */
+export function softenDashes(text: string): string {
+  return text
+    .replace(/(\d)\s*[–—]\s*(\d)/g, '$1 to $2')
+    .replace(/[ \t]*[—–]+[ \t]*/g, ', ')
+    .replace(/(\S)[ \t]+-{1,3}[ \t]+(?=\S)/g, '$1, ')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*([.!?])/g, '$1');
+}
+
 export type BrandDocs = {
   productTruth: string;
   audienceNiche: string;
@@ -839,11 +873,11 @@ export async function generateTaskDraft(
     throw new Error('Claude returned an incomplete task draft');
   }
   return {
-    title: draft.title,
-    hook: draft.hook ?? '',
-    script: draft.script,
-    caption: draft.caption,
-    brief: draft.brief ?? '',
+    title: stripDashes(draft.title),
+    hook: stripDashes(draft.hook ?? ''),
+    script: stripDashes(draft.script),
+    caption: stripDashes(draft.caption),
+    brief: stripDashes(draft.brief ?? ''),
     format: draft.format === 'photo_carousel' ? 'photo_carousel' : 'video',
     estimatedSeconds: estimateSeconds(draft.script),
   };
