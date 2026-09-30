@@ -17,6 +17,8 @@ export type MockQueueItem = {
   ageLabel: string;
   status: TaskStatus;
   resubmitted: boolean;
+  /** The edit pass (or a manager's re-edit) is still running on the latest submission. */
+  editing: boolean;
   /** Set on assignment-backed rows; drives the brief filter. */
   brief?: { id: string; title: string };
 };

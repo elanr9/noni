@@ -38,9 +38,12 @@ export function EditorToolbar(props: {
   boxSelected?: boolean;
   /** The inset media is selected: nothing can be done to it but move and resize. */
   insetSelected?: boolean;
+  /** Footage tools (split, replace, delete clip, speed, crop, mute, volume); off for managers. */
+  cutTools?: boolean;
   onTool: (tool: ToolId) => void;
 }): JSX.Element {
   const {
+    cutTools = true,
     canSplit,
     hasSelection,
     canDelete,
@@ -65,19 +68,23 @@ export function EditorToolbar(props: {
     ...(canStyleText
       ? [{ id: 'text-color' as const, label: 'Text color', icon: 'palette' as const, enabled: true }]
       : []),
-    { id: 'split', label: 'Split', icon: 'scissors', enabled: canSplit },
-    { id: 'replace', label: 'Replace', icon: 'repeat', enabled: hasSelection },
-    { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
-    { id: 'speed', label: 'Speed', icon: 'gauge', enabled: hasSelection },
-    { id: 'crop', label: 'Crop', icon: 'crop', enabled: hasSelection },
-    {
-      id: 'mute',
-      label: selectedMuted ? 'Unmute' : 'Mute',
-      icon: 'volume-x',
-      enabled: hasSelection,
-      active: selectedMuted,
-    },
-    { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
+    ...(cutTools
+      ? ([
+          { id: 'split', label: 'Split', icon: 'scissors', enabled: canSplit },
+          { id: 'replace', label: 'Replace', icon: 'repeat', enabled: hasSelection },
+          { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
+          { id: 'speed', label: 'Speed', icon: 'gauge', enabled: hasSelection },
+          { id: 'crop', label: 'Crop', icon: 'crop', enabled: hasSelection },
+          {
+            id: 'mute',
+            label: selectedMuted ? 'Unmute' : 'Mute',
+            icon: 'volume-x',
+            enabled: hasSelection,
+            active: selectedMuted,
+          },
+          { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
+        ] satisfies Tool[])
+      : []),
   ];
   const tools = insetSelected ? insetTools : boxSelected ? textTools : clipTools;
   return (

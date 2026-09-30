@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApprovedOverlay } from '../../../components/admin/review/ApprovedOverlay';
+import {
+  ManagerVideoEditor,
+  type ManagerClip,
+} from '../../../components/admin/review/ManagerVideoEditor';
 import { ReelSurface, type ReelClip } from '../../../components/admin/review/ReelSurface';
 import {
   ReviewEditMode,
@@ -53,7 +65,9 @@ import { parseNotes } from '../../../lib/post-event-labels';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
+import { asSlideAspect, probeDurationMs } from '../../../lib/submissions';
 import type { Json } from '../../../lib/types';
+import { isVideoEditorAvailable } from '../../../modules/video-editor';
 import { borderWidth, color, type } from '../../../theme/tokens';
 
 type ReviewItem = {
@@ -68,6 +82,22 @@ function sectionLabel(index: number, count: number, isReel: boolean): string {
   if (index === count - 1 && count >= 3) return isReel ? 'Outro' : 'Close';
   return `${isReel ? 'Clip' : 'Slide'} ${index}`;
 }
+
+/** Uploaded clip lengths in ms, slot order, from the render manifest; 0 when unknown. */
+function timelineSourceDurationsMs(timeline: Json | null): number[] {
+  if (timeline === null || typeof timeline !== 'object' || Array.isArray(timeline)) return [];
+  const clips = (timeline as { clips?: unknown }).clips;
+  if (!Array.isArray(clips)) return [];
+  return clips.map((c) => {
+    const row = c as { source_duration_ms?: unknown; duration_ms?: unknown };
+    const ms = typeof row.source_duration_ms === 'number' ? row.source_duration_ms : row.duration_ms;
+    return typeof ms === 'number' && ms > 0 ? ms : 0;
+  });
+}
+
+const FALLBACK_CLIP_MS = 8000;
+/** The creator's editor is a native iOS module; elsewhere the reduced edit mode stays. */
+const FULL_EDITOR = Platform.OS === 'ios' && isVideoEditorAvailable();
 
 /** Seconds per stitched clip, in order, from the submission's render manifest. */
 function timelineClipDurations(timeline: Json | null): number[] {
@@ -172,6 +202,8 @@ export default function ReviewScreen() {
   const [slideOriginals, setSlideOriginals] = useState<string[]>([]);
   /** Signed URLs for the creator's raw clips, slot order. Revision mode only. */
   const [clipUris, setClipUris] = useState<string[]>([]);
+  /** Uploaded clip lengths in ms, slot order, for the manager's editor. */
+  const [clipDurationsMs, setClipDurationsMs] = useState<number[]>([]);
   /** Signed URLs for admin inset pictures, keyed by segment id. */
   const [slideInsetUrls, setSlideInsetUrls] = useState<Record<string, string>>({});
   const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
@@ -326,6 +358,7 @@ export default function ReviewScreen() {
       setBriefSegments([]);
       setSlidePhotos([]);
       setClipUris([]);
+      setClipDurationsMs([]);
       setSlideInsetUrls({});
       setHandle(null);
       setSubtitlesY(current.assignment.briefs.subtitles_y ?? DEFAULT_SUBTITLES_Y);
@@ -351,6 +384,19 @@ export default function ReviewScreen() {
         if (cancelled) return;
         if (current.row.format === 'video') {
           setClipUris(segmentUrls);
+          // The manifest knows every uploaded clip's length once the edit ran;
+          // before that each clip is probed so the editor's timeline is honest.
+          const known = timelineSourceDurationsMs(current.submission?.render_timeline ?? null);
+          const durations = await Promise.all(
+            segmentUrls.map((url, i) =>
+              known[i] !== undefined && known[i] > 0
+                ? Promise.resolve(known[i])
+                : url
+                  ? probeDurationMs(url, FALLBACK_CLIP_MS)
+                  : Promise.resolve(FALLBACK_CLIP_MS),
+            ),
+          );
+          if (!cancelled) setClipDurationsMs(durations);
         } else {
           setSlidePhotos(segmentUrls);
           const originals = await Promise.all(
@@ -425,6 +471,7 @@ export default function ReviewScreen() {
   const { assignment, row, submission } = current;
   const briefRow = assignment.briefs;
   const isReel = row.format === 'video';
+  const slideAspect = asSlideAspect(submission?.slide_aspect);
   const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
   const editFailed = trackRender && submission?.render_status === 'failed';
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
@@ -458,7 +505,7 @@ export default function ReviewScreen() {
           const insetUri = s.screenshot_url ? slideInsetUrls[s.id] : undefined;
           return {
             photoUri: slidePhotos[i] || undefined,
-            boxes: slidesBaked ? ([] as OverlayBox[]) : boxes,
+            boxes: slidesBaked || !s.show_on_screen ? ([] as OverlayBox[]) : boxes,
             inset:
               slidesBaked || insetUri === undefined
                 ? undefined
@@ -549,6 +596,29 @@ export default function ReviewScreen() {
         background: { kind: 'photo' as const, uri: slideOriginals[i] || slidePhotos[i] || undefined },
         insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
       }));
+
+  // The manager's video editor plays the uploaded clips themselves, in slot
+  // order, matched to their brief segment like the revision sections are.
+  const managerClips: ManagerClip[] = isReel
+    ? spokenSegments.flatMap((s, i) => {
+        const section = clipSections.find((c) => c.key === `segment-${s.slot_index}`);
+        const uri = section?.clipUri ?? clipUris[i] ?? null;
+        if (uri === null) return [];
+        const uriIndex = clipUris.indexOf(uri);
+        const durationMs = clipDurationsMs[uriIndex >= 0 ? uriIndex : i] ?? 0;
+        if (durationMs <= 0) return [];
+        return [
+          {
+            slotIndex: s.slot_index,
+            label: section?.label ?? sectionLabel(i, spokenSegments.length, true),
+            uri,
+            durationMs,
+            segment: s,
+          },
+        ];
+      })
+    : [];
+  const fullEditor = isReel && FULL_EDITOR && managerClips.length > 0;
 
   const openEdit = () => {
     if (submission === null) return;
@@ -705,6 +775,7 @@ export default function ReviewScreen() {
         ) : (
           <SlideshowSurface
             slides={surfaceSlides}
+            aspect={slideAspect}
             index={slideIndex}
             onIndex={setSlideIndex}
           />
@@ -760,7 +831,9 @@ export default function ReviewScreen() {
           counterLabel={counterLabel}
           takeLabel={attempt > 1 ? `Take ${attempt}` : undefined}
           onBack={() => router.back()}
-          onEdit={submission !== null && editTargets.length > 0 ? openEdit : undefined}
+          onEdit={
+            submission !== null && (fullEditor || editTargets.length > 0) ? openEdit : undefined
+          }
           onChat={() =>
             router.push({
               pathname: '/(admin)/chat/[creatorId]',
@@ -792,9 +865,28 @@ export default function ReviewScreen() {
         </Button>
       </View>
 
-      {editVisible && (
+      {editVisible && fullEditor && submission !== null && (
+        <ManagerVideoEditor
+          key={submission.id}
+          brief={briefRow}
+          submissionId={submission.id}
+          clips={managerClips}
+          insetUrls={slideInsetUrls}
+          cues={submission.cues}
+          transcript={submission.transcript}
+          subtitlesY={subtitlesY}
+          onSubtitlesY={setSubtitlesY}
+          onSegments={setBriefSegments}
+          onDone={finishEdit}
+          onCancel={cancelEdit}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+        />
+      )}
+      {editVisible && !fullEditor && (
         <ReviewEditMode
           format={row.format}
+          slideAspect={slideAspect}
           briefId={briefRow.id}
           targets={editTargets}
           index={editIndex}

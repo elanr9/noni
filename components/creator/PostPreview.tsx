@@ -1,10 +1,9 @@
 // Full screen "how it lands in the feed" preview the creator opens before
 // sending for approval. Composes the same surfaces the admin review screen
 // uses so both sides see an identical post.
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   Modal,
-  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -17,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BriefSegment } from '../../lib/briefs-api';
 import { OVERLAY_TEXT_SPEC, parseOverlayBoxes, type OverlayBox } from '../../lib/overlay-boxes';
+import type { SlideAspect } from '../../lib/submissions';
 import { color, radiusAdmin, type } from '../../theme/tokens';
 import { ReviewMetaOverlay } from '../admin/review/ReviewMetaOverlay';
 import { SlideshowSurface, type SlideshowSurfaceSlide } from '../admin/review/SlideshowSurface';
@@ -27,7 +27,7 @@ import { PressableScale } from '../ui/PressableScale';
 export type PreviewClip = { uri: string; boxes: OverlayBox[]; durationMs: number };
 
 export type PostPreviewMedia =
-  | { kind: 'slides'; slides: SlideshowSurfaceSlide[] }
+  | { kind: 'slides'; slides: SlideshowSurfaceSlide[]; aspect: SlideAspect }
   | { kind: 'video'; clips: PreviewClip[] };
 
 export type PostPreviewProps = {
@@ -42,8 +42,6 @@ export type PostPreviewProps = {
 };
 
 type Size = { width: number; height: number };
-
-const SWIPE_DX = 40;
 
 /** Recorded clips in slot order with the boxes that will be burned onto each. */
 export function videoPreviewClips(params: {
@@ -180,23 +178,6 @@ export function PostPreview(props: PostPreviewProps): JSX.Element {
   const [stage, setStage] = useState<Size>({ width: 0, height: 0 });
   const slideCount = media.kind === 'slides' ? media.slides.length : 0;
 
-  // Move only captures on a clear horizontal drag so the arrows still tap.
-  const swipe = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, gs) =>
-          Math.abs(gs.dx) > SWIPE_DX && Math.abs(gs.dx) > Math.abs(gs.dy) * 2,
-        onPanResponderRelease: (_e, gs) => {
-          setSlideIndex((i) => {
-            if (gs.dx < 0 && i < slideCount - 1) return i + 1;
-            if (gs.dx > 0 && i > 0) return i - 1;
-            return i;
-          });
-        },
-      }),
-    [slideCount],
-  );
-
   function onStageLayout(e: LayoutChangeEvent) {
     const { width, height } = e.nativeEvent.layout;
     setStage({ width, height });
@@ -214,13 +195,12 @@ export function PostPreview(props: PostPreviewProps): JSX.Element {
       <View style={styles.screen}>
         <View style={styles.media} onLayout={onStageLayout}>
           {media.kind === 'slides' ? (
-            <View style={styles.fill} {...swipe.panHandlers}>
-              <SlideshowSurface
-                slides={media.slides}
-                index={slideIndex}
-                onIndex={setSlideIndex}
-              />
-            </View>
+            <SlideshowSurface
+              slides={media.slides}
+              aspect={media.aspect}
+              index={slideIndex}
+              onIndex={setSlideIndex}
+            />
           ) : (
             <ClipSequencePlayer clips={media.clips} stage={stage} />
           )}

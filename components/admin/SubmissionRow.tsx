@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import type { MockQueueItem } from '../../lib/admin-review-types';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
@@ -69,11 +69,18 @@ export function SubmissionRow({ item, attempt, mediaPath, unitCount, onPress }: 
         </Text>
         <View style={styles.chipRow}>
           <FormatPill format={item.format} />
-          {unitCount !== null && (
+          {item.editing ? (
+            <View style={styles.editingChip}>
+              <ActivityIndicator size="small" color={color.blue700} style={styles.editingSpinner} />
+              <Text numberOfLines={1} style={styles.editingText}>
+                {isReel ? 'Editing video' : 'Editing slides'}
+              </Text>
+            </View>
+          ) : unitCount !== null ? (
             <Text numberOfLines={1} style={styles.countChip}>
               {`${unitCount} ${isReel ? 'clips' : 'slides'}`}
             </Text>
-          )}
+          ) : null}
         </View>
       </View>
     </PressableScale>
@@ -81,6 +88,23 @@ export function SubmissionRow({ item, attempt, mediaPath, unitCount, onPress }: 
 }
 
 const styles = StyleSheet.create({
+  editingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 20,
+    paddingHorizontal: 8,
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.blue100,
+  },
+  editingSpinner: {
+    transform: [{ scale: 0.6 }],
+  },
+  editingText: {
+    fontSize: type.size.micro,
+    fontWeight: type.weight.heavy,
+    color: color.blue700,
+  },
   card: {
     height: ROW_HEIGHT,
     flexDirection: 'row',

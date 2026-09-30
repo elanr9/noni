@@ -17,12 +17,24 @@ const SAVE_DEBOUNCE_MS = 400;
 
 type Pending = { handle: ReturnType<typeof setTimeout>; run: () => void };
 
+/** Who writes a segment's boxes and inset; creators go through their RPCs. */
+export type SegmentWriter = {
+  boxes: (segmentId: string, boxes: OverlayBox[]) => Promise<void>;
+  inset: (segmentId: string, placement: InsetPlacement) => Promise<void>;
+};
+
+export const CREATOR_SEGMENT_WRITER: SegmentWriter = {
+  boxes: (segmentId, boxes) => creatorEditSegmentBoxes({ segmentId, boxes }),
+  inset: (segmentId, screenshot) => creatorPlaceSegment({ segmentId, screenshot }),
+};
+
 export function useSegmentPersistence(params: {
   doc: EditorDoc;
   segments: Map<string, BriefSegment>;
   onError: (message: string) => void;
   onBoxesChange?: (segment: BriefSegment, boxes: OverlayBox[]) => void;
   onPlaceInset?: (segment: BriefSegment, placement: InsetPlacement) => void;
+  writer?: SegmentWriter;
 }): { flush: () => void } {
   const { doc } = params;
   const latest = useRef(params);
@@ -58,6 +70,7 @@ export function useSegmentPersistence(params: {
 
   useEffect(() => {
     const { segments, onError, onBoxesChange, onPlaceInset } = latest.current;
+    const writer = latest.current.writer ?? CREATOR_SEGMENT_WRITER;
     const prev = saved.current;
     saved.current = { boxes: doc.boxes, insets: doc.insets };
 
@@ -67,7 +80,7 @@ export function useSegmentPersistence(params: {
       if (!segment) continue;
       onBoxesChange?.(segment, boxes);
       schedule(`boxes:${segmentId}`, () => {
-        creatorEditSegmentBoxes({ segmentId, boxes }).catch(() =>
+        writer.boxes(segmentId, boxes).catch(() =>
           onError('Could not save that text. Try again.'),
         );
       });
@@ -78,7 +91,7 @@ export function useSegmentPersistence(params: {
       if (!segment) continue;
       onPlaceInset?.(segment, placement);
       schedule(`inset:${segmentId}`, () => {
-        creatorPlaceSegment({ segmentId, screenshot: placement }).catch(() =>
+        writer.inset(segmentId, placement).catch(() =>
           onError('Could not save that position. Try again.'),
         );
       });

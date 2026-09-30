@@ -65,7 +65,16 @@ export function toQueueRow(
     ageLabel: formatAge(submission?.created_at ?? task.created_at),
     status: task.status,
     resubmitted: version > 1,
+    editing: isEditing(submission),
   };
+}
+
+function isEditing(submission: Submission | null): boolean {
+  return (
+    submission !== null &&
+    submission.render_status !== 'ready' &&
+    submission.render_status !== 'failed'
+  );
 }
 
 export function toAssignmentQueueRow(
@@ -88,6 +97,7 @@ export function toAssignmentQueueRow(
     ageLabel: formatAge(submission?.created_at ?? item.created_at),
     status: item.status,
     resubmitted: version > 1,
+    editing: isEditing(submission),
     brief: { id: item.brief_id, title: item.briefs.title },
   };
 }

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BriefSegment } from '../../../lib/briefs-api';
 import { useKeyboardPadding } from '../../../lib/keyboard';
 import { newOverlayBox } from '../../../lib/overlay-boxes';
+import { SLIDE_ASPECT_RATIO, type SlideAspect } from '../../../lib/submissions';
 import { color, radius, type } from '../../../theme/tokens';
 import { SLIDE_INSET_DEFAULTS, type SlideInset } from '../../SlideStage';
 import {
@@ -56,6 +57,8 @@ const PICKER_HEIGHT = 42;
 
 export function ReviewEditMode(props: {
   format: 'video' | 'photo_carousel';
+  /** Slideshows: the frame every slide was cut to, so the stage matches the post. */
+  slideAspect: SlideAspect;
   briefId: string;
   targets: EditTarget[];
   index: number;
@@ -68,8 +71,18 @@ export function ReviewEditMode(props: {
   /** Touched rows are already restored; reload from the server and close. */
   onCancel: () => Promise<void>;
 }): JSX.Element {
-  const { format, briefId, targets, index, onIndex, onSegments, subtitles, onDone, onCancel } =
-    props;
+  const {
+    format,
+    slideAspect,
+    briefId,
+    targets,
+    index,
+    onIndex,
+    onSegments,
+    subtitles,
+    onDone,
+    onCancel,
+  } = props;
   const insets = useSafeAreaInsets();
   const keyboardPad = useKeyboardPadding();
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
@@ -221,6 +234,7 @@ export function ReviewEditMode(props: {
         {segment !== undefined && target !== undefined ? (
           <EditStage
             background={target.background}
+            aspect={isReel ? undefined : SLIDE_ASPECT_RATIO[slideAspect]}
             boxes={boxes}
             inset={inset}
             editing={{

@@ -1569,18 +1569,29 @@ async function runSlideshowAssembly(params: {
 
       let inset: { path: string; x: number; y: number; width: number } | undefined;
       if (insetPath) {
-        const aspects = await insetAspects(admin, [insetPath]);
-        const placed = fitInsetClearOfText(
-          {
-            // Same defaults the app previews when no placement was saved.
-            x: segment.screenshot_x ?? 0.72,
-            y: segment.screenshot_y ?? 0.56,
-            width: segment.screenshot_width ?? 0.34,
-          },
-          aspects[insetPath] ?? DEFAULT_MEDIA_ASPECT,
-          boxes.map(textBand),
-        );
-        inset = { path: insetPath, ...placed };
+        // A saved placement is what the creator and manager saw on the stage;
+        // it bakes exactly there. Only an unplaced inset gets moved clear of
+        // the text, from the same defaults the app draws (SLIDE_INSET_DEFAULTS).
+        const placedByHuman =
+          segment.screenshot_x !== null &&
+          segment.screenshot_y !== null &&
+          segment.screenshot_width !== null;
+        const stored = {
+          x: segment.screenshot_x ?? 0.5,
+          y: segment.screenshot_y ?? 0.62,
+          width: segment.screenshot_width ?? 0.85,
+        };
+        if (placedByHuman) {
+          inset = { path: insetPath, ...stored };
+        } else {
+          const aspects = await insetAspects(admin, [insetPath]);
+          const placed = fitInsetClearOfText(
+            stored,
+            aspects[insetPath] ?? DEFAULT_MEDIA_ASPECT,
+            boxes.map(textBand),
+          );
+          inset = { path: insetPath, ...placed };
+        }
       }
       const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.png`;
       await renderSlideWithFfmpeg({

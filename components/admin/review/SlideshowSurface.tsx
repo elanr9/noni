@@ -1,15 +1,20 @@
-import { useMemo, useRef } from 'react';
-import { PanResponder, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import type { OverlayBox } from '../../../lib/overlay-boxes';
+import { SLIDE_ASPECT_RATIO, type SlideAspect } from '../../../lib/submissions';
 import { color, radiusAdmin, type } from '../../../theme/tokens';
 import { SlideStage, type SlideInset } from '../../SlideStage';
+import { FrameFit } from '../../creator/slides/FrameFit';
+import type { PhotoCrop } from '../../creator/slides/photo-crop';
+import { SlidePager } from '../../creator/slides/SlidePager';
 import { Icon } from '../../ui/Icon';
 import { PressableScale } from '../../ui/PressableScale';
 
 export type SlideshowSurfaceSlide = {
   /** The creator's submitted photo (final baked file once render is ready). */
   photoUri?: string;
+  /** Window of the photo that fills the slide, while it is still a camera roll original. */
+  crop?: PhotoCrop;
   /** Composited client-side only while the bake is still running. */
   boxes: OverlayBox[];
   inset?: SlideInset;
@@ -19,56 +24,56 @@ export type SlideshowSurfaceSlide = {
 
 export interface SlideshowSurfaceProps {
   slides: SlideshowSurfaceSlide[];
+  /** Frame every slide was cut to; the photo sits in the viewer at this size. */
+  aspect: SlideAspect;
   index: number;
   onIndex: (index: number) => void;
 }
 
 /**
- * The real post in photo mode: the creator's photos with the admin's text and
- * pictures on them, `n / total` pill under the top bar, glass 34px arrows.
- * Pager dots live in ReviewMetaOverlay, between the photo and the caption.
+ * The real post in photo mode: each slide at the size it publishes, centred
+ * in the viewer the way TikTok and Instagram show it, paged by the native
+ * scroll view. `n / total` pill under the top bar, glass 34px arrows. Pager
+ * dots live in ReviewMetaOverlay, between the photo and the caption.
  */
-/** Horizontal travel that counts as a page swipe. */
-const SWIPE_DISTANCE = 40;
-
-export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfaceProps) {
-  const slide = slides[index];
-  const latest = useRef({ index, count: slides.length, onIndex });
-  latest.current = { index, count: slides.length, onIndex };
-
-  const swipe = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) =>
-          Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderRelease: (_e, g) => {
-          const { index: i, count, onIndex: go } = latest.current;
-          if (g.dx <= -SWIPE_DISTANCE && i < count - 1) go(i + 1);
-          else if (g.dx >= SWIPE_DISTANCE && i > 0) go(i - 1);
-        },
-      }),
-    [],
-  );
+export function SlideshowSurface({ slides, aspect, index, onIndex }: SlideshowSurfaceProps) {
+  const ratio = SLIDE_ASPECT_RATIO[aspect];
+  const fullBleed = aspect === '9:16';
 
   return (
-    <View style={styles.fill} {...swipe.panHandlers}>
-      {slide !== undefined ? (
-        <SlideStage
-          boxes={slide.boxes}
-          photoUri={slide.photoUri}
-          inset={slide.inset}
-          tint={color.ink800}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
-      {slide !== undefined &&
-      slide.boxes.length === 0 &&
-      slide.photoUri === undefined &&
-      slide.text.length > 0 ? (
-        <View style={styles.centre} pointerEvents="none">
-          <Text style={styles.overlayText}>{slide.text}</Text>
-        </View>
-      ) : null}
+    <View style={styles.fill}>
+      <SlidePager
+        count={slides.length}
+        index={index}
+        onIndex={onIndex}
+        renderPage={(i) => {
+          const slide = slides[i];
+          if (slide === undefined) return null;
+          return (
+            <FrameFit
+              style={fullBleed ? styles.fill : styles.letterbox}
+              frameStyle={styles.frame}
+              aspect={ratio}
+            >
+              <SlideStage
+                boxes={slide.boxes}
+                photoUri={slide.photoUri}
+                photoCrop={slide.crop}
+                inset={slide.inset}
+                tint={color.ink800}
+                style={StyleSheet.absoluteFill}
+              />
+              {slide.boxes.length === 0 &&
+              slide.photoUri === undefined &&
+              slide.text.length > 0 ? (
+                <View style={styles.centre} pointerEvents="none">
+                  <Text style={styles.overlayText}>{slide.text}</Text>
+                </View>
+              ) : null}
+            </FrameFit>
+          );
+        }}
+      />
 
       {slides.length > 1 && (
         <View style={styles.counter} pointerEvents="none">
@@ -103,6 +108,17 @@ export function SlideshowSurface({ slides, index, onIndex }: SlideshowSurfacePro
 const styles = StyleSheet.create({
   fill: {
     flex: 1,
+    backgroundColor: color.ink900,
+  },
+  /** Shorter frames sit a touch above centre, clear of the caption block. */
+  letterbox: {
+    flex: 1,
+    backgroundColor: color.ink900,
+    paddingTop: 96,
+    paddingBottom: 150,
+  },
+  frame: {
+    overflow: 'hidden',
     backgroundColor: color.ink800,
   },
   centre: {

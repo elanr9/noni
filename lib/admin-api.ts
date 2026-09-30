@@ -6,7 +6,7 @@ import { assertTransition, type Assignment, type ContentTask, type TaskStatus } 
 import { parseAssignmentMetrics, transitionAssignment, type Brief } from './tasks-api';
 import type { ReviewEvent } from './review-events';
 import type { Profile } from './profile';
-import type { Database } from './types';
+import type { Database, Json } from './types';
 
 export type TrendItem = Database['public']['Tables']['trend_items']['Row'];
 export type BrandDoc = Database['public']['Tables']['brand_docs']['Row'];
@@ -139,6 +139,12 @@ export async function rerenderSubmission(submissionId: string): Promise<void> {
   const { error } = await supabase.functions.invoke('render-submission', {
     body: { submission_id: submissionId, rerender: true },
   });
+  if (error) throw error;
+}
+
+/** Manager retimes when a clip's screenshot enters; read back by the next render. */
+export async function setSubmissionCues(submissionId: string, cues: Json): Promise<void> {
+  const { error } = await supabase.from('submissions').update({ cues }).eq('id', submissionId);
   if (error) throw error;
 }
 

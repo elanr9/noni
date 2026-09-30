@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   Image,
@@ -16,11 +16,13 @@ import {
   SlideStage,
   type BoxLayoutPatch,
   type SlideInset,
+  type SlideStageCropping,
   type SlideStageEditing,
 } from '../SlideStage';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
-import { createPager } from './slides/pager';
+import { SlidePager } from './slides/SlidePager';
+import type { PhotoCrop } from './slides/photo-crop';
 
 /**
  * The slideshow scroller used everywhere a post is viewed (SCREENS §8):
@@ -34,6 +36,8 @@ export interface SlideNavSlide {
   text?: string;
   /** Image uri, rendered cover over the tint. */
   image?: string;
+  /** Window of the image that fills the slide; whole image when absent. */
+  crop?: PhotoCrop;
   /** Background tint; defaults cycle through a variant palette. */
   tint?: string;
   /** Admin-placed text boxes; when present they replace the centered text. */
@@ -62,6 +66,12 @@ export interface SlideNavProps {
   swipe?: boolean;
   /** Slide shown on mount. */
   initialIndex?: number;
+  /** Off while another gesture layer owns the stage (swipe mode). */
+  scrollEnabled?: boolean;
+  /** Extra layer drawn over a page, above the stage (swipe mode). */
+  renderPageOverlay?: (slideIndex: number) => ReactNode;
+  /** Crop mode on one slide: its photo pans and zooms instead of the boxes. */
+  cropping?: SlideStageCropping & { slideIndex: number };
 }
 
 export interface SlideNavEditing {
@@ -92,6 +102,7 @@ function SlideLayer({
   onMoveInset,
   editing,
   chrome,
+  cropping,
 }: {
   slide: SlideNavSlide;
   tint: string;
@@ -100,11 +111,13 @@ function SlideLayer({
   onMoveInset?: (x: number, y: number) => void;
   editing?: SlideStageEditing;
   chrome?: boolean;
+  cropping?: SlideStageCropping;
 }) {
   // Slides with admin-placed boxes render exactly as they will publish.
   if (
     (slide.boxes?.length ?? 0) > 0 ||
     slide.inset !== undefined ||
+    slide.crop !== undefined ||
     editing !== undefined ||
     chrome === true
   ) {
@@ -112,6 +125,7 @@ function SlideLayer({
       <SlideStage
         boxes={slide.boxes ?? []}
         photoUri={slide.image}
+        photoCrop={slide.crop}
         inset={slide.inset}
         tint={tint}
         style={StyleSheet.absoluteFill}
@@ -119,6 +133,7 @@ function SlideLayer({
         onMoveInset={onMoveInset}
         editing={editing}
         chrome={chrome}
+        cropping={cropping}
       />
     );
   }
@@ -174,10 +189,12 @@ export function SlideNav({
   chrome = false,
   swipe = false,
   initialIndex = 0,
+  scrollEnabled = true,
+  renderPageOverlay,
+  cropping,
 }: SlideNavProps) {
   const dark = variant === 'dark';
   const [index, setIndex] = useState(initialIndex);
-  const [trackWidth, setTrackWidth] = useState(0);
   const prevIndexRef = useRef(initialIndex);
   const fade = useRef(new Animated.Value(1)).current;
 
@@ -186,31 +203,23 @@ export function SlideNav({
   const prevIndex = Math.min(prevIndexRef.current, Math.max(count - 1, 0));
 
   const commit = (next: number) => {
+    if (next === safeIndex) return;
     prevIndexRef.current = safeIndex;
     setIndex(next);
     onIndexChange?.(next);
   };
 
-  // Swipe mode: the whole row of slides slides under the finger and springs
-  // to a page. Otherwise the old 240ms crossfade.
-  const [pager] = useState(() => createPager());
-  useEffect(() => {
-    pager.setPage({
-      index: safeIndex,
-      count,
-      width: trackWidth,
-      enabled: swipe,
-      onSettle: commit,
-    });
-  });
+  // The parent moved to another slide (a fresh pick, a removed slide): follow it.
+  const [seenInitial, setSeenInitial] = useState(initialIndex);
+  if (initialIndex !== seenInitial) {
+    setSeenInitial(initialIndex);
+    setIndex(initialIndex);
+  }
 
   const go = (next: number) => {
     if (next === safeIndex || next < 0 || next >= count) return;
-    if (swipe) {
-      pager.goTo(next);
-      return;
-    }
     commit(next);
+    if (swipe) return;
     fade.setValue(0);
     Animated.timing(fade, {
       toValue: 1,
@@ -226,38 +235,35 @@ export function SlideNav({
   const previous = slides[prevIndex];
 
   return (
-    <View
-      style={[styles.root, style]}
-      onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-      {...(swipe ? pager.panHandlers : {})}
-    >
+    <View style={[styles.root, style]}>
       {swipe ? (
-        <Animated.View
-          style={[
-            styles.track,
-            {
-              width: Math.max(1, trackWidth) * count,
-              transform: [{ translateX: pager.translateX }],
-            },
-          ]}
-        >
-          {slides.map((slide, i) => (
-            <Pressable
-              key={i}
-              style={{ width: Math.max(1, trackWidth) }}
-              onPress={onTapEmpty}
-              accessibilityLabel={`Slide ${i + 1}`}
-            >
-              <SlideLayer
-                slide={slide}
-                tint={tintFor(slide, i, dark)}
-                dark={dark}
-                editing={editingFor(editing, i)}
-                chrome={chrome}
-              />
-            </Pressable>
-          ))}
-        </Animated.View>
+        <SlidePager
+          count={count}
+          index={safeIndex}
+          onIndex={commit}
+          scrollEnabled={scrollEnabled}
+          renderPage={(i) => {
+            const slide = slides[i];
+            if (slide === undefined) return null;
+            return (
+              <Pressable
+                style={styles.page}
+                onPress={onTapEmpty}
+                accessibilityLabel={`Slide ${i + 1}`}
+              >
+                <SlideLayer
+                  slide={slide}
+                  tint={tintFor(slide, i, dark)}
+                  dark={dark}
+                  editing={editingFor(editing, i)}
+                  chrome={chrome}
+                  cropping={cropping?.slideIndex === i ? cropping : undefined}
+                />
+                {renderPageOverlay?.(i)}
+              </Pressable>
+            );
+          }}
+        />
       ) : (
         <>
           {prevIndex !== safeIndex && (
@@ -353,10 +359,8 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  track: {
-    ...StyleSheet.absoluteFill,
-    right: undefined,
-    flexDirection: 'row',
+  page: {
+    flex: 1,
   },
   textWrap: {
     ...StyleSheet.absoluteFill,

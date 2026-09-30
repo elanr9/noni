@@ -25,28 +25,14 @@ export const MIN_TEXT_HOLD_MS = 500;
 
 export type SourceWindow = { startMs: number; endMs: number };
 
-/** The creator narrowed the text window; anything else means the whole clip. */
-export function hasCreatorTextWindow(cue: SlotCue | null): boolean {
-  return cue !== null && cue.source === 'creator' && cue.text_start_ms !== null;
-}
-
 /**
  * Source ms window the on-screen text covers, matching the render pass: the
- * whole clip unless the creator set a start (and optionally a hold).
+ * whole clip. Text timing is not adjustable; only the screenshot has a cue.
  */
-export function slotTextWindow(cue: SlotCue | null, pieces: EditPiece[]): SourceWindow {
+export function slotTextWindow(_cue: SlotCue | null, pieces: EditPiece[]): SourceWindow {
   const first = pieces[0];
   const last = pieces[pieces.length - 1];
-  const clipStart = first ? first.inMs : 0;
-  const clipEnd = last ? last.outMs : 0;
-  if (cue !== null && cue.source === 'creator' && cue.text_start_ms !== null) {
-    const startMs = cue.text_start_ms;
-    return {
-      startMs,
-      endMs: cue.text_hold_ms !== null ? startMs + cue.text_hold_ms : clipEnd,
-    };
-  }
-  return { startMs: clipStart, endMs: clipEnd };
+  return { startMs: first ? first.inMs : 0, endMs: last ? last.outMs : 0 };
 }
 
 export const CUE_ROW_H = 18;
@@ -54,7 +40,6 @@ export const CUE_ROW_GAP = 2;
 
 const CHIP_MIN_W = 28;
 const GLYPH_W = 22;
-const HOLD_HANDLE_W = 14;
 const DRAG_THRESHOLD_PX = 3;
 const THROTTLE_MS = 33;
 
@@ -187,7 +172,6 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
   const { slot, pieces, pxPerMs, selectedKind } = props;
   const cue = slot.cue;
   const creator = cue?.source === 'creator';
-  const textCreator = hasCreatorTextWindow(cue);
   const textWindow = slotTextWindow(
     cue,
     pieces.map((p) => p.piece),
@@ -206,23 +190,10 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
   return (
     <>
       {slot.hasText ? (
-        <CueHandle
-          kind="text"
-          slotIndex={slot.slotIndex}
-          x={textX}
-          toSource={toSource}
-          selected={selectedKind === 'text'}
-          onSelect={props.onSelect}
-          onDragStart={props.onDragStart}
-          onDragPreview={props.onDragPreview}
-          onDragEnd={props.onDragEnd}
-          style={[
-            styles.chip,
-            { left: textX, width: textW },
-            textCreator ? styles.creator : styles.ai,
-            slot.pending && styles.pending,
-            selectedKind === 'text' && styles.selected,
-          ]}
+        // The text chip only shows where the words sit: on screen for the whole clip.
+        <View
+          pointerEvents="none"
+          style={[styles.chip, { left: textX, width: textW }, styles.ai, slot.pending && styles.pending]}
         >
           {slot.pending ? (
             <ActivityIndicator size="small" color={color.white} style={styles.spinner} />
@@ -230,23 +201,7 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
           <Text style={styles.chipText} numberOfLines={1}>
             {slot.label}
           </Text>
-          {selectedKind === 'text' ? (
-            <CueHandle
-              kind="hold"
-              slotIndex={slot.slotIndex}
-              x={textX + textW}
-              toSource={toSource}
-              selected={false}
-              onSelect={props.onSelect}
-              onDragStart={props.onDragStart}
-              onDragPreview={props.onDragPreview}
-              onDragEnd={props.onDragEnd}
-              style={styles.holdHandle}
-            >
-              <View style={styles.holdBar} />
-            </CueHandle>
-          ) : null}
-        </CueHandle>
+        </View>
       ) : null}
       {slot.hasMedia ? (
         <CueHandle
@@ -381,20 +336,4 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.semibold,
   },
   spinner: { transform: [{ scale: 0.5 }], marginRight: -2 },
-  holdHandle: {
-    position: 'absolute',
-    right: -HOLD_HANDLE_W / 2,
-    top: -3,
-    width: HOLD_HANDLE_W,
-    height: CUE_ROW_H + 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 4,
-  },
-  holdBar: {
-    width: 4,
-    height: CUE_ROW_H + 4,
-    borderRadius: 2,
-    backgroundColor: color.white,
-  },
 });

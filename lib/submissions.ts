@@ -1,5 +1,7 @@
+import * as ImageManipulator from 'expo-image-manipulator';
 import { createVideoPlayer } from 'expo-video';
 
+import { cropPixels, type PhotoCrop, type SourceSize } from '../components/creator/slides/photo-crop';
 import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
@@ -332,6 +334,11 @@ export type SlideAspect = '9:16' | '4:5' | '1:1';
 
 export const SLIDE_ASPECTS: readonly SlideAspect[] = ['4:5', '1:1', '9:16'];
 
+/** submissions.slide_aspect as stored; rows before the column default to 9:16. */
+export function asSlideAspect(value: string | null | undefined): SlideAspect {
+  return value === '4:5' || value === '1:1' ? value : '9:16';
+}
+
 /** Width over height. */
 export const SLIDE_ASPECT_RATIO: Record<SlideAspect, number> = {
   '9:16': 9 / 16,
@@ -340,12 +347,32 @@ export const SLIDE_ASPECT_RATIO: Record<SlideAspect, number> = {
 };
 
 export type PickedPhoto = {
-  /** The cropped file that uploads. */
+  /** The camera roll original; the stage shows it through `crop`. */
   uri: string;
   mimeType: string | null;
-  /** The camera roll original, kept so the crop can be adjusted. */
-  sourceUri?: string;
+  /** Pixel size of `uri`, needed to cut and refit the crop. */
+  source?: SourceSize;
+  /** Window of `uri` that fills the slide; the whole photo when absent (older drafts). */
+  crop?: PhotoCrop;
 };
+
+/** Crops wider than this are downscaled; 2x the 1080 bake keeps text crisp. */
+const MAX_SLIDE_UPLOAD_WIDTH = 2160;
+
+/** The file that uploads: the framed window cut out of the original. */
+async function cutPhoto(photo: PickedPhoto): Promise<PickedPhoto> {
+  if (photo.crop === undefined || photo.source === undefined) return photo;
+  const rect = cropPixels(photo.crop, photo.source);
+  const actions: ImageManipulator.Action[] = [{ crop: rect }];
+  if (rect.width > MAX_SLIDE_UPLOAD_WIDTH) {
+    actions.push({ resize: { width: MAX_SLIDE_UPLOAD_WIDTH } });
+  }
+  const result = await ImageManipulator.manipulateAsync(photo.uri, actions, {
+    compress: 0.92,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+  return { uri: result.uri, mimeType: 'image/jpeg' };
+}
 
 function photoExtension(mimeType: string | null): string {
   if (mimeType === 'image/png') return 'png';
@@ -388,13 +415,14 @@ export async function submitAssignmentPhotos(params: {
   }
 
   const version = await nextVersion('assignment_id', assignment.id);
-  const paths = photos.map(
+  const cut = await Promise.all(photos.map(cutPhoto));
+  const paths = cut.map(
     (p, i) =>
       `${companyId}/${assignment.id}/${version}-slide-${i + 1}.${photoExtension(p.mimeType)}`,
   );
 
-  for (let i = 0; i < photos.length; i++) {
-    await uploadPhoto(photos[i], paths[i]);
+  for (let i = 0; i < cut.length; i++) {
+    await uploadPhoto(cut[i], paths[i]);
   }
 
   return createAssignmentSubmission({

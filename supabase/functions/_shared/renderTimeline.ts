@@ -129,7 +129,8 @@ const AUTO_MIN_SIZE = 20 / LEGACY_STAGE_WIDTH;
 const AUTO_MAX_SIZE = 40 / LEGACY_STAGE_WIDTH;
 const AUTO_MAX_LINES = 4;
 const AUTO_GLYPH_WIDTH = 0.55;
-const BOX_MAX_WIDTH = 0.9;
+/** Mirrors OVERLAY_TEXT_SPEC.maxWidth in lib/overlay-boxes.ts so auto layout matches the stage. */
+const BOX_MAX_WIDTH = 0.84;
 const AUTO_Y_BY_INDEX = [0.22, 0.68, 0.45];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -434,18 +435,10 @@ export function buildRenderTimeline(params: {
     const segment = ordered[i];
     if (segment) {
       if (textOverlay.enabled && segment.show_on_screen) {
-        // Text covers the whole clip unless the creator set its own window.
-        const textWindow: OverlayWindow =
-          cue && cue.source === 'creator' && cue.text_start_ms !== null
-            ? clipWindow(
-                cursorMs + sourceToOutputMs(cue.text_start_ms, keep),
-                cursorMs +
-                  sourceToOutputMs(cue.text_start_ms, keep) +
-                  (cue.text_hold_ms ?? effectiveMs),
-                cursorMs,
-                clipEnd,
-              )
-            : { start_ms: cursorMs, duration_ms: effectiveMs };
+        // On-screen text covers its whole clip. Cue text timing is ignored: a
+        // marker dragged to the clip end used to leave the hook on screen for
+        // its last 800ms only.
+        const textWindow: OverlayWindow = { start_ms: cursorMs, duration_ms: effectiveMs };
         for (const box of segmentBoxes(segment)) {
           texts.push({
             text: box.text,

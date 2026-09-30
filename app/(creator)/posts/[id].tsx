@@ -241,7 +241,7 @@ export default function PostDetailScreen() {
 
       <View style={[styles.media, shadow.shadowMedia]}>
         {isPhoto ? (
-          <SlideNav slides={slides} variant="dark" style={styles.mediaFill} />
+          <SlideNav slides={slides} variant="dark" style={styles.mediaFill} swipe />
         ) : (
           <PressableScale
             accessibilityRole="button"

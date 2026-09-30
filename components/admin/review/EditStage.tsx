@@ -8,6 +8,7 @@ import type { OverlayBox } from '../../../lib/overlay-boxes';
 import { color, radius } from '../../../theme/tokens';
 import { SlideStage, type SlideInset, type SlideStageEditing } from '../../SlideStage';
 import { StageSubtitles } from '../../creator/editor/StageSubtitles';
+import { FRAME_ASPECT } from '../../creator/slides/frame';
 import { FrameFit } from '../../creator/slides/FrameFit';
 import { EditVideoFrame, type VideoStill } from './EditVideoFrame';
 
@@ -17,6 +18,8 @@ export type EditStageBackground =
 
 export function EditStage(props: {
   background: EditStageBackground;
+  /** Width over height of the published frame; 9:16 when absent. */
+  aspect?: number;
   boxes: OverlayBox[];
   inset?: SlideInset;
   editing: SlideStageEditing;
@@ -25,12 +28,13 @@ export function EditStage(props: {
   onDragStart: () => void;
   onTapEmpty: () => void;
 }): JSX.Element {
-  const { background, boxes, inset, editing, subtitles, onDragStart, onTapEmpty } = props;
+  const { background, aspect, boxes, inset, editing, subtitles, onDragStart, onTapEmpty } = props;
   const [frame, setFrame] = useState({ w: 0, h: 0 });
   const isVideo = background.kind === 'video';
+  const frameAspect = aspect ?? FRAME_ASPECT;
 
   return (
-    <FrameFit style={styles.fit} frameStyle={styles.card}>
+    <FrameFit style={styles.fit} frameStyle={styles.card} aspect={frameAspect}>
       <Pressable
         accessibilityRole="none"
         onPress={onTapEmpty}
@@ -56,7 +60,7 @@ export function EditStage(props: {
           style={StyleSheet.absoluteFill}
           editing={editing}
           onDragStart={onDragStart}
-          chrome
+          chrome={frameAspect === FRAME_ASPECT}
         />
         {subtitles !== undefined && frame.w > 0 ? (
           <StageSubtitles

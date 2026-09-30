@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,11 +20,14 @@ import { FormatTag, TypeTag } from '../../../components/creator/Chips';
 import { scriptBlocks, usePostTypeMeta } from '../../../components/creator/PostCard';
 import { PostPreview } from '../../../components/creator/PostPreview';
 import { SlideNav } from '../../../components/creator/SlideNav';
+import { CropPanel } from '../../../components/creator/slides/CropPanel';
 import { FrameFit } from '../../../components/creator/slides/FrameFit';
 import {
-  PhotoCropSheet,
-  type CropResult,
-} from '../../../components/creator/slides/PhotoCropSheet';
+  centeredCrop,
+  refitCrop,
+  type PhotoCrop,
+  type SourceSize,
+} from '../../../components/creator/slides/photo-crop';
 import {
   ensurePreview,
   usePhotoPreviews,
@@ -87,8 +91,38 @@ function isSlideAspect(value: unknown): value is SlideAspect {
   return value === '9:16' || value === '4:5' || value === '1:1';
 }
 
-/** A camera roll pick waiting in the crop sheet. */
-type Cropping = { slotIndex: number; sourceUri: string };
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isSourceSize(value: unknown): value is SourceSize {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Partial<SourceSize>;
+  return isFiniteNumber(v.width) && v.width > 0 && isFiniteNumber(v.height) && v.height > 0;
+}
+
+function isPhotoCrop(value: unknown): value is PhotoCrop {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Partial<PhotoCrop>;
+  return (
+    isFiniteNumber(v.x) &&
+    isFiniteNumber(v.y) &&
+    isFiniteNumber(v.width) &&
+    v.width > 0 &&
+    isFiniteNumber(v.height) &&
+    v.height > 0
+  );
+}
+
+function imageSize(uri: string): Promise<SourceSize> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      () => reject(new Error('Could not read this photo.')),
+    );
+  });
+}
 
 type Slide = {
   slotIndex: number;
@@ -178,7 +212,8 @@ async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
       out[slot] = {
         uri: v.uri,
         mimeType: typeof v.mimeType === 'string' ? v.mimeType : null,
-        ...(typeof v.sourceUri === 'string' ? { sourceUri: v.sourceUri } : {}),
+        ...(isSourceSize(v.source) ? { source: v.source } : {}),
+        ...(isPhotoCrop(v.crop) ? { crop: v.crop } : {}),
       };
     }
     return { photos: out, aspect: Object.keys(out).length > 0 ? aspect : null };
@@ -294,7 +329,8 @@ export default function UploadScreen() {
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
   /** One crop aspect for the whole post, chosen with the first photo. */
   const [aspect, setAspect] = useState<SlideAspect | null>(null);
-  const [cropping, setCropping] = useState<Cropping | null>(null);
+  /** Slot whose photo is being framed on the stage. */
+  const [cropSlot, setCropSlot] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
@@ -416,9 +452,7 @@ export default function UploadScreen() {
   }, [draftAssignmentId, photos, aspect]);
 
   const stageAspect: SlideAspect = aspect ?? DEFAULT_SLIDE_ASPECT;
-  /** Other slides already hold this aspect, so the sheet cannot change it. */
-  const aspectLocked =
-    cropping !== null && Object.keys(photos).some((k) => Number(k) !== cropping.slotIndex);
+  const stageRatio = SLIDE_ASPECT_RATIO[stageAspect];
 
   function fail(message: string, retry?: () => void) {
     if (retry) setFailure({ message, retry });
@@ -434,7 +468,28 @@ export default function UploadScreen() {
         quality: 0.9,
       });
       const asset = result.canceled ? null : result.assets[0];
-      if (asset) setCropping({ slotIndex, sourceUri: asset.uri });
+      if (!asset) return;
+      const source: SourceSize =
+        asset.width > 0 && asset.height > 0
+          ? { width: asset.width, height: asset.height }
+          : await imageSize(asset.uri);
+      const picked: PickedPhoto = {
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+        source,
+        crop: centeredCrop(source, stageRatio),
+      };
+      setPhotos((prev) => ({ ...prev, [slotIndex]: picked }));
+      if (aspect === null) setAspect(stageAspect);
+      void ensurePreview(picked.uri);
+      // Straight onto the stage with the photo loose under the text, so the
+      // creator frames it where it will actually post.
+      const slideIndex = slides.findIndex((s) => s.slotIndex === slotIndex);
+      setReviewIndex(slideIndex >= 0 ? slideIndex : slides.length);
+      setSelectedBoxId(null);
+      setFreshBoxId(null);
+      setPhase('review');
+      setCropSlot(slotIndex);
     } catch (e) {
       fail(
         e instanceof Error ? e.message : 'Could not open your photos.',
@@ -445,23 +500,49 @@ export default function UploadScreen() {
     }
   }
 
-  function recropPhoto(slotIndex: number) {
+  async function startCrop(slotIndex: number) {
     const photo = photos[slotIndex];
     if (!photo || picking || phase === 'processing') return;
-    setCropping({ slotIndex, sourceUri: photo.sourceUri ?? photo.uri });
+    setSelectedBoxId(null);
+    setFreshBoxId(null);
+    if (photo.source === undefined || photo.crop === undefined) {
+      // Older drafts kept only the cut file; it becomes the source from here.
+      try {
+        const source = await imageSize(photo.uri);
+        setPhotos((prev) => ({
+          ...prev,
+          [slotIndex]: { ...photo, source, crop: centeredCrop(source, stageRatio) },
+        }));
+      } catch (e) {
+        setErrorToast(e instanceof Error ? e.message : 'Could not read this photo.');
+        return;
+      }
+    }
+    setCropSlot(slotIndex);
   }
 
-  function finishCrop(result: CropResult) {
-    if (!cropping) return;
-    const picked: PickedPhoto = {
-      uri: result.uri,
-      mimeType: result.mimeType,
-      sourceUri: cropping.sourceUri,
-    };
-    setPhotos((prev) => ({ ...prev, [cropping.slotIndex]: picked }));
-    setAspect(result.aspect);
-    setCropping(null);
-    void ensurePreview(picked.uri);
+  function changeCrop(slotIndex: number, crop: PhotoCrop) {
+    setPhotos((prev) => {
+      const photo = prev[slotIndex];
+      return photo === undefined ? prev : { ...prev, [slotIndex]: { ...photo, crop } };
+    });
+  }
+
+  // One size for the whole post: every framed photo keeps its centre and zoom.
+  function changeAspect(next: SlideAspect) {
+    if (next === stageAspect) return;
+    const ratio = SLIDE_ASPECT_RATIO[next];
+    setAspect(next);
+    setPhotos((prev) => {
+      const out: Record<number, PickedPhoto> = {};
+      for (const [key, photo] of Object.entries(prev)) {
+        out[Number(key)] =
+          photo.source !== undefined && photo.crop !== undefined
+            ? { ...photo, crop: refitCrop(photo.crop, photo.source, ratio) }
+            : photo;
+      }
+      return out;
+    });
   }
 
   async function processSlideshow() {
@@ -706,6 +787,7 @@ export default function UploadScreen() {
     setReviewIndex(next);
     setSelectedBoxId(null);
     setFreshBoxId(null);
+    setCropSlot(null);
   }
 
   const canPlace = slides.some(
@@ -715,6 +797,21 @@ export default function UploadScreen() {
   const reviewBoxes = reviewSlide?.boxes ?? [];
   const reviewSegmentId = slideSegment(reviewIndex)?.id ?? null;
   const selectedBox = reviewBoxes.find((b) => b.id === selectedBoxId) ?? null;
+  const cropPhoto = cropSlot !== null ? photos[cropSlot] : undefined;
+  const cropSlideIndex =
+    cropSlot !== null ? slides.findIndex((s) => s.slotIndex === cropSlot) : -1;
+  const cropping =
+    cropSlot !== null &&
+    cropSlideIndex >= 0 &&
+    cropPhoto?.source !== undefined &&
+    cropPhoto.crop !== undefined
+      ? {
+          slideIndex: cropSlideIndex,
+          source: cropPhoto.source,
+          frameAspect: stageRatio,
+          onChange: (crop: PhotoCrop) => changeCrop(cropSlot, crop),
+        }
+      : undefined;
 
   if (loading) {
     return <DetailSkeleton />;
@@ -753,33 +850,39 @@ export default function UploadScreen() {
     return (
       <View style={[styles.review, { paddingTop: insets.top + space[2] }]}>
         <View style={styles.reviewHeader}>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Edit photos"
-            onPress={() => setPhase('idle')}
-          >
-            <Text style={styles.reviewHeaderBtn}>Edit photos</Text>
-          </PressableScale>
-          <Text style={styles.reviewHeaderTitle}>Review</Text>
-          <SlideToolbar
-            onAddText={() => addSlideBox(reviewIndex)}
-            onPickPhoto={() => {
-              if (reviewSlide) void pickPhoto(reviewSlide.slotIndex);
-            }}
-            onCrop={() => {
-              if (reviewSlide) recropPhoto(reviewSlide.slotIndex);
-            }}
-            onRemoveSlide={() => removeSlide(reviewIndex)}
-            disabled={picking || submitting || removing}
-            canRemove={slides.length > 1}
-            canCrop={reviewSlide !== undefined && photos[reviewSlide.slotIndex] !== undefined}
-          />
+          {cropping !== undefined ? (
+            <Text style={styles.reviewHeaderTitle}>Frame the photo</Text>
+          ) : (
+            <>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Back to the slide list"
+                onPress={() => setPhase('idle')}
+                style={styles.reviewBackBtn}
+              >
+                <Icon name="chevron-left" size={20} color={color.white} />
+              </PressableScale>
+              <SlideToolbar
+                onAddText={() => addSlideBox(reviewIndex)}
+                onPickPhoto={() => {
+                  if (reviewSlide) void pickPhoto(reviewSlide.slotIndex);
+                }}
+                onCrop={() => {
+                  if (reviewSlide) void startCrop(reviewSlide.slotIndex);
+                }}
+                onRemoveSlide={() => removeSlide(reviewIndex)}
+                disabled={picking || submitting || removing}
+                canRemove={slides.length > 1}
+                canCrop={reviewSlide !== undefined && photos[reviewSlide.slotIndex] !== undefined}
+              />
+            </>
+          )}
         </View>
 
         <FrameFit
           style={styles.reviewStage}
           frameStyle={styles.reviewCard}
-          aspect={SLIDE_ASPECT_RATIO[stageAspect]}
+          aspect={stageRatio}
         >
           <SlideNav
             key={slides.length}
@@ -787,9 +890,12 @@ export default function UploadScreen() {
             variant="dark"
             slides={slides.map((s) => ({
               image: previewUris[s.slotIndex],
+              crop: photos[s.slotIndex]?.crop,
               boxes: s.boxes,
               inset: s.inset,
             }))}
+            scrollEnabled={cropping === undefined}
+            cropping={cropping}
             style={StyleSheet.absoluteFill}
             onTapEmpty={() => {
               setSelectedBoxId(null);
@@ -811,7 +917,9 @@ export default function UploadScreen() {
             swipe
             onIndexChange={changeReviewIndex}
           />
-          {reviewSlide !== undefined && photos[reviewSlide.slotIndex] === undefined ? (
+          {reviewSlide !== undefined &&
+          photos[reviewSlide.slotIndex] === undefined &&
+          cropping === undefined ? (
             <View style={styles.stageCta} pointerEvents="box-none">
               <PressableScale
                 accessibilityRole="button"
@@ -830,7 +938,7 @@ export default function UploadScreen() {
               <Text style={styles.duplicateText}>Duplicate? Same words as the slide before</Text>
             </View>
           ) : null}
-          {canPlace && !placedOnce ? (
+          {canPlace && !placedOnce && cropping === undefined ? (
             <View style={styles.placeHint} pointerEvents="none">
               <Text style={styles.placeHintText}>
                 Drag to move, pinch to resize, tap to edit
@@ -840,7 +948,7 @@ export default function UploadScreen() {
         </FrameFit>
         {/* Fixed height slot so paging to a slide without text never shifts the stage. */}
         <View style={[styles.colorPicker, { marginBottom: sheetHeight }]}>
-          {reviewBoxes.length > 0 && reviewSegmentId !== null ? (
+          {reviewBoxes.length > 0 && reviewSegmentId !== null && cropping === undefined ? (
             <TextColorPicker
               key={reviewSegmentId}
               boxes={reviewBoxes}
@@ -852,7 +960,7 @@ export default function UploadScreen() {
         <Animated.View
           onLayout={(e) => {
             // Measure the panel at rest only; the text panel and keyboard overlay the stage.
-            if (selectedBox === null && keyboardHeight === 0) {
+            if (selectedBox === null && cropping === undefined && keyboardHeight === 0) {
               setSheetHeight(e.nativeEvent.layout.height);
             }
           }}
@@ -871,7 +979,13 @@ export default function UploadScreen() {
             },
           ]}
         >
-          {selectedBox !== null ? (
+          {cropping !== undefined ? (
+            <CropPanel
+              aspect={stageAspect}
+              onAspect={changeAspect}
+              onDone={() => setCropSlot(null)}
+            />
+          ) : selectedBox !== null ? (
             <TextEditPanel
               key={selectedBox.id}
               box={selectedBox}
@@ -944,10 +1058,12 @@ export default function UploadScreen() {
           hashtags={brief.hashtags ?? []}
           media={{
             kind: 'slides',
+            aspect: stageAspect,
             slides: slides.map((s) => ({
-              photoUri: photos[s.slotIndex]?.uri,
+              photoUri: previewUris[s.slotIndex],
+              crop: photos[s.slotIndex]?.crop,
               boxes: s.boxes,
-              inset: undefined,
+              inset: s.inset,
               text: s.text,
             })),
           }}
@@ -963,18 +1079,6 @@ export default function UploadScreen() {
           failure={failure}
           bottom={sheetHeight + keyboardHeight + space[3]}
           onDismiss={() => setFailure(null)}
-        />
-        <PhotoCropSheet
-          visible={cropping !== null}
-          sourceUri={cropping?.sourceUri ?? null}
-          aspect={stageAspect}
-          aspectLocked={aspectLocked}
-          onCancel={() => setCropping(null)}
-          onDone={finishCrop}
-          onError={(message) => {
-            setCropping(null);
-            setErrorToast(message);
-          }}
         />
       </View>
     );
@@ -1032,7 +1136,8 @@ export default function UploadScreen() {
                   <>
                     <SlideStage
                       boxes={slide.boxes}
-                      photoUri={photo.uri}
+                      photoUri={previewUris[slide.slotIndex] ?? photo.uri}
+                      photoCrop={photo.crop}
                       inset={slide.inset}
                       tint={color.ink800}
                       style={StyleSheet.absoluteFill}
@@ -1097,18 +1202,6 @@ export default function UploadScreen() {
         message={errorToast ?? ''}
         tone="error"
         onHide={() => setErrorToast(null)}
-      />
-      <PhotoCropSheet
-        visible={cropping !== null}
-        sourceUri={cropping?.sourceUri ?? null}
-        aspect={stageAspect}
-        aspectLocked={aspectLocked}
-        onCancel={() => setCropping(null)}
-        onDone={finishCrop}
-        onError={(message) => {
-          setCropping(null);
-          setErrorToast(message);
-        }}
       />
     </View>
   );
@@ -1308,10 +1401,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[7],
     paddingVertical: space[2],
   },
-  reviewHeaderBtn: {
-    color: color.white,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
+  reviewBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: color.whiteA16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   reviewHeaderTitle: {
     color: color.white,

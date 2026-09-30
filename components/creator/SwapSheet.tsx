@@ -62,6 +62,7 @@ function PreviewMedia({ brief }: { brief: Brief }) {
           variant="dark"
           slides={scriptBlocks(brief.script).map((text) => ({ text }))}
           style={StyleSheet.absoluteFill}
+          swipe
         />
       ) : (
         <>

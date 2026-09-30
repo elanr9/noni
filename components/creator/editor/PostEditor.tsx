@@ -81,7 +81,7 @@ import { Timeline, type TrimEdges } from './Timeline';
 import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
 import { useEditHistory } from './useEditHistory';
 import { useEvent } from './useEvent';
-import { useSegmentPersistence } from './useSegmentPersistence';
+import { useSegmentPersistence, type SegmentWriter } from './useSegmentPersistence';
 
 export type EditorSlot = {
   slotIndex: number;
@@ -125,6 +125,14 @@ export type PostEditorProps = {
   onBack: () => void;
   onReplaceSlot: (slotIndex: number) => void;
   onContinue: (timeline: EditTimeline) => void;
+  /**
+   * 'creator' (default) cuts the footage and re-records; 'manager' reviews
+   * uploaded clips, so only text, pictures, subtitles and cue timing are
+   * offered and the header reads Cancel / Done.
+   */
+  mode?: 'creator' | 'manager';
+  /** Where segment boxes and insets save; defaults to the creator RPCs. */
+  segmentWriter?: SegmentWriter;
   /** Export or submit in flight; blocks every control and shows the label. */
   busyLabel: string | null;
   showPlaceHint: boolean;
@@ -220,6 +228,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     onBack,
     onReplaceSlot,
     onContinue,
+    mode = 'creator',
+    segmentWriter,
     busyLabel,
     showPlaceHint,
     trimmedToSpeech,
@@ -271,7 +281,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     onError: setError,
     onBoxesChange,
     onPlaceInset,
+    writer: segmentWriter,
   });
+  const managerMode = mode === 'manager';
 
   const shownCues = useMemo<StoredCues>(
     () => (cuePreview ? { ...cues, [String(cuePreview.slotIndex)]: cuePreview.cue } : cues),
@@ -550,7 +562,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   const onSelectPiece = useEvent((id: string | null) => {
     if (tool !== null) return;
     clearStageSelection();
-    setSelectedId(id);
+    // Managers never cut footage, so a clip never selects (no trim handles).
+    setSelectedId(managerMode ? null : id);
   });
 
   const onTrimPreview = useEvent((pieceId: string, edges: TrimEdges) => {
@@ -927,15 +940,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       const at = slotSourceToTimelineMs(shown, slot, selectedCueValue?.media_start_ms ?? 0);
       return `Screenshot shows at ${formatSeconds(at - range.startMs)}`;
     }
-    const cue = selectedCueValue;
-    if (cue === null || cue.source !== 'creator' || cue.text_start_ms === null) {
-      return 'Text shows for the whole clip';
-    }
-    const textWindow = slotTextWindow(cue, slotPieces(shown, slot));
-    const at = slotSourceToTimelineMs(shown, slot, textWindow.startMs) - range.startMs;
-    if (cue.text_hold_ms === null) return `Text shows from ${formatSeconds(at)} to the end`;
-    const end = slotSourceToTimelineMs(shown, slot, textWindow.endMs) - range.startMs;
-    return `Text shows at ${formatSeconds(at)} for ${formatSeconds(end - at)}`;
+    return 'Text shows for the whole clip';
   }, [selectedCue, selectedCueValue, shown]);
 
   const canResetCue =
@@ -965,12 +970,16 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       <View style={[styles.header, { paddingTop: top + 8 }]}>
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Back to camera"
+          accessibilityLabel={managerMode ? 'Cancel and discard edits' : 'Back to camera'}
           onPress={onBack}
           disabled={busy}
-          style={styles.roundBtn}
+          style={managerMode ? styles.textBtn : styles.roundBtn}
         >
-          <Icon name="chevron-left" size={22} color={color.white} />
+          {managerMode ? (
+            <Text style={styles.cancelText}>Cancel</Text>
+          ) : (
+            <Icon name="chevron-left" size={22} color={color.white} />
+          )}
         </PressableScale>
         {speechPill ? (
           <View style={styles.speechPill} pointerEvents="none">
@@ -979,12 +988,19 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         ) : null}
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Continue"
+          accessibilityLabel={managerMode ? 'Done editing' : 'Continue'}
           onPress={continueToSend}
           disabled={busy}
-          style={[styles.roundBtn, styles.nextBtn, busy && styles.btnOff]}
+          style={[
+            managerMode ? styles.doneBtn : [styles.roundBtn, styles.nextBtn],
+            busy && styles.btnOff,
+          ]}
         >
-          <Icon name="arrow-right" size={22} color={color.white} />
+          {managerMode ? (
+            <Text style={styles.doneText}>Done</Text>
+          ) : (
+            <Icon name="arrow-right" size={22} color={color.white} />
+          )}
         </PressableScale>
       </View>
 
@@ -1153,6 +1169,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           </ToolPanel>
         ) : (
           <EditorToolbar
+            cutTools={!managerMode}
             canSplit={canSplit}
             hasSelection={selected !== null && !busy}
             canDelete={canDelete && !busy}
@@ -1225,6 +1242,30 @@ const styles = StyleSheet.create({
   },
   nextBtn: {
     backgroundColor: ARROW_RED,
+  },
+  textBtn: {
+    minWidth: 64,
+    height: HEADER_H,
+    justifyContent: 'center',
+  },
+  cancelText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
+  },
+  doneBtn: {
+    minWidth: 64,
+    paddingHorizontal: 14,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: color.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneText: {
+    color: color.ink,
+    fontSize: type.size.bodySm,
+    fontWeight: type.weight.bold,
   },
   btnOff: {
     opacity: 0.4,

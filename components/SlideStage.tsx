@@ -23,6 +23,8 @@ import {
 import { color } from '../theme/tokens';
 import { DragPlacement, type PlacementMove } from './creator/DragPlacement';
 import { GestureItem, WidthHandles, useWidthDrag } from './creator/slides/GestureItem';
+import { CropPhoto } from './creator/slides/CropPhoto';
+import { photoLayout, type PhotoCrop, type SourceSize } from './creator/slides/photo-crop';
 import { TikTokChrome } from './creator/slides/TikTokChrome';
 import { OverlayTextBox, overlayMinWrapWidth, overlayWrapWidth } from './ui/OverlayTextBox';
 import { SkeletonCard } from './ui/Skeleton';
@@ -51,6 +53,13 @@ const INSET_MAX_WIDTH = 0.95;
 /** Defaults when the admin attached a picture but never saved a placement.
  * Mirrors renderTimeline.ts (IMAGE_Y / IMAGE_WIDTH). */
 export const SLIDE_INSET_DEFAULTS = { x: 0.5, y: 0.62, width: 0.85 };
+
+/** Crop mode: the photo pans and zooms under the frame, text sits on top as a guide. */
+export type SlideStageCropping = {
+  source: SourceSize;
+  frameAspect: number;
+  onChange: (crop: PhotoCrop) => void;
+};
 
 export type SlideInset = {
   uri: string;
@@ -126,6 +135,8 @@ export function SlideStage(props: {
   boxes: OverlayBox[];
   /** The creator's photo; absent in the admin editor before upload. */
   photoUri?: string;
+  /** Window of the photo that fills the frame; the whole photo covers when absent. */
+  photoCrop?: PhotoCrop;
   inset?: SlideInset;
   /** Shown on the empty background when there is no photo yet. */
   placeholder?: string;
@@ -140,10 +151,13 @@ export function SlideStage(props: {
   editing?: SlideStageEditing;
   /** Ghost TikTok UI (action column, caption block) as safe area guides. */
   chrome?: boolean;
+  /** Framing the photo; needs photoCrop. Boxes and the inset stop taking touches. */
+  cropping?: SlideStageCropping;
 }): JSX.Element {
   const {
     boxes,
     photoUri,
+    photoCrop,
     inset,
     placeholder,
     tint,
@@ -151,10 +165,13 @@ export function SlideStage(props: {
     onMoveBox,
     onMoveInset,
     onDragStart,
-    editing,
+    editing: editingProp,
     chrome = false,
+    cropping,
   } = props;
   const [stage, setStage] = useState({ w: 0, h: 0 });
+  const cropActive = cropping !== undefined && photoUri !== undefined && props.photoCrop !== undefined;
+  const editing = cropActive ? undefined : editingProp;
   const [insetAspect, setInsetAspect] = useState(9 / 16);
   /** Shimmer covers the photo until this uri has decoded. */
   const [loadedUri, setLoadedUri] = useState<string | null>(null);
@@ -190,12 +207,27 @@ export function SlideStage(props: {
         if (width > 0 && height > 0) setStage({ w: width, h: height });
       }}
     >
-      {photoUri !== undefined ? (
+      {photoUri !== undefined && cropActive && photoCrop !== undefined && stage.w > 0 ? (
+        <CropPhoto
+          uri={photoUri}
+          crop={photoCrop}
+          source={cropping.source}
+          frameAspect={cropping.frameAspect}
+          stageWidth={stage.w}
+          stageHeight={stage.h}
+          onChange={cropping.onChange}
+          onLoad={() => setLoadedUri(photoUri)}
+        />
+      ) : photoUri !== undefined ? (
         <>
           <Image
             source={{ uri: photoUri }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            style={
+              photoCrop !== undefined && stage.w > 0
+                ? [styles.croppedPhoto, photoLayout(photoCrop, stage.w, stage.h)]
+                : StyleSheet.absoluteFill
+            }
+            resizeMode={photoCrop !== undefined ? 'stretch' : 'cover'}
             onLoad={() => setLoadedUri(photoUri)}
           />
           {loadedUri !== photoUri ? (
@@ -282,6 +314,7 @@ export function SlideStage(props: {
             return (
               <DragPlacement
                 key={box.id}
+                layerStyle={cropActive ? styles.cropGuide : undefined}
                 x={box.x}
                 y={box.y}
                 stageWidth={stage.w}
@@ -330,6 +363,12 @@ const styles = StyleSheet.create({
   shimmer: {
     flex: 1,
     opacity: 0.35,
+  },
+  croppedPhoto: {
+    position: 'absolute',
+  },
+  cropGuide: {
+    opacity: 0.55,
   },
   insetImg: {
     width: '100%',

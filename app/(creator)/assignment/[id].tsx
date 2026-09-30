@@ -144,6 +144,7 @@ function ExamplePlayer({ assignment }: { assignment: AssignmentWithBrief }) {
               variant="dark"
               slides={scriptBlocks(brief.script).map((text) => ({ text }))}
               style={StyleSheet.absoluteFill}
+              swipe
             />
           ) : (
             <>
