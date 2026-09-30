@@ -51,6 +51,8 @@ export type SubmissionRow = {
   version: number | null;
   overlay_render_id?: string | null;
   audio_gain?: number | null;
+  /** Photo posts: the crop aspect every slide was cut to in the app. */
+  slide_aspect?: string | null;
   /** Manifest stored by the stitch invocation; reused when resuming at overlays. */
   render_timeline?: unknown;
   /** `{ clips: [{ slot_index, words }] }`, ms in each uploaded clip file. */
@@ -512,12 +514,14 @@ async function renderSlideWithFfmpeg(params: {
   inset?: { path: string; x: number; y: number; width: number };
   outputPath: string;
   label: string;
+  frame: SlideFrame;
 }): Promise<void> {
-  const { admin, photoPath, boxes, inset, outputPath, label } = params;
+  const { admin, photoPath, boxes, inset, outputPath, label, frame } = params;
   const apiKey = uploadPostKey();
+  const conform = conformFilter(frame.width, frame.height);
   const timeline: RenderTimeline = {
-    width: 1080,
-    height: 1920,
+    width: frame.width,
+    height: frame.height,
     text_overlay: DEFAULT_TEXT_OVERLAY,
     subtitles: false,
     subtitles_y: SUBTITLE_Y,
@@ -556,7 +560,7 @@ async function renderSlideWithFfmpeg(params: {
   const anchorUrl = fontUrl(QUOTA_ANCHOR_FILE);
   try {
     let basePath = photoPath;
-    let prefix = [CONFORM_1080x1920];
+    let prefix = [conform];
     if (needsCompositePass(timeline)) {
       const compositedPath = `${outputPath}.composited.png`;
       const imageUrls = inset ? await signBriefAssets(admin, [inset.path]) : [];
@@ -569,7 +573,7 @@ async function renderSlideWithFfmpeg(params: {
           timeline,
           images: inset ? [{ index: 2, isVideo: false }] : [],
           ass: buildShapeAss(timeline),
-          baseFilters: CONFORM_1080x1920,
+          baseFilters: conform,
           baseInput: 1,
         }),
         fullCommand: slideCommand({ inputCount: 2 + imageUrls.length }),
@@ -612,6 +616,19 @@ async function renderSlideWithFfmpeg(params: {
 
 /** Instagram feed carousels are 4:5 at most; a 9:16 slide gets cropped. */
 export const INSTAGRAM_SLIDE_SUFFIX = '-ig.png';
+
+type SlideFrame = { width: number; height: number };
+
+/**
+ * Output size for a photo post. The app crops every slide to one of these
+ * aspects (submissions.slide_aspect); 4:5 and 1:1 post as they are on both
+ * platforms, 9:16 keeps the Instagram letterbox copy.
+ */
+export function slideFrame(aspect: string | null | undefined): SlideFrame {
+  if (aspect === '4:5') return { width: 1080, height: 1350 };
+  if (aspect === '1:1') return { width: 1080, height: 1080 };
+  return { width: 1080, height: 1920 };
+}
 
 /**
  * Letterboxed copy of a finished 9:16 slide at another aspect: the slide
@@ -1132,8 +1149,10 @@ export async function signVideoUrls(
 const VIDEO_CODEC =
   '-c:v h264_nvenc -preset p6 -rc vbr -cq 19 -b:v 0 -maxrate 16M -bufsize 32M -profile:v high -pix_fmt yuv420p -movflags +faststart';
 const AUDIO_CODEC = '-c:a aac -b:a 128k';
-const CONFORM_1080x1920 =
-  'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1';
+function conformFilter(width: number, height: number): string {
+  return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
+}
+const CONFORM_1080x1920 = conformFilter(1080, 1920);
 
 // Upload-Post names a lone input {input}; several are {input0}, {input1}, ...
 function inputPlaceholder(index: number, total: number): string {
@@ -1532,6 +1551,8 @@ async function runSlideshowAssembly(params: {
   }
 
   let overlayWarning: string | null = null;
+  const frame = slideFrame(submission.slide_aspect);
+  const letterboxForInstagram = frame.height === 1920;
   // Slides bake two at a time: each is up to two Upload-Post jobs and the
   // API rate limits job creation, polling and downloads alike.
   const finalPaths = await mapWithConcurrency(rawPaths, 2, async (rawPath, i) => {
@@ -1542,7 +1563,9 @@ async function runSlideshowAssembly(params: {
         segment.screenshot_url && !isVideoFile(segment.screenshot_url)
           ? segment.screenshot_url
           : null;
-      if (boxes.length === 0 && !insetPath) return rawPath;
+      // A 9:16 slide with nothing to burn in posts as the creator cut it; other
+      // aspects still bake so the file is exactly frame sized for both feeds.
+      if (boxes.length === 0 && !insetPath && letterboxForInstagram) return rawPath;
 
       let inset: { path: string; x: number; y: number; width: number } | undefined;
       if (insetPath) {
@@ -1567,16 +1590,19 @@ async function runSlideshowAssembly(params: {
         inset,
         outputPath: outPath,
         label: `slide ${i + 1}`,
+        frame,
       });
-      await renderLetterboxedSlide({
-        admin,
-        slidePath: outPath,
-        outputPath: outPath.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX),
-        width: 1080,
-        height: 1350,
-        outputExtension: 'png',
-        label: `slide ${i + 1} instagram`,
-      });
+      if (letterboxForInstagram) {
+        await renderLetterboxedSlide({
+          admin,
+          slidePath: outPath,
+          outputPath: outPath.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX),
+          width: 1080,
+          height: 1350,
+          outputExtension: 'png',
+          label: `slide ${i + 1} instagram`,
+        });
+      }
       return outPath;
   });
 

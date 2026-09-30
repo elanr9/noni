@@ -21,6 +21,10 @@ import { PostPreview } from '../../../components/creator/PostPreview';
 import { SlideNav } from '../../../components/creator/SlideNav';
 import { FrameFit } from '../../../components/creator/slides/FrameFit';
 import {
+  PhotoCropSheet,
+  type CropResult,
+} from '../../../components/creator/slides/PhotoCropSheet';
+import {
   ensurePreview,
   usePhotoPreviews,
 } from '../../../components/creator/slides/photo-previews';
@@ -68,9 +72,23 @@ import {
 } from '../../../components/SlideStage';
 import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
-import { submitAssignmentPhotos, type PickedPhoto } from '../../../lib/submissions';
+import {
+  SLIDE_ASPECT_RATIO,
+  submitAssignmentPhotos,
+  type PickedPhoto,
+  type SlideAspect,
+} from '../../../lib/submissions';
 
 type Phase = 'idle' | 'processing' | 'review';
+
+const DEFAULT_SLIDE_ASPECT: SlideAspect = '4:5';
+
+function isSlideAspect(value: unknown): value is SlideAspect {
+  return value === '9:16' || value === '4:5' || value === '1:1';
+}
+
+/** A camera roll pick waiting in the crop sheet. */
+type Cropping = { slotIndex: number; sourceUri: string };
 
 type Slide = {
   slotIndex: number;
@@ -126,17 +144,28 @@ function draftKey(assignmentId: string): string {
   return `noni:slideshow-draft:${assignmentId}`;
 }
 
-type StoredDraft = Record<string, PickedPhoto>;
+type StoredDraft = {
+  photos: Record<string, PickedPhoto>;
+  aspect: SlideAspect | null;
+};
 
-async function loadPhotoDraft(
-  assignmentId: string,
-): Promise<Record<number, PickedPhoto>> {
+type PhotoDraft = { photos: Record<number, PickedPhoto>; aspect: SlideAspect | null };
+
+const EMPTY_DRAFT: PhotoDraft = { photos: {}, aspect: null };
+
+async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
   try {
     const raw = await AsyncStorage.getItem(draftKey(assignmentId));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as StoredDraft;
+    if (!raw) return EMPTY_DRAFT;
+    const parsed = JSON.parse(raw) as Partial<StoredDraft>;
+    // Drafts saved before the crop step were a bare photos map at 9:16.
+    const legacy = parsed.photos === undefined;
+    const stored = legacy
+      ? (parsed as unknown as Record<string, PickedPhoto>)
+      : parsed.photos ?? {};
+    const aspect = legacy ? '9:16' : isSlideAspect(parsed.aspect) ? parsed.aspect : null;
     const out: Record<number, PickedPhoto> = {};
-    for (const [k, v] of Object.entries(parsed)) {
+    for (const [k, v] of Object.entries(stored)) {
       const slot = Number(k);
       if (
         !Number.isFinite(slot) ||
@@ -149,21 +178,23 @@ async function loadPhotoDraft(
       out[slot] = {
         uri: v.uri,
         mimeType: typeof v.mimeType === 'string' ? v.mimeType : null,
+        ...(typeof v.sourceUri === 'string' ? { sourceUri: v.sourceUri } : {}),
       };
     }
-    return out;
+    return { photos: out, aspect: Object.keys(out).length > 0 ? aspect : null };
   } catch {
-    return {};
+    return EMPTY_DRAFT;
   }
 }
 
 async function savePhotoDraft(
   assignmentId: string,
   photos: Record<number, PickedPhoto>,
+  aspect: SlideAspect | null,
 ): Promise<void> {
-  const stored: StoredDraft = {};
+  const stored: StoredDraft = { photos: {}, aspect };
   for (const [k, v] of Object.entries(photos)) {
-    stored[k] = v;
+    stored.photos[k] = v;
   }
   await AsyncStorage.setItem(draftKey(assignmentId), JSON.stringify(stored));
 }
@@ -261,6 +292,9 @@ export default function UploadScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [submitting, setSubmitting] = useState(false);
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
+  /** One crop aspect for the whole post, chosen with the first photo. */
+  const [aspect, setAspect] = useState<SlideAspect | null>(null);
+  const [cropping, setCropping] = useState<Cropping | null>(null);
   const [picking, setPicking] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
@@ -310,7 +344,8 @@ export default function UploadScreen() {
           ]);
           if (cancelled) return;
           setBriefSegments(segs);
-          setPhotos(draft);
+          setPhotos(draft.photos);
+          setAspect(draft.aspect);
           setDraftLoaded(true);
           for (const seg of segs) {
             if (!seg.screenshot_url) continue;
@@ -377,8 +412,13 @@ export default function UploadScreen() {
   const draftAssignmentId = draftLoaded ? assignment?.id ?? null : null;
   useEffect(() => {
     if (draftAssignmentId === null) return;
-    savePhotoDraft(draftAssignmentId, photos).catch(() => undefined);
-  }, [draftAssignmentId, photos]);
+    savePhotoDraft(draftAssignmentId, photos, aspect).catch(() => undefined);
+  }, [draftAssignmentId, photos, aspect]);
+
+  const stageAspect: SlideAspect = aspect ?? DEFAULT_SLIDE_ASPECT;
+  /** Other slides already hold this aspect, so the sheet cannot change it. */
+  const aspectLocked =
+    cropping !== null && Object.keys(photos).some((k) => Number(k) !== cropping.slotIndex);
 
   function fail(message: string, retry?: () => void) {
     if (retry) setFailure({ message, retry });
@@ -394,11 +434,7 @@ export default function UploadScreen() {
         quality: 0.9,
       });
       const asset = result.canceled ? null : result.assets[0];
-      if (asset) {
-        const picked = { uri: asset.uri, mimeType: asset.mimeType ?? null };
-        setPhotos((prev) => ({ ...prev, [slotIndex]: picked }));
-        void ensurePreview(picked.uri);
-      }
+      if (asset) setCropping({ slotIndex, sourceUri: asset.uri });
     } catch (e) {
       fail(
         e instanceof Error ? e.message : 'Could not open your photos.',
@@ -407,6 +443,25 @@ export default function UploadScreen() {
     } finally {
       setPicking(false);
     }
+  }
+
+  function recropPhoto(slotIndex: number) {
+    const photo = photos[slotIndex];
+    if (!photo || picking || phase === 'processing') return;
+    setCropping({ slotIndex, sourceUri: photo.sourceUri ?? photo.uri });
+  }
+
+  function finishCrop(result: CropResult) {
+    if (!cropping) return;
+    const picked: PickedPhoto = {
+      uri: result.uri,
+      mimeType: result.mimeType,
+      sourceUri: cropping.sourceUri,
+    };
+    setPhotos((prev) => ({ ...prev, [cropping.slotIndex]: picked }));
+    setAspect(result.aspect);
+    setCropping(null);
+    void ensurePreview(picked.uri);
   }
 
   async function processSlideshow() {
@@ -495,6 +550,7 @@ export default function UploadScreen() {
         companyId: profile.active_company_id,
         creatorId: profile.id,
         photos: ordered,
+        slideAspect: stageAspect,
       });
       try {
         await clearPhotoDraft(assignment.id);
@@ -710,13 +766,21 @@ export default function UploadScreen() {
             onPickPhoto={() => {
               if (reviewSlide) void pickPhoto(reviewSlide.slotIndex);
             }}
+            onCrop={() => {
+              if (reviewSlide) recropPhoto(reviewSlide.slotIndex);
+            }}
             onRemoveSlide={() => removeSlide(reviewIndex)}
             disabled={picking || submitting || removing}
             canRemove={slides.length > 1}
+            canCrop={reviewSlide !== undefined && photos[reviewSlide.slotIndex] !== undefined}
           />
         </View>
 
-        <FrameFit style={styles.reviewStage} frameStyle={styles.reviewCard}>
+        <FrameFit
+          style={styles.reviewStage}
+          frameStyle={styles.reviewCard}
+          aspect={SLIDE_ASPECT_RATIO[stageAspect]}
+        >
           <SlideNav
             key={slides.length}
             initialIndex={reviewIndex}
@@ -743,7 +807,7 @@ export default function UploadScreen() {
               onScaleInset: (slideIndex, width) => placeSlideInset(slideIndex, { width }),
               selectedBoxId,
             }}
-            chrome
+            chrome={stageAspect === '9:16'}
             swipe
             onIndexChange={changeReviewIndex}
           />
@@ -900,6 +964,18 @@ export default function UploadScreen() {
           bottom={sheetHeight + keyboardHeight + space[3]}
           onDismiss={() => setFailure(null)}
         />
+        <PhotoCropSheet
+          visible={cropping !== null}
+          sourceUri={cropping?.sourceUri ?? null}
+          aspect={stageAspect}
+          aspectLocked={aspectLocked}
+          onCancel={() => setCropping(null)}
+          onDone={finishCrop}
+          onError={(message) => {
+            setCropping(null);
+            setErrorToast(message);
+          }}
+        />
       </View>
     );
   }
@@ -1021,6 +1097,18 @@ export default function UploadScreen() {
         message={errorToast ?? ''}
         tone="error"
         onHide={() => setErrorToast(null)}
+      />
+      <PhotoCropSheet
+        visible={cropping !== null}
+        sourceUri={cropping?.sourceUri ?? null}
+        aspect={stageAspect}
+        aspectLocked={aspectLocked}
+        onCancel={() => setCropping(null)}
+        onDone={finishCrop}
+        onError={(message) => {
+          setCropping(null);
+          setErrorToast(message);
+        }}
       />
     </View>
   );

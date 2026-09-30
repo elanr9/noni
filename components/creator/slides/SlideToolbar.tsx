@@ -32,12 +32,23 @@ function ToolButton(props: {
 export function SlideToolbar(props: {
   onAddText: () => void;
   onPickPhoto: () => void;
+  onCrop: () => void;
   onRemoveSlide: () => void;
   disabled?: boolean;
   /** Removal stays visible but off when this is the only slide. */
   canRemove?: boolean;
+  /** Crop stays visible but off until the slide has a photo. */
+  canCrop?: boolean;
 }): JSX.Element {
-  const { onAddText, onPickPhoto, onRemoveSlide, disabled = false, canRemove = true } = props;
+  const {
+    onAddText,
+    onPickPhoto,
+    onCrop,
+    onRemoveSlide,
+    disabled = false,
+    canRemove = true,
+    canCrop = true,
+  } = props;
   return (
     <View style={styles.root}>
       <ToolButton
@@ -46,6 +57,13 @@ export function SlideToolbar(props: {
         accessibilityLabel="Replace photo"
         onPress={onPickPhoto}
         disabled={disabled}
+      />
+      <ToolButton
+        icon="crop"
+        label="Crop"
+        accessibilityLabel="Adjust crop"
+        onPress={onCrop}
+        disabled={disabled || !canCrop}
       />
       <ToolButton
         icon="plus"

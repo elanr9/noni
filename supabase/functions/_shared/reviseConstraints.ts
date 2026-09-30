@@ -23,6 +23,7 @@ export type ReviseScope =
   | 'point'
   | 'points'
   | 'search_phrase'
+  | 'undo'
   | 'full';
 
 export const LEARNING_CATEGORIES = [
@@ -64,9 +65,10 @@ export const EMPTY_CONSTRAINTS: ReviseConstraints = {
 };
 
 const EXTRACT_SYSTEM = `You read a campaign manager's feedback on a short form content brief and turn it into a work order. The brief has: a title, a hook (the opening line, also the title slide of a slideshow), numbered talking points (one of them is the product plug, whose sentence is the cta), a caption with hashtags, a search phrase. Answer with one JSON object only, no prose:
-{"scope": "hook" | "title" | "caption" | "cta" | "point" | "points" | "search_phrase" | "full", "point_index": number | null, "remember": [{"category": string, "insight": string}], "point_count": number | null, "lock_hook": boolean, "lock_title": boolean, "lock_caption": boolean, "lock_search_phrase": boolean, "lock_point_indexes": number[], "standing_instructions": string[]}
+{"scope": "hook" | "title" | "caption" | "cta" | "point" | "points" | "search_phrase" | "undo" | "full", "point_index": number | null, "remember": [{"category": string, "insight": string}], "point_count": number | null, "lock_hook": boolean, "lock_title": boolean, "lock_caption": boolean, "lock_search_phrase": boolean, "lock_point_indexes": number[], "standing_instructions": string[]}
 Rules:
-- scope is the smallest part that fixes the newest turn. "the hook needs to be better", "no title slide", "the opening line is weak" is hook. "the title is wrong" is title. Caption or hashtag complaints are caption. Complaints about the plug, the product sentence, the cta, a made up feature or a wrong product claim are cta. One specific point ("point 3 is generic", "the second tip is wrong") is point with point_index (point 1 is index 0). Complaints about the points as a group, the count, the order, the substance of the body ("the points are generic", "give me 5 points") are points. Anything about the post as a whole, the tone everywhere, the topic, the angle, or "it all reads like AI slop" is full. When the newest turn also asks for a new point count, scope is points or full, never a smaller one.
+- scope is the smallest part that fixes the newest turn. "the hook needs to be better", "no title slide", "the opening line is weak" is hook. "the title is wrong" is title. Caption or hashtag complaints are caption. Complaints about the plug, the product sentence, the cta, a made up feature or a wrong product claim are cta. One specific point ("point 3 is generic", "the second tip is wrong") is point with point_index (point 1 is index 0). Complaints about the points as a group, the count, the order, the substance of the body ("the points are generic", "give me 5 points") are points. Anything about the post as a whole, the tone everywhere, the topic, the angle, or "it all reads like AI slop" is full. When the newest turn also asks for a new point count, scope is points or full, never a smaller one. "Put it back", "go back to what I had", "undo that", "revert", "restore the original", "no you didn't, put it back" is undo: the manager wants the previous version back, nothing is rewritten.
+- "Only change X" or "do not edit anything other than X" locks everything else. "Do not edit anything other than points 2 to 6" (or "slides 2 to 6") locks the hook, title, caption, search phrase and every point outside that range (here index 0). Slides and points are the same thing numbered from 1; on a slideshow "slide 1" may mean the title slide, treat "slides 2 to N" as points 1 to N minus 1 in one-based numbering, so lock_point_indexes names the zero-based indexes NOT in the range.
 - remember: durable facts or rules the manager states that apply to every future post, not just this one ("we do not have a roster feature", "never say elite", "always talk to the athlete, not the parent", "do not do that again" about a specific mistake). Each is one plain sentence in the imperative or as a fact, with category one of: hook, talking_points, script, caption, hashtags, cta, overlay_text, screenshots, layout, structure, voice, other. A made up product feature is category cta ("Inkbound has no roster feature; never mention or invent one"). Empty when the feedback is only about this post.
 - point_count: the exact number of talking points the manager asked for ("give me 5 points", "make it 4", "seven tips"), else null. Number words count. A number that is not about how many points there should be is ignored.
 - lock_*: true when the manager said to keep, not change, not touch, or leave alone that part ("do not change the hook or the title", "keep the caption"). Also true when the manager wrote that part themselves this turn and said to use it as is.
@@ -112,7 +114,7 @@ export function regexConstraints(feedback: string): ReviseConstraints {
   };
 }
 
-const SCOPES: ReviseScope[] = ['hook', 'title', 'caption', 'cta', 'point', 'points', 'search_phrase', 'full'];
+const SCOPES: ReviseScope[] = ['hook', 'title', 'caption', 'cta', 'point', 'points', 'search_phrase', 'undo', 'full'];
 
 function parseRemembered(value: unknown): Remembered[] {
   if (!Array.isArray(value)) return [];
@@ -232,8 +234,14 @@ export type LockedValues = {
   hook: string | null;
   title: string | null;
   caption: string | null;
+  /** Locked with the caption; the two are one field to the manager. */
+  hashtags: string[] | null;
   searchPhrase: string | null;
   points: Array<{ index: number; point: TalkingPoint }>;
+  /** Locked when the plug point is locked; the plug sentence lives in both. */
+  cta: string | null;
+  /** True when the plug point is among the locked points. */
+  plugLocked: boolean;
 };
 
 export function captureLocked(
@@ -241,15 +249,71 @@ export function captureLocked(
   chosenHook: string | null,
   constraints: ReviseConstraints,
 ): LockedValues {
+  const points = constraints.lockPointIndexes
+    .filter((i) => draft.talking_points[i]?.text)
+    .map((i) => ({ index: i, point: draft.talking_points[i] }));
+  const plugLocked = points.some((p) => p.point.is_product);
   return {
     hook: constraints.lockHook ? chosenHook?.trim() || null : null,
     title: constraints.lockTitle && draft.title.trim() ? draft.title.trim() : null,
     caption: constraints.lockCaption && draft.caption.trim() ? draft.caption : null,
+    hashtags: constraints.lockCaption ? draft.hashtags : null,
     searchPhrase: constraints.lockSearchPhrase ? draft.search_phrase : null,
-    points: constraints.lockPointIndexes
-      .filter((i) => draft.talking_points[i]?.text)
-      .map((i) => ({ index: i, point: draft.talking_points[i] })),
+    points,
+    cta: plugLocked ? draft.cta : null,
+    plugLocked,
   };
+}
+
+/** True when every part of the post is locked: there is nothing to rewrite. */
+export function everythingLocked(draft: BriefDraftShape, locked: LockedValues): boolean {
+  const allPoints =
+    draft.talking_points.length > 0 &&
+    draft.talking_points.every((p, i) => !p.text || locked.points.some((l) => l.index === i));
+  return (
+    allPoints &&
+    (locked.hook !== null || draft.hook_options.length === 0) &&
+    (locked.title !== null || !draft.title.trim()) &&
+    (locked.caption !== null || !draft.caption.trim())
+  );
+}
+
+const PLUG_FAILURE = /\b(plug|cta|product point|is_product)\b/i;
+const CAPTION_FAILURE = /\b(caption|hashtags?)\b/i;
+
+/** Failures about a locked part are noise: a retry cannot change that part. */
+export function failureAboutLockedPart(failure: string, locked: LockedValues): boolean {
+  if (locked.plugLocked && PLUG_FAILURE.test(failure)) return true;
+  if (locked.caption !== null && CAPTION_FAILURE.test(failure)) return true;
+  return false;
+}
+
+/** What actually changed between the draft the manager sent and the one going back. */
+export function changeReport(before: BriefDraftShape, beforeHook: string | null, after: BriefDraftShape): string {
+  const same = (a: string | null | undefined, b: string | null | undefined) =>
+    (a ?? '').replace(/\s+/g, ' ').trim() === (b ?? '').replace(/\s+/g, ' ').trim();
+  const changed: string[] = [];
+  const kept: string[] = [];
+  (same(before.title, after.title) ? kept : changed).push('title');
+  (same(beforeHook, after.hook_options[0]) ? kept : changed).push('hook');
+  const pointNums: string[] = [];
+  const max = Math.max(before.talking_points.length, after.talking_points.length);
+  for (let i = 0; i < max; i++) {
+    if (!same(before.talking_points[i]?.text, after.talking_points[i]?.text)) pointNums.push(String(i + 1));
+  }
+  if (before.talking_points.length !== after.talking_points.length) {
+    changed.push(`points (now ${after.talking_points.length}, was ${before.talking_points.length})`);
+  } else if (pointNums.length) {
+    changed.push(pointNums.length === 1 ? `point ${pointNums[0]}` : `points ${pointNums.join(', ')}`);
+  } else {
+    kept.push('every point');
+  }
+  (same(before.cta, after.cta) ? kept : changed).push('plug sentence');
+  (same(before.caption, after.caption) ? kept : changed).push('caption');
+  const parts: string[] = [];
+  parts.push(changed.length ? `Changed: ${changed.join(', ')}.` : 'Changed nothing.');
+  if (kept.length) parts.push(`Untouched: ${kept.join(', ')}.`);
+  return parts.join(' ');
 }
 
 /** Texts validation must never flag and compression must never touch. */
@@ -276,6 +340,7 @@ export function constraintLines(
   for (const { index, point } of locked.points) {
     kept.push(`talking point [${index}], exactly: ${point.text}`);
   }
+  if (locked.cta !== null) kept.push(`the plug sentence (cta), exactly: ${locked.cta ?? '(none)'}`);
   if (kept.length) {
     lines.push(
       `LOCKED BY THE MANAGER (return these character for character; every rule below about hook shape, hook count, title shape or point length yields to this):\n${kept.map((k) => `- ${k}`).join('\n')}`,
@@ -311,7 +376,9 @@ export function applyLocked(draft: BriefDraftShape, locked: LockedValues): Brief
   }
   if (locked.title) next.title = locked.title;
   if (locked.caption) next.caption = locked.caption;
+  if (locked.hashtags) next.hashtags = locked.hashtags;
   if (locked.searchPhrase) next.search_phrase = locked.searchPhrase;
+  if (locked.cta !== null) next.cta = locked.cta;
   if (locked.points.length) {
     const points = [...draft.talking_points];
     for (const { index, point } of locked.points) {

@@ -31,7 +31,9 @@ export interface ReviseChatSheetProps {
   postTypeKey?: string | null;
   exampleTranscript?: string | null;
   /** A whole rewrite or a single regenerated part; the editor applies either. */
-  onApply: (result: Exclude<ReviseResult, { kind: 'kill' }>) => void;
+  onApply: (result: Extract<ReviseResult, { kind: 'draft' | 'field' }>) => void;
+  /** Puts the editor back to a snapshot taken before an AI change. */
+  onRestore: (snapshot: RegenDraftPayload) => void;
 }
 
 const STARTERS: readonly string[] = [
@@ -49,7 +51,20 @@ const REVISE_STEPS: readonly string[] = [
 
 const APPLIED_NOTE = 'Applied to the editor. Tap Save when you are happy.';
 
-type ChatTurn = ReviseTurn & { applied?: boolean };
+type ChatTurn = ReviseTurn & {
+  applied?: boolean;
+  /** Editor state before this AI change; Undo puts it back. */
+  before?: RegenDraftPayload;
+  undone?: boolean;
+};
+
+const UNDO_INTENT =
+  /\b(undo|revert|put (it|them|that|everything|this)? ?back|go back to what i had|what i had before|restore (it|that|the original|what i had)|back to (the )?original|back to how it was)\b/i;
+const ORIGINAL_INTENT = /\b(original|the start|the beginning|first version|before you changed anything)\b/i;
+
+function normalizeTurns(turns: ChatTurn[]): ReviseTurn[] {
+  return turns.map(({ role, text }) => ({ role, text }));
+}
 
 // Sheet chrome outside the scrollable body: grabber, title and two line subtitle.
 const SHEET_HEADER_HEIGHT = 125;
@@ -61,6 +76,7 @@ export function ReviseChatSheet({
   postTypeKey,
   exampleTranscript,
   onApply,
+  onRestore,
 }: ReviseChatSheetProps) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -84,17 +100,56 @@ export function ReviseChatSheet({
     panelHeight - SHEET_HEADER_HEIGHT - footerHeight - panelBottomPad,
   );
 
+  /** Snapshots from before each applied AI change, oldest first. */
+  const snapshots = useRef<RegenDraftPayload[]>([]);
+
+  function restoreLatest(original: boolean): boolean {
+    const stack = snapshots.current;
+    if (stack.length === 0) return false;
+    const snapshot = original ? stack[0] : stack[stack.length - 1];
+    snapshots.current = original ? [] : stack.slice(0, -1);
+    onRestore(snapshot);
+    return true;
+  }
+
+  function undoTurn(index: number) {
+    const turn = turns[index];
+    if (!turn?.before || turn.undone) return;
+    onRestore(turn.before);
+    snapshots.current = snapshots.current.filter((s) => s !== turn.before);
+    setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, undone: true } : t)));
+  }
+
   async function send(feedback: string) {
     const text = feedback.trim();
     if (!text || busy) return;
-    const history = turns.map<ReviseTurn>(({ role, text: t }) => ({ role, text: t }));
+    const history = normalizeTurns(turns);
     setTurns((prev) => [...prev, { role: 'manager', text }]);
     setInput('');
     setError(null);
+
+    // Undo never goes through the model: the editor already holds the
+    // version the manager wants back.
+    if (UNDO_INTENT.test(text)) {
+      const restored = restoreLatest(ORIGINAL_INTENT.test(text));
+      setTurns((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: restored
+            ? 'Put back what you had before my last change.'
+            : 'There is nothing of mine to undo yet; the post is as you left it.',
+          applied: restored,
+        },
+      ]);
+      return;
+    }
+
     setBusy(true);
+    const before = getDraft();
     try {
       const result = await assistRevise({
-        draft: getDraft(),
+        draft: before,
         feedback: text,
         postTypeKey: postTypeKey ?? undefined,
         history,
@@ -104,10 +159,34 @@ export function ReviseChatSheet({
         setTurns((prev) => [...prev, { role: 'ai', text: result.kill_reason }]);
         return;
       }
+      if (result.kind === 'undo') {
+        const restored = restoreLatest(ORIGINAL_INTENT.test(text));
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: 'ai',
+            text: restored
+              ? result.revisionNote
+              : 'There is nothing of mine to undo yet; the post is as you left it.',
+            applied: restored,
+          },
+        ]);
+        return;
+      }
+      if (result.kind === 'none') {
+        setTurns((prev) => [...prev, { role: 'ai', text: result.revisionNote }]);
+        return;
+      }
       onApply(result);
+      snapshots.current = [...snapshots.current, before];
       setTurns((prev) => [
         ...prev,
-        { role: 'ai', text: result.revisionNote || 'Applied your feedback.', applied: true },
+        {
+          role: 'ai',
+          text: result.revisionNote || 'Applied your feedback.',
+          applied: true,
+          before,
+        },
       ]);
     } catch (e) {
       // Drop the failed turn so a retry does not send it twice in history.
@@ -196,7 +275,24 @@ export function ReviseChatSheet({
                 <Bubble side="manager" author="Noni AI" avatarInitial="N">
                   {turn.text}
                 </Bubble>
-                {turn.applied ? <Text style={styles.applied}>{APPLIED_NOTE}</Text> : null}
+                {turn.applied ? (
+                  <View style={styles.appliedRow}>
+                    <Text style={styles.applied}>
+                      {turn.undone ? 'Undone.' : APPLIED_NOTE}
+                    </Text>
+                    {turn.before && !turn.undone ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Undo this change"
+                        disabled={busy}
+                        onPress={() => undoTurn(index)}
+                        hitSlop={8}
+                      >
+                        <Text style={styles.undo}>Undo</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
             ),
           )
@@ -227,11 +323,21 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.medium,
     color: color.ink,
   },
-  applied: {
+  appliedRow: {
     marginTop: space[1],
     marginLeft: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+  },
+  applied: {
     fontSize: type.size.label,
     color: color.slate400,
+  },
+  undo: {
+    fontSize: type.size.label,
+    fontWeight: type.weight.medium,
+    color: color.accent,
   },
   working: {
     marginBottom: space[3],

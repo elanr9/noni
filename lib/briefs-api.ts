@@ -477,6 +477,10 @@ export type ReviseResult =
   | { kind: 'draft'; draft: BriefDraft; hook: string | null; revisionNote: string }
   /** Targeted feedback: one part changed, applied like a Regenerate button. */
   | { kind: 'field'; result: RegenResult; revisionNote: string }
+  /** The manager asked for the previous version back; the editor restores its own snapshot. */
+  | { kind: 'undo'; revisionNote: string }
+  /** Everything was locked; nothing was generated. */
+  | { kind: 'none'; revisionNote: string }
   | { kind: 'kill'; kill_reason: string };
 
 /**
@@ -509,6 +513,8 @@ export async function assistRevise(params: {
     field?: RegenField;
     index?: number;
   };
+  if (raw.scope === 'undo') return { kind: 'undo', revisionNote: raw.revision_note ?? '' };
+  if (raw.scope === 'none') return { kind: 'none', revisionNote: raw.revision_note ?? '' };
   if (raw.scope === 'field' && raw.field) {
     const result = parseRegenResult(
       raw as unknown as Record<string, unknown>,

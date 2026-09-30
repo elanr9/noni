@@ -9,10 +9,12 @@ export function FrameFit(props: {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   frameStyle?: StyleProp<ViewStyle>;
+  /** Width over height; defaults to the 9:16 frame. */
+  aspect?: number;
 }): JSX.Element {
-  const { children, style, frameStyle } = props;
+  const { children, style, frameStyle, aspect } = props;
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const frame = fitFrame(box.w, box.h);
+  const frame = fitFrame(box.w, box.h, aspect);
 
   return (
     <View

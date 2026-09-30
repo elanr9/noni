@@ -545,12 +545,38 @@ export default function PostEditorScreen() {
     }
   }
 
-  function applyRevise(result: Exclude<ReviseResult, { kind: 'kill' }>) {
+  function applyRevise(result: Extract<ReviseResult, { kind: 'draft' | 'field' }>) {
     if (result.kind === 'field') {
       if (result.result.kind !== 'kill') applyRegenResult(result.result);
       return;
     }
     applyRevisedDraft(result.draft, result.hook);
+  }
+
+  /** Undo: the editor goes back to exactly what it held before an AI change. */
+  function restoreDraft(snapshot: RegenDraftPayload) {
+    setTitle(snapshot.title);
+    setSearchPhrase(snapshot.search_phrase ?? '');
+    setHookOptions(snapshot.hook_options);
+    const hookIndex = snapshot.hook ? snapshot.hook_options.indexOf(snapshot.hook) : 0;
+    if (snapshot.hook && hookIndex < 0) {
+      setCustomHook(snapshot.hook);
+      setUseCustomHook(true);
+    } else {
+      setChosenHookIndex(Math.max(0, hookIndex));
+      setUseCustomHook(false);
+    }
+    setPoints(snapshot.talking_points);
+    setCta(snapshot.cta ?? '');
+    setCaption(snapshot.caption);
+    setHashtags(snapshot.hashtags);
+    setWhyItWorks(snapshot.why_it_works);
+    setScript(snapshot.script);
+    setTargetWords(snapshot.target_words);
+    setWarnings([]);
+    setPendingOverlayLabels(null);
+    pendingPointMedia.current = [];
+    if (family === 'photo_carousel') slideRegenPending.current = true;
   }
 
   async function regenerate(field: RegenField, index?: number) {
@@ -1816,6 +1842,7 @@ export default function PostEditorScreen() {
         postTypeKey={currentType?.key ?? null}
         exampleTranscript={exampleTranscript}
         onApply={applyRevise}
+        onRestore={restoreDraft}
       />
       <PortSheet
         visible={portSheet !== null}

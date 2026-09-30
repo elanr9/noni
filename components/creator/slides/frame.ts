@@ -26,14 +26,18 @@ export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-export function fitFrame(availableWidth: number, availableHeight: number): {
+export function fitFrame(
+  availableWidth: number,
+  availableHeight: number,
+  aspect: number = FRAME_ASPECT,
+): {
   width: number;
   height: number;
 } {
   if (availableWidth <= 0 || availableHeight <= 0) return { width: 0, height: 0 };
-  const byHeight = availableHeight * FRAME_ASPECT;
+  const byHeight = availableHeight * aspect;
   if (byHeight <= availableWidth) {
     return { width: byHeight, height: availableHeight };
   }
-  return { width: availableWidth, height: availableWidth / FRAME_ASPECT };
+  return { width: availableWidth, height: availableWidth / aspect };
 }

@@ -1063,6 +1063,8 @@ export type GenerateOptions = {
   lockedTexts?: string[];
   /** Failures the standard validator cannot know about (the manager's point count). */
   extraFailures?: (draft: BriefDraftShape) => string[];
+  /** Failures about parts a retry is not allowed to touch. */
+  ignoreFailure?: (failure: string) => boolean;
 };
 
 const normalizeText = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1092,7 +1094,9 @@ export async function generateValidated(
   const validate = (draft: BriefDraftShape): ValidationResult => {
     const base = validateBrief(draft, ctx);
     const failures = [
-      ...base.failures.filter((f) => !failureIsAboutLocked(f, locked)),
+      ...base.failures.filter(
+        (f) => !failureIsAboutLocked(f, locked) && !(options.ignoreFailure?.(f) ?? false),
+      ),
       ...(options.extraFailures?.(draft) ?? []),
     ];
     return { passed: failures.length === 0, failures, warnings: base.warnings };

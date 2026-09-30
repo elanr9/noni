@@ -4288,6 +4288,7 @@ export type Database = {
           render_status: string
           render_timeline: Json | null
           segment_paths: string[] | null
+          slide_aspect: string
           task_id: string | null
           transcript: Json | null
           version: number | null
@@ -4307,6 +4308,7 @@ export type Database = {
           render_status?: string
           render_timeline?: Json | null
           segment_paths?: string[] | null
+          slide_aspect?: string
           task_id?: string | null
           transcript?: Json | null
           version?: number | null
@@ -4326,6 +4328,7 @@ export type Database = {
           render_status?: string
           render_timeline?: Json | null
           segment_paths?: string[] | null
+          slide_aspect?: string
           task_id?: string | null
           transcript?: Json | null
           version?: number | null

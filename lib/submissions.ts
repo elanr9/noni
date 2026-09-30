@@ -210,6 +210,8 @@ async function createAssignmentSubmission(params: {
   /** Post level volume multiplier the stitcher applies; null keeps the column default. */
   audioGain: number | null;
   cues?: SubmissionCue[] | null;
+  /** Photo posts only: the crop aspect every slide was cut to. */
+  slideAspect?: SlideAspect;
 }): Promise<Assignment> {
   const {
     assignment,
@@ -221,6 +223,7 @@ async function createAssignmentSubmission(params: {
     durationSeconds,
     audioGain,
     cues,
+    slideAspect,
   } = params;
 
   const { data: submission, error: insertError } = await supabase
@@ -234,6 +237,7 @@ async function createAssignmentSubmission(params: {
       version,
       ...(audioGain !== null ? { audio_gain: audioGain } : {}),
       ...(cues && cues.length > 0 ? { cues: cues as unknown as Json } : {}),
+      ...(slideAspect !== undefined ? { slide_aspect: slideAspect } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -323,9 +327,24 @@ export async function submitAssignmentClips(params: {
   });
 }
 
+/** Frame aspect every slide of a photo post is cropped to. */
+export type SlideAspect = '9:16' | '4:5' | '1:1';
+
+export const SLIDE_ASPECTS: readonly SlideAspect[] = ['4:5', '1:1', '9:16'];
+
+/** Width over height. */
+export const SLIDE_ASPECT_RATIO: Record<SlideAspect, number> = {
+  '9:16': 9 / 16,
+  '4:5': 4 / 5,
+  '1:1': 1,
+};
+
 export type PickedPhoto = {
+  /** The cropped file that uploads. */
   uri: string;
   mimeType: string | null;
+  /** The camera roll original, kept so the crop can be adjusted. */
+  sourceUri?: string;
 };
 
 function photoExtension(mimeType: string | null): string {
@@ -361,8 +380,9 @@ export async function submitAssignmentPhotos(params: {
   companyId: string;
   creatorId: string;
   photos: PickedPhoto[];
+  slideAspect: SlideAspect;
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId, photos } = params;
+  const { assignment, companyId, creatorId, photos, slideAspect } = params;
   if (photos.length === 0) {
     throw new Error('No photos picked yet');
   }
@@ -387,5 +407,6 @@ export async function submitAssignmentPhotos(params: {
     durationSeconds: null,
     format: 'photo',
     audioGain: null,
+    slideAspect,
   });
 }

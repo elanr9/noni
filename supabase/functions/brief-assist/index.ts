@@ -73,7 +73,10 @@ import {
   captureLocked,
   constraintFailures,
   constraintLines,
+  changeReport,
+  everythingLocked,
   extractConstraints,
+  failureAboutLockedPart,
   keptNote,
   lockedTexts,
   rememberForCompany,
@@ -117,7 +120,11 @@ type Body = {
   example_transcript?: string | null;
 };
 
-const MAX_REVISE_HISTORY = 8;
+// Every manager turn feeds constraint extraction so an instruction from the
+// start of the conversation still holds; only the recent turns ride in the
+// rewrite prompt.
+const MAX_REVISE_HISTORY = 40;
+const MAX_PROMPT_HISTORY = 8;
 const MAX_REVISE_TURN_CHARS = 2000;
 
 function parseHistory(value: unknown): ReviseTurn[] {
@@ -289,6 +296,8 @@ type FieldRegenArgs = {
   feedback?: string;
   standingInstructions?: string[];
   requiredPointCount?: number | null;
+  /** Points the manager locked; returned verbatim on a talking_points regen. */
+  lockedPointIndexes?: number[];
 };
 
 /**
@@ -329,6 +338,17 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
   if (args.feedback) {
     askLines.push(
       `The manager's feedback on this part (it is law; the new version must fix exactly this):\n${args.feedback.slice(0, 3000)}`,
+    );
+  }
+  const lockedPoints =
+    field === 'talking_points'
+      ? (args.lockedPointIndexes ?? [])
+          .filter((i) => draft.talking_points[i]?.text)
+          .map((i) => ({ index: i, point: draft.talking_points[i] }))
+      : [];
+  if (lockedPoints.length) {
+    askLines.push(
+      `LOCKED BY THE MANAGER (return these points at the same index, character for character, and keep the same total count unless a count is required below):\n${lockedPoints.map((l) => `- [${l.index}] ${l.point.text}`).join('\n')}`,
     );
   }
   const requiredCount = field === 'talking_points' ? args.requiredPointCount ?? null : null;
@@ -389,6 +409,9 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
       featureIds = (out.talking_points ?? []).map((p) =>
         sanitizeFeatureId(p.feature_id, knownFeatureIds),
       );
+      for (const { index, point } of lockedPoints) {
+        if (index < points.length) points[index] = { ...point, edited_by_admin: true };
+      }
       merged.talking_points = points;
       merged.point_count =
         typeof out.point_count === 'number' ? out.point_count : points.length;
@@ -677,6 +700,11 @@ Deno.serve(async (req) => {
           draft.talking_points.length,
         ),
       ]);
+      // Undo is the client's job: it holds the snapshot from before the last
+      // change and puts it back without a model in the loop.
+      if (constraints.scope === 'undo') {
+        return jsonResponse({ scope: 'undo', revision_note: 'Put back what you had before my last change.' });
+      }
       // "We do not have that feature, do not do that again" is saved for
       // every future post and applied to this one right now.
       const remembered = await rememberForCompany(admin, caller.companyId, constraints.remember);
@@ -694,6 +722,13 @@ Deno.serve(async (req) => {
           ? { ...loadedType, min_points: constraints.pointCount, max_points: constraints.pointCount }
           : loadedType;
       const knownFeatureIds = new Set(brand.features.map((f) => f.id));
+      const locked = captureLocked(draft, chosenHook, constraints);
+      if (everythingLocked(draft, locked)) {
+        return jsonResponse({
+          scope: 'none',
+          revision_note: `Nothing changed: you asked me to keep the hook, title, caption and every point, so there is nothing left to rewrite. Tell me which part to fix.${rememberedNote}`,
+        });
+      }
 
       // Targeted feedback regenerates one part and leaves the rest untouched;
       // "the hook needs to be better" never costs a whole rewrite.
@@ -736,18 +771,22 @@ Deno.serve(async (req) => {
             feedback,
             standingInstructions: standing,
             requiredPointCount: constraints.pointCount,
+            lockedPointIndexes: constraints.lockPointIndexes,
           });
           if (typeof out.kill_reason === 'string') return out;
+          const keptPoints =
+            targeted.field === 'talking_points' && constraints.lockPointIndexes.length
+              ? ` Kept point${constraints.lockPointIndexes.length === 1 ? '' : 's'} ${constraints.lockPointIndexes.map((i) => i + 1).join(', ')} as you had ${constraints.lockPointIndexes.length === 1 ? 'it' : 'them'}.`
+              : '';
           return {
             ...out,
             scope: 'field',
             field: targeted.field,
-            revision_note: `${fieldNote(targeted.field, targeted.index)}${rememberedNote}`,
+            revision_note: `${fieldNote(targeted.field, targeted.index)}${keptPoints}${rememberedNote}`,
           };
         });
       }
 
-      const locked = captureLocked(draft, chosenHook, constraints);
       const generationId = crypto.randomUUID();
       const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
       let revisionNote = '';
@@ -770,6 +809,7 @@ Deno.serve(async (req) => {
             if (history.length) {
               lines.push(
                 `Conversation so far:\n${history
+                  .slice(-MAX_PROMPT_HISTORY)
                   .map((t) => `${t.role === 'manager' ? 'Manager' : 'You'}: ${t.text.trim()}`)
                   .join('\n')}`,
               );
@@ -805,18 +845,22 @@ Deno.serve(async (req) => {
           {
             lockedTexts: lockedTexts(locked),
             extraFailures: (d) => constraintFailures(d, constraints),
+            ignoreFailure: (f) => failureAboutLockedPart(f, locked),
           },
         );
         if (isKill(outcome)) {
           return { kill_reason: outcome.kill_reason, generation_id: generationId };
         }
+        // The report is computed from the drafts, never taken from the model,
+        // so the chat never claims a change that did not happen.
+        const report = changeReport(draft, chosenHook, outcome.draft);
         const kept = keptNote(constraints, locked);
-        const note = stripDashes(revisionNote) || 'Revised the post against your feedback.';
+        const why = report.startsWith('Changed nothing') ? '' : stripDashes(revisionNote);
         return {
           ...outcome.draft,
           scope: 'full',
           hook: locked.hook ?? outcome.draft.hook_options[0] ?? null,
-          revision_note: `${kept ? `${note} ${kept}` : note}${rememberedNote}`,
+          revision_note: [report, why, kept, rememberedNote.trim()].filter(Boolean).join(' '),
           overlay_labels: outcome.overlayLabels,
           point_media: await resolvePointMedia(
             admin,
