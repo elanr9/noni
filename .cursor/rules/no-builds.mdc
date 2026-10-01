@@ -1,5 +1,4 @@
 ---
-description: Never trigger builds, submissions, or OTA updates
 alwaysApply: true
 ---
-Never run `eas build`, `eas submit`, `eas update`, `npx expo publish`, `expo export`, or any command that creates a build, submits to a store, or publishes an OTA update. This applies after every edit, no matter how large. The user triggers builds and updates manually. If a change requires a new build or update, say so in one sentence and stop.
+Never run `eas build`, `eas submit`, `eas update`, `npx expo publish`, `expo export`, or any command that creates a build, submits to a store, or publishes an OTA update on your own initiative, no matter how large the edit. Run them only when the user explicitly asks in the current message. When a change needs a new build and the user has not asked, say so in one sentence and stop. When asked, use `EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas build --platform ios --profile production --auto-submit --non-interactive` (there is no EAS Update channel configured, so JS changes also ship via a build).
