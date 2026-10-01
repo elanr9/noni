@@ -25,6 +25,34 @@ type PublishBody = {
   days?: PublishDay[];
 };
 
+type VaryCopyResponse = { varied?: number; failed?: string[] };
+
+async function invokeVaryCopy(supabaseUrl: string, authHeader: string, campaignId: string): Promise<void> {
+  const attempt = async (): Promise<void> => {
+    const res = await fetch(`${supabaseUrl}/functions/v1/vary-copy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ campaign_id: campaignId }),
+    });
+    if (!res.ok) throw new Error(`vary-copy returned ${res.status}`);
+    const result = (await res.json().catch(() => null)) as VaryCopyResponse | null;
+    if (result?.failed && result.failed.length > 0) {
+      console.error('publish-campaign: vary-copy left captions null for assignments:', result.failed.join(', '));
+    }
+  };
+  try {
+    await attempt();
+  } catch (first) {
+    console.error('publish-campaign: vary-copy failed, retrying in 3s:', first);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      await attempt();
+    } catch (second) {
+      console.error('publish-campaign: vary-copy failed after retry:', second);
+    }
+  }
+}
+
 function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -224,13 +252,7 @@ Deno.serve(async (req) => {
 
   // Every creator gets their own caption and overlay wording so the same
   // brief never lands word for word on several accounts.
-  EdgeRuntime.waitUntil(
-    fetch(`${supabaseUrl}/functions/v1/vary-copy`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-      body: JSON.stringify({ campaign_id: campaign.id }),
-    }).catch((e) => console.error('publish-campaign: vary-copy failed:', e)),
-  );
+  EdgeRuntime.waitUntil(invokeVaryCopy(supabaseUrl, authHeader, campaign.id));
 
   // Publishing is sign-off: compare each post with the AI's version and
   // learn from the edits. Runs after the response, never blocks the publish.

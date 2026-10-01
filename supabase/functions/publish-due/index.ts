@@ -2,13 +2,17 @@
 // schedule_assignment_publish RPC; pg_cron hits this every 5 minutes and it
 // posts whatever is due through post-approved. Claims via publish_claimed_at
 // (update ... where publish_claimed_at is null) so concurrent runs cannot
-// double-post. A 5xx from post-approved releases the claim so the next tick
-// retries; anything else keeps it claimed with publish_error set so a broken
-// row does not loop forever.
+// double-post. Each tick posts at most one row per company; everything else
+// due is re-slotted through schedule_assignment_publish_system, which also
+// handles every deferral and retry so nothing lands outside the 9am to 9pm ET
+// window or on top of another post. Failures retry up to three attempts and
+// then stay claimed with publish_error set for a manager to see.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+
+type Admin = ReturnType<typeof adminClient>;
 
 type DueRow = {
   id: string;
@@ -16,6 +20,7 @@ type DueRow = {
   brief_id: string | null;
   creator_id: string;
   publish_at: string;
+  publish_attempts: number;
 };
 
 /** Minimum gap between two creators posting the same brief. Identical text
@@ -27,19 +32,26 @@ const SAME_BRIEF_GAP_MS = 24 * 60 * 60 * 1000;
  *  approved in one sitting used to fire every post inside one tick. */
 const SAME_CREATOR_GAP_MS = 90 * 60 * 1000;
 
-/** Random spread added to every deferral so pushed posts do not reconverge. */
-function jitterMs(): number {
-  return Math.floor(Math.random() * 25 * 60 * 1000);
+const MAX_PUBLISH_ATTEMPTS = 3;
+
+/** Re-slots the assignment on a later day and releases any claim. */
+async function defer(admin: Admin, row: DueRow): Promise<void> {
+  const { error } = await admin.rpc('schedule_assignment_publish_system', {
+    p_assignment_id: row.id,
+  });
+  if (error) console.error('publish-due defer error:', row.id, error.message);
+  await admin
+    .from('assignments')
+    .update({ publish_claimed_at: null })
+    .eq('id', row.id)
+    .eq('company_id', row.company_id);
 }
 
 /**
- * When this creator posted anything inside the gap, push this assignment
- * past gap-end and report true so the sweep skips it this tick.
+ * When this creator posted anything inside the gap, re-slot this assignment
+ * and report true so the sweep skips it this tick.
  */
-async function deferIfCreatorRecentlyPosted(
-  admin: ReturnType<typeof adminClient>,
-  row: DueRow,
-): Promise<boolean> {
+async function deferIfCreatorRecentlyPosted(admin: Admin, row: DueRow): Promise<boolean> {
   const since = new Date(Date.now() - SAME_CREATOR_GAP_MS).toISOString();
   const { data } = await admin
     .from('posts')
@@ -52,23 +64,15 @@ async function deferIfCreatorRecentlyPosted(
     .limit(1);
   const latest = (data ?? [])[0] as { posted_at: string | null } | undefined;
   if (!latest?.posted_at) return false;
-  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_CREATOR_GAP_MS + jitterMs());
-  await admin
-    .from('assignments')
-    .update({ publish_at: nextAt.toISOString() })
-    .eq('id', row.id)
-    .is('publish_claimed_at', null);
+  await defer(admin, row);
   return true;
 }
 
 /**
- * When another creator posted this brief inside the gap, push this
- * assignment to gap-end and report true so the sweep skips it this tick.
+ * When another creator posted this brief inside the gap, re-slot this
+ * assignment and report true so the sweep skips it this tick.
  */
-async function deferIfBriefRecentlyPosted(
-  admin: ReturnType<typeof adminClient>,
-  row: DueRow,
-): Promise<boolean> {
+async function deferIfBriefRecentlyPosted(admin: Admin, row: DueRow): Promise<boolean> {
   if (!row.brief_id) return false;
   const since = new Date(Date.now() - SAME_BRIEF_GAP_MS).toISOString();
   const { data } = await admin
@@ -82,12 +86,7 @@ async function deferIfBriefRecentlyPosted(
     .limit(1);
   const latest = (data ?? [])[0] as { posted_at: string | null } | undefined;
   if (!latest?.posted_at) return false;
-  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_BRIEF_GAP_MS + jitterMs());
-  await admin
-    .from('assignments')
-    .update({ publish_at: nextAt.toISOString() })
-    .eq('id', row.id)
-    .is('publish_claimed_at', null);
+  await defer(admin, row);
   return true;
 }
 
@@ -115,11 +114,33 @@ async function publish(assignmentId: string): Promise<PublishOutcome> {
   return { ok: true };
 }
 
+/**
+ * Records a failed attempt. Under the cap a 5xx releases the claim for the
+ * next tick and anything else is re-slotted on a later day; at the cap the
+ * row stays claimed with the error so a manager can step in.
+ */
+async function recordFailure(admin: Admin, row: DueRow, outcome: PublishOutcome): Promise<void> {
+  if (outcome.ok) return;
+  const attempts = row.publish_attempts + 1;
+  const exhausted = attempts >= MAX_PUBLISH_ATTEMPTS;
+  if (!exhausted && outcome.status < 500) await defer(admin, row);
+  const { error } = await admin
+    .from('assignments')
+    .update({
+      publish_error: outcome.message,
+      ...(exhausted ? {} : { publish_claimed_at: null }),
+    })
+    .eq('id', row.id)
+    .eq('company_id', row.company_id);
+  if (error) console.error('publish-due mark error:', row.id, error.message);
+}
+
 type PendingPost = {
   id: string;
   assignment_id: string | null;
   platform: string;
   provider_post_id: string | null;
+  assignments: { company_id: string } | null;
 };
 
 type StatusRow = {
@@ -130,16 +151,16 @@ type StatusRow = {
   status?: string;
 };
 
-async function reconcilePending(admin: ReturnType<typeof adminClient>): Promise<void> {
+async function reconcilePending(admin: Admin): Promise<void> {
   const apiKey = Deno.env.get('UPLOAD_POST_API_KEY');
   if (!apiKey) return;
   const { data } = await admin
     .from('posts')
-    .select('id, assignment_id, platform, provider_post_id')
+    .select('id, assignment_id, platform, provider_post_id, assignments(company_id)')
     .eq('status', 'pending')
     .not('provider_post_id', 'is', null)
     .limit(40);
-  const pending = (data ?? []) as PendingPost[];
+  const pending = (data ?? []) as unknown as PendingPost[];
   const byRequest = new Map<string, PendingPost[]>();
   for (const p of pending) {
     if (!p.provider_post_id) continue;
@@ -172,11 +193,12 @@ async function reconcilePending(admin: ReturnType<typeof adminClient>): Promise<
             post_url: r.post_url ?? null,
           })
           .eq('id', post.id);
-        if (posted && post.assignment_id && r.post_url) {
+        if (posted && post.assignment_id && post.assignments && r.post_url) {
           await admin
             .from('assignments')
             .update({ post_url: r.post_url })
             .eq('id', post.assignment_id)
+            .eq('company_id', post.assignments.company_id)
             .is('post_url', null);
         }
       }
@@ -193,7 +215,7 @@ const DISPOSABLE = /(^draft-.*\.mp4$|-edited\.mp4$|-composited\.(mp4|png)$|-gs-\
  * Deletes the raw takes and intermediate renders of assignments whose every
  * platform is posted, keeping the finished video and slides for playback.
  */
-async function cleanPostedStorage(admin: ReturnType<typeof adminClient>): Promise<void> {
+async function cleanPostedStorage(admin: Admin): Promise<void> {
   const { data } = await admin
     .from('assignments')
     .select('id, company_id, posts(status)')
@@ -214,7 +236,8 @@ async function cleanPostedStorage(admin: ReturnType<typeof adminClient>): Promis
       await admin
         .from('assignments')
         .update({ storage_cleaned_at: new Date().toISOString() })
-        .eq('id', row.id);
+        .eq('id', row.id)
+        .eq('company_id', row.company_id);
     } catch (e) {
       console.error('publish-due cleanup error:', row.id, e);
     }
@@ -247,49 +270,47 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { data: due, error } = await admin
+    const dueQuery = admin
       .from('assignments')
-      .select('id, company_id, brief_id, creator_id, publish_at')
+      .select('id, company_id, brief_id, creator_id, publish_at, publish_attempts')
       .eq('status', 'approved')
       .lte('publish_at', new Date().toISOString())
-      .is('publish_claimed_at', null)
-      .order('publish_at', { ascending: true })
-      .limit(10);
+      .is('publish_claimed_at', null);
+    const scoped = caller.kind === 'user' ? dueQuery.eq('company_id', caller.companyId) : dueQuery;
+    const { data: due, error } = await scoped.order('publish_at', { ascending: true }).limit(10);
     if (error) throw new Error(error.message);
     const rows = (due ?? []) as DueRow[];
 
-    const claimedIds: string[] = [];
-    // One creator per brief and one post per creator per sweep: the first
-    // claimant makes the rest wait out their gap on a later tick.
+    const claimed: DueRow[] = [];
+    // One post per company, one creator per brief and one post per creator
+    // per sweep: the earliest claimant posts and the rest are re-slotted.
+    const companiesClaimedThisTick = new Set<string>();
     const briefsClaimedThisTick = new Set<string>();
     const creatorsClaimedThisTick = new Set<string>();
     for (const row of rows) {
-      if (row.brief_id && briefsClaimedThisTick.has(row.brief_id)) {
-        await admin
-          .from('assignments')
-          .update({ publish_at: new Date(Date.now() + SAME_BRIEF_GAP_MS + jitterMs()).toISOString() })
-          .eq('id', row.id)
-          .is('publish_claimed_at', null);
-        continue;
-      }
-      if (creatorsClaimedThisTick.has(row.creator_id)) {
-        await admin
-          .from('assignments')
-          .update({ publish_at: new Date(Date.now() + SAME_CREATOR_GAP_MS + jitterMs()).toISOString() })
-          .eq('id', row.id)
-          .is('publish_claimed_at', null);
+      const blocked =
+        companiesClaimedThisTick.has(row.company_id) ||
+        (row.brief_id !== null && briefsClaimedThisTick.has(row.brief_id)) ||
+        creatorsClaimedThisTick.has(row.creator_id);
+      if (blocked) {
+        await defer(admin, row);
         continue;
       }
       if (await deferIfBriefRecentlyPosted(admin, row)) continue;
       if (await deferIfCreatorRecentlyPosted(admin, row)) continue;
       const { data: claimedRows } = await admin
         .from('assignments')
-        .update({ publish_claimed_at: new Date().toISOString() })
+        .update({
+          publish_claimed_at: new Date().toISOString(),
+          publish_attempts: row.publish_attempts + 1,
+        })
         .eq('id', row.id)
+        .eq('company_id', row.company_id)
         .is('publish_claimed_at', null)
         .select('id');
       if (claimedRows && claimedRows.length > 0) {
-        claimedIds.push(row.id);
+        claimed.push(row);
+        companiesClaimedThisTick.add(row.company_id);
         if (row.brief_id) briefsClaimedThisTick.add(row.brief_id);
         creatorsClaimedThisTick.add(row.creator_id);
       }
@@ -299,22 +320,14 @@ Deno.serve(async (req) => {
     // out at 10s, so the work runs after the response.
     EdgeRuntime.waitUntil(
       Promise.allSettled(
-        claimedIds.map(async (id) => {
-          const outcome = await publish(id);
+        claimed.map(async (row) => {
+          const outcome = await publish(row.id);
           if (outcome.ok) {
-            await notifyPostLive(id);
+            await notifyPostLive(row.id);
             return;
           }
-          console.error('publish-due post-approved error:', id, outcome.status, outcome.message);
-          const retry = outcome.status >= 500;
-          const { error: markError } = await admin
-            .from('assignments')
-            .update({
-              publish_error: outcome.message,
-              ...(retry ? { publish_claimed_at: null } : {}),
-            })
-            .eq('id', id);
-          if (markError) console.error('publish-due mark error:', id, markError.message);
+          console.error('publish-due post-approved error:', row.id, outcome.status, outcome.message);
+          await recordFailure(admin, row, outcome);
         }),
       ),
     );
@@ -324,7 +337,7 @@ Deno.serve(async (req) => {
     // free the storage of posts that are live everywhere.
     EdgeRuntime.waitUntil(reconcilePending(admin).then(() => cleanPostedStorage(admin)));
 
-    return jsonResponse({ due: rows.length, claimed: claimedIds.length });
+    return jsonResponse({ due: rows.length, claimed: claimed.length });
   } catch (e) {
     console.error('publish-due error:', e);
     return jsonResponse(

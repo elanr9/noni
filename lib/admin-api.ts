@@ -181,20 +181,10 @@ export async function reviewAssignment(params: {
   const updated = await transitionAssignment(assignment.id, assignment.status, action);
 
   if (action === 'approved') {
-    const { data: scheduled, error: scheduleError } = await supabase.rpc(
-      'schedule_assignment_publish',
-      { p_assignment_id: assignment.id },
-    );
+    const { error: scheduleError } = await supabase.rpc('schedule_assignment_publish', {
+      p_assignment_id: assignment.id,
+    });
     if (scheduleError) throw scheduleError;
-    // A slot already in the past is stamped publish_at = now, so the sweep
-    // posts it immediately instead of waiting for the next cron tick. Run
-    // the sweep unconditionally: the device clock cannot be trusted to
-    // compare against the server's now, and a future slot is simply not due.
-    void supabase.functions
-      .invoke('publish-due', { body: { source: 'approve', publish_at: scheduled } })
-      .then(({ error }) => {
-        if (error) console.error('publish-due after approve failed', error);
-      });
   }
 
   void supabase.functions.invoke('notify', {
@@ -360,20 +350,6 @@ export async function reviewTask(params: {
   void supabase.functions.invoke('notify', {
     body: { task_id: task.id, event: action },
   });
-
-  if (action === 'approved') {
-    const { data: postResult, error: postError } =
-      await supabase.functions.invoke('post-approved', {
-        body: { task_id: task.id },
-      });
-    if (postError) throw postError;
-    const errMsg = (postResult as { error?: string } | null)?.error;
-    if (errMsg) throw new Error(errMsg);
-
-    void supabase.functions.invoke('notify', {
-      body: { task_id: task.id, event: 'post_live' },
-    });
-  }
 
   return data as ContentTask;
 }

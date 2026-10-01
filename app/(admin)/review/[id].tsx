@@ -478,7 +478,8 @@ export default function ReviewScreen() {
   const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
   const editFailed = trackRender && submission?.render_status === 'failed';
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
-  const caption = briefRow.caption ?? '';
+  const caption = assignment.caption ?? briefRow.caption ?? '';
+  const captionPending = assignment.caption === null;
   const attempt = submission?.version ?? 1;
   const typeLabel =
     briefRow.post_type_id !== null
@@ -846,6 +847,13 @@ export default function ReviewScreen() {
         />
       </View>
 
+      {captionPending && (
+        <View style={styles.captionNoteWrap}>
+          <Text style={styles.captionNote}>
+            This creator will get their own wording of this caption before it posts.
+          </Text>
+        </View>
+      )}
       <View style={[styles.actionStrip, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <Button
           variant="outline"
@@ -1025,6 +1033,15 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.semibold,
     color: color.white,
     textDecorationLine: 'underline',
+  },
+  captionNoteWrap: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: color.white,
+  },
+  captionNote: {
+    fontSize: type.size.micro,
+    color: color.slate400,
   },
   actionStrip: {
     flexDirection: 'row',

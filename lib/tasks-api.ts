@@ -121,7 +121,7 @@ export async function swapAssignmentBrief(
 ): Promise<AssignmentWithBrief> {
   const { data, error } = await supabase
     .from('assignments')
-    .update({ brief_id: briefId })
+    .update({ brief_id: briefId, caption: null })
     .eq('id', assignmentId)
     .eq('status', 'assigned')
     .select(ASSIGNMENT_SELECT)
@@ -129,6 +129,10 @@ export async function swapAssignmentBrief(
 
   if (error) throw error;
   const updated = data as AssignmentWithBrief;
+
+  void supabase.functions
+    .invoke('vary-copy', { body: { brief_id: briefId, assignment_ids: [assignmentId] } })
+    .catch(() => undefined);
 
   // Clips drafted against the old brief must not resume against the new
   // one; a stale draft would submit the wrong clips under this brief.

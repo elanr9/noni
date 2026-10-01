@@ -145,6 +145,7 @@ export type Database = {
           music_marked_by_creator_at: string | null
           post_url: string | null
           publish_at: string | null
+          publish_attempts: number
           publish_claimed_at: string | null
           publish_error: string | null
           scheduled_date: string
@@ -170,6 +171,7 @@ export type Database = {
           music_marked_by_creator_at?: string | null
           post_url?: string | null
           publish_at?: string | null
+          publish_attempts?: number
           publish_claimed_at?: string | null
           publish_error?: string | null
           scheduled_date: string
@@ -195,6 +197,7 @@ export type Database = {
           music_marked_by_creator_at?: string | null
           post_url?: string | null
           publish_at?: string | null
+          publish_attempts?: number
           publish_claimed_at?: string | null
           publish_error?: string | null
           scheduled_date?: string
@@ -5107,6 +5110,15 @@ export type Database = {
           title: string
         }[]
       }
+      pick_assignment_publish_slot: {
+        Args: {
+          p_assignment_id: string
+          p_company: string
+          p_creator: string
+          p_scheduled: string
+        }
+        Returns: string
+      }
       profile_in_company: {
         Args: { p_company_id: string; p_profile_id: string }
         Returns: boolean
@@ -5121,6 +5133,10 @@ export type Database = {
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
       schedule_assignment_publish: {
+        Args: { p_assignment_id: string }
+        Returns: string
+      }
+      schedule_assignment_publish_system: {
         Args: { p_assignment_id: string }
         Returns: string
       }

@@ -1008,11 +1008,11 @@ export default function UploadScreen() {
                   <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
                 ) : null}
               </View>
-              {brief.caption ? (
+              {(assignment.caption ?? brief.caption) ? (
                 <View style={styles.captionBlock}>
                   <Text style={styles.captionLabel}>Caption</Text>
                   <Text style={styles.captionText} numberOfLines={4}>
-                    {brief.caption}
+                    {assignment.caption ?? brief.caption}
                   </Text>
                 </View>
               ) : null}

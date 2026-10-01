@@ -277,7 +277,14 @@ export default function AdminCreatorPostDetail() {
 
             <View style={styles.captionCard}>
               <Text style={styles.captionLabel}>Caption</Text>
-              <Text style={styles.captionText}>{brief.caption ?? 'No caption.'}</Text>
+              <Text style={styles.captionText}>
+                {data.assignment.caption ?? brief.caption ?? 'No caption.'}
+              </Text>
+              {data.assignment.caption === null && (
+                <Text style={styles.captionNote}>
+                  This creator will get their own wording of this caption before it posts.
+                </Text>
+              )}
             </View>
           </>
         )}
@@ -513,5 +520,9 @@ const styles = StyleSheet.create({
     fontSize: type.size.bodySm,
     lineHeight: type.size.bodySm * type.leading.body,
     color: color.ink,
+  },
+  captionNote: {
+    fontSize: type.size.micro11,
+    color: color.slate400,
   },
 });

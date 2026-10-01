@@ -132,6 +132,39 @@ async function callerManages(
   return isManagerOf(admin, caller.userId, companyId, caller.platformAdmin);
 }
 
+const NO_DISTINCT_CAPTION = 'No distinct caption could be written for this creator';
+
+/**
+ * Asks vary-copy for this creator's own caption and reads back whatever it
+ * wrote. Null means the brief still has no distinct wording for this creator.
+ */
+async function requestDistinctCaption(
+  admin: AdminClient,
+  assignmentId: string,
+  briefId: string,
+  companyId: string,
+): Promise<string | null> {
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/vary-copy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '',
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify({ brief_id: briefId, assignment_ids: [assignmentId] }),
+  }).catch((e) => console.error('post-approved vary-copy error:', assignmentId, e));
+  const { data } = await admin
+    .from('assignments')
+    .select('caption')
+    .eq('id', assignmentId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+  const caption = (data?.caption ?? null) as string | null;
+  return caption && caption.trim().length > 0 ? caption : null;
+}
+
 async function resolveTarget(
   admin: AdminClient,
   body: PostApprovedBody,
@@ -140,7 +173,9 @@ async function resolveTarget(
   if (body.assignment_id) {
     const { data: assignment } = await admin
       .from('assignments')
-      .select('id, company_id, creator_id, brief_id, status, submission_id, task_id, caption')
+      .select(
+        'id, company_id, creator_id, brief_id, status, submission_id, task_id, caption, publish_at, publish_claimed_at',
+      )
       .eq('id', body.assignment_id)
       .maybeSingle();
     if (
@@ -160,10 +195,44 @@ async function resolveTarget(
         409,
       );
     }
+    // A manager cannot jump the schedule: the row must be due and already
+    // claimed by publish-due (or left claimed after its retries ran out).
+    if (caller !== null) {
+      const publishAt = (assignment.publish_at ?? null) as string | null;
+      const due =
+        publishAt !== null &&
+        new Date(publishAt).getTime() <= Date.now() &&
+        assignment.publish_claimed_at !== null;
+      if (!due) {
+        return jsonResponse(
+          { error: `This post is scheduled for ${publishAt ?? 'a later date'}` },
+          409,
+        );
+      }
+    }
+    const companyId = assignment.company_id as string;
+    let caption = (assignment.caption ?? null) as string | null;
+    if (caption === null) {
+      caption = await requestDistinctCaption(
+        admin,
+        assignment.id as string,
+        assignment.brief_id as string,
+        companyId,
+      );
+      if (caption === null) {
+        await admin
+          .from('assignments')
+          .update({ publish_error: NO_DISTINCT_CAPTION, publish_claimed_at: null })
+          .eq('id', assignment.id)
+          .eq('company_id', companyId);
+        return jsonResponse({ error: NO_DISTINCT_CAPTION }, 409);
+      }
+    }
     const { data: brief } = await admin
       .from('briefs')
-      .select('title, caption, format, post_type_id')
+      .select('format')
       .eq('id', assignment.brief_id)
+      .eq('company_id', companyId)
       .maybeSingle();
     const isSlideshow = brief?.format === 'photo_carousel';
     // Slideshows never auto-post to TikTok: identical photo sets across
@@ -177,9 +246,9 @@ async function resolveTarget(
     }
     return {
       id: assignment.id as string,
-      companyId: assignment.company_id as string,
+      companyId,
       creatorId: assignment.creator_id as string,
-      caption: (assignment.caption ?? brief?.caption ?? brief?.title ?? 'New post') as string,
+      caption,
       platforms,
       assignmentId: assignment.id as string,
       taskId: (assignment.task_id ?? null) as string | null,
@@ -252,6 +321,7 @@ async function resolveSubmission(
       .from('assignments')
       .select('submission_id')
       .eq('id', target.assignmentId)
+      .eq('company_id', target.companyId)
       .maybeSingle();
     if (assignment?.submission_id) {
       const { data } = await admin
@@ -263,8 +333,11 @@ async function resolveSubmission(
     }
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version, render_status, slide_aspect')
+      .select(
+        'id, video_path, segment_paths, version, render_status, slide_aspect, assignments!inner(company_id)',
+      )
       .eq('assignment_id', target.assignmentId)
+      .eq('assignments.company_id', target.companyId)
       .order('version', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -592,6 +665,7 @@ Deno.serve(async (req) => {
           .from('assignments')
           .update({ status: 'posted', post_url: liveUrl })
           .eq('id', target.assignmentId)
+          .eq('company_id', target.companyId)
           .eq('status', 'approved');
         if (statusError) {
           return jsonResponse(
@@ -608,6 +682,7 @@ Deno.serve(async (req) => {
           .from('content_tasks')
           .update({ status: 'posted' })
           .eq('id', target.taskId)
+          .eq('company_id', target.companyId)
           .eq('status', 'approved');
         if (statusError) {
           return jsonResponse(

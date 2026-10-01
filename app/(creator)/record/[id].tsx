@@ -2573,7 +2573,7 @@ export default function RecordScreen() {
         creatorName={profile?.full_name ?? ''}
         handle={tiktokHandle}
         typeLabel={typeMeta?.label ?? null}
-        caption={brief?.caption ?? ''}
+        caption={assignment?.caption ?? brief?.caption ?? ''}
         hashtags={brief?.hashtags ?? []}
         media={{
           kind: 'video',
