@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  assistRevise,
+  assistReviseStream,
   type RegenDraftPayload,
   type ReviseResult,
   type ReviseTurn,
@@ -20,7 +21,6 @@ import { useKeyboardHeight } from '../../../lib/keyboard';
 import { borderWidth, color, radiusAdmin, space, type } from '../../../theme/tokens';
 import { Bubble } from '../../creator/ChatKit';
 import { Icon } from '../../ui/Icon';
-import { AiWorkingCard } from '../AiWorkingCard';
 import { Sheet } from '../shared/Sheet';
 
 export interface ReviseChatSheetProps {
@@ -42,19 +42,6 @@ const STARTERS: readonly string[] = [
   'The hook is weak. Make it stop the scroll.',
 ];
 
-const REVISE_STEPS: readonly string[] = [
-  'Reading your feedback',
-  'Loading the brand brain',
-  'Deciding what to change',
-  'Writing the new copy',
-  'Checking banned words and claims',
-  'Checking hook and point length',
-  'Fixing anything that failed',
-  'Matching clips to the points',
-];
-const REVISE_STEP_MS = 5000;
-const SLOW_AFTER_S = 45;
-
 const APPLIED_NOTE = 'Applied to the editor. Tap Save when you are happy.';
 
 type ChatTurn = ReviseTurn & {
@@ -62,7 +49,26 @@ type ChatTurn = ReviseTurn & {
   /** Editor state before this AI change; Undo puts it back. */
   before?: RegenDraftPayload;
   undone?: boolean;
+  /** The AI is still typing this reply. */
+  streaming?: boolean;
+  /** Labels of the parts that moved, shown as pills under the reply. */
+  changed?: string[];
 };
+
+function BlinkingCursor() {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.15, duration: 450, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 450, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.Text style={[styles.cursor, { opacity }]}>▍</Animated.Text>;
+}
 
 const UNDO_INTENT =
   /\b(undo|revert|put (it|them|that|everything|this)? ?back|go back to what i had|what i had before|restore (it|that|the original|what i had)|back to (the )?original|back to how it was)\b/i;
@@ -92,8 +98,11 @@ export function ReviseChatSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
+  const [stage, setStage] = useState<string | null>(null);
   const listRef = useRef<ScrollView>(null);
-  const [elapsedS, setElapsedS] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const pendingNote = useRef('');
+  const noteFrame = useRef<number | null>(null);
 
   useEffect(() => {
     const id = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
@@ -101,19 +110,38 @@ export function ReviseChatSheet({
   }, [turns.length, busy]);
 
   useEffect(() => {
-    if (!busy) {
-      setElapsedS(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const id = setInterval(() => {
-      setElapsedS(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [busy]);
+    if (!visible) abortRef.current?.abort();
+  }, [visible]);
 
-  const workingSubtitle =
-    elapsedS >= SLOW_AFTER_S ? `Taking longer than usual, still working. ${elapsedS}s` : `${elapsedS}s`;
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      if (noteFrame.current !== null) cancelAnimationFrame(noteFrame.current);
+    },
+    [],
+  );
+
+  function patchStreamingTurn(patch: Partial<ChatTurn> | ((turn: ChatTurn) => ChatTurn)) {
+    setTurns((prev) =>
+      prev.map((t) => {
+        if (!t.streaming) return t;
+        return typeof patch === 'function' ? patch(t) : { ...t, ...patch };
+      }),
+    );
+  }
+
+  function flushNote() {
+    noteFrame.current = null;
+    const delta = pendingNote.current;
+    pendingNote.current = '';
+    if (!delta) return;
+    patchStreamingTurn((t) => ({ ...t, text: t.text + delta }));
+  }
+
+  function queueNote(delta: string) {
+    pendingNote.current += delta;
+    if (noteFrame.current === null) noteFrame.current = requestAnimationFrame(flushNote);
+  }
 
   const panelHeight = Math.min(height * 0.84, height - keyboardHeight - insets.top);
   const panelBottomPad = keyboardHeight > 0 ? 12 : Math.max(insets.bottom, 24);
@@ -168,55 +196,71 @@ export function ReviseChatSheet({
     }
 
     setBusy(true);
+    setStage(null);
+    setTurns((prev) => [...prev, { role: 'ai', text: '', streaming: true }]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     const before = getDraft();
+
+    const finish = (fallbackText: string, extra: Partial<ChatTurn> = {}) => {
+      if (noteFrame.current !== null) cancelAnimationFrame(noteFrame.current);
+      flushNote();
+      patchStreamingTurn((t) => ({
+        ...t,
+        ...extra,
+        streaming: false,
+        text: t.text.trim() ? t.text : fallbackText,
+      }));
+    };
+
     try {
-      const result = await assistRevise({
-        draft: before,
-        feedback: text,
-        postTypeKey: postTypeKey ?? undefined,
-        history,
-        exampleTranscript,
-      });
+      const result = await assistReviseStream(
+        {
+          draft: before,
+          feedback: text,
+          postTypeKey: postTypeKey ?? undefined,
+          history,
+          exampleTranscript,
+        },
+        { onStage: setStage, onNote: queueNote, signal: controller.signal },
+      );
       if (result.kind === 'kill') {
-        setTurns((prev) => [...prev, { role: 'ai', text: result.kill_reason }]);
+        finish(result.kill_reason);
         return;
       }
       if (result.kind === 'undo') {
         const restored = restoreLatest(ORIGINAL_INTENT.test(text));
-        setTurns((prev) => [
-          ...prev,
-          {
-            role: 'ai',
-            text: restored
-              ? result.revisionNote
-              : 'There is nothing of mine to undo yet; the post is as you left it.',
-            applied: restored,
-          },
-        ]);
+        finish(
+          restored
+            ? result.revisionNote
+            : 'There is nothing of mine to undo yet; the post is as you left it.',
+          { applied: restored },
+        );
         return;
       }
       if (result.kind === 'none') {
-        setTurns((prev) => [...prev, { role: 'ai', text: result.revisionNote }]);
+        finish(result.revisionNote);
         return;
       }
       onApply(result);
       snapshots.current = [...snapshots.current, before];
-      setTurns((prev) => [
-        ...prev,
-        {
-          role: 'ai',
-          text: result.revisionNote || 'Applied your feedback.',
-          applied: true,
-          before,
-        },
-      ]);
+      finish(result.revisionNote || 'Applied your feedback.', {
+        applied: true,
+        before,
+        changed: result.changed,
+      });
     } catch (e) {
-      // Drop the failed turn so a retry does not send it twice in history.
-      setTurns((prev) => prev.slice(0, -1));
+      // Drop the failed turns so a retry does not send them twice in history.
+      if (noteFrame.current !== null) cancelAnimationFrame(noteFrame.current);
+      pendingNote.current = '';
+      setTurns((prev) => prev.filter((t) => !t.streaming).slice(0, -1));
+      if (controller.signal.aborted) return;
       setInput(text);
       const detail = e instanceof Error && e.message ? e.message : '';
       setError(detail ? `Could not rewrite: ${detail}` : 'Something went wrong. Try again.');
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setStage(null);
       setBusy(false);
     }
   }
@@ -231,16 +275,6 @@ export function ReviseChatSheet({
       subtitle="Say what is wrong. It fixes that part and leaves the rest alone."
       footer={
         <View onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height + 12)}>
-          {busy ? (
-            <AiWorkingCard
-              title="Revising the post"
-              subtitle={workingSubtitle}
-              steps={REVISE_STEPS}
-              stepMs={REVISE_STEP_MS}
-              family="video"
-              style={styles.working}
-            />
-          ) : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <View style={styles.composer}>
             <TextInput
@@ -297,8 +331,25 @@ export function ReviseChatSheet({
             ) : (
               <View key={index}>
                 <Bubble side="manager" author="Noni AI" avatarInitial="N">
-                  {turn.text}
+                  {turn.streaming ? (
+                    <Text style={styles.aiText}>
+                      {turn.text}
+                      {turn.text ? null : <BlinkingCursor />}
+                    </Text>
+                  ) : (
+                    turn.text
+                  )}
                 </Bubble>
+                {turn.streaming && stage ? <Text style={styles.stage}>{stage}</Text> : null}
+                {turn.changed && turn.changed.length > 0 ? (
+                  <View style={styles.pills}>
+                    {turn.changed.map((label) => (
+                      <View key={label} style={styles.pill}>
+                        <Text style={styles.pillText}>{label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
                 {turn.applied ? (
                   <View style={styles.appliedRow}>
                     <Text style={styles.applied}>
@@ -363,8 +414,38 @@ const styles = StyleSheet.create({
     fontWeight: type.weight.medium,
     color: color.accent,
   },
-  working: {
-    marginBottom: space[3],
+  aiText: {
+    fontSize: type.size.bodySm,
+    lineHeight: type.size.bodySm * type.leading.body,
+    color: color.ink,
+  },
+  cursor: {
+    fontSize: type.size.bodySm,
+    color: color.slate400,
+  },
+  stage: {
+    marginTop: space[1],
+    marginLeft: 44,
+    fontSize: 12,
+    color: color.slate400,
+  },
+  pills: {
+    marginTop: space[2],
+    marginLeft: 44,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space[1],
+  },
+  pill: {
+    paddingVertical: 3,
+    paddingHorizontal: space[2],
+    borderRadius: radiusAdmin.pill,
+    backgroundColor: color.surfaceBrandSoft,
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: type.weight.medium,
+    color: color.ink,
   },
   error: {
     marginBottom: space[2],

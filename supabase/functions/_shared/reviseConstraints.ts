@@ -338,32 +338,168 @@ export function failureAboutLockedPart(failure: string, locked: LockedValues): b
   return false;
 }
 
-/** What actually changed between the draft the manager sent and the one going back. */
-export function changeReport(before: BriefDraftShape, beforeHook: string | null, after: BriefDraftShape): string {
-  const same = (a: string | null | undefined, b: string | null | undefined) =>
-    (a ?? '').replace(/\s+/g, ' ').trim() === (b ?? '').replace(/\s+/g, ' ').trim();
+const sameText = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? '').replace(/\s+/g, ' ').trim() === (b ?? '').replace(/\s+/g, ' ').trim();
+
+/**
+ * The parts that differ between the draft the manager sent and the one going
+ * back, in post order: title, hook, point N (one entry per point), plug,
+ * caption. kept lists the parts that did not move.
+ */
+export function changedParts(
+  before: BriefDraftShape,
+  beforeHook: string | null,
+  after: BriefDraftShape,
+): { changed: string[]; kept: string[] } {
   const changed: string[] = [];
   const kept: string[] = [];
-  (same(before.title, after.title) ? kept : changed).push('title');
-  (same(beforeHook, after.hook_options[0]) ? kept : changed).push('hook');
-  const pointNums: string[] = [];
+  (sameText(before.title, after.title) ? kept : changed).push('title');
+  (sameText(beforeHook, after.hook_options[0]) ? kept : changed).push('hook');
   const max = Math.max(before.talking_points.length, after.talking_points.length);
+  let anyPoint = false;
   for (let i = 0; i < max; i++) {
-    if (!same(before.talking_points[i]?.text, after.talking_points[i]?.text)) pointNums.push(String(i + 1));
+    if (!sameText(before.talking_points[i]?.text, after.talking_points[i]?.text)) {
+      changed.push(`point ${i + 1}`);
+      anyPoint = true;
+    }
+  }
+  if (!anyPoint) kept.push('every point');
+  (sameText(before.cta, after.cta) ? kept : changed).push('plug');
+  (sameText(before.caption, after.caption) ? kept : changed).push('caption');
+  return { changed, kept };
+}
+
+/** What actually changed between the draft the manager sent and the one going back. */
+export function changeReport(before: BriefDraftShape, beforeHook: string | null, after: BriefDraftShape): string {
+  const { changed: list, kept } = changedParts(before, beforeHook, after);
+  const pointNums = list.filter((c) => c.startsWith('point ')).map((c) => c.slice(6));
+  const changed: string[] = [];
+  for (const part of list) {
+    if (part === 'title' || part === 'hook') changed.push(part);
   }
   if (before.talking_points.length !== after.talking_points.length) {
     changed.push(`points (now ${after.talking_points.length}, was ${before.talking_points.length})`);
   } else if (pointNums.length) {
     changed.push(pointNums.length === 1 ? `point ${pointNums[0]}` : `points ${pointNums.join(', ')}`);
-  } else {
-    kept.push('every point');
   }
-  (same(before.cta, after.cta) ? kept : changed).push('plug sentence');
-  (same(before.caption, after.caption) ? kept : changed).push('caption');
+  if (list.includes('plug')) changed.push('plug sentence');
+  if (list.includes('caption')) changed.push('caption');
+  const keptLabels = kept.map((k) => (k === 'plug' ? 'plug sentence' : k));
   const parts: string[] = [];
   parts.push(changed.length ? `Changed: ${changed.join(', ')}.` : 'Changed nothing.');
-  if (kept.length) parts.push(`Untouched: ${kept.join(', ')}.`);
+  if (keptLabels.length) parts.push(`Untouched: ${keptLabels.join(', ')}.`);
   return parts.join(' ');
+}
+
+/** The parts of a post a full revise may rewrite. cta always rides with the points. */
+export type RevisePart = 'points' | 'hook' | 'title' | 'caption' | 'search_phrase';
+
+const PART_WORDS: Array<[RevisePart, RegExp]> = [
+  ['hook', /\bhooks?\b|\bopening line\b|\btitle slide\b|\bfirst line\b/i],
+  ['title', /\btitle\b(?! slide)/i],
+  ['caption', /\bcaptions?\b|\bhashtags?\b/i],
+  ['points', /\b(cta|plug|product (point|sentence|line)|points?|talking points?|clips?|slides?|tips?|steps?|mistakes?|moral|body)\b/i],
+  ['search_phrase', /\bsearch (phrase|term)\b/i],
+];
+
+const TOPIC_WORDS = /\b(topic|angle|subject|idea|concept|whole thing|everything|entire|all of it|start over|rewrite it all|different direction)\b/i;
+
+/**
+ * Which parts the newest feedback is about, so the rewrite returns only
+ * those keys. Nothing specific named means the points and the plug; the hook
+ * joins when it is empty or the topic itself is changing. Locked parts never
+ * join.
+ */
+export function reviseParts(
+  feedback: string,
+  constraints: ReviseConstraints,
+  draft: BriefDraftShape,
+  chosenHook: string | null,
+): RevisePart[] {
+  const parts = new Set<RevisePart>();
+  for (const [part, re] of PART_WORDS) {
+    if (re.test(feedback)) parts.add(part);
+  }
+  if (constraints.pointCount !== null) {
+    parts.add('points');
+    if (/^\d+\b/.test(draft.title.trim())) parts.add('title');
+  }
+  if (!parts.size) {
+    parts.add('points');
+    if (!chosenHook?.trim() || TOPIC_WORDS.test(feedback)) parts.add('hook');
+  }
+  if (constraints.lockHook) parts.delete('hook');
+  if (constraints.lockTitle) parts.delete('title');
+  if (constraints.lockCaption) parts.delete('caption');
+  if (constraints.lockSearchPhrase) parts.delete('search_phrase');
+  if (!parts.size) parts.add('points');
+  const order: RevisePart[] = ['points', 'hook', 'title', 'caption', 'search_phrase'];
+  return order.filter((p) => parts.has(p));
+}
+
+/** Which part of the post a validation failure string is about. */
+export function failurePart(failure: string): RevisePart | null {
+  if (/^(hook option|hook |expected 8 to 10 hook options)/.test(failure)) return 'hook';
+  if (/^title says "/.test(failure)) return 'title';
+  if (/^(caption|hashtags|expected 3 to 5 hashtags|search phrase ".+" is not in the caption)/.test(failure)) {
+    return 'caption';
+  }
+  if (
+    /^(talking point|plug point|a point said verbatim|the post ends on|hedge words|more than one speaker|a line starts with a speaker label|talking_points length|\d+ talking points;|title leads with|the manager asked for exactly|script says)/.test(
+      failure,
+    )
+  ) {
+    return 'points';
+  }
+  if (/^(cta|the plug|product point|expected exactly one is_product|the advice beat|this type takes no plug|\w+ takes no plug)/.test(failure)) {
+    return 'points';
+  }
+  return null;
+}
+
+const normalizeFailureText = (text: string | null | undefined) =>
+  (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * A failure about text that was already in the draft the manager sent (the
+ * hand written hook, a pre existing option, a point this turn did not touch)
+ * is not this revision's problem and must never trigger a repair.
+ */
+export function failureAboutUnchangedText(
+  failure: string,
+  before: BriefDraftShape,
+  beforeHook: string | null,
+  after: BriefDraftShape,
+): boolean {
+  const pointSays = failure.match(/^talking point (\d+) says "/);
+  if (pointSays) {
+    const i = Number(pointSays[1]) - 1;
+    return sameText(before.talking_points[i]?.text, after.talking_points[i]?.text);
+  }
+  const hookSays = failure.match(/^hook option (\d+) says "/);
+  if (hookSays) {
+    const text = after.hook_options[Number(hookSays[1]) - 1];
+    return text !== undefined && before.hook_options.some((h) => sameText(h, text));
+  }
+  if (/^cta says "/.test(failure)) return sameText(before.cta, after.cta);
+  if (/^title says "/.test(failure)) return sameText(before.title, after.title);
+  if (/^caption says "/.test(failure)) return sameText(before.caption, after.caption);
+  if (/^script says "/.test(failure)) return sameText(before.script, after.script);
+  const beforeTexts = [
+    before.title,
+    beforeHook,
+    ...before.hook_options,
+    ...before.talking_points.map((p) => p.text),
+    before.cta,
+    before.caption,
+  ]
+    .map(normalizeFailureText)
+    .filter((t) => t.length > 0);
+  const quoted = [...failure.matchAll(/"([^"]+)"/g)].map((m) => normalizeFailureText(m[1]));
+  if (!quoted.length) return false;
+  return quoted.every((q) =>
+    beforeTexts.some((b) => b === q || (q.length >= 15 && b.includes(q))),
+  );
 }
 
 /** Texts validation must never flag and compression must never touch. */

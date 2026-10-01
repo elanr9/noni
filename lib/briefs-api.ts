@@ -8,6 +8,9 @@ import {
   type ReviewCheck,
   type TalkingPoint,
 } from '../supabase/functions/_shared/validateBrief';
+import { fetch as expoFetch } from 'expo/fetch';
+import { Platform } from 'react-native';
+
 import type { MediaKind } from './media-library-api';
 import {
   parseOverlayBoxes,
@@ -474,45 +477,66 @@ function parseRegenResult(
 export type ReviseTurn = { role: 'manager' | 'ai'; text: string };
 
 export type ReviseResult =
-  | { kind: 'draft'; draft: BriefDraft; hook: string | null; revisionNote: string }
+  | {
+      kind: 'draft';
+      draft: BriefDraft;
+      hook: string | null;
+      revisionNote: string;
+      /** Human labels of what moved, like "hook" or "point 1". */
+      changed: string[];
+    }
   /** Targeted feedback: one part changed, applied like a Regenerate button. */
-  | { kind: 'field'; result: RegenResult; revisionNote: string }
+  | { kind: 'field'; result: RegenResult; revisionNote: string; changed: string[] }
   /** The manager asked for the previous version back; the editor restores its own snapshot. */
   | { kind: 'undo'; revisionNote: string }
   /** Everything was locked; nothing was generated. */
   | { kind: 'none'; revisionNote: string }
   | { kind: 'kill'; kill_reason: string };
 
-/**
- * Rewrites the whole draft against plain feedback from the manager. Each
- * turn revises from the draft passed in, so callers send the latest editor
- * state. Nothing is saved.
- */
-export async function assistRevise(params: {
+export interface ReviseParams {
   draft: RegenDraftPayload;
   feedback: string;
   postTypeKey?: string;
   history?: ReviseTurn[];
   exampleTranscript?: string | null;
-}): Promise<ReviseResult> {
-  const { data, error } = await supabase.functions.invoke('brief-assist', {
-    body: {
-      action: 'revise',
-      draft: params.draft,
-      feedback: params.feedback,
-      post_type: params.postTypeKey,
-      history: params.history,
-      example_transcript: params.exampleTranscript ?? null,
-    },
-  });
-  if (error) throw error;
-  const raw = data as RawDraftResponse & {
-    revision_note?: string;
-    hook?: string | null;
-    scope?: string;
-    field?: RegenField;
-    index?: number;
+}
+
+export interface ReviseStreamHandlers {
+  /** Real pipeline step from the server, shown as a status line. */
+  onStage?: (label: string) => void;
+  /** A slice of the AI's note, appended live. */
+  onNote?: (delta: string) => void;
+  signal?: AbortSignal;
+}
+
+type RawReviseResponse = RawDraftResponse & {
+  revision_note?: string;
+  hook?: string | null;
+  scope?: string;
+  field?: RegenField;
+  index?: number;
+  changed?: unknown;
+};
+
+function reviseBody(params: ReviseParams): Record<string, unknown> {
+  return {
+    action: 'revise',
+    draft: params.draft,
+    feedback: params.feedback,
+    post_type: params.postTypeKey,
+    history: params.history,
+    example_transcript: params.exampleTranscript ?? null,
   };
+}
+
+/** Shared by the one shot and streamed revise paths. */
+function parseReviseResponse(
+  raw: RawReviseResponse,
+  exampleTranscript: string | null | undefined,
+): ReviseResult {
+  const changed = Array.isArray(raw.changed)
+    ? raw.changed.filter((c): c is string => typeof c === 'string')
+    : [];
   if (raw.scope === 'undo') return { kind: 'undo', revisionNote: raw.revision_note ?? '' };
   if (raw.scope === 'none') return { kind: 'none', revisionNote: raw.revision_note ?? '' };
   if (raw.scope === 'field' && raw.field) {
@@ -522,7 +546,7 @@ export async function assistRevise(params: {
       raw.index,
     );
     if (result.kind === 'kill') return { kind: 'kill', kill_reason: result.kill_reason };
-    return { kind: 'field', result, revisionNote: raw.revision_note ?? '' };
+    return { kind: 'field', result, revisionNote: raw.revision_note ?? '', changed };
   }
   const result = toDraftResult(raw, '');
   if (result.kind === 'kill') {
@@ -532,12 +556,148 @@ export async function assistRevise(params: {
     kind: 'draft',
     draft: {
       ...result.draft,
-      example_transcript:
-        result.draft.example_transcript ?? params.exampleTranscript ?? null,
+      example_transcript: result.draft.example_transcript ?? exampleTranscript ?? null,
     },
     hook: typeof raw.hook === 'string' && raw.hook.trim() ? raw.hook : null,
     revisionNote: raw.revision_note ?? '',
+    changed,
   };
+}
+
+/**
+ * Rewrites the whole draft against plain feedback from the manager. Each
+ * turn revises from the draft passed in, so callers send the latest editor
+ * state. Nothing is saved.
+ */
+export async function assistRevise(params: ReviseParams): Promise<ReviseResult> {
+  const { data, error } = await supabase.functions.invoke('brief-assist', {
+    body: reviseBody(params),
+  });
+  if (error) throw error;
+  return parseReviseResponse(data as RawReviseResponse, params.exampleTranscript);
+}
+
+/** One parsed `event:` block from a text/event-stream body. */
+interface SseEvent {
+  event: string;
+  data: string;
+}
+
+function parseSseBlock(block: string): SseEvent | null {
+  let event = 'message';
+  const data: string[] = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith(':')) continue;
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+  }
+  if (data.length === 0) return null;
+  return { event, data: data.join('\n') };
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same call as assistRevise, but over Server Sent Events so the sheet can
+ * type the AI's note live and show the real pipeline stage. Falls back to a
+ * plain JSON body when the function build does not stream yet.
+ */
+export async function assistReviseStream(
+  params: ReviseParams,
+  handlers: ReviseStreamHandlers = {},
+): Promise<ReviseResult> {
+  const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  if (!baseUrl || !anonKey) throw new Error('Supabase is not configured');
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) throw new Error('You are signed out');
+
+  const doFetch = (Platform.OS === 'web' ? fetch.bind(globalThis) : expoFetch) as typeof fetch;
+  const response = await doFetch(`${baseUrl}/functions/v1/brief-assist`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      apikey: anonKey,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(reviseBody(params)),
+    signal: handlers.signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    const json = parseJsonObject(text);
+    const message = json && typeof json.error === 'string' ? json.error : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('text/event-stream') || !response.body) {
+    const raw = parseJsonObject(await response.text());
+    if (!raw) throw new Error('Unexpected response from the server');
+    return parseReviseResponse(raw as RawReviseResponse, params.exampleTranscript);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const state: { result: ReviseResult | null } = { result: null };
+
+  const dispatch = (block: string) => {
+    const sse = parseSseBlock(block);
+    if (!sse) return;
+    const data = parseJsonObject(sse.data);
+    switch (sse.event) {
+      case 'stage':
+        if (data && typeof data.label === 'string') handlers.onStage?.(data.label);
+        return;
+      case 'note':
+        if (data && typeof data.delta === 'string') handlers.onNote?.(data.delta);
+        return;
+      case 'result':
+        if (!data) throw new Error('Unexpected response from the server');
+        state.result = parseReviseResponse(data as RawReviseResponse, params.exampleTranscript);
+        return;
+      case 'error':
+        throw new Error(
+          data && typeof data.message === 'string' ? data.message : 'Something went wrong',
+        );
+      default:
+        return;
+    }
+  };
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        dispatch(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) dispatch(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!state.result) throw new Error('The server closed the stream before finishing');
+  return state.result;
 }
 
 /**

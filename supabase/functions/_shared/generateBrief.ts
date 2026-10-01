@@ -425,9 +425,9 @@ export function buildBriefSystem(
 }
 
 const REVISE_CONTRACT =
-  '{"revision_note": string, "claim_id": string | null, "search_phrase": string, "point_count": number, "talking_points": [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta": string | null, "script": string | null, "target_words": number, "hook_options": [{"text": string, "score": number}], "title": string, "caption": string, "hashtags": string[], "why_it_works": string}';
+  '{"revision_note": string, "claim_id"?: string | null, "search_phrase"?: string, "point_count"?: number, "talking_points"?: [{"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}], "cta"?: string | null, "script"?: string | null, "target_words"?: number, "hook_options"?: [{"text": string, "score": number}], "title"?: string, "caption"?: string, "hashtags"?: string[], "why_it_works"?: string}';
 
-const REVISE_PREAMBLE = `You revise a structured UGC content brief after the campaign manager reviewed it and gave feedback in plain language. The current brief, the conversation so far and the newest feedback are in the message. The feedback is law: rewrite every part it touches and fix the root cause across the whole brief (if the manager says the product was never mentioned, the plug, the caption and the plug point's on-screen label all change). Parts the manager did not complain about stay as close to the current brief as the feedback allows, so the manager recognizes their post; a talking point marked "edited by the manager" is kept word for word unless the feedback names it. Never argue with the feedback and never ask a question back; make the change. THE MANAGER OUTRANKS EVERY RULE BELOW: when the message carries a LOCKED block, a REQUIRED POINT COUNT or STANDING INSTRUCTIONS, obey them exactly even where a rule below says otherwise (a locked hook is returned unchanged even if it breaks a hook rule; a required count wins over the post type range). Product mechanisms come only from the approved claims or the Product truth in the message, never invented. When feedback targets the hook and the hook is not locked, EVERY hook option is rewritten to that angle as a fresh grammatical headline; carrying over old hooks or bolting the feedback's keywords onto existing lines is a failed revision. Start the JSON with revision_note: two or three plain sentences to the manager about the post itself, naming exactly what changed and why it is stronger; never mention validation, rules, claims tables, hashtag banks or anything about how you work, no bullet points, no markdown.`;
+const REVISE_PREAMBLE = `You revise a structured UGC content brief after the campaign manager reviewed it and gave feedback in plain language. The current brief, the conversation so far and the newest feedback are in the message. The feedback is law: rewrite every part it touches and fix the root cause inside the parts in scope (if the manager says the product was never mentioned, the plug and the plug point's on-screen label change). RETURN ONLY WHAT CHANGES: the message carries a SCOPE block naming the parts this revision is about and the exact JSON keys you may return. revision_note is always the FIRST key; after it return only the keys in scope and omit every other key entirely. Omitted keys (title, hook options, caption, hashtags, search phrase) are carried over from the current brief character for character, so never return a key just to repeat it. When talking_points is in scope, return the whole array (every point, including ones you keep) together with point_count and cta; a talking point marked "edited by the manager" is kept word for word unless the feedback names it. Never argue with the feedback and never ask a question back; make the change. THE MANAGER OUTRANKS EVERY RULE BELOW: when the message carries a LOCKED block, a REQUIRED POINT COUNT or STANDING INSTRUCTIONS, obey them exactly even where a rule below says otherwise (a locked hook is returned unchanged even if it breaks a hook rule; a required count wins over the post type range). Product mechanisms come only from the approved claims or the Product truth in the message, never invented. When the hook is in scope, EVERY hook option is rewritten to that angle as a fresh grammatical headline; carrying over old hooks or bolting the feedback's keywords onto existing lines is a failed revision. revision_note is 1 to 3 plain sentences to the manager about the post itself, written first, naming what is changing and why it is stronger; never mention validation, rules, claims tables, hashtag banks or anything about how you work, no bullet points, no markdown.`;
 
 /** Full-brief rewrite driven by manager feedback (chat revise). */
 export function buildReviseSystem(
@@ -532,13 +532,17 @@ export function buildFieldSystem(
   postType: PostTypeRow | null,
   fallbackFormat: 'video' | 'photo_carousel',
   options: BriefSystemOptions,
+  withNote = false,
 ): string {
   const requiresPlug = postType ? postType.requires_plug : true;
   const preamble = `You revise one part of a structured UGC content brief for creators posting on TikTok and Instagram. The current brief is in the message; regenerate ONLY what is asked and keep it consistent with the parts the admin is keeping. Answer with a single JSON object, no markdown fences, no preamble.`;
+  const note = withNote
+    ? `revision_note is the FIRST key of the JSON object, before every key named below: 1 to 3 plain sentences to the manager about what is changing in this part and why it is stronger; never mention validation, rules or how you work, no bullet points, no markdown.`
+    : null;
   const banned = options.bannedPhrases.length
     ? `BANNED PHRASES: the admin has banned these exact phrases; never use them: ${options.bannedPhrases.join(' | ')}`
     : null;
-  const blocks: (string | null)[] = [preamble, NO_DASH_RULE];
+  const blocks: (string | null)[] = [preamble, note, NO_DASH_RULE];
   switch (field) {
     case 'search_phrase':
       blocks.push(
@@ -615,11 +619,13 @@ export function buildFieldSystem(
  * The corrective message for attempt two. Retries were trimming a word or
  * merging points instead of compressing, so the fix method is spelled out.
  */
+const FIX_METHOD = `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and a bracketed nudge on a cue point stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A line flagged for a banned word is written again from scratch without that word or any synonym for it; when it is the cta, compose a new plug sentence from the approved claims or Product truth and put the same new sentence in the plug point. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. A plug flagged for crediting the product with a capability not written in the Product truth is rewritten from one capability sentence quoted near verbatim from the Product truth or an approved claim, keeping that sentence's verb and object; never paraphrase a new capability into it, and put the same new sentence in cta and in the plug point. A verbatim point (script true) flagged for a bracket loses the bracket entirely. A hook flagged for stitched fragments or for the word "things" is replaced with one complete spoken sentence naming a specific stake. A line flagged for a hedge word is rewritten without it. Everything not flagged stays exactly as it was.`;
+
 export function retryMessage(priorFailures: string[], what: 'draft' | 'revision' | 'answer'): string {
   return [
     `Your previous ${what} failed validation. Fix every one of these and return the corrected JSON:`,
     ...priorFailures.map((f) => `- ${f}`),
-    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and a bracketed nudge on a cue point stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A line flagged for a banned word is written again from scratch without that word or any synonym for it; when it is the cta, compose a new plug sentence from the approved claims or Product truth and put the same new sentence in the plug point. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. A plug flagged for crediting the product with a capability not written in the Product truth is rewritten from one capability sentence quoted near verbatim from the Product truth or an approved claim, keeping that sentence's verb and object; never paraphrase a new capability into it, and put the same new sentence in cta and in the plug point. A verbatim point (script true) flagged for a bracket loses the bracket entirely. A hook flagged for stitched fragments or for the word "things" is replaced with one complete spoken sentence naming a specific stake. A line flagged for a hedge word is rewritten without it. Everything not flagged stays exactly as it was.`,
+    FIX_METHOD,
   ].join('\n');
 }
 
@@ -1054,70 +1060,15 @@ export function normalizeGenerated(
   };
 }
 
-const LENGTH_CHECK = /^(talking point|plug point) is \d+ words, over the hard cap|^hook option over 9 words/;
-
-const COMPRESS_POINT_SYSTEM = `You shorten one talking point of a UGC brief. Answer with the rewritten point text only, no quotes, no JSON, no commentary. Keep its concrete anchor (the number, named example or exact phrase), keep any [bracketed nudge] word for word, and cut the rationale clause first. If the message marks it as the plug point, the sentence given as cta stays inside it verbatim and the product name is never added anywhere else. Target the word budget in the message exactly.`;
-
-const COMPRESS_HOOK_SYSTEM = `You shorten one hook line of a UGC brief to 9 words or fewer. Answer with the hook only. Keep its angle, its specificity marker (number, absolute or named thing) and make it read as a headline a person would type; never end on a preposition or conjunction.`;
-
-/**
- * Per-item compression for the length failures a full retry leaves behind.
- * Returns null when nothing in the failures is about length.
- */
-async function compressOverLongItems(
-  outcome: GeneratedDraft,
-  failures: string[],
-  isLocked: (text: string) => boolean,
-): Promise<GeneratedDraft | null> {
-  if (!failures.some((f) => LENGTH_CHECK.test(f))) return null;
-  const draft = outcome.draft;
-  const points = await Promise.all(
-    draft.talking_points.map(async (point) => {
-      if (!point.text || isLocked(point.text)) return point;
-      const budget = point.is_product ? 36 : 22;
-      const cap = point.is_product ? 40 : 30;
-      if (point.text.split(/\s+/).filter(Boolean).length <= cap) return point;
-      const user = [
-        `Talking point (${point.is_product ? 'the plug point' : 'a regular point'}), rewrite to ${budget} words or fewer:`,
-        point.text,
-        ...(point.is_product && draft.cta ? [`cta sentence that must stay verbatim: ${draft.cta}`] : []),
-      ].join('\n');
-      try {
-        const text = stripDashes(await askClaude(COMPRESS_POINT_SYSTEM, user, 200));
-        return text ? { ...point, text } : point;
-      } catch (error) {
-        console.warn('point compression failed:', error instanceof Error ? error.message : error);
-        return point;
-      }
-    }),
-  );
-  const hooks = await Promise.all(
-    draft.hook_options.map(async (hook) => {
-      if (isLocked(hook) || hook.split(/\s+/).filter(Boolean).length <= 9) return hook;
-      try {
-        const text = stripDashes(await askClaude(COMPRESS_HOOK_SYSTEM, hook, 60));
-        return text || hook;
-      } catch {
-        return hook;
-      }
-    }),
-  );
-  return { ...outcome, draft: { ...draft, talking_points: points, hook_options: hooks } };
-}
-
-/**
- * One draft, validated, with a single corrective retry and a per-item
- * compression pass for what the retry leaves over length. Every attempt is
- * logged to brief_validations against the generation_id, which joins to the
- * brief once the client saves it.
- */
 export type GenerateOptions = {
-  /** Texts the manager locked: never flagged, never compressed, so a retry never rewrites them. */
+  /** Texts the manager locked: never flagged, never repaired, so a repair never rewrites them. */
   lockedTexts?: string[];
   /** Failures the standard validator cannot know about (the manager's point count). */
   extraFailures?: (draft: BriefDraftShape) => string[];
-  /** Failures about parts a retry is not allowed to touch. */
-  ignoreFailure?: (failure: string) => boolean;
+  /** Failures about parts a repair is not allowed to touch; receives the draft being validated. */
+  ignoreFailure?: (failure: string, draft: BriefDraftShape) => boolean;
+  /** Progress label for each real step (validation, repair passes). */
+  onStage?: (label: string) => void;
 };
 
 const normalizeText = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1129,24 +1080,239 @@ function failureIsAboutLocked(failure: string, locked: string[]): boolean {
   return quoted.some((q) => locked.some((l) => l.includes(q) || q.includes(l)));
 }
 
-/** Failures worth a second corrective retry; everything else gets one. */
-const SECOND_RETRY_FAILURES: RegExp[] = [
-  /which the manager banned/,
-  /^a point said verbatim \(script true\) carries a bracketed nudge/,
-  /^plug point is \d+ words, over the hard cap/,
-  /^hedge words in the spoken lines/,
-  /^hook is a generic shape/,
-  /^hook is short fragments stitched/,
-  /^hook says "things"/,
-  /^the plug credits .+ which is not written in the Product truth/,
-];
+export type RepairTarget =
+  | { kind: 'point'; index: number }
+  | { kind: 'hook_option'; index: number }
+  | { kind: 'cta' }
+  | { kind: 'caption' }
+  | { kind: 'title' }
+  | { kind: 'search_phrase' };
 
-const MAX_DRAFT_ATTEMPTS = 3;
-
-function earnsSecondRetry(failures: string[]): boolean {
-  return failures.some((f) => SECOND_RETRY_FAILURES.some((re) => re.test(f)));
+function targetKey(t: RepairTarget): string {
+  if (t.kind === 'point' || t.kind === 'hook_option') return `${t.kind} ${t.index + 1}`;
+  return t.kind;
 }
 
+function parseTargetKey(key: string): RepairTarget | null {
+  const m = key.trim().toLowerCase().match(/^(point|hook_option)\s+(\d+)$/);
+  if (m) return { kind: m[1] as 'point' | 'hook_option', index: Number(m[2]) - 1 };
+  const k = key.trim().toLowerCase();
+  if (k === 'cta' || k === 'caption' || k === 'title' || k === 'search_phrase') return { kind: k };
+  return null;
+}
+
+const HEDGE_LIST = /^hedge words in the spoken lines: (.+); cut them$/;
+
+/**
+ * Which lines a failure is about. Count, position and claim id failures have
+ * no line to replace and map to nothing; they stay as warnings.
+ */
+export function failureTargets(failure: string, draft: BriefDraftShape): RepairTarget[] {
+  const quoted = [...failure.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const pointByText = (text: string | undefined): RepairTarget[] => {
+    if (!text) return [];
+    const i = draft.talking_points.findIndex((p) => p.text && normalizeText(p.text) === normalizeText(text));
+    return i >= 0 ? [{ kind: 'point', index: i }] : [];
+  };
+  const hookByText = (text: string | undefined): RepairTarget[] => {
+    if (!text) return [];
+    const i = draft.hook_options.findIndex((h) => normalizeText(h) === normalizeText(text));
+    return i >= 0 ? [{ kind: 'hook_option', index: i }] : [];
+  };
+  const plugIndex = draft.talking_points.findIndex((p) => p.is_product);
+  const plug: RepairTarget[] = plugIndex >= 0 ? [{ kind: 'cta' }, { kind: 'point', index: plugIndex }] : [];
+
+  let m = failure.match(/^talking point (\d+) says "/);
+  if (m) return [{ kind: 'point', index: Number(m[1]) - 1 }];
+  m = failure.match(/^hook option (\d+) says "/);
+  if (m) return [{ kind: 'hook_option', index: Number(m[1]) - 1 }];
+  if (/^cta says "/.test(failure)) return plug;
+  if (/^title says "/.test(failure)) return [{ kind: 'title' }];
+  if (/^caption says "/.test(failure)) return [{ kind: 'caption' }];
+  if (/^(talking point|plug point) is \d+ words/.test(failure)) return pointByText(quoted[0]);
+  if (/^a point said verbatim/.test(failure)) return pointByText(quoted[0]);
+  if (/^hook option over 9 words/.test(failure)) return hookByText(quoted[0]);
+  if (/^hook (is a generic shape|is short fragments)/.test(failure)) return hookByText(quoted[0]);
+  if (/^hook says "things"/.test(failure)) return hookByText(quoted[1]);
+  if (/^the post ends on/.test(failure) && draft.talking_points.length) {
+    return [{ kind: 'point', index: draft.talking_points.length - 1 }];
+  }
+  const hedges = failure.match(HEDGE_LIST);
+  if (hedges) {
+    const words = hedges[1].split(',').map((w) => w.trim().replace(/ x\d+$/, '')).filter(Boolean);
+    const re = new RegExp(`\\b(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
+    const out: RepairTarget[] = [];
+    draft.talking_points.forEach((p, i) => {
+      if (p.text && re.test(p.text)) out.push({ kind: 'point', index: i });
+    });
+    draft.hook_options.forEach((h, i) => {
+      if (re.test(h)) out.push({ kind: 'hook_option', index: i });
+    });
+    return out;
+  }
+  if (/^(cta |the plug|product point has no text|the advice beat)/.test(failure)) return plug;
+  if (/^caption (opens like a tutorial|is \d+ chars)/.test(failure)) return [{ kind: 'caption' }];
+  if (/^search phrase ".+" is not in the caption/.test(failure)) return [{ kind: 'caption' }];
+  return [];
+}
+
+const REPAIR_PREAMBLE = `You repair specific lines of a structured UGC content brief that failed its checks. The whole brief is in the message for context, then the failing checks, each tagged with the line it is about. Rewrite ONLY the tagged lines; every other line stays exactly as it is and is not returned. Answer with one JSON object, no markdown fences, no commentary: {"fixes": [{"target": "hook_option 3" | "point 2" | "cta" | "caption" | "title" | "search_phrase", "text": string}]}. One fix per tagged line, text is the complete replacement for that line. When the plug point or cta is tagged, return BOTH a "cta" fix (the one plug sentence) and a "point N" fix for the plug point whose text contains that exact cta sentence after an 8 to 15 word advice beat and before a short nudge. Inside string values use single quotes for any quoted phrase.`;
+
+type RawFixes = { fixes?: Array<{ target?: unknown; text?: unknown }> };
+
+function repairSystem(
+  targets: RepairTarget[],
+  postType: PostTypeRow | null,
+  format: 'video' | 'photo_carousel',
+  options: BriefSystemOptions,
+): string {
+  const kinds = new Set(targets.map((t) => t.kind));
+  const requiresPlug = postType ? postType.requires_plug : true;
+  const blocks: (string | null)[] = [REPAIR_PREAMBLE, NO_DASH_RULE];
+  if (kinds.has('point') || kinds.has('cta')) {
+    blocks.push(SUBSTANCE_RULE, POINT_RULES, SPOKEN_RULE, EXPERT_CREATOR_RULE, CREDENTIAL_RULE);
+  }
+  if (kinds.has('cta')) {
+    blocks.push(
+      plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
+      requiresPlug ? CAPABILITY_RULE(options.productName) : null,
+    );
+  }
+  if (kinds.has('hook_option')) blocks.push(HOOK_RULES, HOOK_CRAFT_RULE, CREDENTIAL_RULE);
+  if (kinds.has('caption')) blocks.push(captionRules(requiresPlug));
+  if (kinds.has('title')) blocks.push(postTypeBlock(postType, format));
+  if (kinds.has('search_phrase')) blocks.push(SEARCH_PHRASE_RULE);
+  if (options.bannedPhrases.length) {
+    blocks.push(`BANNED PHRASES: never use them: ${options.bannedPhrases.join(' | ')}`);
+  }
+  blocks.push(FIX_METHOD);
+  return blocks.filter((b): b is string => b !== null).join('\n\n');
+}
+
+function plugSentenceIn(text: string, productNames: string[]): string | null {
+  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  const named = sentences.find((s) => productNames.some((n) => n.trim() && s.toLowerCase().includes(n.toLowerCase())));
+  return named ?? null;
+}
+
+/**
+ * One fast model call that rewrites only the failing lines and splices the
+ * replacements into the draft in place. Returns null when no failure maps to
+ * a line that can be replaced.
+ */
+export async function repairLines(
+  outcome: GeneratedDraft,
+  failures: string[],
+  validationCtx: { productNames?: string[]; bannedPhrases?: string[]; approvedClaimIds: string[] },
+  systemOptions: BriefSystemOptions,
+  postType: PostTypeRow | null,
+  isLocked: (text: string) => boolean = () => false,
+): Promise<{ outcome: GeneratedDraft; targetCount: number } | null> {
+  const draft = outcome.draft;
+  const tagged = failures
+    .map((f) => ({
+      failure: f,
+      targets: failureTargets(f, draft).filter((t) => {
+        if (t.kind === 'point') {
+          const text = draft.talking_points[t.index]?.text;
+          return text !== undefined && text !== null && !isLocked(text);
+        }
+        if (t.kind === 'hook_option') {
+          const text = draft.hook_options[t.index];
+          return text !== undefined && !isLocked(text);
+        }
+        if (t.kind === 'title') return !isLocked(draft.title);
+        if (t.kind === 'caption') return !isLocked(draft.caption);
+        return true;
+      }),
+    }))
+    .filter((t) => t.targets.length > 0);
+  if (!tagged.length) return null;
+  const targets = [...new Map(tagged.flatMap((t) => t.targets).map((t) => [targetKey(t), t])).values()];
+  const productNames = validationCtx.productNames ?? [];
+
+  const context = [
+    'Current brief:',
+    `title: ${draft.title || '(none)'}`,
+    `search_phrase: ${draft.search_phrase ?? '(none)'}`,
+    `Talking points:\n${draft.talking_points
+      .map((p, i) => `point ${i + 1}${p.is_product ? ' (the plug point)' : ''}${p.script ? ' (said verbatim, script true)' : ''}: ${p.text ?? '(empty)'}`)
+      .join('\n')}`,
+    `cta: ${draft.cta ?? '(none)'}`,
+    `Hook options:\n${draft.hook_options.map((h, i) => `hook_option ${i + 1}: ${h}`).join('\n') || '(none)'}`,
+    `caption: ${draft.caption || '(none)'}`,
+    `Hashtags: ${draft.hashtags.join(' ') || '(none)'}`,
+    `Product name: ${systemOptions.productName}`,
+    '',
+    `FAILING CHECKS (fix only these lines):\n${tagged
+      .map((t) => `- [${t.targets.map(targetKey).join(', ')}] ${t.failure}`)
+      .join('\n')}`,
+  ].join('\n\n');
+
+  const raw = await askClaude(
+    repairSystem(targets, postType, draft.format, systemOptions),
+    context,
+    1500,
+    { tier: 'fast' },
+  );
+  const parsed = parseClaudeJson<RawFixes>(raw);
+  const fixes = new Map<string, string>();
+  for (const fix of parsed.fixes ?? []) {
+    if (typeof fix.target !== 'string' || typeof fix.text !== 'string' || !fix.text.trim()) continue;
+    const target = parseTargetKey(fix.target);
+    if (!target || !targets.some((t) => targetKey(t) === targetKey(target))) continue;
+    fixes.set(targetKey(target), stripDashes(fix.text));
+  }
+  if (!fixes.size) return null;
+
+  const next: BriefDraftShape = {
+    ...draft,
+    talking_points: draft.talking_points.map((p) => ({ ...p })),
+    hook_options: [...draft.hook_options],
+  };
+  const plugIndex = next.talking_points.findIndex((p) => p.is_product);
+  for (const [key, text] of fixes) {
+    const target = parseTargetKey(key);
+    if (!target) continue;
+    if (target.kind === 'point' && next.talking_points[target.index]) {
+      next.talking_points[target.index].text = text;
+    } else if (target.kind === 'hook_option' && next.hook_options[target.index] !== undefined) {
+      next.hook_options[target.index] = text;
+    } else if (target.kind === 'title') {
+      next.title = text;
+    } else if (target.kind === 'caption') {
+      next.caption = text;
+    } else if (target.kind === 'search_phrase') {
+      next.search_phrase = text;
+    } else if (target.kind === 'cta') {
+      next.cta = text.replace(/^["']|["']$/g, '');
+    }
+  }
+  // The plug sentence lives in cta and inside the plug point; after a fix to
+  // either, the two are reconciled so the embedded check holds.
+  if (plugIndex >= 0) {
+    const plugText = next.talking_points[plugIndex].text ?? '';
+    const ctaFixed = fixes.has('cta');
+    const pointFixed = fixes.has(`point ${plugIndex + 1}`);
+    if (pointFixed && !ctaFixed) {
+      if (!next.cta || !normalizeText(plugText).includes(normalizeText(next.cta))) {
+        next.cta = plugSentenceIn(plugText, productNames) ?? next.cta;
+      }
+    } else if (ctaFixed && !pointFixed && next.cta && draft.cta && plugText.includes(draft.cta)) {
+      next.talking_points[plugIndex].text = plugText.replace(draft.cta, next.cta);
+    }
+  }
+  return { outcome: { ...outcome, draft: next }, targetCount: fixes.size };
+}
+
+const MAX_REPAIR_PASSES = 2;
+
+/**
+ * One draft, validated, then at most two repair passes that rewrite only the
+ * failing lines; the post is never generated twice. Every attempt is logged
+ * to brief_validations against the generation_id (attempt 1 is the draft,
+ * 2 and 3 are repair passes), which joins to the brief once the client saves it.
+ */
 export async function generateValidated(
   admin: SupabaseClient,
   companyId: string,
@@ -1172,7 +1338,7 @@ export async function generateValidated(
     const base = validateBrief(draft, ctx);
     const failures = [
       ...base.failures.filter(
-        (f) => !failureIsAboutLocked(f, locked) && !(options.ignoreFailure?.(f) ?? false),
+        (f) => !failureIsAboutLocked(f, locked) && !(options.ignoreFailure?.(f, draft) ?? false),
       ),
       ...(options.extraFailures?.(draft) ?? []),
     ];
@@ -1189,12 +1355,17 @@ export async function generateValidated(
     });
     if (error) console.error('brief_validations insert failed:', error.message);
   };
+  const systemOptions: BriefSystemOptions = {
+    bannedPhrases: validationCtx.bannedPhrases ?? [],
+    productName: validationCtx.productNames?.[0] ?? 'the product',
+    hasApprovedClaims: validationCtx.approvedClaimIds.length > 0,
+  };
 
   let outcome: GenOutcome;
   try {
     outcome = await draftOnce([]);
   } catch (error) {
-    // Malformed JSON from the model is a retryable failure, not a 500.
+    // Malformed JSON from the model is retried once; it is not a 500.
     const message = error instanceof Error ? error.message : String(error);
     if (!/json|unexpected token|position \d+/i.test(message)) throw error;
     outcome = await draftOnce([
@@ -1202,49 +1373,34 @@ export async function generateValidated(
     ]);
   }
   if (isKill(outcome)) return { outcome, warnings: [] };
-  let result = validate(outcome.draft);
+  options.onStage?.('Checking against the brand rules');
+  let generated: GeneratedDraft = outcome;
+  let result = validate(generated.draft);
   let attempt = 1;
   await logAttempt(attempt, result);
-  while (
-    !result.passed &&
-    attempt < MAX_DRAFT_ATTEMPTS &&
-    (attempt === 1 || earnsSecondRetry(result.failures))
-  ) {
-    let retry: GenOutcome;
+  for (let pass = 0; pass < MAX_REPAIR_PASSES && !result.passed; pass++) {
+    const targetCount = result.failures.filter((f) => failureTargets(f, generated.draft).length > 0).length;
+    if (!targetCount) break;
+    options.onStage?.(`Repairing ${targetCount} ${targetCount === 1 ? 'line' : 'lines'}`);
+    let repaired: { outcome: GeneratedDraft; targetCount: number } | null;
     try {
-      retry = await draftOnce(result.failures);
+      repaired = await repairLines(generated, result.failures, ctx, systemOptions, postType, isLocked);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/json|unexpected token|position \d+/i.test(message)) throw error;
-      retry = await draftOnce([
-        ...result.failures,
-        `your previous answer was not valid JSON (${message.slice(0, 160)}); answer with one JSON object only and use single quotes for any quoted phrase inside a string value`,
-      ]);
+      console.warn('repair pass failed:', error instanceof Error ? error.message : error);
+      break;
     }
-    if (isKill(retry)) return { outcome: retry, warnings: [] };
-    outcome = retry;
-    result = validate(outcome.draft);
+    if (!repaired) break;
+    const repairedResult = validate(repaired.outcome.draft);
     attempt++;
-    await logAttempt(attempt, result);
-  }
-  // Length is the one failure a whole-brief retry never fixes (it trims a
-  // word or drifts the untouched fields), so over-long items are compressed
-  // one at a time and spliced back in. Nothing else in the draft moves.
-  if (!result.passed && !isKill(outcome)) {
-    const repaired = await compressOverLongItems(outcome, result.failures, isLocked);
-    if (repaired) {
-      const repairedResult = validate(repaired.draft);
-      await logAttempt(attempt + 1, repairedResult);
-      if (repairedResult.failures.length < result.failures.length) {
-        outcome = repaired;
-        result = repairedResult;
-      }
-    }
+    await logAttempt(attempt, repairedResult);
+    if (repairedResult.failures.length > result.failures.length) break;
+    generated = repaired.outcome;
+    result = repairedResult;
   }
   const warnings = result.passed
     ? result.warnings
     : [...result.failures, ...result.warnings];
-  return { outcome, warnings };
+  return { outcome: generated, warnings };
 }
 
 // ---------------------------------------------------------------------------

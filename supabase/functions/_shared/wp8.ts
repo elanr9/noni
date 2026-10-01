@@ -62,6 +62,65 @@ export function streamJsonResponse(
   });
 }
 
+export type SseEmit = (event: string, data: Record<string, unknown>) => void;
+
+/** True when the client asked for server sent events instead of one JSON body. */
+export function wantsSse(req: Request): boolean {
+  return (req.headers.get('accept') ?? '').includes('text/event-stream');
+}
+
+/**
+ * A server sent events response. Work emits named events as it goes; the
+ * resolved object is sent as the final "result" event, a thrown error as an
+ * "error" event. A comment line every 10s keeps idle proxies from closing
+ * the connection.
+ */
+export function sseResponse(
+  work: (emit: SseEmit) => Promise<Record<string, unknown>>,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let open = true;
+      const write = (chunk: string) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          open = false;
+        }
+      };
+      const emit: SseEmit = (event, data) => {
+        write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+      const beat = setInterval(() => write(': keepalive\n\n'), 10000);
+      work(emit)
+        .then((body) => emit('result', body))
+        .catch((e) => {
+          emit('error', { message: e instanceof Error ? e.message : 'request failed' });
+        })
+        .then(() => {
+          clearInterval(beat);
+          if (!open) return;
+          open = false;
+          try {
+            controller.close();
+          } catch {
+            // The client already went away.
+          }
+        });
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
 export function adminClient(): SupabaseClient {
   return createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -238,6 +297,145 @@ export async function askClaude(
     throw new Error(`Claude returned no text: ${JSON.stringify(data).slice(0, 1500)}`);
   }
   return text;
+}
+
+type StreamEvent = {
+  type: string;
+  message?: { usage?: ClaudeUsage };
+  delta?: { type?: string; text?: string };
+  usage?: ClaudeUsage;
+  error?: { message?: string };
+};
+
+/**
+ * askClaude with the Messages API streaming; every text delta is handed to
+ * onText as it arrives and the full text is returned at the end.
+ */
+export async function askClaudeStream(
+  system: string,
+  user: string,
+  maxTokens: number,
+  options: AskClaudeOptions & { onText: (delta: string) => void },
+): Promise<string> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+  const model = claudeModel(options.tier);
+  const cache = { type: 'ephemeral' as const };
+  const userContent = options.cachedPrefix?.trim()
+    ? [
+        { type: 'text' as const, text: options.cachedPrefix, cache_control: cache },
+        { type: 'text' as const, text: user },
+      ]
+    : user;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      stream: true,
+      ...noThinking(model),
+      system: [{ type: 'text', text: system, cache_control: cache }],
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Claude ${res.status}: ${await res.text()}`);
+  }
+  const usage: ClaudeUsage = {};
+  let text = '';
+  let buffer = '';
+  const handleLine = (line: string) => {
+    if (!line.startsWith('data: ')) return;
+    const event = JSON.parse(line.slice(6)) as StreamEvent;
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      const delta = event.delta.text ?? '';
+      if (delta) {
+        text += delta;
+        options.onText(delta);
+      }
+    } else if (event.type === 'message_start' && event.message?.usage) {
+      Object.assign(usage, event.message.usage);
+    } else if (event.type === 'message_delta' && event.usage) {
+      usage.output_tokens = event.usage.output_tokens;
+    } else if (event.type === 'error') {
+      throw new Error(`Claude stream error: ${event.error?.message ?? 'unknown'}`);
+    }
+  };
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) handleLine(line.trimEnd());
+  }
+  if (buffer.trim()) handleLine(buffer.trim());
+  logUsage(`${options.tier ?? 'draft'} stream`, model, usage);
+  if (!text) throw new Error('Claude returned no text');
+  return text;
+}
+
+/**
+ * Watches streamed JSON text for one string valued key and forwards its
+ * unescaped content as it arrives, so a note can show while the rest of the
+ * object is still being written. Returns the delta handler to feed.
+ */
+export function jsonStringFieldScanner(
+  key: string,
+  onValue: (delta: string) => void,
+): (delta: string) => void {
+  const opener = new RegExp(`"${key}"\\s*:\\s*"`);
+  let state: 'searching' | 'inside' | 'done' = 'searching';
+  let head = '';
+  let escaping = false;
+  let unicode: string | null = null;
+  return (delta: string) => {
+    if (state === 'done') return;
+    let rest = delta;
+    if (state === 'searching') {
+      head += delta;
+      const match = opener.exec(head);
+      if (!match) return;
+      state = 'inside';
+      rest = head.slice(match.index + match[0].length);
+      head = '';
+    }
+    let out = '';
+    for (const ch of rest) {
+      if (unicode !== null) {
+        unicode += ch;
+        if (unicode.length === 4) {
+          out += String.fromCharCode(parseInt(unicode, 16));
+          unicode = null;
+        }
+        continue;
+      }
+      if (escaping) {
+        escaping = false;
+        if (ch === 'n') out += '\n';
+        else if (ch === 't') out += '\t';
+        else if (ch === 'u') unicode = '';
+        else out += ch;
+        continue;
+      }
+      if (ch === '\\') {
+        escaping = true;
+        continue;
+      }
+      if (ch === '"') {
+        state = 'done';
+        break;
+      }
+      out += ch;
+    }
+    if (out) onValue(out);
+  };
 }
 
 export type ResearchSource = { url: string; title: string };

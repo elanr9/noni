@@ -15,9 +15,12 @@
 //   source post is never touched.
 //
 // { action: "revise", draft, feedback, post_type?, history?, example_transcript? }
-//   Chat revise: rewrites the whole brief against the manager's plain
-//   language feedback and returns a draft in the ingest-brief shape plus
-//   revision_note (what changed, addressed to the manager). Nothing is saved.
+//   Chat revise: rewrites the parts of the brief the manager's plain language
+//   feedback is about and returns a draft in the ingest-brief shape plus
+//   revision_note (what changed, addressed to the manager) and changed (the
+//   list of parts that moved). Nothing is saved. With Accept: text/event-stream
+//   the response is SSE: stage {label}, note {delta}, result {...}, error
+//   {message}, with a ": keepalive" comment every 10s.
 //
 // { action: "derive_segments", brief_id, overlay_labels? }
 //   Derives or re-derives the render manifest for a saved brief through the
@@ -31,14 +34,19 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import {
   adminClient,
   askClaude,
+  askClaudeStream,
   authenticate,
   handleCors,
   jsonResponse,
+  jsonStringFieldScanner,
+  sseResponse,
   streamJsonResponse,
   loadBrandContext,
   parseClaudeJson,
   stripDashes,
+  wantsSse,
   type BrandContext,
+  type SseEmit,
 } from '../_shared/wp8.ts';
 import {
   brandDocBlocks,
@@ -49,16 +57,19 @@ import {
   buildPortSystem,
   buildReviseSystem,
   deriveSegments,
+  failureTargets,
   generateValidated,
   isKill,
   loadPostType,
   managerRuleLines,
   normalizeGenerated,
+  repairLines,
   resolvePointMedia,
   sanitizeFeatureId,
   sortHooks,
   sourceBriefLines,
   toPostTypeShape,
+  type GeneratedDraft,
   type PostTypeRow,
   type RawGenerated,
   type RegenField,
@@ -74,15 +85,20 @@ import {
   banTermsForCompany,
   bannedCarryoverLines,
   captureLocked,
+  changedParts,
   constraintFailures,
   constraintLines,
   changeReport,
   everythingLocked,
   extractConstraints,
   failureAboutLockedPart,
+  failureAboutUnchangedText,
+  failurePart,
   keptNote,
   lockedTexts,
   rememberForCompany,
+  reviseParts,
+  type RevisePart,
 } from '../_shared/reviseConstraints.ts';
 
 /** The one line the chat shows after a targeted fix. */
@@ -251,6 +267,128 @@ function draftContext(draft: BriefDraftShape, chosenHook: string | null = null):
   ];
 }
 
+const PART_KEYS: Record<RevisePart, string[]> = {
+  points: ['claim_id', 'point_count', 'talking_points', 'cta', 'script', 'target_words'],
+  hook: ['hook_options'],
+  title: ['title'],
+  caption: ['caption', 'hashtags'],
+  search_phrase: ['search_phrase'],
+};
+
+function partName(part: RevisePart, pointCount: number): string {
+  switch (part) {
+    case 'points':
+      return pointCount > 1 ? `points 1 to ${pointCount}` : 'the point';
+    case 'hook':
+      return 'the hook';
+    case 'title':
+      return 'the title';
+    case 'caption':
+      return 'the caption';
+    default:
+      return 'the search phrase';
+  }
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+function rewriteLabel(parts: RevisePart[], pointCount: number): string {
+  return `Rewriting ${joinNames(parts.map((p) => partName(p, pointCount)))}`;
+}
+
+/** Tells the model which keys to return; everything else is carried over verbatim. */
+function scopeLine(parts: RevisePart[], pointCount: number): string {
+  const all: RevisePart[] = ['points', 'hook', 'title', 'caption', 'search_phrase'];
+  const omitted = all.filter((p) => !parts.includes(p));
+  const keys = parts.flatMap((p) => PART_KEYS[p]);
+  return [
+    `SCOPE OF THIS REVISION: the feedback is about ${joinNames(parts.map((p) => partName(p, pointCount)))}.`,
+    `Return "revision_note" first, then ONLY these keys: ${keys.join(', ')} (and why_it_works only if the concept itself changed).`,
+    omitted.length
+      ? `Omit ${joinNames(omitted.map((p) => partName(p, pointCount)))} entirely (${omitted.flatMap((p) => PART_KEYS[p]).join(', ')}); they are carried over character for character from the current brief.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function reviseMaxTokens(parts: RevisePart[], format: 'video' | 'photo_carousel'): number {
+  const base = parts.includes('hook') || parts.includes('caption') ? 4000 : 2500;
+  return format === 'photo_carousel' && parts.includes('points') ? base + 1000 : base;
+}
+
+function failureAboutOmittedPart(failure: string, parts: RevisePart[]): boolean {
+  const part = failurePart(failure);
+  return part !== null && !parts.includes(part);
+}
+
+/** Fills the keys the model omitted from the current draft so normalization sees a whole brief. */
+function mergePartialRevision(parsed: RawGenerated, draft: BriefDraftShape): RawGenerated {
+  const points = parsed.talking_points;
+  return {
+    revision_note: parsed.revision_note,
+    claim_id: parsed.claim_id,
+    search_phrase: parsed.search_phrase ?? draft.search_phrase ?? undefined,
+    point_count: points ? parsed.point_count ?? points.length : draft.talking_points.length,
+    talking_points: points ??
+      draft.talking_points.map((p) => ({
+        id: p.id,
+        text: p.text,
+        is_product: p.is_product,
+        claim_id: p.claim_id,
+        feature_id: null,
+        overlay_label: null,
+      })),
+    cta: points ? (parsed.cta !== undefined ? parsed.cta : draft.cta) : draft.cta,
+    script: parsed.script !== undefined ? parsed.script : draft.script,
+    target_words: parsed.target_words ?? draft.target_words,
+    hook_options: parsed.hook_options ?? draft.hook_options,
+    title: parsed.title ?? draft.title,
+    caption: parsed.caption ?? draft.caption,
+    hashtags: parsed.hashtags ?? draft.hashtags,
+    why_it_works: parsed.why_it_works ?? draft.why_it_works,
+  };
+}
+
+/** The changed list for a targeted revise: the one field, or the points that moved. */
+function fieldChanges(
+  draft: BriefDraftShape,
+  chosenHook: string | null,
+  targeted: { field: RegenField; index?: number },
+  out: Record<string, unknown>,
+): string[] {
+  switch (targeted.field) {
+    case 'hook':
+      return ['hook'];
+    case 'title':
+      return ['title'];
+    case 'caption':
+      return ['caption'];
+    case 'search_phrase':
+      return ['search phrase'];
+    case 'talking_point': {
+      const point = out.talking_point as TalkingPoint | undefined;
+      const label = `point ${(targeted.index ?? 0) + 1}`;
+      return point?.is_product && typeof out.cta === 'string' && out.cta !== draft.cta
+        ? [label, 'plug']
+        : [label];
+    }
+    default: {
+      const after: BriefDraftShape = {
+        ...draft,
+        talking_points: Array.isArray(out.talking_points) ? (out.talking_points as TalkingPoint[]) : draft.talking_points,
+        cta: typeof out.cta === 'string' ? out.cta : null,
+      };
+      return changedParts(draft, chosenHook, after).changed.filter(
+        (c) => c.startsWith('point ') || c === 'plug',
+      );
+    }
+  }
+}
+
 type RawPointOut = {
   id?: string;
   text?: string | null;
@@ -262,6 +400,7 @@ type RawPointOut = {
 
 type RawFieldOut = {
   kill_reason?: string;
+  revision_note?: string;
   search_phrase?: string;
   title?: string;
   claim_id?: string | null;
@@ -301,13 +440,67 @@ type FieldRegenArgs = {
   requiredPointCount?: number | null;
   /** Points the manager locked; returned verbatim on a talking_points regen. */
   lockedPointIndexes?: number[];
+  /** Progress labels for the chat; each marks a real step. */
+  emit?: (label: string) => void;
+  /** Live deltas of the model's revision note; when given the note is requested. */
+  onNote?: (delta: string) => void;
 };
+
+function fieldParts(field: RegenField): RevisePart[] {
+  switch (field) {
+    case 'hook':
+      return ['hook'];
+    case 'title':
+      return ['title'];
+    case 'caption':
+      return ['caption'];
+    case 'search_phrase':
+      return ['search_phrase'];
+    default:
+      return ['points'];
+  }
+}
+
+function fieldMaxTokens(field: RegenField, format: 'video' | 'photo_carousel'): number {
+  switch (field) {
+    case 'talking_points':
+      return format === 'photo_carousel' ? 3500 : 2500;
+    case 'talking_point':
+      return 1000;
+    case 'hook':
+      return 1500;
+    case 'caption':
+      return 800;
+    default:
+      return 400;
+  }
+}
+
+function fieldStage(field: RegenField, index: number | undefined, count: number): string {
+  switch (field) {
+    case 'hook':
+      return 'Rewriting the hook';
+    case 'title':
+      return 'Rewriting the title';
+    case 'caption':
+      return 'Rewriting the caption';
+    case 'search_phrase':
+      return 'Rewriting the search phrase';
+    case 'talking_point':
+      return `Rewriting point ${(index ?? 0) + 1}`;
+    default:
+      return count > 1 ? `Rewriting points 1 to ${count}` : 'Rewriting the point';
+  }
+}
+
+const normalizeForCompare = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /**
  * Regenerates one part of the draft against the rest of it and returns the
  * response body the editor applies. Shared by the Regenerate buttons and by
  * chat revise when the feedback only touches one part, so "the hook needs to
- * be better" costs one small call instead of a whole rewrite.
+ * be better" costs one small call instead of a whole rewrite. Failing lines
+ * are repaired in place, never generated again.
  */
 async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unknown>> {
   const { admin, companyId, brand, draft, postType, field, index, knownFeatureIds } = args;
@@ -315,7 +508,8 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
     ...brandValidationCtx(brand),
     postType: postType ? toPostTypeShape(postType) : null,
   };
-  const system = buildFieldSystem(field, postType, draft.format, brandSystemOptions(brand));
+  const systemOptions = brandSystemOptions(brand);
+  const system = buildFieldSystem(field, postType, draft.format, systemOptions, Boolean(args.onNote));
 
   const askLines: string[] = [];
   if (field === 'talking_point') {
@@ -361,112 +555,144 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
       `REQUIRED POINT COUNT: the manager asked for exactly ${requiredCount} talking points. point_count is ${requiredCount} and talking_points has exactly ${requiredCount} entries; this overrides the post type's range.`,
     );
   }
+
+  // Only failures about the regenerated part, on text this call produced,
+  // count; the manager's own hook or a point this call never touched is not
+  // this call's problem.
+  const parts = fieldParts(field);
+  const beforeHook = draft.hook_options[0] ?? null;
   const validate = (merged: BriefDraftShape) => {
     const base = validateBrief(merged, validationCtx);
+    const failures = base.failures.filter((f) => {
+      const part = failurePart(f);
+      if (part !== null && !parts.includes(part)) return false;
+      return !failureAboutUnchangedText(f, draft, beforeHook, merged);
+    });
     if (requiredCount !== null && merged.talking_points.length !== requiredCount) {
-      base.failures.push(
+      failures.push(
         `the manager asked for exactly ${requiredCount} talking points and you returned ${merged.talking_points.length}; write exactly ${requiredCount}`,
       );
-      base.passed = false;
     }
-    return base;
+    return { passed: failures.length === 0, failures, warnings: base.warnings };
   };
+  const untouched = new Set(
+    [
+      draft.title,
+      draft.caption,
+      ...draft.hook_options,
+      ...draft.talking_points.filter((_, i) => !(field === 'talking_point' && i === index)).map((p) => p.text),
+    ]
+      .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      .map(normalizeForCompare),
+  );
+  const isLocked = (text: string) => untouched.has(normalizeForCompare(text));
 
-  const generate = async (priorFailures: string[]): Promise<RawFieldOut> => {
-    const lines = [...draftContext(draft), '', ...askLines];
-    if (priorFailures.length) {
-      lines.push(retryMessage(priorFailures, 'answer'));
-    }
-    const raw = await askClaude(system, lines.join('\n\n'), 8000, {
-      cachedPrefix: brandDocBlocks(brand).join('\n\n'),
-    });
-    return parseClaudeJson<RawFieldOut>(raw);
-  };
+  args.emit?.(fieldStage(field, index, requiredCount ?? draft.talking_points.length));
+  const user = [...draftContext(draft), '', ...askLines].join('\n\n');
+  const maxTokens = fieldMaxTokens(field, draft.format);
+  const callOptions = { cachedPrefix: brandDocBlocks(brand).join('\n\n') };
+  const raw = args.onNote
+    ? await askClaudeStream(system, user, maxTokens, {
+        ...callOptions,
+        onText: jsonStringFieldScanner('revision_note', args.onNote),
+      })
+    : await askClaude(system, user, maxTokens, callOptions);
+  const out = parseClaudeJson<RawFieldOut>(raw);
+  if (out.kill_reason?.trim()) return { kill_reason: stripDashes(out.kill_reason) };
 
   // Merge the regenerated field into the draft so validation sees the
   // post as the editor will after applying it.
-  const merge = (
-    out: RawFieldOut,
-  ): {
-    merged: BriefDraftShape;
-    overlayLabels: (string | null)[];
-    featureIds: (string | null)[];
-  } => {
-    const merged: BriefDraftShape = { ...draft };
-    let overlayLabels: (string | null)[] = [];
-    let featureIds: (string | null)[] = [];
-    if (field === 'search_phrase') {
-      merged.search_phrase = out.search_phrase?.trim()
-        ? stripDashes(out.search_phrase)
-        : draft.search_phrase;
-    } else if (field === 'title') {
-      merged.title = out.title?.trim() ? stripDashes(out.title) : draft.title;
-    } else if (field === 'talking_points') {
-      const points = (out.talking_points ?? []).map((p, i) =>
-        toPoint(p, `p${i + 1}-${crypto.randomUUID().slice(0, 8)}`),
-      );
-      overlayLabels = (out.talking_points ?? []).map((p) =>
-        typeof p.overlay_label === 'string' && p.overlay_label.trim()
-          ? stripDashes(p.overlay_label)
-          : null,
-      );
-      featureIds = (out.talking_points ?? []).map((p) =>
-        sanitizeFeatureId(p.feature_id, knownFeatureIds),
-      );
-      for (const { index, point } of lockedPoints) {
-        if (index < points.length) points[index] = { ...point, edited_by_admin: true };
-      }
-      merged.talking_points = points;
-      merged.point_count =
-        typeof out.point_count === 'number' ? out.point_count : points.length;
-      merged.cta =
-        typeof out.cta === 'string' && out.cta.trim() ? stripDashes(out.cta) : null;
-      merged.script =
-        draft.format === 'photo_carousel' && out.script ? stripDashes(out.script) : null;
-      if (typeof out.target_words === 'number') merged.target_words = out.target_words;
-    } else if (field === 'talking_point') {
-      const at = index!;
-      const current = draft.talking_points[at];
-      // Force the original id; the point is regenerated in place and the
-      // model cannot be trusted to keep it.
-      const point = out.talking_point
-        ? { ...toPoint(out.talking_point, current.id), id: current.id, script: current.script }
-        : current;
-      merged.talking_points = draft.talking_points.map((p, i) => (i === at ? point : p));
-      // The plug sentence lives in cta too; a regenerated plug point carries
-      // its new sentence there.
-      if (point.is_product && typeof out.cta === 'string' && out.cta.trim()) {
-        merged.cta = stripDashes(out.cta);
-      }
-      overlayLabels =
-        typeof out.talking_point?.overlay_label === 'string'
-          ? [stripDashes(out.talking_point.overlay_label)]
-          : [null];
-      featureIds = [sanitizeFeatureId(out.talking_point?.feature_id, knownFeatureIds)];
-    } else if (field === 'hook') {
-      merged.hook_options = sortHooks(out.hook_options).map(stripDashes);
-    } else {
-      merged.caption = out.caption ? stripDashes(out.caption) : draft.caption;
-      merged.hashtags = Array.isArray(out.hashtags)
-        ? out.hashtags.map((h) => String(h).replace(/[-–—]/g, ''))
-        : draft.hashtags;
+  let merged: BriefDraftShape = { ...draft };
+  let overlayLabels: (string | null)[] = [];
+  let featureIds: (string | null)[] = [];
+  if (field === 'search_phrase') {
+    merged.search_phrase = out.search_phrase?.trim()
+      ? stripDashes(out.search_phrase)
+      : draft.search_phrase;
+  } else if (field === 'title') {
+    merged.title = out.title?.trim() ? stripDashes(out.title) : draft.title;
+  } else if (field === 'talking_points') {
+    const points = (out.talking_points ?? []).map((p, i) =>
+      toPoint(p, `p${i + 1}-${crypto.randomUUID().slice(0, 8)}`),
+    );
+    overlayLabels = (out.talking_points ?? []).map((p) =>
+      typeof p.overlay_label === 'string' && p.overlay_label.trim()
+        ? stripDashes(p.overlay_label)
+        : null,
+    );
+    featureIds = (out.talking_points ?? []).map((p) =>
+      sanitizeFeatureId(p.feature_id, knownFeatureIds),
+    );
+    for (const { index: at, point } of lockedPoints) {
+      if (at < points.length) points[at] = { ...point, edited_by_admin: true };
     }
-    return { merged, overlayLabels, featureIds };
-  };
-
-  let out = await generate([]);
-  if (out.kill_reason?.trim()) return { kill_reason: stripDashes(out.kill_reason) };
-  let { merged, overlayLabels, featureIds } = merge(out);
-  let result = validate(merged);
-  if (!result.passed) {
-    out = await generate(result.failures);
-    if (out.kill_reason?.trim()) return { kill_reason: stripDashes(out.kill_reason) };
-    ({ merged, overlayLabels, featureIds } = merge(out));
-    result = validate(merged);
+    merged.talking_points = points;
+    merged.point_count =
+      typeof out.point_count === 'number' ? out.point_count : points.length;
+    merged.cta =
+      typeof out.cta === 'string' && out.cta.trim() ? stripDashes(out.cta) : null;
+    merged.script =
+      draft.format === 'photo_carousel' && out.script ? stripDashes(out.script) : null;
+    if (typeof out.target_words === 'number') merged.target_words = out.target_words;
+  } else if (field === 'talking_point') {
+    const at = index!;
+    const current = draft.talking_points[at];
+    // Force the original id; the point is regenerated in place and the
+    // model cannot be trusted to keep it.
+    const point = out.talking_point
+      ? { ...toPoint(out.talking_point, current.id), id: current.id, script: current.script }
+      : current;
+    merged.talking_points = draft.talking_points.map((p, i) => (i === at ? point : p));
+    // The plug sentence lives in cta too; a regenerated plug point carries
+    // its new sentence there.
+    if (point.is_product && typeof out.cta === 'string' && out.cta.trim()) {
+      merged.cta = stripDashes(out.cta);
+    }
+    overlayLabels =
+      typeof out.talking_point?.overlay_label === 'string'
+        ? [stripDashes(out.talking_point.overlay_label)]
+        : [null];
+    featureIds = [sanitizeFeatureId(out.talking_point?.feature_id, knownFeatureIds)];
+  } else if (field === 'hook') {
+    merged.hook_options = sortHooks(out.hook_options).map(stripDashes);
+  } else {
+    merged.caption = out.caption ? stripDashes(out.caption) : draft.caption;
+    merged.hashtags = Array.isArray(out.hashtags)
+      ? out.hashtags.map((h) => String(h).replace(/[-–—]/g, ''))
+      : draft.hashtags;
   }
+
+  args.emit?.('Checking against the brand rules');
+  let result = validate(merged);
+  let generated: GeneratedDraft = { draft: merged, overlayLabels: [], featureIds: [] };
+  for (let pass = 0; pass < 2 && !result.passed; pass++) {
+    const targetCount = result.failures.filter((f) => failureTargets(f, generated.draft).length > 0).length;
+    if (!targetCount) break;
+    args.emit?.(`Repairing ${targetCount} ${targetCount === 1 ? 'line' : 'lines'}`);
+    const repaired = await repairLines(
+      generated,
+      result.failures,
+      validationCtx,
+      systemOptions,
+      postType,
+      isLocked,
+    ).catch((error: unknown) => {
+      console.warn('field repair failed:', error instanceof Error ? error.message : error);
+      return null;
+    });
+    if (!repaired) break;
+    const repairedResult = validate(repaired.outcome.draft);
+    if (repairedResult.failures.length > result.failures.length) break;
+    generated = repaired.outcome;
+    result = repairedResult;
+  }
+  merged = generated.draft;
   const warnings = result.passed
     ? result.warnings
     : [...result.failures, ...result.warnings];
+  const note = typeof out.revision_note === 'string' && out.revision_note.trim()
+    ? stripDashes(out.revision_note)
+    : null;
 
   // Body changed under the hook: it was written against different content.
   // Flag it; never regenerate the hook silently, the admin may have
@@ -474,10 +700,14 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
   const hookMayBeStale = field === 'talking_points' || field === 'talking_point';
   const family = postType?.family ?? draft.format;
 
-  if (field === 'search_phrase') return { search_phrase: merged.search_phrase, warnings };
-  if (field === 'title') return { title: merged.title, warnings };
-  if (field === 'talking_points') {
-    return {
+  let response: Record<string, unknown>;
+  if (field === 'search_phrase') {
+    response = { search_phrase: merged.search_phrase, warnings };
+  } else if (field === 'title') {
+    response = { title: merged.title, warnings };
+  } else if (field === 'talking_points') {
+    args.emit?.('Matching clips to the points');
+    response = {
       talking_points: merged.talking_points,
       cta: merged.cta,
       point_count: merged.point_count,
@@ -488,10 +718,10 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
       hook_may_be_stale: hookMayBeStale,
       warnings,
     };
-  }
-  if (field === 'talking_point') {
+  } else if (field === 'talking_point') {
+    args.emit?.('Matching clips to the points');
     const point = merged.talking_points[index!];
-    return {
+    response = {
       talking_point: point,
       cta: merged.cta,
       overlay_label: overlayLabels[0] ?? null,
@@ -500,9 +730,12 @@ async function regenerateField(args: FieldRegenArgs): Promise<Record<string, unk
       hook_may_be_stale: hookMayBeStale,
       warnings,
     };
+  } else if (field === 'hook') {
+    response = { hook_options: merged.hook_options, warnings };
+  } else {
+    response = { caption: merged.caption, hashtags: merged.hashtags, warnings };
   }
-  if (field === 'hook') return { hook_options: merged.hook_options, warnings };
-  return { caption: merged.caption, hashtags: merged.hashtags, warnings };
+  return note ? { ...response, revision_note: note } : response;
 }
 
 Deno.serve(async (req) => {
@@ -678,8 +911,10 @@ Deno.serve(async (req) => {
     }
 
     // Chat revise: the manager says what is wrong in plain language and the
-    // whole brief is rewritten against that feedback. Nothing is saved; the
-    // client applies the returned draft the same way it applies ingest-brief.
+    // parts the feedback is about are rewritten against it. Nothing is saved;
+    // the client applies the returned draft the same way it applies
+    // ingest-brief. With Accept: text/event-stream the steps and the note
+    // stream as server sent events; otherwise one JSON body as before.
     if (body.action === 'revise') {
       const feedback = body.feedback?.trim();
       if (!feedback) return jsonResponse({ error: 'feedback required' }, 400);
@@ -696,82 +931,92 @@ Deno.serve(async (req) => {
       if (body.post_type?.trim() && !loadedType) {
         return jsonResponse({ error: `unknown post type "${body.post_type}"` }, 400);
       }
-      const [loadedBrand, constraints] = await Promise.all([
-        loadBrandContext(admin, caller.companyId),
-        extractConstraints(
-          history.filter((t) => t.role === 'manager').map((t) => t.text),
-          feedback,
-          draft.talking_points.length,
-        ),
-      ]);
-      // Undo is the client's job: it holds the snapshot from before the last
-      // change and puts it back without a model in the loop.
-      if (constraints.scope === 'undo') {
-        return jsonResponse({ scope: 'undo', revision_note: 'Put back what you had before my last change.' });
-      }
-      // "We do not have that feature, do not do that again" is saved for
-      // every future post and applied to this one right now.
-      const [remembered, bannedNow] = await Promise.all([
-        rememberForCompany(admin, caller.companyId, constraints.remember),
-        banTermsForCompany(admin, caller.companyId, constraints.bannedTerms),
-      ]);
-      // This turn validates against the new bans too; the loaded brand predates them.
-      const brand: BrandContext = {
-        ...loadedBrand,
-        bannedPhrases: [...new Set([...loadedBrand.bannedPhrases, ...constraints.bannedTerms])],
-      };
-      const standing = [
-        ...constraints.standingInstructions,
-        ...constraints.remember.map((r) => r.insight),
-      ];
-      const rememberedNote = [
-        remembered.length ? ` Noted for every future post: ${remembered.map((r) => r.insight).join(' ')}` : '',
-        bannedNow.length ? ` Banned from every post: ${bannedNow.map((t) => `"${t}"`).join(', ')}.` : '',
-      ].join('');
-      // The manager's count outranks the post type's range, in the prompt
-      // and in validation alike.
-      const postType: PostTypeRow | null =
-        loadedType && constraints.pointCount !== null
-          ? { ...loadedType, min_points: constraints.pointCount, max_points: constraints.pointCount }
-          : loadedType;
-      const knownFeatureIds = new Set(brand.features.map((f) => f.id));
-      const locked = captureLocked(draft, chosenHook, constraints);
-      if (everythingLocked(draft, locked)) {
-        return jsonResponse({
-          scope: 'none',
-          revision_note: `Nothing changed: you asked me to keep the hook, title, caption and every point, so there is nothing left to rewrite. Tell me which part to fix.${rememberedNote}`,
-        });
-      }
 
-      // Targeted feedback regenerates one part and leaves the rest untouched;
-      // "the hook needs to be better" never costs a whole rewrite.
-      const productIndex = draft.talking_points.findIndex((p) => p.is_product);
-      const targeted: { field: RegenField; index?: number } | null = (() => {
-        switch (constraints.scope) {
-          case 'hook':
-            return draft.talking_points.length ? { field: 'hook' } : null;
-          case 'title':
-            return { field: 'title' };
-          case 'caption':
-            return { field: 'caption' };
-          case 'search_phrase':
-            return { field: 'search_phrase' };
-          case 'cta':
-            return productIndex >= 0
-              ? { field: 'talking_point', index: productIndex }
-              : { field: 'talking_points' };
-          case 'point':
-            return constraints.pointIndex !== null
-              ? { field: 'talking_point', index: constraints.pointIndex }
-              : { field: 'talking_points' };
-          case 'points':
-            return { field: 'talking_points' };
-          default:
-            return null;
+      const run = async (emit: SseEmit): Promise<Record<string, unknown>> => {
+        const stage = (label: string) => emit('stage', { label });
+        const onNote = (delta: string) => emit('note', { delta });
+        stage('Reading your feedback');
+        stage('Loading the brand brain');
+        const [loadedBrand, constraints] = await Promise.all([
+          loadBrandContext(admin, caller.companyId),
+          extractConstraints(
+            history.filter((t) => t.role === 'manager').map((t) => t.text),
+            feedback,
+            draft.talking_points.length,
+          ),
+        ]);
+        // Undo is the client's job: it holds the snapshot from before the last
+        // change and puts it back without a model in the loop.
+        if (constraints.scope === 'undo') {
+          return {
+            scope: 'undo',
+            revision_note: 'Put back what you had before my last change.',
+            changed: [],
+          };
         }
-      })();
-      if (targeted) {
-        return streamJsonResponse(async () => {
+        // "We do not have that feature, do not do that again" is saved for
+        // every future post and applied to this one right now.
+        const [remembered, bannedNow] = await Promise.all([
+          rememberForCompany(admin, caller.companyId, constraints.remember),
+          banTermsForCompany(admin, caller.companyId, constraints.bannedTerms),
+        ]);
+        // This turn validates against the new bans too; the loaded brand predates them.
+        const brand: BrandContext = {
+          ...loadedBrand,
+          bannedPhrases: [...new Set([...loadedBrand.bannedPhrases, ...constraints.bannedTerms])],
+        };
+        const standing = [
+          ...constraints.standingInstructions,
+          ...constraints.remember.map((r) => r.insight),
+        ];
+        const rememberedNote = [
+          remembered.length ? ` Noted for every future post: ${remembered.map((r) => r.insight).join(' ')}` : '',
+          bannedNow.length ? ` Banned from every post: ${bannedNow.map((t) => `"${t}"`).join(', ')}.` : '',
+        ].join('');
+        // The manager's count outranks the post type's range, in the prompt
+        // and in validation alike.
+        const postType: PostTypeRow | null =
+          loadedType && constraints.pointCount !== null
+            ? { ...loadedType, min_points: constraints.pointCount, max_points: constraints.pointCount }
+            : loadedType;
+        const knownFeatureIds = new Set(brand.features.map((f) => f.id));
+        const locked = captureLocked(draft, chosenHook, constraints);
+        if (everythingLocked(draft, locked)) {
+          return {
+            scope: 'none',
+            revision_note: `Nothing changed: you asked me to keep the hook, title, caption and every point, so there is nothing left to rewrite. Tell me which part to fix.${rememberedNote}`,
+            changed: [],
+          };
+        }
+
+        // Targeted feedback regenerates one part and leaves the rest untouched;
+        // "the hook needs to be better" never costs a whole rewrite.
+        const productIndex = draft.talking_points.findIndex((p) => p.is_product);
+        const targeted: { field: RegenField; index?: number } | null = (() => {
+          switch (constraints.scope) {
+            case 'hook':
+              return draft.talking_points.length ? { field: 'hook' } : null;
+            case 'title':
+              return { field: 'title' };
+            case 'caption':
+              return { field: 'caption' };
+            case 'search_phrase':
+              return { field: 'search_phrase' };
+            case 'cta':
+              return productIndex >= 0
+                ? { field: 'talking_point', index: productIndex }
+                : { field: 'talking_points' };
+            case 'point':
+              return constraints.pointIndex !== null
+                ? { field: 'talking_point', index: constraints.pointIndex }
+                : { field: 'talking_points' };
+            case 'points':
+              return { field: 'talking_points' };
+            default:
+              return null;
+          }
+        })();
+        if (targeted) {
           const out = await regenerateField({
             admin,
             companyId: caller.companyId,
@@ -785,29 +1030,35 @@ Deno.serve(async (req) => {
             standingInstructions: standing,
             requiredPointCount: constraints.pointCount,
             lockedPointIndexes: constraints.lockPointIndexes,
+            emit: stage,
+            onNote,
           });
           if (typeof out.kill_reason === 'string') return out;
+          const { revision_note: modelNote, ...rest } = out;
           const keptPoints =
             targeted.field === 'talking_points' && constraints.lockPointIndexes.length
               ? ` Kept point${constraints.lockPointIndexes.length === 1 ? '' : 's'} ${constraints.lockPointIndexes.map((i) => i + 1).join(', ')} as you had ${constraints.lockPointIndexes.length === 1 ? 'it' : 'them'}.`
               : '';
+          const note = typeof modelNote === 'string' && modelNote.trim()
+            ? modelNote
+            : fieldNote(targeted.field, targeted.index);
           return {
-            ...out,
+            ...rest,
             scope: 'field',
             constraints,
             field: targeted.field,
-            revision_note: `${fieldNote(targeted.field, targeted.index)}${keptPoints}${rememberedNote}`,
+            revision_note: `${note}${keptPoints}${rememberedNote}`,
+            changed: fieldChanges(draft, chosenHook, targeted, out),
           };
-        });
-      }
+        }
 
-      const generationId = crypto.randomUUID();
-      const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
-      let revisionNote = '';
+        const generationId = crypto.randomUUID();
+        const system = buildReviseSystem(postType, draft.format, brandSystemOptions(brand));
+        const parts = reviseParts(feedback, constraints, draft, chosenHook);
+        const pointCount = constraints.pointCount ?? draft.talking_points.length;
+        stage(rewriteLabel(parts, pointCount));
+        let revisionNote = '';
 
-      // A full rewrite runs past the gateway's 150s idle timeout; stream
-      // keepalive bytes until the draft is ready.
-      return streamJsonResponse(async () => {
         const { outcome, warnings } = await generateValidated(
           admin,
           caller.companyId,
@@ -832,78 +1083,60 @@ Deno.serve(async (req) => {
             lines.push(...managerRuleLines(brand));
             lines.push(...bannedCarryoverLines(draft, brand.bannedPhrases));
             lines.push(...constraintLines({ ...constraints, standingInstructions: standing }, locked));
-            if (priorFailures.length) {
-              lines.push(
-                retryMessage(priorFailures, 'revision'),
-              );
-            }
-          const raw = await askClaude(
-            system,
-            lines.join('\n\n'),
-            8000,
-            { cachedPrefix: brandDocBlocks(brand).join('\n\n') },
-          );
-          const parsed = parseClaudeJson<RawGenerated>(raw);
-          revisionNote =
+            lines.push(scopeLine(parts, pointCount));
+            if (priorFailures.length) lines.push(...priorFailures);
+            // The note streams only on the first attempt; a JSON retry would
+            // otherwise show it twice.
+            const raw = await askClaudeStream(system, lines.join('\n\n'), reviseMaxTokens(parts, draft.format), {
+              cachedPrefix: brandDocBlocks(brand).join('\n\n'),
+              onText: priorFailures.length ? () => {} : jsonStringFieldScanner('revision_note', onNote),
+            });
+            const parsed = parseClaudeJson<RawGenerated>(raw);
+            revisionNote =
               typeof parsed.revision_note === 'string' ? parsed.revision_note.trim() : '';
+            const returnedPoints = Array.isArray(parsed.talking_points);
             const generated = normalizeGenerated(
-              parsed,
+              mergePartialRevision(parsed, draft),
               postType ? postType.family : draft.format,
               postType?.key ?? null,
-              new Set(brand.features.map((f) => f.id)),
+              knownFeatureIds,
             );
             if (isKill(generated)) return generated;
+            const next: BriefDraftShape = returnedPoints
+              ? generated.draft
+              : { ...generated.draft, talking_points: draft.talking_points.map((p) => ({ ...p })) };
             // Locks are enforced here, not trusted: the model's output is
             // overwritten before validation ever sees it.
-            return { ...generated, draft: applyLocked(generated.draft, locked) };
+            return { ...generated, draft: applyLocked(next, locked) };
           },
           brandValidationCtx(brand),
           {
             lockedTexts: lockedTexts(locked),
             extraFailures: (d) => constraintFailures(d, constraints),
-            ignoreFailure: (f) => failureAboutLockedPart(f, locked),
+            ignoreFailure: (f, d) =>
+              failureAboutLockedPart(f, locked) ||
+              failureAboutOmittedPart(f, parts) ||
+              failureAboutUnchangedText(f, draft, chosenHook, d),
+            onStage: stage,
           },
         );
         if (isKill(outcome)) {
           return { kill_reason: outcome.kill_reason, generation_id: generationId };
-        }
-        // A banned word that survived the rewrite is repaired one point at a
-        // time; the targeted path is reliable where the whole rewrite is not.
-        let finalWarnings = warnings;
-        const bannedLeft = finalWarnings.filter((w) => w.includes('which the manager banned'));
-        if (bannedLeft.length) {
-          const plugIndex = outcome.draft.talking_points.findIndex((p) => p.is_product);
-          const hitIndexes = new Set<number>();
-          for (const w of bannedLeft) {
-            const m = w.match(/^talking point (\d+)/);
-            if (m) hitIndexes.add(Number(m[1]) - 1);
-            if (w.startsWith('cta') && plugIndex >= 0) hitIndexes.add(plugIndex);
-          }
-          for (const at of hitIndexes) {
-            const fixed = await regenerateField({
-              admin,
-              companyId: caller.companyId,
-              brand,
-              draft: outcome.draft,
-              postType,
-              field: 'talking_point',
-              index: at,
-              knownFeatureIds,
-              feedback: `Rewrite this point without the banned words (${brand.bannedPhrases.map((b) => `"${b}"`).join(', ')}); the product does not have that feature.`,
-            });
-            if (typeof fixed.kill_reason === 'string' || !fixed.talking_point) continue;
-            outcome.draft.talking_points[at] = fixed.talking_point as TalkingPoint;
-            if (typeof fixed.cta === 'string' && (fixed.talking_point as TalkingPoint).is_product) {
-              outcome.draft.cta = fixed.cta;
-            }
-            finalWarnings = Array.isArray(fixed.warnings) ? (fixed.warnings as string[]) : finalWarnings;
-          }
         }
         // The report is computed from the drafts, never taken from the model,
         // so the chat never claims a change that did not happen.
         const report = changeReport(draft, chosenHook, outcome.draft);
         const kept = keptNote(constraints, locked);
         const why = report.startsWith('Changed nothing') ? '' : stripDashes(revisionNote);
+        stage('Matching clips to the points');
+        const pointMedia = await resolvePointMedia(
+          admin,
+          caller.companyId,
+          brand.features,
+          outcome.featureIds,
+          outcome.draft.talking_points,
+          postType?.family ?? draft.format,
+        );
         return {
           ...outcome.draft,
           scope: 'full',
@@ -911,19 +1144,17 @@ Deno.serve(async (req) => {
           hook: locked.hook ?? outcome.draft.hook_options[0] ?? null,
           revision_note: [report, why, kept, rememberedNote.trim()].filter(Boolean).join(' '),
           overlay_labels: outcome.overlayLabels,
-          point_media: await resolvePointMedia(
-            admin,
-            caller.companyId,
-            brand.features,
-            outcome.featureIds,
-            outcome.draft.talking_points,
-            postType?.family ?? draft.format,
-          ),
+          point_media: pointMedia,
           post_type_id: postType?.id ?? null,
           generation_id: generationId,
-          warnings: finalWarnings,
+          warnings,
+          changed: changedParts(draft, chosenHook, outcome.draft).changed,
         };
-      });
+      };
+
+      // A rewrite can run past the gateway's idle timeout; both transports
+      // keep bytes moving until the draft is ready.
+      return wantsSse(req) ? sseResponse(run) : streamJsonResponse(() => run(() => {}));
     }
 
     if (body.action !== 'regenerate_field') {
