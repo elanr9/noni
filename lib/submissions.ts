@@ -1,4 +1,6 @@
+import { Directory, File, Paths } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { createVideoPlayer } from 'expo-video';
 
 import { cropPixels, type PhotoCrop, type SourceSize } from '../components/creator/slides/photo-crop';
@@ -437,4 +439,53 @@ export async function submitAssignmentPhotos(params: {
     audioGain: null,
     slideAspect,
   });
+}
+
+/** The finished files for an assignment: the rendered video, or the baked slides. */
+export type FinalMedia = { kind: 'video'; paths: [string] } | { kind: 'slides'; paths: string[] };
+
+export async function getFinalMedia(
+  assignment: Assignment,
+  isSlideshow: boolean,
+): Promise<FinalMedia | null> {
+  const columns = 'video_path, segment_paths';
+  const { data, error } = assignment.submission_id
+    ? await supabase.from('submissions').select(columns).eq('id', assignment.submission_id).maybeSingle()
+    : await supabase
+        .from('submissions')
+        .select(columns)
+        .eq('assignment_id', assignment.id)
+        .order('version', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  if (isSlideshow) {
+    const slides = (data.segment_paths ?? []).filter((p): p is string => typeof p === 'string');
+    return slides.length > 0 ? { kind: 'slides', paths: slides } : null;
+  }
+  return data.video_path ? { kind: 'video', paths: [data.video_path] } : null;
+}
+
+/**
+ * Download the finished post into the camera roll so the creator can post it
+ * by hand. Returns how many files were saved.
+ */
+export async function saveFinalMediaToPhotos(media: FinalMedia): Promise<number> {
+  const permission = await MediaLibrary.requestPermissionsAsync(true);
+  if (!permission.granted) throw new Error('Allow photo access in Settings to save this post.');
+  const dir = new Directory(Paths.cache, 'noni-downloads');
+  if (!dir.exists) dir.create();
+  let saved = 0;
+  for (const path of media.paths) {
+    const { data, error } = await supabase.storage.from('videos').createSignedUrl(path, 3600);
+    if (error) throw error;
+    const file = new File(dir, path.split('/').pop() ?? `noni-${Date.now()}`);
+    if (file.exists) file.delete();
+    const downloaded = await File.downloadFileAsync(data.signedUrl, file);
+    await MediaLibrary.saveToLibraryAsync(downloaded.uri);
+    downloaded.delete();
+    saved += 1;
+  }
+  return saved;
 }

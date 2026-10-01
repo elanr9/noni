@@ -461,6 +461,7 @@ Deno.serve(async (req) => {
             transcript: read.transcript,
             slide_texts: read.slideTexts,
             pattern: null,
+            error: e instanceof Error ? e.message.slice(0, 300) : 'study failed',
           };
         },
       );

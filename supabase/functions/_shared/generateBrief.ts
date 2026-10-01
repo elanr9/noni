@@ -190,13 +190,18 @@ const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, backgroun
 
 const SECOND_PERSON_RULE = `SECOND PERSON: aim for 5 to 6 uses of "you" or "your" per 100 words. Every strong post talks straight at one person.`;
 
-const EXPERT_CREATOR_RULE = `EXPERT CREATORS: every creator on the roster has lived this topic and has their own stories. Write points as cues with one concrete anchor each, not scripts; the creator adds their own example on camera. At least two non plug points end with a short bracketed nudge like "[your own example]" or "[what happened when you did this]" so the creator knows to bring their experience. Never bracket the plug point; the plug is said as written and a bracket on it fails validation.`;
+const EXPERT_CREATOR_RULE = `EXPERT CREATORS: every creator on the roster has lived this topic and has their own stories. Write points as cues with one concrete anchor each, not scripts; the creator adds their own example on camera. A short bracketed nudge like "[your own example]" is optional, never required: at most one per post, only on a non plug cue point the creator talks around, never on a point that is said verbatim (script true) and never on the plug point. A bracket on the plug or on a verbatim point fails validation.`;
+
+const CAPABILITY_RULE = (productName: string) =>
+  `PRODUCT CAPABILITIES (hard allowlist): ${productName} may only be credited with capabilities written verbatim or near verbatim in the Product truth, the Approved claims or the Feature library in the message. Naming any capability not written there (a data source it pulls, a thing it tracks or analyzes, a result it produces) is a kill level failure, worse than a thin brief. When no sentence there fits the topic, take the closest capability sentence that does exist, keep its verb and its object, and angle the advice beat toward it instead of inventing a fit.`;
+
+const HOOK_CRAFT_RULE = `HOOK CRAFT: every hook is one complete grammatical sentence a real person would say out loud, at least 5 words and never over the 9 word cap. No sentence fragments stitched with commas (these fail: 'Send this email, get coaches to tell truth', 'Coaches reveal the real fit, right here, now'). Never 'these 5 things' or any hook with the word 'things', never 'here is why'. Every hook names a specific stake or detail from this industry and this audience (the roster spot, the person who reads the email, the deadline), never the general topic.`;
 
 const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points). The hook is the first line the creator says AND the title card on screen for the first two seconds, so it must read as a headline. hook_options is 8 to 10 variants, each 9 words or fewer (count them; 10 is a hard fail), and EVERY variant must:
 - name the viewer's specific high-stakes moment (the round, the deadline, the email, the tryout), never the general topic;
 - carry one specificity marker: a number, an absolute ("WILL", "never", "stop", "every"), or a named thing (the platform, the round, the person who judges you);
 - promise or threaten a concrete outcome for "you" (what you will be asked, why you got dropped, what you are doing wrong).
-Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email recruiters always answer"), COUNTED VALUE ("3 things that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email a recruiter" is banned, "the 4 line email recruiters answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever. Hooks sound like a person saying something true and specific, never a headline generator: no perfect, ultimate, elite, killer, formula, secret, hack or game changer, and no line a viewer has seen on a hundred other posts.`;
+Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email recruiters always answer"), COUNTED VALUE ("3 emails that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email a recruiter" is banned, "the 4 line email recruiters answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever. Hooks sound like a person saying something true and specific, never a headline generator: no perfect, ultimate, elite, killer, formula, secret, hack or game changer, and no line a viewer has seen on a hundred other posts.`;
 
 function captionRules(requiresPlug: boolean): string {
   const product = requiresPlug
@@ -205,7 +210,7 @@ function captionRules(requiresPlug: boolean): string {
   return `CAPTION (after the hooks): exactly two sentences and under 200 characters (about 30 words, count them). Sentence one carries the search phrase verbatim and the promise of the post; sentence two is ${requiresPlug ? 'the product sentence with its nudge' : 'the one line moral'}. Never list or summarize the talking points in the caption. No hashtags inside it${product}. HASHTAGS: 3 to 5 tags chosen from the hashtag bank in the message by topical fit, not the same set every time.`;
 }
 
-const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to 22 words; 25 is the ceiling and 30 is a hard fail (the plug point may run to 40, hard fail at 45). Count the words of every point before you answer and cut the rationale clause first when over. A creator reads a point and starts talking; they do not recite it. Every point carries ONE concrete anchor the viewer can screenshot or repeat: an exact phrase to say or type, a named example, a number, or a two-second scenario ("even in freshman orientation you never know who is in your group"). A point with no anchor is filler; cut it or replace it. Each point is what to do plus why it works in one breath; "keep it short" alone is not a point, "keep it short: role, one result with a number, one line on why this team, recruiters read on their phone" is. THE MORAL: the post ends on one sentence that is a general truth about the viewer's situation, written fresh for this exact topic ("be kind to everyone and you will be totally okay" closes a post on getting dropped during rush; "the resume you send everywhere is the one nobody reads" closes a job hunt post); it is never the same sentence across two posts; it is never a step, never an instruction, never a stat, never a recap, and it has no verb of instruction (send, end with, lock in, email). It is 12 words or fewer. When the count is fixed by the source or title ("5 mistakes"), the final item is its anchor in one short clause plus the moral sentence; otherwise the final talking point is the moral alone. When the final point must be shortened, the instruction clause goes and the moral stays. No hedge words anywhere in spoken lines: really, truly, actually, honestly, simply, just, very. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label (see ON-SCREEN TEXT).`;
+const POINT_RULES = `TALKING POINTS: beats, not lines. Write each point at 15 to 22 words; 25 is the ceiling and 30 is a hard fail (the plug point may run to 36, hard fail over 40). Count the words of every point before you answer and cut the rationale clause first when over. A creator reads a point and starts talking; they do not recite it. Every point carries ONE concrete anchor the viewer can screenshot or repeat: an exact phrase to say or type, a named example, a number, or a two-second scenario ("even in freshman orientation you never know who is in your group"). A point with no anchor is filler; cut it or replace it. Each point is what to do plus why it works in one breath; "keep it short" alone is not a point, "keep it short: role, one result with a number, one line on why this team, recruiters read on their phone" is. THE MORAL: the post ends on one sentence that is a general truth about the viewer's situation, written fresh for this exact topic ("be kind to everyone and you will be totally okay" closes a post on getting dropped during rush; "the resume you send everywhere is the one nobody reads" closes a job hunt post); it is never the same sentence across two posts; it is never a step, never an instruction, never a stat, never a recap, and it has no verb of instruction (send, end with, lock in, email). It is 12 words or fewer. When the count is fixed by the source or title ("5 mistakes"), the final item is its anchor in one short clause plus the moral sentence; otherwise the final talking point is the moral alone. When the final point must be shortened, the instruction clause goes and the moral stays. No hedge words anywhere in spoken lines: really, truly, actually, honestly, simply, just, very. If a point reads as a complete performable sentence with closing rhythm, compress it. Give every point a short unique id. Also give every point an overlay_label (see ON-SCREEN TEXT).`;
 
 const SUBSTANCE_RULE = `SUBSTANCE (the bar every point clears): write as the most experienced insider in this niche talking to one person, never as a content marketer summarizing a topic. Every non plug point carries something a generic list would not: a real number, a named rule, date or deadline, a named tool, event, level or role, or a scenario only someone who has lived it knows. Take these facts from the Industry playbook and the Reference playbook in the message; never invent a statistic, rule or date, and when the playbooks do not have one, use a concrete scenario instead. THE GENERIC TEST: if the point could sit unchanged in a list for any sport, any job or any product ("start early", "stay consistent", "use multiple angles", "build a smart list", "stay visible", "track everything", "be professional", "quality over quantity"), it fails; replace it with the specific move behind it and the reason an insider knows. Off niche example of the fix: "tailor your resume to each job" fails; "paste three exact phrases from the job post into your resume, the screening software scores keyword matches before a person reads it" passes. Every point must be correct advice a real expert would sign; one wrong or made up detail loses the viewer's trust in the whole post.`;
 
@@ -382,6 +387,7 @@ function briefSystemBlocks(
     `Rules, measured against real high performing posts. Follow the numbers exactly.`,
     NO_DASH_RULE,
     plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
+    requiresPlug ? CAPABILITY_RULE(options.productName) : null,
     SEARCH_PHRASE_RULE,
     SUBSTANCE_RULE,
     POINT_RULES,
@@ -392,6 +398,7 @@ function briefSystemBlocks(
     CREDENTIAL_RULE,
     SECOND_PERSON_RULE,
     HOOK_RULES,
+    HOOK_CRAFT_RULE,
     `TITLE: the admin-facing name of THIS post format; never copy search_phrase into title. For numbered_list and numbered_tips the title MUST start with the chosen point_count digit and a list phrase (tips / things / mistakes / signs); when the source names a number, that digit is the source's number and talking_points has exactly that many entries. Other types follow TITLE SHAPE above. Keep it under 12 words.`,
     captionRules(requiresPlug),
     `WHY IT WORKS: one punchy sentence a content strategist would say about why this concept performs.`,
@@ -546,6 +553,7 @@ export function buildFieldSystem(
         winningPattern(requiresPlug),
         postTypeBlock(postType, fallbackFormat),
         plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
+        requiresPlug ? CAPABILITY_RULE(options.productName) : null,
         SUBSTANCE_RULE,
         POINT_RULES,
         SPOKEN_RULE,
@@ -563,6 +571,7 @@ export function buildFieldSystem(
         `Otherwise answer: {"talking_point": {"id": string, "text": string, "is_product": boolean, "claim_id": string | null, "feature_id": string | null, "overlay_label": string}, "cta": string | null}`,
         `Regenerate ONLY the talking point at the index named in the message. Keep its id. Do not duplicate or contradict the other points; they stay exactly as given. If it is the is_product point, it stays the plug point: keep its claim_id and compose the plug sentence from that approved claim, naming "${options.productName}" out loud; put that exact plug sentence in cta and inside the point text (advice beat first, then the plug sentence, then the nudge). cta is null when the point is not the plug point.`,
         plugRule(requiresPlug, options.productName, options.hasApprovedClaims),
+        requiresPlug ? CAPABILITY_RULE(options.productName) : null,
         SUBSTANCE_RULE,
         POINT_RULES,
         SPOKEN_RULE,
@@ -578,6 +587,7 @@ export function buildFieldSystem(
       blocks.push(
         `JSON: {"hook_options": [{"text": string, "score": number}]}`,
         HOOK_RULES,
+        HOOK_CRAFT_RULE,
         CREDENTIAL_RULE,
         banned,
       );
@@ -609,7 +619,7 @@ export function retryMessage(priorFailures: string[], what: 'draft' | 'revision'
   return [
     `Your previous ${what} failed validation. Fix every one of these and return the corrected JSON:`,
     ...priorFailures.map((f) => `- ${f}`),
-    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and its bracketed nudge stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A line flagged for a banned word is written again from scratch without that word or any synonym for it; when it is the cta, compose a new plug sentence from the approved claims or Product truth and put the same new sentence in the plug point. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. Everything not flagged stays exactly as it was.`,
+    `How to fix: a point flagged for length is rewritten to 20 words or fewer by deleting its rationale clause, never by merging it with another point, never by changing point_count, and a bracketed nudge on a cue point stays; when it is the final point, its moral sentence stays and its instruction clause goes. A caption flagged for length becomes two sentences, the search phrase sentence and the product sentence, with the talking points left out. A hook flagged for length or for a banned shape is replaced with a new hook from a different angle, never a shorter version of the same line. A plug point flagged for advice gets an 8 to 15 word advice beat written in front of the unchanged cta sentence; cta itself never grows. A line flagged for a banned word is written again from scratch without that word or any synonym for it; when it is the cta, compose a new plug sentence from the approved claims or Product truth and put the same new sentence in the plug point. A final point flagged for its ending keeps its anchor clause and ends on a fresh one sentence moral with no instruction verb. A plug flagged for crediting the product with a capability not written in the Product truth is rewritten from one capability sentence quoted near verbatim from the Product truth or an approved claim, keeping that sentence's verb and object; never paraphrase a new capability into it, and put the same new sentence in cta and in the plug point. A verbatim point (script true) flagged for a bracket loses the bracket entirely. A hook flagged for stitched fragments or for the word "things" is replaced with one complete spoken sentence naming a specific stake. A line flagged for a hedge word is rewritten without it. Everything not flagged stays exactly as it was.`,
   ].join('\n');
 }
 
@@ -627,15 +637,24 @@ export function brandValidationCtx(brand: BrandContext): {
   approvedClaimIds: string[];
   productNames: string[];
   bannedPhrases: string[];
+  productCapabilityText: string;
 } {
   const names = [brand.productName, brand.companyName].filter(
     (n, i, all) => n.trim().length > 0 && all.indexOf(n) === i,
   );
+  const capabilityText = [
+    brand.docs.productTruth,
+    ...brand.approvedClaims.map((c) => `${c.claim} ${c.what_it_does}`),
+    ...brand.features.map((f) => `${f.name} ${f.sentence ?? ''}`),
+  ]
+    .join(' ')
+    .trim();
   return {
     hashtagBank: brand.hashtagBank,
     approvedClaimIds: brand.approvedClaims.map((c) => c.id),
     productNames: names,
     bannedPhrases: brand.bannedPhrases,
+    productCapabilityText: capabilityText,
   };
 }
 
@@ -648,16 +667,25 @@ export function brandDocBlocks(brand: BrandContext): string[] {
     `Brand: ${brand.companyName}`,
     `Product name, said out loud in the plug and written in the caption: ${brand.productName}`,
   ];
+  const hasCoreDocs =
+    Boolean(brand.docs.productTruth.trim()) ||
+    Boolean(brand.docs.voice.trim()) ||
+    Boolean(brand.docs.learnings.trim());
   if (brand.docs.productTruth.trim()) {
     docBlocks.push(`Product truth:\n${brand.docs.productTruth.trim()}`);
+  }
+  if (brand.docs.audienceNiche.trim()) {
+    docBlocks.push(`Audience (who is watching and buying):\n${brand.docs.audienceNiche.trim()}`);
   }
   if (brand.docs.voice.trim()) {
     docBlocks.push(`Voice:\n${brand.docs.voice.trim()}`);
   }
   if (brand.docs.learnings.trim()) {
-    docBlocks.push(`What has worked so far:\n${brand.docs.learnings.trim()}`);
+    docBlocks.push(
+      `What has worked so far (content insight only; it is not a feature list):\n${brand.docs.learnings.trim()}`,
+    );
   }
-  if (docBlocks.length === 2) docBlocks.push(legacyBrandLines(brand));
+  if (!hasCoreDocs) docBlocks.push(legacyBrandLines(brand));
   if (brand.docs.industryResearch.trim()) {
     docBlocks.push(
       `Industry playbook (researched; the source for every fact, number, date, rule and insider detail in the post; never contradict it):\n${brand.docs.industryResearch.trim().slice(0, INDUSTRY_DOC_CAP)}`,
@@ -716,7 +744,17 @@ export function managerRuleLines(brand: BrandContext): string[] {
  * publishing. Company rules first; each carries at most one before/after pair
  * so the model sees the correction, not just the rule.
  */
-export function learningBlocks(learnings: BrandContext['learnings']): string | null {
+const COPY_LEARNING_CATEGORIES = new Set([
+  'hook', 'talking_points', 'script', 'caption', 'hashtags', 'cta', 'structure', 'voice', 'other',
+]);
+
+/** Layout learnings (overlay_text, layout, screenshots) and weak rows are noise in a copy prompt. */
+function isCopyLearning(l: BrandContext['learnings'][number]): boolean {
+  return COPY_LEARNING_CATEGORIES.has(l.category) && (l.confidence >= 0.4 || l.evidence_count >= 3);
+}
+
+export function learningBlocks(allLearnings: BrandContext['learnings']): string | null {
+  const learnings = allLearnings.filter(isCopyLearning);
   if (!learnings.length) return null;
   const line = (l: BrandContext['learnings'][number]) => {
     const example = l.examples[0];
@@ -1036,8 +1074,8 @@ async function compressOverLongItems(
   const points = await Promise.all(
     draft.talking_points.map(async (point) => {
       if (!point.text || isLocked(point.text)) return point;
-      const budget = point.is_product ? 40 : 22;
-      const cap = point.is_product ? 45 : 30;
+      const budget = point.is_product ? 36 : 22;
+      const cap = point.is_product ? 40 : 30;
       if (point.text.split(/\s+/).filter(Boolean).length <= cap) return point;
       const user = [
         `Talking point (${point.is_product ? 'the plug point' : 'a regular point'}), rewrite to ${budget} words or fewer:`,
@@ -1091,13 +1129,37 @@ function failureIsAboutLocked(failure: string, locked: string[]): boolean {
   return quoted.some((q) => locked.some((l) => l.includes(q) || q.includes(l)));
 }
 
+/** Failures worth a second corrective retry; everything else gets one. */
+const SECOND_RETRY_FAILURES: RegExp[] = [
+  /which the manager banned/,
+  /^a point said verbatim \(script true\) carries a bracketed nudge/,
+  /^plug point is \d+ words, over the hard cap/,
+  /^hedge words in the spoken lines/,
+  /^hook is a generic shape/,
+  /^hook is short fragments stitched/,
+  /^hook says "things"/,
+  /^the plug credits .+ which is not written in the Product truth/,
+];
+
+const MAX_DRAFT_ATTEMPTS = 3;
+
+function earnsSecondRetry(failures: string[]): boolean {
+  return failures.some((f) => SECOND_RETRY_FAILURES.some((re) => re.test(f)));
+}
+
 export async function generateValidated(
   admin: SupabaseClient,
   companyId: string,
   generationId: string,
   postType: PostTypeRow | null,
   draftOnce: (priorFailures: string[]) => Promise<GenOutcome>,
-  validationCtx: { hashtagBank: string[]; approvedClaimIds: string[]; productNames?: string[]; bannedPhrases?: string[] },
+  validationCtx: {
+    hashtagBank: string[];
+    approvedClaimIds: string[];
+    productNames?: string[];
+    bannedPhrases?: string[];
+    productCapabilityText?: string;
+  },
   options: GenerateOptions = {},
 ): Promise<{ outcome: GenOutcome; warnings: string[] }> {
   const ctx = {
@@ -1141,8 +1203,13 @@ export async function generateValidated(
   }
   if (isKill(outcome)) return { outcome, warnings: [] };
   let result = validate(outcome.draft);
-  await logAttempt(1, result);
-  if (!result.passed) {
+  let attempt = 1;
+  await logAttempt(attempt, result);
+  while (
+    !result.passed &&
+    attempt < MAX_DRAFT_ATTEMPTS &&
+    (attempt === 1 || earnsSecondRetry(result.failures))
+  ) {
     let retry: GenOutcome;
     try {
       retry = await draftOnce(result.failures);
@@ -1157,7 +1224,8 @@ export async function generateValidated(
     if (isKill(retry)) return { outcome: retry, warnings: [] };
     outcome = retry;
     result = validate(outcome.draft);
-    await logAttempt(2, result);
+    attempt++;
+    await logAttempt(attempt, result);
   }
   // Length is the one failure a whole-brief retry never fixes (it trims a
   // word or drifts the untouched fields), so over-long items are compressed
@@ -1166,7 +1234,7 @@ export async function generateValidated(
     const repaired = await compressOverLongItems(outcome, result.failures, isLocked);
     if (repaired) {
       const repairedResult = validate(repaired.draft);
-      await logAttempt(3, repairedResult);
+      await logAttempt(attempt + 1, repairedResult);
       if (repairedResult.failures.length < result.failures.length) {
         outcome = repaired;
         result = repairedResult;

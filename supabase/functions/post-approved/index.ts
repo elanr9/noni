@@ -2,8 +2,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import {
   assembleSubmission,
+  ensureInstagramSlides,
   uploadPostKey,
-  INSTAGRAM_SLIDE_SUFFIX,
   type AdminClient,
 } from '../_shared/assemble.ts';
 import { isManagerOf } from '../_shared/membership.ts';
@@ -140,7 +140,7 @@ async function resolveTarget(
   if (body.assignment_id) {
     const { data: assignment } = await admin
       .from('assignments')
-      .select('id, company_id, creator_id, brief_id, status, submission_id, task_id')
+      .select('id, company_id, creator_id, brief_id, status, submission_id, task_id, caption')
       .eq('id', body.assignment_id)
       .maybeSingle();
     if (
@@ -165,16 +165,26 @@ async function resolveTarget(
       .select('title, caption, format, post_type_id')
       .eq('id', assignment.brief_id)
       .maybeSingle();
+    const isSlideshow = brief?.format === 'photo_carousel';
+    // Slideshows never auto-post to TikTok: identical photo sets across
+    // accounts got creators shadow banned. Creators save the slides from the
+    // app and post them by hand. Videos still go out with per-creator copy.
+    const platforms = (repostPlatforms ?? SUPPORTED_PLATFORMS).filter(
+      (p) => !(isSlideshow && p === 'tiktok'),
+    );
+    if (platforms.length === 0) {
+      return jsonResponse({ error: 'slideshows do not auto-post to TikTok' }, 409);
+    }
     return {
       id: assignment.id as string,
       companyId: assignment.company_id as string,
       creatorId: assignment.creator_id as string,
-      caption: (brief?.caption ?? brief?.title ?? 'New post') as string,
-      platforms: repostPlatforms ?? SUPPORTED_PLATFORMS,
+      caption: (assignment.caption ?? brief?.caption ?? brief?.title ?? 'New post') as string,
+      platforms,
       assignmentId: assignment.id as string,
       taskId: (assignment.task_id ?? null) as string | null,
       briefId: assignment.brief_id as string,
-      isSlideshow: brief?.format === 'photo_carousel',
+      isSlideshow,
     };
   }
 
@@ -221,13 +231,21 @@ async function resolveTarget(
 async function resolveSubmission(
   admin: AdminClient,
   target: PostTarget,
-): Promise<{ id: string; video_path: string | null; segment_paths: string[] | null; version: number | null; render_status: string | null } | null> {
+): Promise<{
+  id: string;
+  video_path: string | null;
+  segment_paths: string[] | null;
+  version: number | null;
+  render_status: string | null;
+  slide_aspect: string | null;
+} | null> {
   type Row = {
     id: string;
     video_path: string | null;
     segment_paths: string[] | null;
     version: number | null;
     render_status: string | null;
+    slide_aspect: string | null;
   };
   if (target.assignmentId) {
     const { data: assignment } = await admin
@@ -405,32 +423,30 @@ Deno.serve(async (req) => {
       if (slidePaths.length === 0) {
         return jsonResponse({ error: 'submission has no slides' }, 400);
       }
-      const igUrls: string[] = [];
-      /** Signed URL of a letterboxed sibling of the slide, or null when the bake never made one. */
-      const signVariant = async (path: string, suffix: string): Promise<string | null> => {
-        const variantPath = path.replace(/\.(?:png|jpg)$/, suffix);
-        if (variantPath === path) return null;
-        const { data } = await admin.storage.from('videos').createSignedUrl(variantPath, 3600);
-        return data?.signedUrl ?? null;
-      };
-      for (const path of slidePaths) {
-        const { data: slide, error: slideError } = await admin.storage
+      const signSlide = async (path: string): Promise<string> => {
+        const { data, error: slideError } = await admin.storage
           .from('videos')
           .createSignedUrl(path, 3600);
-        if (slideError || !slide?.signedUrl) {
-          return jsonResponse(
-            { error: 'could not sign slide url', detail: slideError?.message },
-            500,
-          );
+        if (slideError || !data?.signedUrl) {
+          throw new Error(`could not sign slide url: ${slideError?.message ?? path}`);
         }
-        form.append('photos[]', slide.signedUrl);
-        // Instagram feed carousels crop 9:16 to 4:5; the bake stores a 4:5
-        // letterboxed copy next to each finished slide. TikTok gets the 9:16.
-        igUrls.push((await signVariant(path, INSTAGRAM_SLIDE_SUFFIX)) ?? slide.signedUrl);
-      }
-      const baseUrls = form.getAll('photos[]');
-      if (platforms.includes('instagram') && igUrls.some((u, i) => u !== baseUrls[i])) {
-        instagramPhotoUrls = igUrls;
+        return data.signedUrl;
+      };
+      try {
+        for (const path of slidePaths) form.append('photos[]', await signSlide(path));
+        if (platforms.includes('instagram')) {
+          // Instagram feed carousels are 4:5: every 9:16 slide posts its
+          // 1080x1350 copy, rendered now if the bake never made one. TikTok
+          // keeps the 9:16.
+          const igPaths = await ensureInstagramSlides(admin, slidePaths, submission.slide_aspect);
+          if (igPaths.some((p, i) => p !== slidePaths[i])) {
+            instagramPhotoUrls = [];
+            for (const path of igPaths) instagramPhotoUrls.push(await signSlide(path));
+          }
+        }
+      } catch (slideError) {
+        const detail = slideError instanceof Error ? slideError.message : String(slideError);
+        return jsonResponse({ error: 'could not prepare slides', detail }, 500);
       }
     } else {
       // The edit pass (stitch + overlays) runs at submit time now, via the

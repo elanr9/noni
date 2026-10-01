@@ -12,8 +12,10 @@ import {
   jsonResponse,
 } from '../_shared/wp8.ts';
 import {
+  loadStudy,
   maybeDistillPlaybook,
   normalizeReferenceUrl,
+  type ReferenceStudy,
   studyReference,
 } from '../_shared/referenceStudy.ts';
 import { socialHost } from '../_shared/scrapeSocial.ts';
@@ -84,13 +86,18 @@ Deno.serve(async (req) => {
 
   EdgeRuntime.waitUntil(
     (async () => {
-      await Promise.all(
+      const results = await Promise.all(
         readable.map((t) =>
-          studyReference(admin, companyId, t.url, { libraryItemId: t.libraryItemId }).catch((e) =>
-            console.error('study-reference failed:', t.url, e instanceof Error ? e.message : e),
+          studyReference(admin, companyId, t.url, { libraryItemId: t.libraryItemId }).catch(
+            (e): null => {
+              console.error('study-reference failed:', t.url, e instanceof Error ? e.message : e);
+              return null;
+            },
           ),
         ),
       );
+      const landed = results.some((s) => s?.status === 'done');
+      if (!landed && !body.distill) return;
       try {
         await maybeDistillPlaybook(admin, companyId, Boolean(body.distill));
       } catch (e) {
@@ -99,5 +106,26 @@ Deno.serve(async (req) => {
     })(),
   );
 
-  return jsonResponse({ queued: readable.length, distill: Boolean(body.distill) }, 202);
+  const studies = await Promise.all(
+    readable.map(async (t) => {
+      const existing = await loadStudy(admin, companyId, t.url);
+      return studySummary(t.url, existing);
+    }),
+  );
+
+  return jsonResponse(
+    { queued: readable.length, distill: Boolean(body.distill), studies },
+    202,
+  );
 });
+
+function studySummary(
+  url: string,
+  study: ReferenceStudy | null,
+): { url: string; status: ReferenceStudy['status']; error: string | null } {
+  return {
+    url: normalizeReferenceUrl(url),
+    status: study?.status ?? 'pending',
+    error: study?.status === 'failed' ? study.error : null,
+  };
+}

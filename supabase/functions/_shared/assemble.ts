@@ -617,6 +617,11 @@ async function renderSlideWithFfmpeg(params: {
 /** Instagram feed carousels are 4:5 at most; a 9:16 slide gets cropped. */
 export const INSTAGRAM_SLIDE_SUFFIX = '-ig.png';
 
+/** Storage path of the 4:5 Instagram copy that sits next to a 9:16 slide. */
+export function instagramSlidePath(slidePath: string): string {
+  return slidePath.replace(/\.[a-z0-9]+$/i, INSTAGRAM_SLIDE_SUFFIX);
+}
+
 type SlideFrame = { width: number; height: number };
 
 /**
@@ -666,6 +671,39 @@ async function renderLetterboxedSlide(params: {
     outputPath,
     outputExtension,
     label,
+  });
+}
+
+async function renderInstagramSlide(admin: AdminClient, slidePath: string, label: string): Promise<string> {
+  const outputPath = instagramSlidePath(slidePath);
+  await renderLetterboxedSlide({
+    admin,
+    slidePath,
+    outputPath,
+    width: 1080,
+    height: 1350,
+    outputExtension: 'png',
+    label,
+  });
+  return outputPath;
+}
+
+/**
+ * The 4:5 Instagram copy of every 9:16 slide, rendering any that the bake
+ * never produced. Other aspects post as they are. A 9:16 image must never
+ * reach the Instagram feed: it lands pillarboxed inside a 4:5 frame.
+ */
+export async function ensureInstagramSlides(
+  admin: AdminClient,
+  slidePaths: string[],
+  slideAspect: string | null | undefined,
+): Promise<string[]> {
+  if (slideFrame(slideAspect).height !== 1920) return slidePaths;
+  return mapWithConcurrency(slidePaths, 2, async (path, i) => {
+    const igPath = instagramSlidePath(path);
+    const { data } = await admin.storage.from('videos').createSignedUrl(igPath, 60);
+    if (data?.signedUrl) return igPath;
+    return renderInstagramSlide(admin, path, `slide ${i + 1} instagram`);
   });
 }
 
@@ -1608,7 +1646,12 @@ async function runSlideshowAssembly(params: {
   // API rate limits job creation, polling and downloads alike.
   const finalPaths = await mapWithConcurrency(rawPaths, 2, async (rawPath, i) => {
       const segment = slideSegments[i];
-      if (!segment) return rawPath;
+      // Every 9:16 slide gets its 4:5 Instagram copy, even one with nothing
+      // to burn in: the raw 9:16 would otherwise land pillarboxed on Instagram.
+      if (!segment) {
+        if (letterboxForInstagram) await renderInstagramSlide(admin, rawPath, `slide ${i + 1} instagram`);
+        return rawPath;
+      }
       const boxes = segment.show_on_screen ? segmentBoxes(segment) : [];
       const insetPath =
         segment.screenshot_url && !isVideoFile(segment.screenshot_url)
@@ -1616,7 +1659,10 @@ async function runSlideshowAssembly(params: {
           : null;
       // A 9:16 slide with nothing to burn in posts as the creator cut it; other
       // aspects still bake so the file is exactly frame sized for both feeds.
-      if (boxes.length === 0 && !insetPath && letterboxForInstagram) return rawPath;
+      if (boxes.length === 0 && !insetPath && letterboxForInstagram) {
+        await renderInstagramSlide(admin, rawPath, `slide ${i + 1} instagram`);
+        return rawPath;
+      }
 
       let inset: { path: string; x: number; y: number; width: number } | undefined;
       if (insetPath) {
@@ -1655,15 +1701,7 @@ async function runSlideshowAssembly(params: {
         frame,
       });
       if (letterboxForInstagram) {
-        await renderLetterboxedSlide({
-          admin,
-          slidePath: outPath,
-          outputPath: outPath.replace(/\.(?:png|jpg)$/, INSTAGRAM_SLIDE_SUFFIX),
-          width: 1080,
-          height: 1350,
-          outputExtension: 'png',
-          label: `slide ${i + 1} instagram`,
-        });
+        await renderInstagramSlide(admin, outPath, `slide ${i + 1} instagram`);
       }
       return outPath;
   });

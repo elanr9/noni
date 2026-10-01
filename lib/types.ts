@@ -134,6 +134,7 @@ export type Database = {
           bounty_credited_at: string | null
           brief_id: string
           campaign_id: string | null
+          caption: string | null
           company_id: string
           created_at: string | null
           creator_id: string
@@ -158,6 +159,7 @@ export type Database = {
           bounty_credited_at?: string | null
           brief_id: string
           campaign_id?: string | null
+          caption?: string | null
           company_id: string
           created_at?: string | null
           creator_id: string
@@ -182,6 +184,7 @@ export type Database = {
           bounty_credited_at?: string | null
           brief_id?: string
           campaign_id?: string | null
+          caption?: string | null
           company_id?: string
           created_at?: string | null
           creator_id?: string

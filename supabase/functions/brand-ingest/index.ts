@@ -251,17 +251,61 @@ async function ingestCompany(
   return result;
 }
 
-// Monthly cron: never touches the human docs; appends a dated findings note
-// to the machine-owned learnings doc instead.
+const VERIFIED_HEADING = '## Verified from the website';
+const PRODUCT_TRUTH_MAX_CHARS = 6000;
+
+function bulletKey(line: string): string {
+  return line.replace(/^-\s*/, '').trim().toLowerCase();
+}
+
+function existingBulletKeys(doc: string): Set<string> {
+  const keys = new Set<string>();
+  for (const line of doc.split('\n')) {
+    if (line.trim().startsWith('- ')) keys.add(bulletKey(line));
+  }
+  return keys;
+}
+
+// Drops the oldest "Verified from the website" sections until the doc fits.
+function trimVerifiedSections(doc: string, maxChars: number): string {
+  const sections = doc.split(/\n(?=## )/);
+  const join = (parts: string[]) => parts.join('\n').trim();
+  let kept = sections;
+  while (join(kept).length > maxChars) {
+    const oldest = kept.findIndex((s) => s.startsWith(VERIFIED_HEADING));
+    if (oldest < 0) break;
+    kept = kept.filter((_, i) => i !== oldest);
+  }
+  return join(kept);
+}
+
+function appendVerifiedFindings(productDoc: string, findings: string[], date: string): string {
+  const seen = existingBulletKeys(productDoc);
+  const fresh: string[] = [];
+  for (const raw of findings) {
+    const text = softenDashes(raw).trim();
+    if (!text) continue;
+    const key = bulletKey(text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fresh.push(`- ${text}`);
+  }
+  if (fresh.length === 0) return productDoc;
+  const section = `\n\n${VERIFIED_HEADING} ${date}\n${fresh.join('\n')}`;
+  return trimVerifiedSections(`${productDoc}${section}`.trim(), PRODUCT_TRUTH_MAX_CHARS);
+}
+
+// Monthly cron: appends a dated "Verified from the website" section of fresh
+// site facts to product_truth, preserving the row's human_edited flag.
 async function refreshLearnings(admin: SupabaseClient, companyId: string): Promise<void> {
   const src = await gatherSources(admin, companyId, {});
   if (!src.siteText && src.captions.length === 0) return;
 
   const docs = await loadDocs(admin, companyId);
-  const productDoc = docs.find((d) => d.kind === 'product_truth')?.content ?? '';
-  const learnings = docs.find((d) => d.kind === 'learnings')?.content ?? '';
+  const productRow = docs.find((d) => d.kind === 'product_truth');
+  const productDoc = productRow?.content ?? '';
 
-  const system = `You maintain the learnings document of a UGC content engine. Given the brand's current product document and freshly crawled site and social material, list only genuinely new or changed facts worth knowing for content creation (new features, pricing changes, positioning shifts, new campaigns). Answer with a single JSON object: {"findings": string[]}. 0 to 5 findings, one sentence each. Return an empty array if nothing changed.`;
+  const system = `You maintain the product document of a UGC content engine. Given the brand's current product document and freshly crawled site and social material, list only genuinely new or changed facts worth knowing for content creation (new features, pricing changes, positioning shifts, new campaigns). Answer with a single JSON object: {"findings": string[]}. 0 to 5 findings, one sentence each. Return an empty array if nothing changed.`;
   const user = [
     productDoc ? `Current product document:\n${productDoc.slice(0, 4000)}` : null,
     sourceLines(src),
@@ -275,8 +319,9 @@ async function refreshLearnings(admin: SupabaseClient, companyId: string): Promi
   if (!Array.isArray(findings) || findings.length === 0) return;
 
   const date = new Date().toISOString().slice(0, 10);
-  const note = `\n\n## Site refresh ${date}\n${findings.map((f) => `- ${softenDashes(f)}`).join('\n')}`;
-  await upsertDoc(admin, companyId, 'learnings', `${learnings}${note}`.trim());
+  const updated = appendVerifiedFindings(productDoc, findings, date);
+  if (updated === productDoc) return;
+  await upsertDoc(admin, companyId, 'product_truth', updated, productRow?.human_edited ?? false);
 }
 
 /** Admin Draft-with-AI: draft only the requested docs, no profile rewrite, no Apify. */
@@ -365,7 +410,7 @@ Deno.serve(async (req) => {
       return jsonResponse(result as unknown as Record<string, unknown>);
     }
 
-    // Monthly cron: append fresh findings to learnings for every company.
+    // Monthly cron: append verified site findings to product_truth for every company.
     const { data: profiles } = await admin.from('brand_profiles').select('company_id');
     let refreshed = 0;
     for (const p of profiles ?? []) {

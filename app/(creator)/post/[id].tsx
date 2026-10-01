@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import {
   Stack,
   useFocusEffect,
@@ -18,6 +19,7 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { StatusChip } from '../../../components/ui/StatusChip';
 import { useAuth } from '../../../lib/auth';
 import { parseTalkingPoints } from '../../../lib/briefs-api';
+import { getFinalMedia, saveFinalMediaToPhotos } from '../../../lib/submissions';
 import {
   getAssignment,
   type AssignmentWithBrief,
@@ -85,6 +87,13 @@ export default function PostDetailScreen() {
   );
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<'error' | 'success'>('error');
+  const [saving, setSaving] = useState(false);
+
+  const notify = (message: string, tone: 'error' | 'success') => {
+    setToastTone(tone);
+    setToast(message);
+  };
 
   const load = useCallback(async () => {
     if (!id) {
@@ -95,7 +104,7 @@ export default function PostDetailScreen() {
     try {
       setAssignment(await getAssignment(profile.active_company_id, id));
     } catch {
-      setToast('Could not load this post. Try again.');
+      notify('Could not load this post. Try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -171,6 +180,38 @@ export default function PostDetailScreen() {
       return;
     }
     router.push(`/(creator)/record/${assignment.id}?assignment=1`);
+  };
+
+  const isFinished = status === 'approved' || status === 'posted';
+  const caption = (assignment.caption ?? brief.caption ?? '').trim();
+
+  const onCopyCaption = async () => {
+    await Clipboard.setStringAsync(caption);
+    notify('Caption copied.', 'success');
+  };
+
+  const onSaveToPhotos = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const media = await getFinalMedia(assignment, isSlideshow);
+      if (!media) {
+        notify('The finished post is not ready yet.', 'error');
+        return;
+      }
+      const saved = await saveFinalMediaToPhotos(media);
+      await Clipboard.setStringAsync(caption);
+      notify(
+        media.kind === 'slides'
+          ? `${saved} slides saved to Photos. Caption copied.`
+          : 'Video saved to Photos. Caption copied.',
+        'success',
+      );
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not save this post.', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -265,6 +306,34 @@ export default function PostDetailScreen() {
         />
       ) : null}
 
+      {isFinished ? (
+        <View style={styles.manualCard}>
+          <Text style={styles.manualTitle}>Post it yourself on TikTok</Text>
+          <Text style={styles.manualBody}>
+            {isSlideshow
+              ? 'Slideshows go to TikTok by hand. Save the slides, open TikTok, pick them in order and paste the caption.'
+              : 'Want to post this one yourself? Save the finished video and paste the caption.'}
+          </Text>
+          <View style={styles.manualActions}>
+            <Button
+              block
+              icon="download"
+              disabled={saving}
+              onPress={() => void onSaveToPhotos()}
+            >
+              {saving ? 'Saving' : isSlideshow ? 'Save slides to Photos' : 'Save video to Photos'}
+            </Button>
+            {caption.length > 0 ? (
+              <Button block variant="secondary" icon="check" onPress={() => void onCopyCaption()}>
+                Copy caption
+              </Button>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {caption.length > 0 ? <InfoBlock label="Your caption">{caption}</InfoBlock> : null}
+
       {isSlideshow ? (
         <View style={styles.blocks}>
           {points.map((text, i) => (
@@ -286,7 +355,7 @@ export default function PostDetailScreen() {
       <SoftToast
         visible={toast !== null}
         message={toast ?? ''}
-        tone="error"
+        tone={toastTone}
         onHide={() => setToast(null)}
       />
     </Screen>
@@ -390,6 +459,26 @@ const styles = StyleSheet.create({
   },
   blocks: {
     gap: 10,
+  },
+  manualCard: {
+    gap: 10,
+    padding: space[4],
+    borderRadius: radius.lg,
+    backgroundColor: color.fillQuiet,
+  },
+  manualTitle: {
+    fontSize: type.size.action,
+    fontWeight: type.weight.bold,
+    color: color.ink,
+  },
+  manualBody: {
+    fontSize: type.size.meta,
+    lineHeight: type.size.meta * type.leading.body,
+    color: color.slate500,
+  },
+  manualActions: {
+    gap: 8,
+    marginTop: 4,
   },
   missing: {
     marginTop: space[5],

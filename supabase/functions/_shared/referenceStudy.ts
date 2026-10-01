@@ -34,10 +34,24 @@ export type ReferenceStudy = {
   transcript: string | null;
   slide_texts: string[] | null;
   pattern: PatternCard | null;
+  error: string | null;
 };
 
 const STUDY_COLUMNS =
-  'id, url, status, platform, format, caption, transcript, slide_texts, pattern';
+  'id, url, status, platform, format, caption, transcript, slide_texts, pattern, error';
+
+export const MIN_PLAYBOOK_QUALITY = 3;
+
+export const NO_SOURCE_ERROR =
+  'Could not read the spoken words or slide text from this post, so there is nothing to learn from. Try a post with a voiceover or a slideshow with text.';
+
+/** A caption alone is marketing copy, not the post; only speech or slide text teaches anything. */
+export function hasReadableSource(read: {
+  transcript: string | null;
+  slideTexts: string[] | null;
+}): boolean {
+  return Boolean(read.transcript?.trim()) || Boolean(read.slideTexts?.some((s) => s.trim()));
+}
 
 /** Share links carry tracking params; the post is the path. */
 export function normalizeReferenceUrl(url: string): string {
@@ -85,9 +99,7 @@ export async function extractPattern(input: {
   slideTexts: string[] | null;
   format: string | null;
 }): Promise<PatternCard | null> {
-  if (!input.transcript && !input.slideTexts?.some((s) => s.trim()) && !input.caption) {
-    return null;
-  }
+  if (!hasReadableSource(input)) return null;
   const raw = await askClaude(PATTERN_SYSTEM, sourceText(input), 1500, { tier: 'fast' });
   const card = parseClaudeJson<PatternCard>(raw);
   const list = (v: unknown, max: number) =>
@@ -163,16 +175,20 @@ export async function studyReference(
 
   let pattern: PatternCard | null = null;
   let error: string | null = null;
-  try {
-    pattern = await extractPattern({
-      caption: read.post.caption,
-      transcript: read.transcript,
-      slideTexts: read.slideTexts,
-      format: read.post.format,
-    });
-  } catch (e) {
-    error = e instanceof Error ? e.message.slice(0, 300) : 'pattern failed';
-    console.warn('reference pattern failed:', error);
+  if (!hasReadableSource(read)) {
+    error = NO_SOURCE_ERROR;
+  } else {
+    try {
+      pattern = await extractPattern({
+        caption: read.post.caption,
+        transcript: read.transcript,
+        slideTexts: read.slideTexts,
+        format: read.post.format,
+      });
+    } catch (e) {
+      error = e instanceof Error ? e.message.slice(0, 300) : 'pattern failed';
+      console.warn('reference pattern failed:', error);
+    }
   }
 
   const row: Record<string, unknown> = {
@@ -200,13 +216,13 @@ export async function studyReference(
 
 /** A pattern card as prompt lines, for the playbook distill and for a draft built on that reference. */
 export function patternLines(card: PatternCard): string {
-  return [
+  const lines = [
     `Topic: ${card.topic}`,
     card.hook_spoken ? `Hook said: ${card.hook_spoken}` : null,
     card.hook_on_screen ? `Hook on screen: ${card.hook_on_screen}` : null,
     `Hook type: ${card.hook_type}`,
     card.structure.length ? `Beats: ${card.structure.join(' / ')}` : null,
-    card.on_screen_text.length ? `On-screen text: ${card.on_screen_text.join(' | ')}` : null,
+    card.on_screen_text.length ? `On screen text: ${card.on_screen_text.join(' | ')}` : null,
     card.insider_details.length ? `Insider details: ${card.insider_details.join(' | ')}` : null,
     card.phrases.length ? `Lines in their voice: ${card.phrases.join(' | ')}` : null,
     card.product_mention ? `Product mention: ${card.product_mention}` : null,
@@ -214,11 +230,16 @@ export function patternLines(card: PatternCard): string {
   ]
     .filter((l): l is string => l !== null)
     .join('\n');
+  return stripDashes(lines);
 }
 
-const DISTILL_SYSTEM = `You maintain the reference playbook of a short form content team: what the winning posts in their niche have in common, written so a scriptwriter copies the craft and never the words. You get breakdowns of reference posts the team picked because they performed. Write markdown with exactly these sections, concrete and short, quoting the references word for word as evidence:
+function stripDashes(text: string): string {
+  return softenDashes(text).replace(/[—–]/g, ', ');
+}
+
+const DISTILL_SYSTEM = `You maintain the reference playbook of a short form content team: what the winning posts in their niche have in common, written so a scriptwriter copies the craft and never the words. You get breakdowns of reference posts the team picked because they performed. Every reference you get is a strong model; treat each as proof of what works. Write markdown with exactly these sections, concrete and short, quoting the references word for word as evidence:
 ## Hooks that won
-The hook shapes that recur, each with two or three verbatim hooks from the references.
+The hook shapes used, each with verbatim hooks from the references.
 ## How the body is built
 Beat order, pacing, how many points, how each point is made concrete.
 ## On-screen text
@@ -231,7 +252,8 @@ Real phrases from the references and the register they set.
 How any product or service is mentioned, verbatim, and where in the post.
 ## Never do
 Patterns the references avoid, and generic moves they never make.
-Stay under 900 words. Never state a fact the breakdowns do not contain.`;
+Stay under 900 words. Never state a fact the breakdowns do not contain.
+Write every line as a confident instruction or a quoted example. Never comment on the references themselves: no remarks on how many there are, how thin the evidence is, how strong or weak a reference is, no gap flags, caveats, warnings or notes to the reader, and no sections beyond the seven above. Use only plain punctuation: no em dashes or en dashes anywhere, use a comma or the word 'to' instead.`;
 
 const DISTILL_EVERY = 3;
 const DISTILL_MAX_CARDS = 40;
@@ -239,6 +261,8 @@ const DISTILL_MAX_CARDS = 40;
 /**
  * Rebuilds reference_playbook when it is missing or DISTILL_EVERY studies
  * have landed since it was written. A manager edited playbook is left alone.
+ * Only cards scoring MIN_PLAYBOOK_QUALITY or better are distilled; when none
+ * qualify, an auto generated playbook is removed so nothing weak is taught.
  */
 export async function maybeDistillPlaybook(
   admin: SupabaseClient,
@@ -253,16 +277,6 @@ export async function maybeDistillPlaybook(
     .maybeSingle();
   if (doc?.human_edited && !force) return false;
 
-  let newer = admin
-    .from('reference_studies')
-    .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .eq('status', 'done');
-  if (doc?.updated_at) newer = newer.gt('studied_at', doc.updated_at);
-  const { count } = await newer;
-  if (!force && doc && (count ?? 0) < DISTILL_EVERY) return false;
-  if (!doc && (count ?? 0) === 0) return false;
-
   const { data: rows } = await admin
     .from('reference_studies')
     .select('url, format, pattern')
@@ -272,16 +286,36 @@ export async function maybeDistillPlaybook(
     .order('studied_at', { ascending: false })
     .limit(DISTILL_MAX_CARDS);
   const cards = ((rows ?? []) as Array<{ url: string; format: string | null; pattern: PatternCard }>)
-    .sort((a, b) => (b.pattern.quality ?? 3) - (a.pattern.quality ?? 3));
-  if (cards.length === 0) return false;
+    .filter((c) => (c.pattern.quality ?? 0) >= MIN_PLAYBOOK_QUALITY)
+    .sort((a, b) => b.pattern.quality - a.pattern.quality);
+  if (cards.length === 0) {
+    if (doc && !doc.human_edited) {
+      await admin
+        .from('brand_docs')
+        .delete()
+        .eq('company_id', companyId)
+        .eq('kind', 'reference_playbook')
+        .eq('human_edited', false);
+    }
+    return false;
+  }
+
+  let newer = admin
+    .from('reference_studies')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('status', 'done');
+  if (doc?.updated_at) newer = newer.gt('studied_at', doc.updated_at);
+  const { count } = await newer;
+  if (!force && doc && (count ?? 0) < DISTILL_EVERY) return false;
 
   const user = cards
     .map(
       (c, i) =>
-        `Reference ${i + 1} (${c.format === 'photo_carousel' ? 'slideshow' : 'video'}, quality ${c.pattern.quality}/5):\n${patternLines(c.pattern)}`,
+        `Reference ${i + 1} (${c.format === 'photo_carousel' ? 'slideshow' : 'video'}):\n${patternLines(c.pattern)}`,
     )
     .join('\n\n');
-  const content = softenDashes((await askClaude(DISTILL_SYSTEM, user, 3000)).trim());
+  const content = stripDashes((await askClaude(DISTILL_SYSTEM, user, 3000)).trim());
   if (!content) return false;
   const { error } = await admin.from('brand_docs').upsert(
     {

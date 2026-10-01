@@ -44,10 +44,16 @@ const STARTERS: readonly string[] = [
 
 const REVISE_STEPS: readonly string[] = [
   'Reading your feedback',
-  'Working out what to change',
-  'Rewriting that part',
-  'Checking it against the rest',
+  'Loading the brand brain',
+  'Deciding what to change',
+  'Writing the new copy',
+  'Checking banned words and claims',
+  'Checking hook and point length',
+  'Fixing anything that failed',
+  'Matching clips to the points',
 ];
+const REVISE_STEP_MS = 5000;
+const SLOW_AFTER_S = 45;
 
 const APPLIED_NOTE = 'Applied to the editor. Tap Save when you are happy.';
 
@@ -87,11 +93,27 @@ export function ReviseChatSheet({
   const [error, setError] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const listRef = useRef<ScrollView>(null);
+  const [elapsedS, setElapsedS] = useState(0);
 
   useEffect(() => {
     const id = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(id);
   }, [turns.length, busy]);
+
+  useEffect(() => {
+    if (!busy) {
+      setElapsedS(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setElapsedS(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [busy]);
+
+  const workingSubtitle =
+    elapsedS >= SLOW_AFTER_S ? `Taking longer than usual, still working. ${elapsedS}s` : `${elapsedS}s`;
 
   const panelHeight = Math.min(height * 0.84, height - keyboardHeight - insets.top);
   const panelBottomPad = keyboardHeight > 0 ? 12 : Math.max(insets.bottom, 24);
@@ -212,7 +234,9 @@ export function ReviseChatSheet({
           {busy ? (
             <AiWorkingCard
               title="Revising the post"
+              subtitle={workingSubtitle}
               steps={REVISE_STEPS}
+              stepMs={REVISE_STEP_MS}
               family="video"
               style={styles.working}
             />

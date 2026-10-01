@@ -10,12 +10,56 @@ import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
-type DueRow = { id: string; company_id: string; brief_id: string | null; publish_at: string };
+type DueRow = {
+  id: string;
+  company_id: string;
+  brief_id: string | null;
+  creator_id: string;
+  publish_at: string;
+};
 
 /** Minimum gap between two creators posting the same brief. Identical text
  *  slideshows landing on several accounts within minutes reads as
  *  mass-produced content to TikTok and every copy gets pulled. */
 const SAME_BRIEF_GAP_MS = 24 * 60 * 60 * 1000;
+
+/** Minimum gap between two posts from the same creator account. A backlog
+ *  approved in one sitting used to fire every post inside one tick. */
+const SAME_CREATOR_GAP_MS = 90 * 60 * 1000;
+
+/** Random spread added to every deferral so pushed posts do not reconverge. */
+function jitterMs(): number {
+  return Math.floor(Math.random() * 25 * 60 * 1000);
+}
+
+/**
+ * When this creator posted anything inside the gap, push this assignment
+ * past gap-end and report true so the sweep skips it this tick.
+ */
+async function deferIfCreatorRecentlyPosted(
+  admin: ReturnType<typeof adminClient>,
+  row: DueRow,
+): Promise<boolean> {
+  const since = new Date(Date.now() - SAME_CREATOR_GAP_MS).toISOString();
+  const { data } = await admin
+    .from('posts')
+    .select('posted_at, assignments!inner(id, creator_id, company_id)')
+    .eq('assignments.creator_id', row.creator_id)
+    .eq('assignments.company_id', row.company_id)
+    .neq('assignments.id', row.id)
+    .gte('posted_at', since)
+    .order('posted_at', { ascending: false })
+    .limit(1);
+  const latest = (data ?? [])[0] as { posted_at: string | null } | undefined;
+  if (!latest?.posted_at) return false;
+  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_CREATOR_GAP_MS + jitterMs());
+  await admin
+    .from('assignments')
+    .update({ publish_at: nextAt.toISOString() })
+    .eq('id', row.id)
+    .is('publish_claimed_at', null);
+  return true;
+}
 
 /**
  * When another creator posted this brief inside the gap, push this
@@ -38,7 +82,7 @@ async function deferIfBriefRecentlyPosted(
     .limit(1);
   const latest = (data ?? [])[0] as { posted_at: string | null } | undefined;
   if (!latest?.posted_at) return false;
-  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_BRIEF_GAP_MS);
+  const nextAt = new Date(new Date(latest.posted_at).getTime() + SAME_BRIEF_GAP_MS + jitterMs());
   await admin
     .from('assignments')
     .update({ publish_at: nextAt.toISOString() })
@@ -205,7 +249,7 @@ Deno.serve(async (req) => {
   try {
     const { data: due, error } = await admin
       .from('assignments')
-      .select('id, company_id, brief_id, publish_at')
+      .select('id, company_id, brief_id, creator_id, publish_at')
       .eq('status', 'approved')
       .lte('publish_at', new Date().toISOString())
       .is('publish_claimed_at', null)
@@ -215,19 +259,29 @@ Deno.serve(async (req) => {
     const rows = (due ?? []) as DueRow[];
 
     const claimedIds: string[] = [];
-    // One creator per brief per sweep: the first claimant's post makes the
-    // rest of the brief wait out the gap on the next tick.
+    // One creator per brief and one post per creator per sweep: the first
+    // claimant makes the rest wait out their gap on a later tick.
     const briefsClaimedThisTick = new Set<string>();
+    const creatorsClaimedThisTick = new Set<string>();
     for (const row of rows) {
       if (row.brief_id && briefsClaimedThisTick.has(row.brief_id)) {
         await admin
           .from('assignments')
-          .update({ publish_at: new Date(Date.now() + SAME_BRIEF_GAP_MS).toISOString() })
+          .update({ publish_at: new Date(Date.now() + SAME_BRIEF_GAP_MS + jitterMs()).toISOString() })
+          .eq('id', row.id)
+          .is('publish_claimed_at', null);
+        continue;
+      }
+      if (creatorsClaimedThisTick.has(row.creator_id)) {
+        await admin
+          .from('assignments')
+          .update({ publish_at: new Date(Date.now() + SAME_CREATOR_GAP_MS + jitterMs()).toISOString() })
           .eq('id', row.id)
           .is('publish_claimed_at', null);
         continue;
       }
       if (await deferIfBriefRecentlyPosted(admin, row)) continue;
+      if (await deferIfCreatorRecentlyPosted(admin, row)) continue;
       const { data: claimedRows } = await admin
         .from('assignments')
         .update({ publish_claimed_at: new Date().toISOString() })
@@ -237,6 +291,7 @@ Deno.serve(async (req) => {
       if (claimedRows && claimedRows.length > 0) {
         claimedIds.push(row.id);
         if (row.brief_id) briefsClaimedThisTick.add(row.brief_id);
+        creatorsClaimedThisTick.add(row.creator_id);
       }
     }
 

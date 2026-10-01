@@ -240,6 +240,76 @@ function mentionsAny(text: string, names: string[]): boolean {
   });
 }
 
+/** "Coaches reveal the real fit, right here, now": three comma parts, all but at most one under 4 words. */
+function isStitchedFragments(hook: string): boolean {
+  const parts = hook.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 3) return false;
+  const short = parts.filter((p) => wordCount(p) < 4).length;
+  return short >= parts.length - 1;
+}
+
+// Light stemmer so "sends" matches "send" and "writes" matches "write".
+function stemWord(word: string): string {
+  let w = word;
+  if (w.length > 5 && w.endsWith('ing')) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith('ed')) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith('s')) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+}
+
+// Words right after the product name that are not the capability verb.
+const NOT_A_VERB = new Set([
+  'is', 'are', 'was', 'can', 'could', 'will', 'would', 'does', 'did', 'has', 'had',
+  'also', 'now', 'even', 'already', 'literally', 'to', 'for', 'and', 'so', 'that',
+  'which', 'who', 'app', 'account', 'in', 'on', 'at', 'from', 'with',
+]);
+
+const OBJECT_STOP = new Set([
+  'i', 'me', 'my', 'mine', 'you', 'your', 'our', 'own', 'the', 'a', 'an', 'to', 'for',
+  'of', 'in', 'on', 'at', 'with', 'from', 'into', 'every', 'each', 'it', 'them', 'this',
+  'that', 'these', 'those', 'and', 'so', 'is', 'are', 'do', 'does', 'all', 'any', 'one',
+]);
+
+const CLAUSE_BREAK = new Set(['so', 'and', 'then', 'because', 'while', 'before', 'after', 'when', 'which', 'that']);
+
+/**
+ * The clause after the product name credits it with a verb and an object.
+ * Both must appear (stemmed) in the allowed capability text, else the plug
+ * invented a feature. Returns the offending clause or null.
+ */
+function unverifiedCapability(
+  text: string,
+  productNames: string[],
+  allowedStems: ReadonlySet<string>,
+): string | null {
+  const clauses = text.split(/[,.;:!?]/).map((c) => c.trim()).filter(Boolean);
+  for (const clause of clauses) {
+    const words = normalizePhrase(clause).split(' ').filter(Boolean);
+    for (const name of productNames) {
+      const nameWords = normalizePhrase(name).split(' ').filter(Boolean);
+      if (!nameWords.length) continue;
+      const at = words.findIndex(
+        (_, i) => words.slice(i, i + nameWords.length).join(' ') === nameWords.join(' '),
+      );
+      if (at < 0) continue;
+      let rest = words.slice(at + nameWords.length);
+      const breakAt = rest.findIndex((w) => CLAUSE_BREAK.has(w));
+      if (breakAt >= 0) rest = rest.slice(0, breakAt);
+      if (!rest.length) continue;
+      const verb = NOT_A_VERB.has(rest[0]) ? null : rest[0];
+      const objectWords = rest
+        .slice(verb ? 1 : 0)
+        .filter((w) => w.length > 1 && !OBJECT_STOP.has(w) && !nameWords.includes(w));
+      if (verb && !allowedStems.has(stemWord(verb))) return clause;
+      if (objectWords.length && !objectWords.some((w) => allowedStems.has(stemWord(w)))) {
+        return clause;
+      }
+    }
+  }
+  return null;
+}
+
 export function runTier1Checks(
   draft: BriefDraftShape,
   ctx: {
@@ -250,11 +320,16 @@ export function runTier1Checks(
     productNames?: string[];
     /** Words or phrases the manager banned (a feature the product does not have); a hard fail wherever they appear. */
     bannedPhrases?: string[];
+    /** Product truth, approved claims and feature sentences joined; the only capabilities the plug may credit. */
+    productCapabilityText?: string;
   },
 ): ReviewCheck[] {
   const checks: ReviewCheck[] = [];
   const postType = ctx.postType ?? null;
   const productNames = (ctx.productNames ?? []).filter((n) => n.trim().length > 0);
+  const allowedStems = new Set(
+    normalizePhrase(ctx.productCapabilityText ?? '').split(' ').filter(Boolean).map(stemWord),
+  );
   const fail = (check_id: string, section: ReviewSection, message: string) =>
     checks.push({ check_id, tier: 1, section, severity: 'fail', message });
   const warn = (check_id: string, section: ReviewSection, message: string) =>
@@ -429,6 +504,18 @@ export function runTier1Checks(
             `the plug sentence never says the product name; it must name ${productNames[0]} out loud`,
           );
         }
+        if (allowedStems.size > 0 && productNames.length > 0) {
+          const offending =
+            unverifiedCapability(product.text, productNames, allowedStems) ??
+            (draft.cta ? unverifiedCapability(draft.cta, productNames, allowedStems) : null);
+          if (offending) {
+            fail(
+              'plug_capability_unverified',
+              'cta',
+              `the plug credits ${productNames[0]} with "${offending}", which is not written in the Product truth, Approved claims or Feature library; rewrite the plug sentence from one capability sentence quoted near verbatim from the Product truth, never a paraphrase or a new capability`,
+            );
+          }
+        }
       }
     }
   } else {
@@ -445,12 +532,19 @@ export function runTier1Checks(
   for (const point of draft.talking_points) {
     if (!point.text) continue;
     const words = wordCount(point.text);
-    const hardCap = point.is_product ? 45 : 30;
+    const hardCap = point.is_product ? 40 : 30;
     if (words > hardCap) {
       fail(
-        point.is_product ? 'plug_over_45_words' : 'point_over_30_words',
+        point.is_product ? 'plug_over_40_words' : 'point_over_30_words',
         'talking_points',
         `${point.is_product ? 'plug point' : 'talking point'} is ${words} words, over the hard cap of ${hardCap}; compress it: "${point.text}"`,
+      );
+    }
+    if (point.script === true && /[\[\]]/.test(point.text)) {
+      fail(
+        'script_point_bracketed',
+        'talking_points',
+        `a point said verbatim (script true) carries a bracketed nudge; remove the bracket, nudges belong only on cue points: "${point.text}"`,
       );
     }
   }
@@ -498,6 +592,20 @@ export function runTier1Checks(
         'hook_banned_shape',
         'hook',
         `hook is a generic shape nobody screenshots: "${hook}"; rewrite it with a specific promise, fear, number or named thing`,
+      );
+    }
+    if (isStitchedFragments(hook)) {
+      fail(
+        'hook_stitched_fragments',
+        'hook',
+        `hook is short fragments stitched with commas: "${hook}"; write one complete sentence a person would say out loud`,
+      );
+    }
+    if (/\bthings\b/i.test(hook)) {
+      fail(
+        'hook_says_things',
+        'hook',
+        `hook says "things": "${hook}"; name the specific stake or detail instead`,
       );
     }
   }
@@ -557,7 +665,7 @@ export function runTier1Checks(
     if (count > 0) hedgeHits.push(count > 1 ? `${hedge} x${count}` : hedge);
   }
   if (hedgeHits.length > 0) {
-    warn(
+    fail(
       'hedges',
       'talking_points',
       `hedge words in the spoken lines: ${hedgeHits.join(', ')}; cut them`,
@@ -574,13 +682,12 @@ export function runTier1Checks(
   }
 
   for (const point of draft.talking_points) {
-    // The plug carries the product name, the mechanism and the nudge, so it gets more room.
-    const budget = point.is_product ? 40 : 25;
-    if (point.text && wordCount(point.text) > budget) {
+    if (point.is_product) continue;
+    if (point.text && wordCount(point.text) > 25) {
       warn(
-        point.is_product ? 'plug_over_40_words' : 'point_over_25_words',
+        'point_over_25_words',
         'talking_points',
-        `${point.is_product ? 'plug point' : 'talking point'} over ${budget} words: "${point.text}"`,
+        `talking point over 25 words: "${point.text}"`,
       );
     }
   }
@@ -640,6 +747,8 @@ export function validateBrief(
     approvedClaimIds: string[];
     postType?: PostTypeShape | null;
     productNames?: string[];
+    bannedPhrases?: string[];
+    productCapabilityText?: string;
   },
 ): ValidationResult {
   const checks = runTier1Checks(draft, ctx);

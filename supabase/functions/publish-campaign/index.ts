@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { buildCreatorWeek, type CampaignBrief } from '../_shared/shuffle.ts';
+import { buildCreatorWeek, seededShuffle, type CampaignBrief } from '../_shared/shuffle.ts';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
     slot_index: number;
   }> = [];
   if (days.length > 0) {
-    // Day planner mode: the admin's layout, identical for every creator.
+    // Day planner mode: the admin's days, shuffled per creator below.
     const ready = new Set(
       (allCampaignBriefs ?? [])
         .filter((b) => {
@@ -173,9 +173,12 @@ Deno.serve(async (req) => {
         seen.add(briefId);
       }
     }
+    // Same briefs per day for everyone, but each creator posts them in their
+    // own order so no two accounts run the same sequence through the day.
     for (const creator of creators) {
       for (const day of days) {
-        day.brief_ids.forEach((briefId, slotIndex) => {
+        const order = seededShuffle(day.brief_ids, `${campaign.id}:${creator.id}:${day.date}`);
+        order.forEach((briefId, slotIndex) => {
           rows.push({
             creator_id: creator.id,
             brief_id: briefId,
@@ -218,6 +221,16 @@ Deno.serve(async (req) => {
   if (publishError) {
     return jsonResponse({ error: publishError.message }, 500);
   }
+
+  // Every creator gets their own caption and overlay wording so the same
+  // brief never lands word for word on several accounts.
+  EdgeRuntime.waitUntil(
+    fetch(`${supabaseUrl}/functions/v1/vary-copy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ campaign_id: campaign.id }),
+    }).catch((e) => console.error('publish-campaign: vary-copy failed:', e)),
+  );
 
   // Publishing is sign-off: compare each post with the AI's version and
   // learn from the edits. Runs after the response, never blocks the publish.
