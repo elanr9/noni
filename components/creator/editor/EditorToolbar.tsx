@@ -9,7 +9,6 @@ export type ToolId =
   | 'split'
   | 'replace'
   | 'delete'
-  | 'speed'
   | 'crop'
   | 'mute'
   | 'volume'
@@ -73,7 +72,6 @@ export function EditorToolbar(props: {
           { id: 'split', label: 'Split', icon: 'scissors', enabled: canSplit },
           { id: 'replace', label: 'Replace', icon: 'repeat', enabled: hasSelection },
           { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
-          { id: 'speed', label: 'Speed', icon: 'gauge', enabled: hasSelection },
           { id: 'crop', label: 'Crop', icon: 'crop', enabled: hasSelection },
           {
             id: 'mute',

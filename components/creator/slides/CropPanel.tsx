@@ -1,44 +1,44 @@
-// Bottom sheet while the creator frames a photo on the stage: the post's
-// size (one for every slide) and Done. The photo itself is moved on the
-// stage, over the text that will sit on it.
+// Bottom sheet while the creator frames a photo on the stage: a TikTok and
+// an Instagram view of the same photo, each framed on its own, then Done.
+// The photo itself is moved on the stage, over the text that will sit on it.
 import type { JSX } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { SLIDE_ASPECTS, type SlideAspect } from '../../../lib/submissions';
+import { SLIDE_PLATFORMS, type SlidePlatform } from '../../../lib/submissions';
 import { color, radius, type } from '../../../theme/tokens';
 import { PressableScale } from '../../ui/PressableScale';
+import { PlatformLogo } from './PlatformLogo';
 
-const ASPECT_LABEL: Record<SlideAspect, string> = {
-  '4:5': 'Portrait 4:5',
-  '1:1': 'Square 1:1',
-  '9:16': 'Full screen 9:16',
+const PLATFORM_LABEL: Record<SlidePlatform, string> = {
+  tiktok: 'Frame for TikTok',
+  instagram: 'Frame for Instagram',
 };
 
 export function CropPanel(props: {
-  aspect: SlideAspect;
-  onAspect: (aspect: SlideAspect) => void;
+  platform: SlidePlatform;
+  onPlatform: (platform: SlidePlatform) => void;
   onDone: () => void;
 }): JSX.Element {
-  const { aspect, onAspect, onDone } = props;
+  const { platform, onPlatform, onDone } = props;
   return (
     <View style={styles.root}>
       <View style={styles.copy}>
         <Text style={styles.title}>Drag to move, pinch to zoom</Text>
-        <Text style={styles.hint}>Every slide in this post shares one size.</Text>
+        <Text style={styles.hint}>Frame it for both apps before you send it.</Text>
       </View>
       <View style={styles.chips}>
-        {SLIDE_ASPECTS.map((a) => {
-          const active = a === aspect;
+        {SLIDE_PLATFORMS.map((p) => {
+          const active = p === platform;
           return (
             <PressableScale
-              key={a}
+              key={p}
               accessibilityRole="button"
-              accessibilityLabel={ASPECT_LABEL[a]}
+              accessibilityLabel={PLATFORM_LABEL[p]}
               accessibilityState={{ selected: active }}
-              onPress={() => onAspect(a)}
+              onPress={() => onPlatform(p)}
               style={[styles.chip, active && styles.chipOn]}
             >
-              <Text style={[styles.chipText, active && styles.chipTextOn]}>{a}</Text>
+              <PlatformLogo platform={p} size={22} color={active ? color.white : color.ink} />
             </PressableScale>
           );
         })}
@@ -77,25 +77,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    height: 36,
-    paddingHorizontal: 16,
+    height: 44,
+    width: 64,
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: color.line,
     backgroundColor: color.white,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   chipOn: {
     backgroundColor: color.ink,
     borderColor: color.ink,
-  },
-  chipText: {
-    color: color.ink,
-    fontSize: type.size.label,
-    fontWeight: type.weight.bold,
-  },
-  chipTextOn: {
-    color: color.white,
   },
   done: {
     height: 56,

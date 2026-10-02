@@ -170,6 +170,11 @@ export async function markNotificationRead(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function markAllNotificationsRead(): Promise<void> {
+  const { error } = await supabase.rpc('mark_all_notifications_read');
+  if (error) throw error;
+}
+
 /** Public URL for a companies.logo_path object in the company-logos bucket. */
 export type CreatorCompanyEarnings = {
   companyId: string | null;

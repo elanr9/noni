@@ -13,14 +13,11 @@ import {
   type OverlayBox,
 } from '../../../lib/overlay-boxes';
 import {
-  EDIT_SPEEDS,
   canSplitAt,
-  clampSpeed,
   deletePiece,
   formatClock,
   formatSeconds,
   pieceAt,
-  pieceDurationMs,
   pieceRanges,
   setAllMuted,
   setGain,
@@ -78,7 +75,7 @@ import type { BoxPlacement } from './StageTextBox';
 import { SUBTITLE_PLACEHOLDER, subtitleBand, subtitleChunks, subtitleTextAt } from './subtitles';
 import { TextEditSheet } from './TextEditSheet';
 import { Timeline, type TrimEdges } from './Timeline';
-import { GainFader, SpeedOptions, ToolPanel } from './ToolPanel';
+import { GainFader, ToolPanel } from './ToolPanel';
 import { useEditHistory } from './useEditHistory';
 import { useEvent } from './useEvent';
 import { useSegmentPersistence, type SegmentWriter } from './useSegmentPersistence';
@@ -142,7 +139,7 @@ export type PostEditorProps = {
   bottomInset: number;
 };
 
-type OpenTool = 'speed' | 'crop' | 'volume' | 'text-color' | 'cue';
+type OpenTool = 'crop' | 'volume' | 'text-color' | 'cue';
 
 type TextEdit = { segment: BriefSegment; boxId: string | null };
 
@@ -729,19 +726,6 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     seek(Math.min(range?.startMs ?? 0, Math.max(0, total - 1)), true);
   }
 
-  function openSpeed() {
-    if (!selected) return;
-    pause();
-    setTool('speed');
-    const range = pieceRanges(committed).find((r) => r.piece.id === selected.id);
-    if (range) seek(range.startMs, true);
-  }
-
-  function changeSpeed(value: number) {
-    if (!selected) return;
-    setPreview(updatePiece(committed, selected.id, { speed: clampSpeed(value) }));
-  }
-
   function openCrop() {
     if (!selected) return;
     pause();
@@ -832,7 +816,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       }
       setCuePreview(null);
       setSelectedCue(null);
-    } else if (tool === 'speed' || tool === 'volume') {
+    } else if (tool === 'volume') {
       if (save && preview !== null) commitTimeline(preview);
       setPreview(null);
     } else if (tool === 'crop' && selected !== null) {
@@ -861,9 +845,6 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       case 'delete':
         if (selectedBox !== null) deleteSelectedBox();
         else remove();
-        return;
-      case 'speed':
-        openSpeed();
         return;
       case 'crop':
         openCrop();
@@ -925,11 +906,6 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
     persistence.flush();
     onContinue(preview ?? committed);
   }
-
-  const speedCaption = useMemo(() => {
-    if (!selected) return '';
-    return `This clip plays for ${formatSeconds(pieceDurationMs(selected))}`;
-  }, [selected]);
 
   const cueCaption = useMemo(() => {
     if (!selectedCue) return '';
@@ -1108,16 +1084,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
       />
 
       <View style={[styles.tools, { height: TOOLS_H + bottom, paddingBottom: bottom }]}>
-        {tool === 'speed' && selected !== null ? (
-          <ToolPanel title="Speed" onCancel={() => closeTool(false)} onDone={() => closeTool(true)}>
-            <SpeedOptions
-              options={EDIT_SPEEDS}
-              value={selected.speed}
-              onChange={changeSpeed}
-              caption={speedCaption}
-            />
-          </ToolPanel>
-        ) : tool === 'volume' ? (
+        {tool === 'volume' ? (
           <ToolPanel title="Volume" onCancel={() => closeTool(false)} onDone={() => closeTool(true)}>
             <GainFader value={shown.gain} onChange={changeGain} />
           </ToolPanel>

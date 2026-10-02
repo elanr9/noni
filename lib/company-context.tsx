@@ -16,6 +16,7 @@ import { useAuth } from './auth';
 import {
   fetchCompanyStatusSummary,
   fetchNotificationsFeed,
+  markAllNotificationsRead,
   markNotificationRead,
   sideForRole,
   statusKey,
@@ -61,6 +62,7 @@ type CompanyState = {
   markRead: (id: string) => Promise<void>;
   /** Marks read, switches company when needed, then routes to the deep link. */
   openNotification: (n: CompanyNotification) => Promise<void>;
+  markAllRead: () => Promise<void>;
   openSwitcher: () => void;
   closeSwitcher: () => void;
   openNotifications: () => void;
@@ -272,6 +274,16 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const markAllRead = useCallback(async () => {
+    const now = new Date().toISOString();
+    setNotifications((rows) => rows.map((n) => (n.readAt ? n : { ...n, readAt: now })));
+    try {
+      await markAllNotificationsRead();
+    } catch (e) {
+      console.error('mark all notifications read failed', e);
+    }
+  }, []);
+
   const openNotification = useCallback(
     async (n: CompanyNotification) => {
       void markRead(n.id);
@@ -368,6 +380,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       refreshNotifications,
       markRead,
       openNotification,
+      markAllRead,
       openSwitcher,
       closeSwitcher,
       openNotifications,
@@ -395,6 +408,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       refreshNotifications,
       markRead,
       openNotification,
+      markAllRead,
       openSwitcher,
       closeSwitcher,
       openNotifications,

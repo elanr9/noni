@@ -4352,6 +4352,7 @@ export type Database = {
           cues: Json | null
           duration_seconds: number | null
           id: string
+          instagram_segment_paths: string[] | null
           overlay_render_id: string | null
           render_claimed_at: string | null
           render_error: string | null
@@ -4372,6 +4373,7 @@ export type Database = {
           cues?: Json | null
           duration_seconds?: number | null
           id?: string
+          instagram_segment_paths?: string[] | null
           overlay_render_id?: string | null
           render_claimed_at?: string | null
           render_error?: string | null
@@ -4392,6 +4394,7 @@ export type Database = {
           cues?: Json | null
           duration_seconds?: number | null
           id?: string
+          instagram_segment_paths?: string[] | null
           overlay_render_id?: string | null
           render_claimed_at?: string | null
           render_error?: string | null
@@ -5076,6 +5079,7 @@ export type Database = {
           views: number
         }[]
       }
+      mark_all_notifications_read: { Args: never; Returns: undefined }
       mark_notification_read: { Args: { p_id: string }; Returns: undefined }
       member_role: { Args: { p_company_id: string }; Returns: string }
       my_companies: {

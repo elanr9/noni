@@ -698,7 +698,7 @@ export default function PostEditorScreen() {
           )
         : hookOptions;
       await updateBrief(id, {
-        title: title.trim() || searchPhrase.trim() || 'Untitled post',
+        title: title.trim() || searchPhrase.trim() || chosenHook?.trim() || 'Untitled post',
         format:
           currentType?.family === 'photo_carousel' ? 'photo_carousel' : 'video',
         hook: chosenHook,

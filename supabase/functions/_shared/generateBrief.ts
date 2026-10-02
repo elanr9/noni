@@ -870,7 +870,13 @@ export async function resolvePointMedia(
   points: TalkingPoint[],
   family: 'video' | 'photo_carousel',
 ): Promise<(PointMedia | null)[]> {
-  const base = buildPointMedia(features, featureIds);
+  // UGC video shows the product exactly once, on the plug. Any feature
+  // screenshot the model hung on an advice point is dropped; slideshows keep
+  // a picture per slide.
+  const plugOnly = family === 'video';
+  const base = buildPointMedia(features, featureIds).map((m, i) =>
+    plugOnly && !points[i]?.is_product ? null : m,
+  );
   const { data } = await admin
     .from('media_library')
     .select('id, kind, path, title, description')
@@ -886,6 +892,9 @@ export async function resolvePointMedia(
   const user = [
     `Media library${family === 'photo_carousel' ? ' (slideshow: screenshots only)' : ''}:\n${library.map((m, i) => `- media_index ${i} (${m.kind}): ${m.title.trim()}${m.description?.trim() ? `: ${m.description.trim()}` : ''}`).join('\n')}`,
     `Talking points:\n${points.map((p, i) => `- point_index ${i}${p.is_product ? ' [is_product]' : ''}: ${p.text}`).join('\n')}`,
+    ...(plugOnly
+      ? ['This is a video: pick media for the [is_product] point ONLY. Every other point stays bare.']
+      : []),
   ].join('\n\n');
 
   let picks: { point_index: number; media_index: number }[] = [];
@@ -920,6 +929,7 @@ export async function resolvePointMedia(
     const item = library[pick.media_index];
     if (!item || used.has(pick.media_index)) continue;
     if (pick.point_index < 0 || pick.point_index >= points.length) continue;
+    if (plugOnly && !points[pick.point_index].is_product) continue;
     used.add(pick.media_index);
     attach(pick.point_index, item);
   }

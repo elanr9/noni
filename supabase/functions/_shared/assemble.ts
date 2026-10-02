@@ -53,6 +53,8 @@ export type SubmissionRow = {
   audio_gain?: number | null;
   /** Photo posts: the crop aspect every slide was cut to in the app. */
   slide_aspect?: string | null;
+  /** Photo posts: the creator's 4:5 Instagram cut of each slide, in slide order. */
+  instagram_segment_paths?: string[] | null;
   /** Manifest stored by the stitch invocation; reused when resuming at overlays. */
   render_timeline?: unknown;
   /** `{ clips: [{ slot_index, words }] }`, ms in each uploaded clip file. */
@@ -1642,14 +1644,38 @@ async function runSlideshowAssembly(params: {
   let overlayWarning: string | null = null;
   const frame = slideFrame(submission.slide_aspect);
   const letterboxForInstagram = frame.height === 1920;
+  const instagramRaw = submission.instagram_segment_paths ?? [];
   // Slides bake two at a time: each is up to two Upload-Post jobs and the
   // API rate limits job creation, polling and downloads alike.
   const finalPaths = await mapWithConcurrency(rawPaths, 2, async (rawPath, i) => {
       const segment = slideSegments[i];
-      // Every 9:16 slide gets its 4:5 Instagram copy, even one with nothing
-      // to burn in: the raw 9:16 would otherwise land pillarboxed on Instagram.
+      const igRaw = instagramRaw[i] ?? null;
+      const label = `slide ${i + 1} instagram`;
+      // Every 9:16 slide gets its 4:5 Instagram copy. The creator's own 4:5
+      // cut bakes with the same text when there is one; otherwise the finished
+      // 9:16 is letterboxed so it never lands pillarboxed on Instagram.
+      const renderInstagram = async (
+        finalPath: string,
+        boxes: SegmentBox[],
+        inset?: { path: string; x: number; y: number; width: number },
+      ): Promise<void> => {
+        if (!letterboxForInstagram) return;
+        if (igRaw) {
+          await renderSlideWithFfmpeg({
+            admin,
+            photoPath: igRaw,
+            boxes,
+            inset,
+            outputPath: instagramSlidePath(finalPath),
+            label,
+            frame: slideFrame('4:5'),
+          });
+          return;
+        }
+        await renderInstagramSlide(admin, finalPath, label);
+      };
       if (!segment) {
-        if (letterboxForInstagram) await renderInstagramSlide(admin, rawPath, `slide ${i + 1} instagram`);
+        await renderInstagram(rawPath, []);
         return rawPath;
       }
       const boxes = segment.show_on_screen ? segmentBoxes(segment) : [];
@@ -1660,7 +1686,7 @@ async function runSlideshowAssembly(params: {
       // A 9:16 slide with nothing to burn in posts as the creator cut it; other
       // aspects still bake so the file is exactly frame sized for both feeds.
       if (boxes.length === 0 && !insetPath && letterboxForInstagram) {
-        await renderInstagramSlide(admin, rawPath, `slide ${i + 1} instagram`);
+        await renderInstagram(rawPath, []);
         return rawPath;
       }
 
@@ -1700,9 +1726,7 @@ async function runSlideshowAssembly(params: {
         label: `slide ${i + 1}`,
         frame,
       });
-      if (letterboxForInstagram) {
-        await renderInstagramSlide(admin, outPath, `slide ${i + 1} instagram`);
-      }
+      await renderInstagram(outPath, boxes, inset);
       return outPath;
   });
 

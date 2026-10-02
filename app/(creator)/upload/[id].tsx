@@ -24,7 +24,6 @@ import { CropPanel } from '../../../components/creator/slides/CropPanel';
 import { FrameFit } from '../../../components/creator/slides/FrameFit';
 import {
   centeredCrop,
-  refitCrop,
   type PhotoCrop,
   type SourceSize,
 } from '../../../components/creator/slides/photo-crop';
@@ -77,18 +76,28 @@ import {
 import { useCreatorQueue } from '../../../lib/creator-queue';
 import { getAssignment, type AssignmentWithBrief } from '../../../lib/tasks-api';
 import {
+  PLATFORM_SLIDE_ASPECT,
   SLIDE_ASPECT_RATIO,
   submitAssignmentPhotos,
   type PickedPhoto,
-  type SlideAspect,
+  type SlidePlatform,
 } from '../../../lib/submissions';
 
 type Phase = 'idle' | 'processing' | 'review';
 
-const DEFAULT_SLIDE_ASPECT: SlideAspect = '4:5';
+const TIKTOK_RATIO = SLIDE_ASPECT_RATIO[PLATFORM_SLIDE_ASPECT.tiktok];
+const INSTAGRAM_RATIO = SLIDE_ASPECT_RATIO[PLATFORM_SLIDE_ASPECT.instagram];
 
-function isSlideAspect(value: unknown): value is SlideAspect {
-  return value === '9:16' || value === '4:5' || value === '1:1';
+function platformRatio(platform: SlidePlatform): number {
+  return platform === 'tiktok' ? TIKTOK_RATIO : INSTAGRAM_RATIO;
+}
+
+/** Both platform windows for a freshly picked or re-read photo. */
+function bothCrops(source: SourceSize): Pick<PickedPhoto, 'crop' | 'cropInstagram'> {
+  return {
+    crop: centeredCrop(source, TIKTOK_RATIO),
+    cropInstagram: centeredCrop(source, INSTAGRAM_RATIO),
+  };
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -180,12 +189,11 @@ function draftKey(assignmentId: string): string {
 
 type StoredDraft = {
   photos: Record<string, PickedPhoto>;
-  aspect: SlideAspect | null;
 };
 
-type PhotoDraft = { photos: Record<number, PickedPhoto>; aspect: SlideAspect | null };
+type PhotoDraft = { photos: Record<number, PickedPhoto> };
 
-const EMPTY_DRAFT: PhotoDraft = { photos: {}, aspect: null };
+const EMPTY_DRAFT: PhotoDraft = { photos: {} };
 
 async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
   try {
@@ -197,7 +205,6 @@ async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
     const stored = legacy
       ? (parsed as unknown as Record<string, PickedPhoto>)
       : parsed.photos ?? {};
-    const aspect = legacy ? '9:16' : isSlideAspect(parsed.aspect) ? parsed.aspect : null;
     const out: Record<number, PickedPhoto> = {};
     for (const [k, v] of Object.entries(stored)) {
       const slot = Number(k);
@@ -214,9 +221,10 @@ async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
         mimeType: typeof v.mimeType === 'string' ? v.mimeType : null,
         ...(isSourceSize(v.source) ? { source: v.source } : {}),
         ...(isPhotoCrop(v.crop) ? { crop: v.crop } : {}),
+        ...(isPhotoCrop(v.cropInstagram) ? { cropInstagram: v.cropInstagram } : {}),
       };
     }
-    return { photos: out, aspect: Object.keys(out).length > 0 ? aspect : null };
+    return { photos: out };
   } catch {
     return EMPTY_DRAFT;
   }
@@ -225,9 +233,8 @@ async function loadPhotoDraft(assignmentId: string): Promise<PhotoDraft> {
 async function savePhotoDraft(
   assignmentId: string,
   photos: Record<number, PickedPhoto>,
-  aspect: SlideAspect | null,
 ): Promise<void> {
-  const stored: StoredDraft = { photos: {}, aspect };
+  const stored: StoredDraft = { photos: {} };
   for (const [k, v] of Object.entries(photos)) {
     stored.photos[k] = v;
   }
@@ -327,8 +334,8 @@ export default function UploadScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [submitting, setSubmitting] = useState(false);
   const [photos, setPhotos] = useState<Record<number, PickedPhoto>>({});
-  /** One crop aspect for the whole post, chosen with the first photo. */
-  const [aspect, setAspect] = useState<SlideAspect | null>(null);
+  /** Which app's frame the stage shows; each photo keeps a crop for both. */
+  const [platform, setPlatform] = useState<SlidePlatform>('tiktok');
   /** Slot whose photo is being framed on the stage. */
   const [cropSlot, setCropSlot] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
@@ -381,7 +388,6 @@ export default function UploadScreen() {
           if (cancelled) return;
           setBriefSegments(segs);
           setPhotos(draft.photos);
-          setAspect(draft.aspect);
           setDraftLoaded(true);
           for (const seg of segs) {
             if (!seg.screenshot_url) continue;
@@ -448,11 +454,13 @@ export default function UploadScreen() {
   const draftAssignmentId = draftLoaded ? assignment?.id ?? null : null;
   useEffect(() => {
     if (draftAssignmentId === null) return;
-    savePhotoDraft(draftAssignmentId, photos, aspect).catch(() => undefined);
-  }, [draftAssignmentId, photos, aspect]);
+    savePhotoDraft(draftAssignmentId, photos).catch(() => undefined);
+  }, [draftAssignmentId, photos]);
 
-  const stageAspect: SlideAspect = aspect ?? DEFAULT_SLIDE_ASPECT;
-  const stageRatio = SLIDE_ASPECT_RATIO[stageAspect];
+  const stageAspect = PLATFORM_SLIDE_ASPECT[platform];
+  const stageRatio = platformRatio(platform);
+  const cropOf = (photo: PickedPhoto | undefined): PhotoCrop | undefined =>
+    platform === 'tiktok' ? photo?.crop : photo?.cropInstagram;
 
   function fail(message: string, retry?: () => void) {
     if (retry) setFailure({ message, retry });
@@ -477,10 +485,9 @@ export default function UploadScreen() {
         uri: asset.uri,
         mimeType: asset.mimeType ?? null,
         source,
-        crop: centeredCrop(source, stageRatio),
+        ...bothCrops(source),
       };
       setPhotos((prev) => ({ ...prev, [slotIndex]: picked }));
-      if (aspect === null) setAspect(stageAspect);
       void ensurePreview(picked.uri);
       // Straight onto the stage with the photo loose under the text, so the
       // creator frames it where it will actually post.
@@ -505,13 +512,18 @@ export default function UploadScreen() {
     if (!photo || picking || phase === 'processing') return;
     setSelectedBoxId(null);
     setFreshBoxId(null);
-    if (photo.source === undefined || photo.crop === undefined) {
-      // Older drafts kept only the cut file; it becomes the source from here.
+    if (photo.source === undefined || photo.crop === undefined || photo.cropInstagram === undefined) {
+      // Older drafts kept only the cut file or one crop; both frames start centred.
       try {
-        const source = await imageSize(photo.uri);
+        const source = photo.source ?? (await imageSize(photo.uri));
         setPhotos((prev) => ({
           ...prev,
-          [slotIndex]: { ...photo, source, crop: centeredCrop(source, stageRatio) },
+          [slotIndex]: {
+            ...photo,
+            source,
+            crop: photo.crop ?? centeredCrop(source, TIKTOK_RATIO),
+            cropInstagram: photo.cropInstagram ?? centeredCrop(source, INSTAGRAM_RATIO),
+          },
         }));
       } catch (e) {
         setErrorToast(e instanceof Error ? e.message : 'Could not read this photo.');
@@ -524,24 +536,9 @@ export default function UploadScreen() {
   function changeCrop(slotIndex: number, crop: PhotoCrop) {
     setPhotos((prev) => {
       const photo = prev[slotIndex];
-      return photo === undefined ? prev : { ...prev, [slotIndex]: { ...photo, crop } };
-    });
-  }
-
-  // One size for the whole post: every framed photo keeps its centre and zoom.
-  function changeAspect(next: SlideAspect) {
-    if (next === stageAspect) return;
-    const ratio = SLIDE_ASPECT_RATIO[next];
-    setAspect(next);
-    setPhotos((prev) => {
-      const out: Record<number, PickedPhoto> = {};
-      for (const [key, photo] of Object.entries(prev)) {
-        out[Number(key)] =
-          photo.source !== undefined && photo.crop !== undefined
-            ? { ...photo, crop: refitCrop(photo.crop, photo.source, ratio) }
-            : photo;
-      }
-      return out;
+      if (photo === undefined) return prev;
+      const patch = platform === 'tiktok' ? { crop } : { cropInstagram: crop };
+      return { ...prev, [slotIndex]: { ...photo, ...patch } };
     });
   }
 
@@ -631,7 +628,6 @@ export default function UploadScreen() {
         companyId: profile.active_company_id,
         creatorId: profile.id,
         photos: ordered,
-        slideAspect: stageAspect,
       });
       try {
         await clearPhotoDraft(assignment.id);
@@ -804,7 +800,7 @@ export default function UploadScreen() {
     cropSlot !== null &&
     cropSlideIndex >= 0 &&
     cropPhoto?.source !== undefined &&
-    cropPhoto.crop !== undefined
+    cropOf(cropPhoto) !== undefined
       ? {
           slideIndex: cropSlideIndex,
           source: cropPhoto.source,
@@ -890,7 +886,7 @@ export default function UploadScreen() {
             variant="dark"
             slides={slides.map((s) => ({
               image: previewUris[s.slotIndex],
-              crop: photos[s.slotIndex]?.crop,
+              crop: cropOf(photos[s.slotIndex]),
               boxes: s.boxes,
               inset: s.inset,
             }))}
@@ -913,7 +909,7 @@ export default function UploadScreen() {
               onScaleInset: (slideIndex, width) => placeSlideInset(slideIndex, { width }),
               selectedBoxId,
             }}
-            chrome={stageAspect === '9:16'}
+            chrome={platform === 'tiktok'}
             swipe
             onIndexChange={changeReviewIndex}
           />
@@ -981,8 +977,8 @@ export default function UploadScreen() {
         >
           {cropping !== undefined ? (
             <CropPanel
-              aspect={stageAspect}
-              onAspect={changeAspect}
+              platform={platform}
+              onPlatform={setPlatform}
               onDone={() => setCropSlot(null)}
             />
           ) : selectedBox !== null ? (
@@ -1061,7 +1057,7 @@ export default function UploadScreen() {
             aspect: stageAspect,
             slides: slides.map((s) => ({
               photoUri: previewUris[s.slotIndex],
-              crop: photos[s.slotIndex]?.crop,
+              crop: cropOf(photos[s.slotIndex]),
               boxes: s.boxes,
               inset: s.inset,
               text: s.text,

@@ -216,6 +216,8 @@ async function createAssignmentSubmission(params: {
   cues?: SubmissionCue[] | null;
   /** Photo posts only: the crop aspect every slide was cut to. */
   slideAspect?: SlideAspect;
+  /** Photo posts only: the creator's 4:5 Instagram cut of each slide. */
+  instagramPaths?: string[] | null;
 }): Promise<Assignment> {
   const {
     assignment,
@@ -228,6 +230,7 @@ async function createAssignmentSubmission(params: {
     audioGain,
     cues,
     slideAspect,
+    instagramPaths,
   } = params;
 
   const { data: submission, error: insertError } = await supabase
@@ -242,6 +245,7 @@ async function createAssignmentSubmission(params: {
       ...(audioGain !== null ? { audio_gain: audioGain } : {}),
       ...(cues && cues.length > 0 ? { cues: cues as unknown as Json } : {}),
       ...(slideAspect !== undefined ? { slide_aspect: slideAspect } : {}),
+      ...(instagramPaths ? { instagram_segment_paths: instagramPaths } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -334,7 +338,16 @@ export async function submitAssignmentClips(params: {
 /** Frame aspect every slide of a photo post is cropped to. */
 export type SlideAspect = '9:16' | '4:5' | '1:1';
 
-export const SLIDE_ASPECTS: readonly SlideAspect[] = ['4:5', '1:1', '9:16'];
+/** Where a slideshow posts. Each platform gets its own crop of every slide. */
+export type SlidePlatform = 'tiktok' | 'instagram';
+
+export const SLIDE_PLATFORMS: readonly SlidePlatform[] = ['tiktok', 'instagram'];
+
+/** The frame each platform shows a slide in: TikTok full screen, Instagram 4:5. */
+export const PLATFORM_SLIDE_ASPECT: Record<SlidePlatform, SlideAspect> = {
+  tiktok: '9:16',
+  instagram: '4:5',
+};
 
 /** submissions.slide_aspect as stored; rows before the column default to 9:16. */
 export function asSlideAspect(value: string | null | undefined): SlideAspect {
@@ -354,17 +367,19 @@ export type PickedPhoto = {
   mimeType: string | null;
   /** Pixel size of `uri`, needed to cut and refit the crop. */
   source?: SourceSize;
-  /** Window of `uri` that fills the slide; the whole photo when absent (older drafts). */
+  /** 9:16 window of `uri` that fills the TikTok slide; the whole photo when absent (older drafts). */
   crop?: PhotoCrop;
+  /** 4:5 window of `uri` for the Instagram slide; the bake letterboxes the TikTok cut when absent. */
+  cropInstagram?: PhotoCrop;
 };
 
 /** Crops wider than this are downscaled; 2x the 1080 bake keeps text crisp. */
 const MAX_SLIDE_UPLOAD_WIDTH = 2160;
 
 /** The file that uploads: the framed window cut out of the original. */
-async function cutPhoto(photo: PickedPhoto): Promise<PickedPhoto> {
-  if (photo.crop === undefined || photo.source === undefined) return photo;
-  const rect = cropPixels(photo.crop, photo.source);
+async function cutPhoto(photo: PickedPhoto, crop: PhotoCrop | undefined): Promise<PickedPhoto> {
+  if (crop === undefined || photo.source === undefined) return photo;
+  const rect = cropPixels(crop, photo.source);
   const actions: ImageManipulator.Action[] = [{ crop: rect }];
   if (rect.width > MAX_SLIDE_UPLOAD_WIDTH) {
     actions.push({ resize: { width: MAX_SLIDE_UPLOAD_WIDTH } });
@@ -409,22 +424,30 @@ export async function submitAssignmentPhotos(params: {
   companyId: string;
   creatorId: string;
   photos: PickedPhoto[];
-  slideAspect: SlideAspect;
 }): Promise<Assignment> {
-  const { assignment, companyId, creatorId, photos, slideAspect } = params;
+  const { assignment, companyId, creatorId, photos } = params;
   if (photos.length === 0) {
     throw new Error('No photos picked yet');
   }
 
   const version = await nextVersion('assignment_id', assignment.id);
-  const cut = await Promise.all(photos.map(cutPhoto));
-  const paths = cut.map(
-    (p, i) =>
-      `${companyId}/${assignment.id}/${version}-slide-${i + 1}.${photoExtension(p.mimeType)}`,
+  const folder = `${companyId}/${assignment.id}/${version}`;
+  const cut = await Promise.all(photos.map((p) => cutPhoto(p, p.crop)));
+  const paths = cut.map((p, i) => `${folder}-slide-${i + 1}.${photoExtension(p.mimeType)}`);
+
+  const everyInstagramCrop = photos.every((p) => p.cropInstagram !== undefined);
+  const cutInstagram = everyInstagramCrop
+    ? await Promise.all(photos.map((p) => cutPhoto(p, p.cropInstagram)))
+    : [];
+  const instagramPaths = cutInstagram.map(
+    (p, i) => `${folder}-slide-${i + 1}-instagram.${photoExtension(p.mimeType)}`,
   );
 
   for (let i = 0; i < cut.length; i++) {
     await uploadPhoto(cut[i], paths[i]);
+  }
+  for (let i = 0; i < cutInstagram.length; i++) {
+    await uploadPhoto(cutInstagram[i], instagramPaths[i]);
   }
 
   return createAssignmentSubmission({
@@ -437,7 +460,8 @@ export async function submitAssignmentPhotos(params: {
     durationSeconds: null,
     format: 'photo',
     audioGain: null,
-    slideAspect,
+    slideAspect: PLATFORM_SLIDE_ASPECT.tiktok,
+    instagramPaths: instagramPaths.length > 0 ? instagramPaths : null,
   });
 }
 

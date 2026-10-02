@@ -393,10 +393,6 @@ export function serializeEdits(timeline: EditTimeline, prior?: StoredEdits): Sto
   return { slots, gain: timeline.gain, cues: prior?.cues ?? {}, words: prior?.words ?? {} };
 }
 
-function isSpeed(value: unknown): value is EditSpeed {
-  return typeof value === 'number' && (EDIT_SPEEDS as readonly number[]).includes(value);
-}
-
 function parseCrop(value: unknown): EditCrop | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
@@ -435,15 +431,15 @@ export function parseStoredEdits(value: Json | null | undefined): StoredEdits {
       if (
         typeof raw.in_ms !== 'number' ||
         typeof raw.out_ms !== 'number' ||
-        !isSpeed(raw.speed) ||
         typeof raw.muted !== 'boolean'
       ) {
         continue;
       }
+      // Speed edits were removed from the editor; older drafts play at 1x.
       pieces.push({
         in_ms: raw.in_ms,
         out_ms: raw.out_ms,
-        speed: raw.speed,
+        speed: 1,
         muted: raw.muted,
         crop: parseCrop(raw.crop),
       });

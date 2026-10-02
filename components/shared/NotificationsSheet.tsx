@@ -72,8 +72,15 @@ function NotificationRow({ n, here, last, onPress }: RowProps) {
 /** Every row is stamped with its company. Tapping switches and opens the item. */
 export function NotificationsSheet() {
   const { height } = useWindowDimensions();
-  const { active, notifications, notificationsOpen, closeNotifications, openNotification } =
-    useCompany();
+  const {
+    active,
+    notifications,
+    notificationsOpen,
+    closeNotifications,
+    openNotification,
+    markAllRead,
+  } = useCompany();
+  const anyUnread = notifications.some((n) => n.readAt === null);
   const pending = useRef<CompanyNotification | null>(null);
   const activeId = active?.companyId ?? null;
 
@@ -103,6 +110,17 @@ export function NotificationsSheet() {
             <Text style={styles.title}>Notifications</Text>
             <Text style={styles.subtitle}>All campaigns</Text>
           </View>
+          {anyUnread && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Mark all notifications read"
+              hitSlop={6}
+              onPress={() => void markAllRead()}
+              style={styles.readAll}
+            >
+              <Text style={styles.readAllText}>Read all</Text>
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close"
@@ -153,6 +171,20 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 14,
     color: color.slate500,
+  },
+  readAll: {
+    height: 34,
+    paddingHorizontal: 12,
+    marginRight: 8,
+    borderRadius: 17,
+    backgroundColor: color.fillQuiet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readAllText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: color.ink,
   },
   close: {
     width: 34,
