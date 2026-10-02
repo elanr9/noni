@@ -7,6 +7,16 @@ import type {
 } from './admin-review-types';
 import type { ReviewEvent } from './review-events';
 
+/** "Sat, Oct 3 · 2:40 PM" in the viewer's time zone. */
+export function formatPublishAt(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const day = at.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day} \u00b7 ${time}`;
+}
+
 export function formatAge(iso: string | null | undefined): string {
   if (!iso) return 'just now';
   const ms = Date.now() - new Date(iso).getTime();
@@ -66,10 +76,11 @@ export function toQueueRow(
     status: task.status,
     resubmitted: version > 1,
     editing: isEditing(submission),
+    publishLabel: null,
   };
 }
 
-function isEditing(submission: Submission | null): boolean {
+export function isEditing(submission: Submission | null): boolean {
   return (
     submission !== null &&
     submission.render_status !== 'ready' &&
@@ -98,6 +109,7 @@ export function toAssignmentQueueRow(
     status: item.status,
     resubmitted: version > 1,
     editing: isEditing(submission),
+    publishLabel: formatPublishAt(item.publish_at),
     brief: { id: item.brief_id, title: item.briefs.title },
   };
 }

@@ -81,6 +81,11 @@ export function SubmissionRow({ item, attempt, mediaPath, unitCount, onPress }: 
               {`${unitCount} ${isReel ? 'clips' : 'slides'}`}
             </Text>
           ) : null}
+          {item.publishLabel !== null ? (
+            <Text numberOfLines={1} style={styles.publish}>
+              {`Posts ${item.publishLabel}`}
+            </Text>
+          ) : null}
         </View>
       </View>
     </PressableScale>
@@ -158,6 +163,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     overflow: 'hidden',
+  },
+  publish: {
+    flexShrink: 1,
+    fontSize: type.size.micro11,
+    fontWeight: type.weight.semibold,
+    color: color.slate400,
   },
   countChip: {
     paddingVertical: 5,

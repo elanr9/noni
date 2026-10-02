@@ -30,7 +30,7 @@ import {
 } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import { useCompany } from '../../../lib/company-context';
-import { toAssignmentQueueRow } from '../../../lib/admin-queue-map';
+import { isEditing, toAssignmentQueueRow } from '../../../lib/admin-queue-map';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
 import { color, radiusAdmin, shadow, space } from '../../../theme/tokens';
 
@@ -93,7 +93,9 @@ function useAdminQueue(companyId: string | undefined): {
         ...musicQueue.map((m) => m.assignment.id),
       ]);
       setPosts(
-        queue.map((a) => {
+        // A post still in the edit pass has nothing to review yet; it shows
+        // up once the render lands.
+        queue.filter((a) => !isEditing(subs.get(a.id) ?? null)).map((a) => {
           const submission = subs.get(a.id) ?? null;
           return {
             item: toAssignmentQueueRow(a, submission),

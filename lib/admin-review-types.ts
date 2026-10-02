@@ -19,6 +19,8 @@ export type MockQueueItem = {
   resubmitted: boolean;
   /** The edit pass (or a manager's re-edit) is still running on the latest submission. */
   editing: boolean;
+  /** When it goes live, e.g. "Sat, Oct 3 · 2:40 PM". Null until a slot is picked. */
+  publishLabel: string | null;
   /** Set on assignment-backed rows; drives the brief filter. */
   brief?: { id: string; title: string };
 };
