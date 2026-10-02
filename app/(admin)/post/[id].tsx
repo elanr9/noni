@@ -810,6 +810,7 @@ export default function PostEditorScreen() {
       rows,
       pointMedia,
       family,
+      plugPointIndex: points.findIndex((p) => p.is_product),
     });
     if (placed === 0) return rows;
     return listBriefSegments(id);

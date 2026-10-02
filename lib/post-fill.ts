@@ -228,10 +228,16 @@ export async function applyPointMedia(params: {
   pointMedia: (PointMedia | null)[];
   /** Slideshows take stills only: recordings are skipped. */
   family?: BriefFormat;
+  /** Index of the is_product talking point; on video only this point gets media. */
+  plugPointIndex?: number | null;
 }): Promise<number> {
   const targets: { row: BriefSegment; media: PointMedia }[] = [];
+  // UGC video shows the product once, on the plug. Slideshows take a picture
+  // per slide.
+  const plugOnly = params.family === 'video' && params.plugPointIndex !== undefined;
   for (const row of params.rows) {
     if (row.talking_point_index === null || row.screenshot_url) continue;
+    if (plugOnly && row.talking_point_index !== params.plugPointIndex) continue;
     const media = params.pointMedia[row.talking_point_index];
     if (!media || !(media.library_path || media.screenshot_url)) continue;
     if (params.family === 'photo_carousel' && media.library_kind === 'recording') continue;
@@ -485,6 +491,7 @@ export async function fillPostSlot(params: {
         rows,
         pointMedia: draft.point_media,
         family: params.family,
+        plugPointIndex: draft.talking_points.findIndex((p) => p.is_product === true),
       })
     : 0;
   await snapshotAiFill(params.briefId, params.source.kind);
