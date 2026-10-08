@@ -210,6 +210,10 @@ export default function BriefsWeeksScreen() {
 
   const cwPosts = cw?.campaignId != null ? postsCache[cw.campaignId] : undefined;
   const empty = !loading && weeks.length === 0;
+  const listCards = [
+    ...cards.filter((c) => c.status === 'current'),
+    ...cards.filter((c) => c.status !== 'current'),
+  ];
 
   return (
     <AdminScreen
@@ -340,42 +344,46 @@ export default function BriefsWeeksScreen() {
         </View>
       ) : (
         <View style={styles.stack}>
-          {cards.map((card) => (
-            <Card
-              key={card.key}
-              pad={13}
-              onPress={() => openCard(card)}
-              style={styles.weekCard}
-            >
-              <View style={styles.cardHead}>
-                <View style={styles.cardTitleRow}>
-                  <Text numberOfLines={1} style={styles.cardTitle}>
-                    {card.label}
-                  </Text>
-                  {card.startDay !== null ? (
-                    <Text numberOfLines={1} style={styles.cardRange}>
-                      {briefWeekRangeLabel(card.startDay)}
+          {listCards.map((card) => {
+            const featured = card.status === 'current';
+            return (
+              <Card
+                key={card.key}
+                pad={featured ? 18 : 13}
+                onPress={() => openCard(card)}
+                style={featured ? styles.currentCard : styles.weekCard}
+              >
+                {featured ? <Text style={styles.currentKicker}>This week</Text> : null}
+                <View style={styles.cardHead}>
+                  <View style={featured ? styles.currentTitleCol : styles.cardTitleRow}>
+                    <Text numberOfLines={1} style={featured ? styles.currentTitle : styles.cardTitle}>
+                      {card.label}
                     </Text>
-                  ) : null}
+                    {card.startDay !== null ? (
+                      <Text numberOfLines={1} style={featured ? styles.currentRange : styles.cardRange}>
+                        {briefWeekRangeLabel(card.startDay)}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {statusChip(card, due)}
+                  <Icon name="chevron-right" size={16} color={color.slate300} />
                 </View>
-                {statusChip(card, due)}
-                <Icon name="chevron-right" size={16} color={color.slate300} />
-              </View>
 
-              {!card.planned ? (
-                <Text style={styles.notPlanned}>
-                  {card.status === 'next' && due !== null
-                    ? `${due.label} ends ${briefWeekEndsWeekday(due.startDay, 'long')}. Not planned yet.`
-                    : notPlannedLine(card.startDay)}
-                </Text>
-              ) : (
-                <View style={styles.railsRow}>
-                  <ProgressRail icon="video" lane={card.video} />
-                  <ProgressRail icon="images" lane={card.slideshow} />
-                </View>
-              )}
-            </Card>
-          ))}
+                {!card.planned ? (
+                  <Text style={styles.notPlanned}>
+                    {card.status === 'next' && due !== null
+                      ? `${due.label} ends ${briefWeekEndsWeekday(due.startDay, 'long')}. Not planned yet.`
+                      : notPlannedLine(card.startDay)}
+                  </Text>
+                ) : (
+                  <View style={styles.railsRow}>
+                    <ProgressRail icon="video" lane={card.video} />
+                    <ProgressRail icon="images" lane={card.slideshow} />
+                  </View>
+                )}
+              </Card>
+            );
+          })}
         </View>
       )}
     </AdminScreen>
@@ -424,6 +432,31 @@ const styles = StyleSheet.create({
   },
   weekCard: {
     gap: 10,
+  },
+  currentCard: {
+    gap: 12,
+  },
+  currentKicker: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    color: color.blue600,
+  },
+  currentTitleCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  currentTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    color: color.ink,
+  },
+  currentRange: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: color.slate500,
   },
   calendarStack: {
     gap: 12,

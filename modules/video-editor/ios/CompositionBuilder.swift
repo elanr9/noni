@@ -103,6 +103,9 @@ internal enum CompositionBuilder {
   private static let timescale: CMTimeScale = 600
 
   static func build(timeline: TimelineRecord, cache: AssetCache) async throws -> BuiltTimeline {
+    if timeline.isBlockTimeline {
+      return try await buildBlocks(timeline.blocks, cache: cache)
+    }
     guard !timeline.pieces.isEmpty else {
       throw VideoEditorException("Timeline has no pieces")
     }
@@ -195,6 +198,202 @@ internal enum CompositionBuilder {
       videoComposition: videoComposition,
       durationMs: total.seconds * 1000
     )
+  }
+
+  // MARK: Blocks
+
+  /// The studio document: blocks in timeline order with one or two cells.
+  /// Cell i always lives on video track i and audio track i, the render is
+  /// always 1080x1920, and a block lasts `durationMs` (the shortest cell).
+  /// Image cells insert no media; their time is kept with empty ranges so
+  /// composition time equals document time and JS draws the picture over
+  /// the player for that window.
+  static let blockRenderSize = CGSize(width: 1080, height: 1920)
+
+  private static func buildBlocks(_ blocks: [BlockRecord], cache: AssetCache) async throws -> BuiltTimeline {
+    guard !blocks.isEmpty else {
+      throw VideoEditorException("Timeline has no blocks")
+    }
+
+    var assets: [String: LoadedAsset] = [:]
+    var trackCount = 0
+    for block in blocks {
+      for (index, cell) in block.cells.enumerated() where cell.isVideo {
+        trackCount = max(trackCount, index + 1)
+        if assets[cell.uri] == nil {
+          assets[cell.uri] = try await cache.asset(for: cell.uri)
+        }
+      }
+    }
+    guard trackCount > 0 else {
+      throw VideoEditorException("Timeline has no video cells")
+    }
+
+    let composition = AVMutableComposition()
+    var videoTracks: [AVMutableCompositionTrack] = []
+    var audioTracks: [AVMutableCompositionTrack?] = []
+    var videoEnds: [CMTime] = []
+    var audioEnds: [CMTime] = []
+    for _ in 0..<trackCount {
+      guard let videoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      ) else {
+        throw VideoEditorException("Could not create composition video track")
+      }
+      videoTracks.append(videoTrack)
+      audioTracks.append(composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      ))
+      videoEnds.append(.zero)
+      audioEnds.append(.zero)
+    }
+
+    var instructions: [AVMutableVideoCompositionInstruction] = []
+    var cursor = CMTime.zero
+
+    for block in blocks {
+      let blockDuration = blockDuration(for: block)
+      guard blockDuration > .zero else { continue }
+      var layers: [AVMutableVideoCompositionLayerInstruction] = []
+
+      for (index, cell) in block.cells.enumerated() where index < trackCount {
+        guard cell.isVideo, let asset = assets[cell.uri] else { continue }
+        let speed = cell.speed.isFinite && cell.speed > 0 ? cell.speed : 1
+        let wanted = CMTimeMultiplyByFloat64(blockDuration, multiplier: speed)
+        let sourceRange = sourceRange(for: cell, in: asset, maxDuration: wanted)
+        let videoTrack = videoTracks[index]
+
+        if videoEnds[index] < cursor {
+          videoTrack.insertEmptyTimeRange(CMTimeRange(start: videoEnds[index], end: cursor))
+        }
+        try videoTrack.insertTimeRange(sourceRange, of: asset.videoTrack, at: cursor)
+        var scaledDuration = sourceRange.duration
+        if speed != 1 {
+          scaledDuration = CMTimeMultiplyByFloat64(sourceRange.duration, multiplier: 1 / speed)
+          videoTrack.scaleTimeRange(
+            CMTimeRange(start: cursor, duration: sourceRange.duration),
+            toDuration: scaledDuration
+          )
+        }
+        videoEnds[index] = CMTimeAdd(cursor, scaledDuration)
+
+        if !cell.muted, let sourceAudio = asset.audioTrack, let audioTrack = audioTracks[index] {
+          let available = CMTimeSubtract(asset.audioDuration, sourceRange.start)
+          let audioDuration = CMTimeMinimum(sourceRange.duration, available)
+          if audioDuration > .zero {
+            if audioEnds[index] < cursor {
+              audioTrack.insertEmptyTimeRange(CMTimeRange(start: audioEnds[index], end: cursor))
+            }
+            try audioTrack.insertTimeRange(
+              CMTimeRange(start: sourceRange.start, duration: audioDuration),
+              of: sourceAudio,
+              at: cursor
+            )
+            var scaledAudio = audioDuration
+            if speed != 1 {
+              scaledAudio = CMTimeMultiplyByFloat64(audioDuration, multiplier: 1 / speed)
+              audioTrack.scaleTimeRange(
+                CMTimeRange(start: cursor, duration: audioDuration),
+                toDuration: scaledAudio
+              )
+            }
+            audioEnds[index] = CMTimeAdd(cursor, scaledAudio)
+          }
+        }
+
+        let rect = cellRect(layout: block.layout, index: index)
+        let cellTransform = transform(for: asset, crop: cell.crop, renderSize: rect.size)
+          .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+        layer.setTransform(cellTransform, at: cursor)
+        layer.setCropRectangle(
+          sourceCropRect(for: asset, transform: cellTransform, cellRect: rect),
+          at: cursor
+        )
+        layers.append(layer)
+      }
+
+      let instruction = AVMutableVideoCompositionInstruction()
+      instruction.timeRange = CMTimeRange(start: cursor, duration: blockDuration)
+      instruction.layerInstructions = layers
+      instructions.append(instruction)
+      cursor = CMTimeAdd(cursor, blockDuration)
+    }
+
+    guard !instructions.isEmpty else {
+      throw VideoEditorException("Timeline has no playable blocks")
+    }
+
+    // Image only blocks at the tail would leave every track short of the
+    // document end; pad the first track so the composition lasts the document.
+    if videoEnds[0] < cursor {
+      videoTracks[0].insertEmptyTimeRange(CMTimeRange(start: videoEnds[0], end: cursor))
+    }
+
+    let total = composition.duration
+    if let last = instructions.last, total > last.timeRange.start {
+      last.timeRange = CMTimeRange(start: last.timeRange.start, end: total)
+    }
+
+    let videoComposition = AVMutableVideoComposition()
+    videoComposition.renderSize = blockRenderSize
+    videoComposition.frameDuration = frameDuration
+    videoComposition.instructions = instructions
+
+    return BuiltTimeline(
+      composition: composition,
+      videoComposition: videoComposition,
+      durationMs: total.seconds * 1000
+    )
+  }
+
+  private static func blockDuration(for block: BlockRecord) -> CMTime {
+    if block.durationMs.isFinite && block.durationMs > 0 {
+      return time(fromMs: block.durationMs)
+    }
+    let cellMs = block.cells.map { cell -> Double in
+      let speed = cell.speed.isFinite && cell.speed > 0 ? cell.speed : 1
+      return max(cell.outMs - cell.inMs, 0) / speed
+    }
+    return time(fromMs: cellMs.min() ?? 0)
+  }
+
+  private static func sourceRange(for cell: CellRecord, in asset: LoadedAsset, maxDuration: CMTime) -> CMTimeRange {
+    let assetRange = CMTimeRange(start: .zero, duration: asset.duration)
+    var start = CMTimeClampToRange(time(fromMs: cell.inMs), range: assetRange)
+    let end = CMTimeClampToRange(time(fromMs: cell.outMs), range: assetRange)
+    var duration = CMTimeMinimum(CMTimeSubtract(end, start), maxDuration)
+    if duration < frameDuration {
+      duration = CMTimeMinimum(frameDuration, asset.duration)
+      start = CMTimeMinimum(start, CMTimeSubtract(asset.duration, duration))
+    }
+    return CMTimeRange(start: start, duration: duration)
+  }
+
+  private static func cellRect(layout: String, index: Int) -> CGRect {
+    let size = blockRenderSize
+    switch layout {
+    case "split_v":
+      let half = size.height / 2
+      return CGRect(x: 0, y: index == 0 ? 0 : half, width: size.width, height: half)
+    case "split_h":
+      let half = size.width / 2
+      return CGRect(x: index == 0 ? 0 : half, y: 0, width: half, height: size.height)
+    default:
+      return CGRect(origin: .zero, size: size)
+    }
+  }
+
+  /// The crop rectangle is in the track's own pixel space before the layer
+  /// transform, so the cell is mapped back through the inverse transform.
+  private static func sourceCropRect(for asset: LoadedAsset, transform: CGAffineTransform, cellRect: CGRect) -> CGRect {
+    let natural = CGRect(origin: .zero, size: asset.naturalSize)
+    let determinant = transform.a * transform.d - transform.b * transform.c
+    guard determinant != 0 else { return natural }
+    let mapped = cellRect.applying(transform.inverted()).intersection(natural)
+    return mapped.isNull || mapped.isEmpty ? natural : mapped
   }
 
   private static func time(fromMs ms: Double) -> CMTime {

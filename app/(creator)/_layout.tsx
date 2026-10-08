@@ -151,6 +151,14 @@ export default function CreatorLayout() {
           />
           <Stack.Screen name="record/changes/[id]" />
           <Stack.Screen
+            name="studio/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
             name="upload/[id]"
             options={{
               presentation: 'fullScreenModal',

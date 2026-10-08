@@ -31,19 +31,49 @@ async function apifyRun(actor: string, input: Record<string, unknown>): Promise<
   return (await res.json()) as unknown[];
 }
 
+type SubtitleLink = {
+  language?: string;
+  downloadLink?: string;
+  source?: string;
+};
+
 type TikTokItem = {
   text?: string;
   mediaUrls?: string[];
-  videoMeta?: { transcriptionLink?: string };
+  musicMeta?: { playUrl?: string };
+  videoMeta?: {
+    transcriptionLink?: string;
+    downloadAddr?: string;
+    subtitleLinks?: SubtitleLink[];
+  };
   imagePost?: { images?: Array<{ imageURL?: { urlList?: string[] } }> };
   slideshowImageLinks?: Array<{ downloadLink?: string }>;
 };
 
+/** English speech first, then any other subtitle file the actor returned. */
+function pickSubtitle(links: SubtitleLink[] | undefined): string | null {
+  if (!links?.length) return null;
+  const scored = links
+    .filter((l) => Boolean(l.downloadLink))
+    .map((l) => {
+      const lang = l.language ?? '';
+      const source = l.source ?? '';
+      let score = 0;
+      if (/^en/i.test(lang)) score += 4;
+      if (/asr|whisper/i.test(source)) score += 2;
+      if (/^mt$/i.test(source) || /machine/i.test(source)) score -= 1;
+      return { link: l.downloadLink as string, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.link ?? null;
+}
+
 async function scrapeTikTok(url: string): Promise<SourcePost | null> {
   const items = (await apifyRun('clockworks~tiktok-scraper', {
     postURLs: [url],
-    // Actor transcribes videos without captions; primary transcript source.
-    downloadSubtitlesOptions: 'DOWNLOAD_AND_TRANSCRIBE_VIDEOS_WITHOUT_SUBTITLES',
+    // Always transcribe. A video that already has a foreign machine
+    // translation would otherwise come back with no English speech.
+    downloadSubtitlesOptions: 'TRANSCRIBE_ALL_VIDEOS',
   })) as TikTokItem[];
   const i = items[0];
   if (!i) return null;
@@ -55,11 +85,15 @@ async function scrapeTikTok(url: string): Promise<SourcePost | null> {
     .filter((u): u is string => Boolean(u));
   const imageUrls = slides.length > 0 ? slides : fallbackSlides;
   const isCarousel = imageUrls.length > 0;
+  const transcript =
+    i.videoMeta?.transcriptionLink ?? pickSubtitle(i.videoMeta?.subtitleLinks) ?? null;
   return {
     platform: 'tiktok',
     caption: i.text ?? '',
-    media_url: isCarousel ? null : i.mediaUrls?.[0] ?? null,
-    transcript_url: isCarousel ? null : i.videoMeta?.transcriptionLink ?? null,
+    media_url: isCarousel
+      ? null
+      : i.mediaUrls?.[0] ?? i.videoMeta?.downloadAddr ?? i.musicMeta?.playUrl ?? null,
+    transcript_url: isCarousel ? null : transcript,
     image_urls: imageUrls,
     format: isCarousel ? 'photo_carousel' : 'video',
   };
@@ -91,17 +125,44 @@ async function scrapeInstagram(url: string): Promise<SourcePost | null> {
   };
 }
 
+/** WebVTT and SRT cues down to the spoken line. Plain transcripts pass through. */
+function subtitleToText(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.startsWith('<!') || trimmed.startsWith('<html')) return null;
+  const timed = trimmed.startsWith('WEBVTT') || trimmed.includes('-->');
+  if (!timed) return trimmed;
+  const lines = trimmed.split(/\r?\n/).filter((line) => {
+    const t = line.trim();
+    if (!t || t === 'WEBVTT' || /^\d+$/.test(t)) return false;
+    if (t.includes('-->') || /^\d{2}:\d{2}/.test(t)) return false;
+    if (/^(NOTE|STYLE|Kind:|Language:)/.test(t)) return false;
+    return true;
+  });
+  const text = lines
+    .join(' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
 async function fetchApifyTranscript(url: string): Promise<string | null> {
   const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) return null;
+  let href = url;
   try {
-    const sep = url.includes('?') ? '&' : '?';
-    const res = await fetch(`${url}${sep}token=${token}`, {
-      signal: AbortSignal.timeout(30000),
-    });
+    const parsed = new URL(url);
+    if (token && /(^|\.)apify\.com$/i.test(parsed.hostname)) {
+      parsed.searchParams.set('token', token);
+      href = parsed.href;
+    }
+  } catch {
+    return null;
+  }
+  try {
+    const res = await fetch(href, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) return null;
     const text = (await res.text()).trim();
-    return text.length > 0 ? text : null;
+    return text.length > 0 ? subtitleToText(text) : null;
   } catch {
     return null;
   }

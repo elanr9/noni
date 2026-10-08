@@ -370,7 +370,7 @@ export type CreatorSocialStatus = {
 // On non-2xx the supabase client throws a generic "Edge Function returned a
 // non-2xx status code" and hides the JSON body; pull the real message out.
 async function invokeSocialConnect(body: {
-  action: 'status' | 'connect_url' | 'team_status';
+  action: 'status' | 'connect_url' | 'disconnect' | 'team_status';
 }): Promise<unknown> {
   const { data, error, response } = await supabase.functions.invoke(
     'social-connect',
@@ -399,6 +399,10 @@ export async function getSocialConnectUrl(): Promise<string> {
   if (payload.error) throw new Error(payload.error);
   if (!payload.access_url) throw new Error('No connect URL returned');
   return payload.access_url;
+}
+
+export async function disconnectSocialAccounts(): Promise<void> {
+  await invokeSocialConnect({ action: 'disconnect' });
 }
 
 export async function listCreatorSocialStatus(): Promise<CreatorSocialStatus[]> {

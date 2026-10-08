@@ -2248,6 +2248,68 @@ export type Database = {
           },
         ]
       }
+      creator_projects: {
+        Row: {
+          assignment_id: string | null
+          company_id: string
+          created_at: string
+          creator_id: string
+          document: Json
+          format: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          assignment_id?: string | null
+          company_id: string
+          created_at?: string
+          creator_id: string
+          document?: Json
+          format: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          assignment_id?: string | null
+          company_id?: string
+          created_at?: string
+          creator_id?: string
+          document?: Json
+          format?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creator_projects_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: true
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "creator_projects_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "creator_projects_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "creator_projects_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       creator_reminders: {
         Row: {
           company_id: string
@@ -4351,9 +4413,11 @@ export type Database = {
           creator_id: string
           cues: Json | null
           duration_seconds: number | null
+          edit_document: Json | null
           id: string
           instagram_segment_paths: string[] | null
           overlay_render_id: string | null
+          project_id: string | null
           render_claimed_at: string | null
           render_error: string | null
           render_status: string
@@ -4372,9 +4436,11 @@ export type Database = {
           creator_id: string
           cues?: Json | null
           duration_seconds?: number | null
+          edit_document?: Json | null
           id?: string
           instagram_segment_paths?: string[] | null
           overlay_render_id?: string | null
+          project_id?: string | null
           render_claimed_at?: string | null
           render_error?: string | null
           render_status?: string
@@ -4393,9 +4459,11 @@ export type Database = {
           creator_id?: string
           cues?: Json | null
           duration_seconds?: number | null
+          edit_document?: Json | null
           id?: string
           instagram_segment_paths?: string[] | null
           overlay_render_id?: string | null
+          project_id?: string | null
           render_claimed_at?: string | null
           render_error?: string | null
           render_status?: string
@@ -4427,6 +4495,13 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "submissions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "creator_projects"
             referencedColumns: ["id"]
           },
           {

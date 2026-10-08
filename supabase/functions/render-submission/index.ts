@@ -7,6 +7,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import { assembleSubmission, type SubmissionRow } from '../_shared/assemble.ts';
+import { assembleDocumentSubmission } from '../_shared/documentAssembly.ts';
+import { parseEditDocument } from '../_shared/editDocument.ts';
 import { MANAGER_MEMBER_ROLES, memberRole } from '../_shared/membership.ts';
 
 declare const EdgeRuntime:
@@ -67,7 +69,7 @@ Deno.serve(async (req) => {
     const { data: submission } = await admin
       .from('submissions')
       .select(
-        'id, video_path, segment_paths, instagram_segment_paths, version, creator_id, assignment_id, task_id, render_status, overlay_render_id, audio_gain, slide_aspect, render_timeline, transcript, cues',
+        'id, video_path, segment_paths, instagram_segment_paths, version, creator_id, assignment_id, task_id, render_status, overlay_render_id, audio_gain, slide_aspect, render_timeline, transcript, cues, edit_document',
       )
       .eq('id', body.submission_id)
       .maybeSingle();
@@ -184,14 +186,22 @@ Deno.serve(async (req) => {
           return res.ok;
         };
 
-    const job = assembleSubmission({
-      admin,
-      submission: submission as unknown as SubmissionRow,
-      targetId,
-      companyId,
-      briefId,
-      handoff,
-    })
+    // Studio submissions carry the creator's edit document; it drives the
+    // whole render. Legacy submissions (null) keep the brief_segments path.
+    const row = submission as unknown as SubmissionRow;
+    const editDocument = row.edit_document != null ? parseEditDocument(row.edit_document) : null;
+    const job = (
+      editDocument
+        ? assembleDocumentSubmission({ admin, targetId, companyId, handoff }, row, editDocument)
+        : assembleSubmission({
+            admin,
+            submission: row,
+            targetId,
+            companyId,
+            briefId,
+            handoff,
+          })
+    )
       .then((result) => {
         if (result.overlayWarning) console.warn(`render-submission: ${result.overlayWarning}`);
       })

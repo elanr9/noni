@@ -443,7 +443,12 @@ Deno.serve(async (req) => {
     // A reference is scraped and studied once; every later draft from it
     // reads the stored study instead of paying Apify and Deepgram again.
     let study = await loadStudy(admin, caller.companyId, url!);
-    if (!study || !(study.transcript || study.slide_texts?.length || study.caption)) {
+    // A caption-only row is a failed read. Retry so the spoken track or
+    // slide text is what the draft is written from.
+    const hasSource = Boolean(
+      study?.transcript?.trim() || study?.slide_texts?.some((s) => s.trim()),
+    );
+    if (!study || !hasSource) {
       const read = await readSocialPost(url!);
       if (!read) {
         return { error: 'Could not read that post. Check the link.' };

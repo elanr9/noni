@@ -61,6 +61,8 @@ export type SubmissionRow = {
   transcript?: unknown | null;
   /** SubmissionCue[] for the slots the creator adjusted in the editor. */
   cues?: unknown | null;
+  /** Studio edit document (lib/edit-document.ts); non-null routes to documentAssembly. */
+  edit_document?: unknown | null;
 };
 
 export function uploadPostKey(): string {
@@ -203,7 +205,7 @@ async function executeFfmpegJob(params: {
 }
 
 // Run an FFmpeg job and store the media result in the videos bucket.
-async function runFfmpegJob(params: {
+export async function runFfmpegJob(params: {
   admin: AdminClient;
   apiKey: string;
   files: string[];
@@ -287,7 +289,7 @@ async function uploadTextToVideos(
 }
 
 /** The render_timeline stored by the previous render, if it parses. */
-function parseStoredTimeline(raw: unknown): RenderTimeline | null {
+export function parseStoredTimeline(raw: unknown): RenderTimeline | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const t = raw as Partial<RenderTimeline>;
   if (!Array.isArray(t.texts) || !Array.isArray(t.images) || typeof t.width !== 'number') {
@@ -299,11 +301,11 @@ function parseStoredTimeline(raw: unknown): RenderTimeline | null {
 type OverlayStage = 'composite' | 'text';
 
 /** overlay_render_id for an in-flight Upload-Post job of one overlay stage. */
-function stageJobId(stage: OverlayStage, jobId: string): string {
+export function stageJobId(stage: OverlayStage, jobId: string): string {
   return `${FFMPEG_JOB_PREFIX}${stage}:${jobId}`;
 }
 
-function parseStageJobId(stored: string | null): { stage: OverlayStage; jobId: string } | null {
+export function parseStageJobId(stored: string | null): { stage: OverlayStage; jobId: string } | null {
   if (!stored?.startsWith(FFMPEG_JOB_PREFIX)) return null;
   const rest = stored.slice(FFMPEG_JOB_PREFIX.length);
   const sep = rest.indexOf(':');
@@ -313,12 +315,21 @@ function parseStageJobId(stored: string | null): { stage: OverlayStage; jobId: s
   return { stage, jobId: rest.slice(sep + 1) };
 }
 
-/** Signs brief-assets paths in order. */
-async function signBriefAssets(admin: AdminClient, paths: string[]): Promise<string[]> {
+/**
+ * Bucket an overlay picture lives in. Studio uploads sit in `videos` as
+ * `{company}/{assignment}/asset-{id}.{ext}`; everything else (brief media,
+ * the brand library) is in `brief-assets`.
+ */
+export function overlayImageBucket(path: string): 'videos' | 'brief-assets' {
+  return /^[^/]+\/[^/]+\/asset-[^/]+$/.test(path) ? 'videos' : 'brief-assets';
+}
+
+/** Signs overlay picture paths in order, each from the bucket it lives in. */
+export async function signBriefAssets(admin: AdminClient, paths: string[]): Promise<string[]> {
   const urls: string[] = [];
   for (const path of paths) {
     const { data, error } = await admin.storage
-      .from('brief-assets')
+      .from(overlayImageBucket(path))
       .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
     if (error || !data?.signedUrl) {
       throw new Error(`could not sign ${path}: ${error?.message}`);
@@ -421,7 +432,7 @@ function compositeSignature(timeline: RenderTimeline): string {
 // text stage. Resolves null when the current job is still running at the
 // deadline; the caller hands the wait to a fresh invocation, which resumes on
 // the stored stage and job id.
-async function renderOverlaysWithFfmpeg(params: {
+export async function renderOverlaysWithFfmpeg(params: {
   admin: AdminClient;
   timeline: RenderTimeline;
   videoPath: string;
@@ -509,7 +520,7 @@ async function renderOverlaysWithFfmpeg(params: {
 // frame, the admin's inset picture and text boxes burnt in, stored as a PNG.
 // A slide with an inset or a bubble runs the composite graph first (one job),
 // then the drawtext pass (one job); bare text is a single job.
-async function renderSlideWithFfmpeg(params: {
+export async function renderSlideWithFfmpeg(params: {
   admin: AdminClient;
   photoPath: string;
   boxes: SegmentBox[];
@@ -517,10 +528,12 @@ async function renderSlideWithFfmpeg(params: {
   outputPath: string;
   label: string;
   frame: SlideFrame;
+  /** Filters run on the photo before the frame conform (a document's source crop). */
+  preFilters?: string[];
 }): Promise<void> {
   const { admin, photoPath, boxes, inset, outputPath, label, frame } = params;
   const apiKey = uploadPostKey();
-  const conform = conformFilter(frame.width, frame.height);
+  const conform = [...(params.preFilters ?? []), conformFilter(frame.width, frame.height)].join(',');
   const timeline: RenderTimeline = {
     width: frame.width,
     height: frame.height,
@@ -624,7 +637,7 @@ export function instagramSlidePath(slidePath: string): string {
   return slidePath.replace(/\.[a-z0-9]+$/i, INSTAGRAM_SLIDE_SUFFIX);
 }
 
-type SlideFrame = { width: number; height: number };
+export type SlideFrame = { width: number; height: number };
 
 /**
  * Output size for a photo post. The app crops every slide to one of these
@@ -676,7 +689,7 @@ async function renderLetterboxedSlide(params: {
   });
 }
 
-async function renderInstagramSlide(admin: AdminClient, slidePath: string, label: string): Promise<string> {
+export async function renderInstagramSlide(admin: AdminClient, slidePath: string, label: string): Promise<string> {
   const outputPath = instagramSlidePath(slidePath);
   await renderLetterboxedSlide({
     admin,
@@ -848,7 +861,7 @@ function trimFilter(name: 'trim' | 'atrim', range: KeepRange): string {
 }
 
 // submissions.audio_gain applied after loudnorm; the limiter catches peaks.
-function gainFilters(gain: number): string {
+export function gainFilters(gain: number): string {
   if (gain === 1) return '';
   return `,volume=${gain.toFixed(2)},alimiter=limit=0.95:attack=5:release=50:level=false`;
 }
@@ -897,7 +910,7 @@ function storedClipCuts(raw: unknown, count: number): ClipCut[] | null {
 const TRANSCRIBE_CONCURRENCY = 3;
 const CUE_CONCURRENCY = 3;
 
-async function mapWithConcurrency<T, R>(
+export async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
@@ -914,7 +927,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function parseWords(raw: unknown): TranscriptWord[] | null {
+export function parseWords(raw: unknown): TranscriptWord[] | null {
   if (!Array.isArray(raw)) return null;
   const words: TranscriptWord[] = [];
   for (const item of raw as unknown[]) {
@@ -1186,16 +1199,16 @@ export async function signVideoUrls(
   return urls;
 }
 
-const VIDEO_CODEC =
+export const VIDEO_CODEC =
   '-c:v h264_nvenc -preset p6 -rc vbr -cq 19 -b:v 0 -maxrate 16M -bufsize 32M -profile:v high -pix_fmt yuv420p -movflags +faststart';
-const AUDIO_CODEC = '-c:a aac -b:a 128k';
-function conformFilter(width: number, height: number): string {
+export const AUDIO_CODEC = '-c:a aac -b:a 128k';
+export function conformFilter(width: number, height: number): string {
   return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
 }
-const CONFORM_1080x1920 = conformFilter(1080, 1920);
+export const CONFORM_1080x1920 = conformFilter(1080, 1920);
 
 // Upload-Post names a lone input {input}; several are {input0}, {input1}, ...
-function inputPlaceholder(index: number, total: number): string {
+export function inputPlaceholder(index: number, total: number): string {
   return total === 1 ? '{input}' : `{input${index}}`;
 }
 
@@ -1236,8 +1249,8 @@ async function normalizeClipPass(params: {
   });
 }
 
-const AUDIO_CONFORM = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
-const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+export const AUDIO_CONFORM = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
+export const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11';
 
 // One job: every keep range of every clip is trimmed and conformed (fps 30,
 // 1080x1920, 48k stereo) inside the graph, concat joins the pieces in order,
@@ -1465,7 +1478,7 @@ export type OverlayHandoff = () => Promise<boolean>;
 
 // How long one invocation waits on the overlay render before handing the
 // wait to the next one. Well inside the 400s edge function wall clock.
-const OVERLAY_WAIT_MS = 240_000;
+export const OVERLAY_WAIT_MS = 240_000;
 
 function isVideoFile(path: string): boolean {
   return /\.(mp4|mov|m4v|webm)$/i.test(path);
@@ -1481,7 +1494,7 @@ function isVideoFile(path: string): boolean {
  * Managers hear about a post once the edit is watchable, not at submit: the
  * push deep links into review, and review shows the finished cut.
  */
-async function notifyReadyForReview(admin: AdminClient, submissionId: string): Promise<void> {
+export async function notifyReadyForReview(admin: AdminClient, submissionId: string): Promise<void> {
   const secret = Deno.env.get('CRON_SECRET');
   if (!secret) return;
   const { data } = await admin

@@ -4,6 +4,14 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import { createVideoPlayer } from 'expo-video';
 
 import { cropPixels, type PhotoCrop, type SourceSize } from '../components/creator/slides/photo-crop';
+import {
+  allAssetsUploaded,
+  assetById,
+  blockDurationMs,
+  documentDurationMs,
+  serializeEditDocument,
+  type EditDocument,
+} from './edit-document';
 import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
@@ -218,6 +226,8 @@ async function createAssignmentSubmission(params: {
   slideAspect?: SlideAspect;
   /** Photo posts only: the creator's 4:5 Instagram cut of each slide. */
   instagramPaths?: string[] | null;
+  /** Studio posts: the frozen edit document the render builds from. */
+  project?: { id: string; document: Json } | null;
 }): Promise<Assignment> {
   const {
     assignment,
@@ -231,6 +241,7 @@ async function createAssignmentSubmission(params: {
     cues,
     slideAspect,
     instagramPaths,
+    project,
   } = params;
 
   const { data: submission, error: insertError } = await supabase
@@ -246,6 +257,7 @@ async function createAssignmentSubmission(params: {
       ...(cues && cues.length > 0 ? { cues: cues as unknown as Json } : {}),
       ...(slideAspect !== undefined ? { slide_aspect: slideAspect } : {}),
       ...(instagramPaths ? { instagram_segment_paths: instagramPaths } : {}),
+      ...(project ? { project_id: project.id, edit_document: project.document } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -332,6 +344,69 @@ export async function submitAssignmentClips(params: {
     format: 'video',
     audioGain: audioGain ?? null,
     cues: cues ?? null,
+  });
+}
+
+/**
+ * Submit a studio project. Every referenced asset must already be in the
+ * videos bucket (the studio uploads in the background); the document is
+ * frozen onto the submission and render-submission builds the final media
+ * from it. segment_paths carries the asset paths in timeline order so older
+ * readers (review, storage cleanup) keep working.
+ */
+export async function submitProject(params: {
+  assignment: Assignment;
+  companyId: string;
+  creatorId: string;
+  projectId: string;
+  document: EditDocument;
+}): Promise<Assignment> {
+  const { assignment, companyId, creatorId, projectId, document } = params;
+  if (!allAssetsUploaded(document)) {
+    throw new Error('Still uploading your clips');
+  }
+  const version = await nextVersion('assignment_id', assignment.id);
+  const project = { id: projectId, document: serializeEditDocument(document) };
+
+  if (document.format === 'slideshow') {
+    if (document.slides.length === 0) throw new Error('Add at least one photo');
+    const paths = document.slides.map((s) => assetById(document, s.assetId)?.storagePath ?? '');
+    return createAssignmentSubmission({
+      assignment,
+      companyId,
+      creatorId,
+      version,
+      paths,
+      durationsMs: paths.map(() => null),
+      durationSeconds: null,
+      format: 'photo',
+      audioGain: null,
+      slideAspect: document.aspect,
+      project,
+    });
+  }
+
+  if (document.blocks.length === 0) throw new Error('Nothing recorded yet');
+  const paths: string[] = [];
+  const durationsMs: number[] = [];
+  for (const block of document.blocks) {
+    const path = assetById(document, block.cells[0].assetId)?.storagePath;
+    if (!path) throw new Error('Still uploading your clips');
+    paths.push(path);
+    durationsMs.push(blockDurationMs(block));
+  }
+  const durationSeconds = Math.max(1, Math.round(documentDurationMs(document) / 1000));
+  return createAssignmentSubmission({
+    assignment,
+    companyId,
+    creatorId,
+    version,
+    paths,
+    durationsMs,
+    durationSeconds,
+    format: 'video',
+    audioGain: document.gain,
+    project,
   });
 }
 

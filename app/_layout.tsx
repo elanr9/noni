@@ -6,6 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { ShareIntentProvider } from 'expo-share-intent';
 import * as SplashScreen from 'expo-splash-screen';
 import { isLoaded, useFonts } from 'expo-font';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ConfigErrorScreen } from '../components/Screen';
 import { CompanyOverlays } from '../components/shared';
@@ -65,20 +66,22 @@ function App() {
   if (!fontsReady) return null;
 
   return (
-    <ShareIntentProvider>
-      <AuthProvider>
-        <CompanyProvider>
-          <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              animation: screenTransition.fade,
-              animationDuration: motion.base,
-            }}
-          />
-          <CompanyOverlays />
-        </CompanyProvider>
-      </AuthProvider>
-    </ShareIntentProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ShareIntentProvider>
+        <AuthProvider>
+          <CompanyProvider>
+            <StatusBar style="dark" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                animation: screenTransition.fade,
+                animationDuration: motion.base,
+              }}
+            />
+            <CompanyOverlays />
+          </CompanyProvider>
+        </AuthProvider>
+      </ShareIntentProvider>
+    </GestureHandlerRootView>
   );
 }

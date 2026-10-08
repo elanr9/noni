@@ -164,11 +164,7 @@ export default function HomeScreen() {
   // F5: Fix it goes straight to the normal record/upload flow, the same
   // route Messages and the posts changes detail push for a re-record.
   const recordRoute = (a: AssignmentWithBrief) => {
-    if (a.briefs.format === 'photo_carousel' && a.briefs.post_type_id !== null) {
-      router.push(`/(creator)/upload/${a.id}`);
-      return;
-    }
-    router.push(`/(creator)/record/${a.id}?assignment=1`);
+    router.push(`/(creator)/studio/${a.id}`);
   };
 
   const recordOrCatchUp = (a: AssignmentWithBrief) => {

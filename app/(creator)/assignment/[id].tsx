@@ -269,15 +269,7 @@ export default function AssignmentDetailScreen() {
 
   function onRecord() {
     if (!assignment) return;
-    if (assignment.status === 'changes_requested') {
-      router.push(`/(creator)/record/changes/${assignment.id}`);
-      return;
-    }
-    if (usesUpload) {
-      router.push(`/(creator)/upload/${assignment.id}`);
-      return;
-    }
-    router.push(`/(creator)/record/${assignment.id}?assignment=1`);
+    router.push(`/(creator)/studio/${assignment.id}`);
   }
 
   return (

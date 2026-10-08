@@ -17,10 +17,42 @@ struct PieceRecord: Record {
   @Field var crop: CropRecord? = nil
 }
 
+/// One cell of a block. `kind == "image"` cells carry no media on the native
+/// side: they reserve their time in the composition and JS draws the picture.
+struct CellRecord {
+  var kind: String = "video"
+  var uri: String = ""
+  var inMs: Double = 0
+  var outMs: Double = 0
+  var speed: Double = 1
+  var muted: Bool = false
+  var crop: CropRecord? = nil
+
+  var isVideo: Bool {
+    kind == "video" && !uri.isEmpty
+  }
+}
+
+struct BlockRecord {
+  var layout: String = "single"
+  var durationMs: Double = 0
+  var cells: [CellRecord] = []
+}
+
 struct TimelineRecord: Record {
   @Field var pieces: [PieceRecord] = []
 
+  var blocks: [BlockRecord] = []
+  var isBlockTimeline = false
+
+  var isEmpty: Bool {
+    isBlockTimeline ? blocks.isEmpty : pieces.isEmpty
+  }
+
   static func parse(_ raw: [String: Any]) throws -> TimelineRecord {
+    if let blocks = raw["blocks"] as? [Any] {
+      return try parseBlocks(blocks)
+    }
     guard let pieces = raw["pieces"] as? [Any] else {
       throw VideoEditorException("timeline.pieces is missing")
     }
@@ -35,16 +67,46 @@ struct TimelineRecord: Record {
       piece.outMs = number(dict["outMs"]) ?? 0
       piece.speed = number(dict["speed"]) ?? 1
       piece.muted = (dict["muted"] as? Bool) ?? false
-      if let crop = dict["crop"] as? [String: Any] {
-        var cropRecord = CropRecord()
-        cropRecord.scale = number(crop["scale"]) ?? 1
-        cropRecord.x = number(crop["x"]) ?? 0
-        cropRecord.y = number(crop["y"]) ?? 0
-        piece.crop = cropRecord
-      }
+      piece.crop = parseCrop(dict["crop"])
       return piece
     }
     return record
+  }
+
+  private static func parseBlocks(_ blocks: [Any]) throws -> TimelineRecord {
+    var record = TimelineRecord()
+    record.isBlockTimeline = true
+    record.blocks = try blocks.map { entry in
+      guard let dict = entry as? [String: Any], let cells = dict["cells"] as? [Any] else {
+        throw VideoEditorException("timeline block is missing cells")
+      }
+      var block = BlockRecord()
+      block.layout = (dict["layout"] as? String) ?? "single"
+      block.durationMs = number(dict["durationMs"]) ?? 0
+      block.cells = cells.map { cellEntry in
+        var cell = CellRecord()
+        guard let cellDict = cellEntry as? [String: Any] else { return cell }
+        cell.kind = (cellDict["kind"] as? String) ?? "video"
+        cell.uri = (cellDict["uri"] as? String) ?? ""
+        cell.inMs = number(cellDict["inMs"]) ?? 0
+        cell.outMs = number(cellDict["outMs"]) ?? 0
+        cell.speed = number(cellDict["speed"]) ?? 1
+        cell.muted = (cellDict["muted"] as? Bool) ?? false
+        cell.crop = parseCrop(cellDict["crop"])
+        return cell
+      }
+      return block
+    }
+    return record
+  }
+
+  private static func parseCrop(_ value: Any?) -> CropRecord? {
+    guard let crop = value as? [String: Any] else { return nil }
+    var cropRecord = CropRecord()
+    cropRecord.scale = number(crop["scale"]) ?? 1
+    cropRecord.x = number(crop["x"]) ?? 0
+    cropRecord.y = number(crop["y"]) ?? 0
+    return cropRecord
   }
 
   private static func number(_ value: Any?) -> Double? {

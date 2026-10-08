@@ -7,6 +7,13 @@ import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modu
 import { Platform, type StyleProp, type ViewStyle } from 'react-native';
 import type { ComponentType, Ref } from 'react';
 
+import {
+  assetById,
+  blockDurationMs,
+  type AssetKind,
+  type BlockLayout,
+  type VideoDocument,
+} from '../../lib/edit-document';
 import type { EditCrop, EditPiece, EditTimeline } from '../../lib/video-edit';
 
 /** Piece as the native side reads it. Times are source milliseconds. */
@@ -21,6 +28,23 @@ export type NativePiece = {
 
 export type NativeTimeline = { pieces: NativePiece[] };
 
+/** One cell of a studio block. Image cells send kind 'image' and no media;
+ * the native side keeps their time with an empty range and JS draws them. */
+export type NativeCell = {
+  kind: AssetKind;
+  uri: string;
+  inMs: number;
+  outMs: number;
+  speed: number;
+  muted: boolean;
+  crop: EditCrop | null;
+};
+
+export type NativeBlock = { layout: BlockLayout; durationMs: number; cells: NativeCell[] };
+
+/** Studio document shape: two video and two audio tracks, 1080x1920 render. */
+export type NativeBlockTimeline = { blocks: NativeBlock[] };
+
 export type ExportResult = { uri: string; durationMs: number };
 
 /** Where speech starts and ends in a clip, in source milliseconds. Equals
@@ -32,7 +56,7 @@ export type PreviewReadyEvent = { nativeEvent: { durationMs: number } };
 export type PreviewErrorEvent = { nativeEvent: { message: string } };
 
 export type VideoEditorPreviewProps = {
-  timeline: NativeTimeline;
+  timeline: NativeTimeline | NativeBlockTimeline;
   /** Continuous playback flag. Native pauses itself at the end and fires onEnd. */
   playing: boolean;
   style?: StyleProp<ViewStyle>;
@@ -87,6 +111,35 @@ export function toNativePiece(piece: EditPiece): NativePiece {
 
 export function toNativeTimeline(timeline: EditTimeline): NativeTimeline {
   return { pieces: timeline.pieces.map(toNativePiece) };
+}
+
+/** A video cell without a local file plays as an image cell (black on the
+ * native side) until its asset is available on this device. */
+export function toNativeBlockTimeline(doc: VideoDocument): NativeBlockTimeline {
+  return {
+    blocks: doc.blocks.map((block) => ({
+      layout: block.layout,
+      durationMs: blockDurationMs(block),
+      cells: block.cells.map((cell) => {
+        const asset = assetById(doc, cell.assetId);
+        const uri = asset?.kind === 'video' ? asset.localUri : null;
+        return {
+          kind: uri ? 'video' : 'image',
+          uri: uri ?? '',
+          inMs: cell.inMs,
+          outMs: cell.outMs,
+          speed: cell.speed,
+          muted: cell.muted,
+          crop: cell.crop,
+        };
+      }),
+    })),
+  };
+}
+
+/** True when at least one cell can play natively. */
+export function hasNativeVideo(timeline: NativeBlockTimeline): boolean {
+  return timeline.blocks.some((b) => b.cells.some((c) => c.kind === 'video'));
 }
 
 /** Render the pieces into one mp4 in the cache directory. */

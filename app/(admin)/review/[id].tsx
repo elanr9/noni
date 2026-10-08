@@ -836,7 +836,11 @@ export default function ReviewScreen() {
           takeLabel={attempt > 1 ? `Take ${attempt}` : undefined}
           onBack={() => router.back()}
           onEdit={
-            submission !== null && (fullEditor || editTargets.length > 0) ? openEdit : undefined
+            submission !== null &&
+            submission.edit_document === null &&
+            (fullEditor || editTargets.length > 0)
+              ? openEdit
+              : undefined
           }
           onChat={() =>
             router.push({

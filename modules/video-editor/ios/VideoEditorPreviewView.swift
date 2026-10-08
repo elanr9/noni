@@ -110,7 +110,7 @@ final class VideoEditorPreviewView: ExpoView {
       self.generation += 1
       let myGeneration = self.generation
 
-      if timeline.pieces.isEmpty {
+      if timeline.isEmpty {
         self.clearItem()
         self.onReady(["durationMs": 0])
         return

@@ -10,6 +10,7 @@ import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import {
+  disconnectSocialAccounts,
   getSocialConnectStatus,
   getSocialConnectUrl,
   type SocialConnectStatus,
@@ -212,6 +213,39 @@ export default function ConnectAccountsScreen() {
     }
   };
 
+  const disconnect = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await disconnectSocialAccounts();
+      if (!alive.current) return;
+      celebrated.current = false;
+      setAttempted(false);
+      setStatus({ profile: null, social_accounts: {} });
+      if (profile !== null) {
+        void refreshSetupState(profile.active_company_id, profile.id).catch(() => undefined);
+      }
+    } catch (e) {
+      Alert.alert(
+        'We could not unlink your accounts',
+        e instanceof Error ? e.message : 'Try again in a moment.',
+      );
+    } finally {
+      if (alive.current) setBusy(false);
+    }
+  };
+
+  const confirmDisconnect = () => {
+    Alert.alert(
+      'Unlink your accounts?',
+      'Instagram and TikTok will be disconnected from Noni. You can link different accounts right after.',
+      [
+        { text: 'Keep linked', style: 'cancel' },
+        { text: 'Unlink', style: 'destructive', onPress: () => void disconnect() },
+      ],
+    );
+  };
+
   const finishCelebration = () => {
     setCelebrating(false);
     router.back();
@@ -219,24 +253,43 @@ export default function ConnectAccountsScreen() {
 
   const footer = (
     <>
-      {allConnected ? (
-        <Button size="lg" block icon="check" onPress={() => router.back()}>
-          Back to setup
-        </Button>
-      ) : (
-        <Button
-          size="lg"
-          block
-          icon="link"
-          disabled={busy || checking}
-          onPress={() => void connect()}
-        >
-          {busy
-            ? 'Opening…'
+      <Button
+        size="lg"
+        block
+        icon={allConnected ? 'repeat' : 'link'}
+        disabled={busy || checking}
+        onPress={() => void connect()}
+      >
+        {busy
+          ? 'Opening…'
+          : allConnected
+            ? 'Change accounts'
             : connectedCount === 1
               ? 'Connect the other one'
               : 'Connect accounts'}
-        </Button>
+      </Button>
+      {connectedCount > 0 && !checking && (
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Unlink accounts"
+          disabled={busy}
+          onPress={confirmDisconnect}
+          style={styles.recheck}
+        >
+          <Text style={[styles.recheckText, styles.unlinkText]}>
+            Unlink and connect different accounts
+          </Text>
+        </PressableScale>
+      )}
+      {allConnected && (
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Back to setup"
+          onPress={() => router.back()}
+          style={styles.recheck}
+        >
+          <Text style={styles.recheckText}>Back to setup</Text>
+        </PressableScale>
       )}
       {!allConnected && attempted && !checking && (
         <PressableScale
@@ -497,5 +550,8 @@ const styles = StyleSheet.create({
     fontSize: type.size.meta,
     fontWeight: type.weight.bold,
     color: color.slate500,
+  },
+  unlinkText: {
+    color: color.danger,
   },
 });

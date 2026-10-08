@@ -2,9 +2,22 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 type Body = {
-  action: 'status' | 'connect_url' | 'team_status' | 'cleanup_profiles';
+  action:
+    | 'status'
+    | 'connect_url'
+    | 'disconnect'
+    | 'team_status'
+    | 'cleanup_profiles';
   creator_id?: string;
 };
+
+const ACTIONS: Body['action'][] = [
+  'status',
+  'connect_url',
+  'disconnect',
+  'team_status',
+  'cleanup_profiles',
+];
 
 function uploadPostKey(): string {
   const key = Deno.env.get('UPLOAD_POST_API_KEY');
@@ -104,14 +117,9 @@ Deno.serve(async (req) => {
   if (preflight) return preflight;
   try {
     const body = (await req.json().catch(() => null)) as Body | null;
-    if (
-      !body?.action ||
-      !['status', 'connect_url', 'team_status', 'cleanup_profiles'].includes(
-        body.action,
-      )
-    ) {
+    if (!body?.action || !ACTIONS.includes(body.action)) {
       return jsonResponse(
-        { error: 'expected { action: status|connect_url|team_status }' },
+        { error: `expected { action: ${ACTIONS.join('|')} }` },
         400,
       );
     }
@@ -269,7 +277,10 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'creator not found' }, 404);
       }
       targetId = target.id;
-    } else if (isManager && body.action === 'connect_url') {
+    } else if (
+      isManager &&
+      (body.action === 'connect_url' || body.action === 'disconnect')
+    ) {
       // Dual-role admins (can_create) connect their own socials like creators.
       const { data: self } = await admin
         .from('profiles')
@@ -314,7 +325,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // connect_url — creator, or dual admin connecting self
+    // connect_url / disconnect — creator, or dual admin acting on self
     const { data: selfRow } = await admin
       .from('profiles')
       .select('can_create')
@@ -325,7 +336,38 @@ Deno.serve(async (req) => {
       !(caller.role === 'creator' || dualAdmin) ||
       targetId !== caller.id
     ) {
-      return jsonResponse({ error: 'only the creator can connect their socials' }, 403);
+      return jsonResponse({ error: 'only the creator can manage their socials' }, 403);
+    }
+
+    // Upload-Post has no per-platform unlink endpoint, so disconnecting
+    // deletes the whole profile (and its social connections). The next
+    // connect_url call recreates a fresh profile under the same username.
+    if (body.action === 'disconnect') {
+      if (target.upload_post_profile) {
+        const delRes = await fetch(
+          'https://api.upload-post.com/api/uploadposts/users',
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Apikey ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ username: target.upload_post_profile }),
+          },
+        );
+        if (!delRes.ok && delRes.status !== 404) {
+          return jsonResponse(
+            { error: 'could not unlink accounts', detail: await delRes.text() },
+            502,
+          );
+        }
+      }
+      const { error } = await admin
+        .from('profiles')
+        .update({ upload_post_profile: null })
+        .eq('id', caller.id);
+      if (error) throw error;
+      return jsonResponse({ profile: null, social_accounts: {} });
     }
 
     const profileUser = await ensureUploadPostProfile(
