@@ -1,4 +1,4 @@
-// Morning due-today / overdue pushes for creators. Hourly cron at :15; only
+// Morning due-today pushes for creators. Hourly cron at :15; only
 // acts in America/New_York hour 8–9. Account warm-up pushes fire in hour 14
 // every 3 days starting 2026-09-28. Claims via creator_reminders insert so
 // concurrent runs cannot double-send. One push per creator per kind per day.
@@ -446,8 +446,8 @@ Deno.serve(async (req) => {
       const tz = tzByCompany.get(raw.company_id) ?? 'America/Chicago';
       const today = todayInTz(tz);
       let kind: ReminderKind | null = null;
+      // Past-day posts are shown as missed in the app; no push for them.
       if (raw.scheduled_date === today) kind = 'due_today';
-      else if (raw.scheduled_date < today) kind = 'overdue';
       if (!kind) continue;
       const key = `${raw.company_id}:${raw.creator_id}:${kind}:${today}`;
       const list = grouped.get(key) ?? [];
