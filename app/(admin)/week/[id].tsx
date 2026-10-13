@@ -21,7 +21,6 @@ import { SkeletonCard } from '../../../components/ui/Skeleton';
 import {
   briefWeekOpensLabel,
   briefWeekRangeLabel,
-  briefWeekStatus,
   listWeekLanes,
   weekNumber as fetchWeekNumber,
   type BriefMediaFormat,
@@ -114,9 +113,10 @@ export default function WeekScreen() {
   const leftCount = allSlots.length - readyCount;
   const published = campaign?.status === 'published';
   const editable = campaign?.status === 'draft';
-  const isDone = campaign ? briefWeekStatus(campaign).status === 'done' : false;
-  const phase: WeekPhase = published ? 'published' : leftCount === 0 ? 'complete' : 'in_progress';
-  const showFooter = !needsWeekSetup && (published || (editable && readyCount > 0));
+  // Publishing waits for the full week: every slot filled and ready. Once
+  // published, no partial sends, Plan more days or Start next week here.
+  const phase: WeekPhase = 'complete';
+  const showFooter = !needsWeekSetup && !published && editable && allSlots.length > 0 && leftCount === 0;
 
   /** Publish opens the day planner: pick or randomize the days. */
   function openPlanner() {
@@ -216,13 +216,11 @@ export default function WeekScreen() {
               <WeekFooter
                 phase={phase}
                 left={leftCount}
-                readyCount={readyCount}
                 weekNumber={week}
                 beforeCutoff={campaign?.drop_date ? isBeforeNotifyCutoff(campaign.drop_date) : true}
                 publishing={false}
                 onPublish={openPlanner}
-                onStartNext={() => router.push('/(admin)/week-setup')}
-                onPlanMore={published && !isDone ? openPlanner : undefined}
+                onStartNext={openPlanner}
               />
             ) : null}
           </>
