@@ -2280,7 +2280,8 @@ export type SlideBox = { x: number; y: number; w: number };
 export type SlideTextStyle = {
   size?: number;
   align?: 'left' | 'center' | 'right';
-  bg?: 'none' | 'box' | 'outline';
+  /** outline = outlined letters, box = solid box, soft = translucent box. */
+  bg?: 'none' | 'box' | 'outline' | 'soft';
   color?: string;
   font?: string;
 };
@@ -2362,7 +2363,7 @@ function parseTextStyle(value: unknown): SlideTextStyle | undefined {
   const out: SlideTextStyle = {};
   if (typeof value.size === 'number') out.size = value.size;
   if (value.align === 'left' || value.align === 'center' || value.align === 'right') out.align = value.align;
-  if (value.bg === 'none' || value.bg === 'box' || value.bg === 'outline') out.bg = value.bg;
+  if (value.bg === 'none' || value.bg === 'box' || value.bg === 'outline' || value.bg === 'soft') out.bg = value.bg;
   if (typeof value.color === 'string') out.color = value.color;
   if (typeof value.font === 'string') out.font = value.font;
   return out;

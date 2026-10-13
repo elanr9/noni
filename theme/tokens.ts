@@ -126,7 +126,9 @@ export const briefTone = {
   done: '#22C55E',
   canvas: { bg: '#1C2128', chrome: '#2A3038', thumb: '#2A3038' },
   /** "You" legend swatch and manager slide placeholder gradient (top to bottom). */
-  managerSlide: ['#CFDCE8', '#4F6276'],
+  managerSlide: ['#CFDCE8', '#8FA3B6', '#4F6276'],
+  /** Canvas text style swatches (SSCanvas SWATCHES), in order. */
+  textSwatches: ['#FFFFFF', '#0F1720', '#1BA6EE', '#3DBE5B', '#F6C445', '#F58B1F', '#E5484D', '#D6246E', '#8E24AA'],
   /** Creator preview sheet gradient (top to bottom). */
   previewSky: ['#E9F3FC', '#B7C6D4', '#3C4B59'],
   /** Dashed creator slide stripes. */

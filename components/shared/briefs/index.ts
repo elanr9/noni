@@ -7,3 +7,5 @@ export { StepStrip } from './StepStrip';
 export type { BriefStep, StepStripProps } from './StepStrip';
 export { BriefHeader, HeaderIconButton } from './BriefHeader';
 export type { BriefHeaderProps } from './BriefHeader';
+export { InkToast } from './InkToast';
+export type { InkToastProps } from './InkToast';
