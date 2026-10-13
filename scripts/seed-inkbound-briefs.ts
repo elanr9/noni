@@ -171,7 +171,7 @@ async function main(): Promise<void> {
     `update briefs set kind = 'handheld', post_type_id = ${lit(typeId('numbered_tips'))}, title = 'College soccer program red flags',
        caption = ${lit(CAPTION)}, hashtags = ${arr(HASHTAGS)}, search_phrase = ${lit(SEARCH)},
        slides = ${json(handheldSlides(hl))}, cta = ${lit('Tip 3: Inkbound makes your highlight video in 6 minutes.')}, cta_feature_id = ${lit(hl)},
-       creator_note = ${lit('Use real game photos, not stock. Your own film if you have it.')}, status = 'ready'
+       creator_note = ${lit('Use real game photos, not stock. Your own film if you have it.')}, status = 'ready', reviewed_at = now()
      where id = ${lit(shows[0].id)}`,
   );
   // Reel slot 01: handheld, Numbered list.
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     `update briefs set kind = 'handheld', post_type_id = ${lit(typeId('numbered_list'))}, title = '5 tips for the perfect highlight video',
        caption = ${lit(CAPTION)}, hashtags = ${arr(HASHTAGS)}, search_phrase = ${lit(SEARCH)},
        slides = ${json(reelSlides(hl))}, cta = ${lit('Tip 3: Inkbound makes your highlight video in 6 minutes.')}, cta_feature_id = ${lit(hl)},
-       creator_note = ${lit('Natural light. Say the hook to camera, then cut.')}, status = 'ready'
+       creator_note = ${lit('Natural light. Say the hook to camera, then cut.')}, status = 'ready', reviewed_at = now()
      where id = ${lit(reels[0].id)}`,
   );
   // Reel slot 02: story, Talking head.
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
        ])},
        story = ${json({ theme: 'What a $40 camera sees that your coach misses', beats: [], min: 3, max: 6 })},
        cta = ${lit('Inkbound got my film in front of 40 coaches. Link in bio.')}, cta_feature_id = ${lit(hl)},
-       creator_note = ${lit('Say your credential first.')}, status = 'ready'
+       creator_note = ${lit('Say your credential first.')}, status = 'ready', reviewed_at = now()
      where id = ${lit(reels[1].id)}`,
   );
 

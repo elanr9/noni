@@ -56,7 +56,7 @@ function formatDay(iso: string | null): string {
 }
 
 function metricText(v: number | null): string {
-  return v === null ? '–' : formatMetric(v);
+  return v === null ? '0' : formatMetric(v);
 }
 
 function PostVideo({ uri }: { uri: string }) {

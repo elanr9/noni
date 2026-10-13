@@ -2611,6 +2611,8 @@ function slidesToJson(slides: BriefSlide[]): Json {
 
 function weekBriefPatch(input: WeekBriefInput, status: BriefStatus) {
   return {
+    // Publishing (week-plan and publish-campaign) treats reviewed_at as "complete".
+    reviewed_at: status === 'ready' ? new Date().toISOString() : null,
     kind: input.kind,
     post_type_id: input.postTypeId,
     title: input.title.trim() || PLACEHOLDER_BRIEF_TITLE,
@@ -2656,6 +2658,7 @@ export async function clearWeekSlot(briefId: string): Promise<void> {
       cta: null,
       cta_feature_id: null,
       creator_note: null,
+      reviewed_at: null,
       status: 'draft',
     })
     .eq('id', briefId);

@@ -9,7 +9,7 @@
 | 5 | Manager reel editor | manager agent | briefs-manager (merged) | done |
 | 6 | Creator home and slideshow | creator agent | briefs-creator (merged) | done |
 | 7 | Creator reel record and editor | creator agent | briefs-creator (merged) | done |
-| 8 | Full loop test and polish | orchestrator | briefs-redesign | in progress |
+| 8 | Full loop test and polish | orchestrator | briefs-redesign | done (data level; device pass needs a build) |
 
 ## Job 1: Audit
 Plan: read handoff, map screens, write `AUDIT.md`, copy rules to `.cursor/rules/noni-design.mdc`.
@@ -98,6 +98,8 @@ Done (commits `briefs: job 7 creator 1/2`, `briefs: job 7 creator reel record an
   - Captions track: the bar reflects `subtitles.enabled`; there is no on device transcript preview.
 
 ## Job 8: Full loop test and polish
+Plan: data level loop (publish seeded briefs to Inkbound creators, verify creator day query), `reviewed_at` set by `addBriefToWeek` so publishing accepts redesign briefs, dash grep, typecheck, lint, tests, `DONE.md`.
+Done. See `DONE.md`. Device pass is pending a new build (new native dependency `expo-linear-gradient`); no Xcode or simulator on this machine.
 
 ## Shared change requests
 (lanes write requests here and stop that item)
