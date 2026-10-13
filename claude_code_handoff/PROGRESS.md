@@ -5,7 +5,7 @@
 | 1 | Audit | orchestrator | briefs-redesign | done |
 | 2 | Database and API | orchestrator | briefs-redesign | done |
 | 3 | Manager week and kind picker | manager agent | briefs-manager | done |
-| 4 | Manager slideshow editor | manager agent | briefs-manager | pending |
+| 4 | Manager slideshow editor | manager agent | briefs-manager | done |
 | 5 | Manager reel editor | manager agent | briefs-manager | pending |
 | 6 | Creator home and slideshow | creator agent | briefs-creator | in progress |
 | 7 | Creator reel record and editor | creator agent | briefs-creator | pending |
@@ -37,6 +37,14 @@ Done.
 
 ## Job 4: Manager slideshow editor
 Plan: `components/admin/briefs/editor/useBriefEditor.ts` (HandheldEditor state: steps, slides, count, AI actions, save mapping), `editor/BriefEditor.tsx` (step switch, sheets), `canvas/CanvasEditor.tsx` + `PlatformGhost.tsx` + `TextBoxView.tsx` + `InsetSticker.tsx` + `TextToolbar.tsx` + `CanvasFooter.tsx` (Reanimated and gesture handler), `editor/DetailsStep.tsx` + `TagField.tsx`, `editor/ReviewScreen.tsx` + `FypChrome.tsx`, `sheets/MediaSheet.tsx`, `CountSheet.tsx`, `FeatureSheet.tsx`, `CtaIntro.tsx`, `ReviseSheet.tsx`; wire `app/(admin)/brief/[id].tsx` to it. Commits per sub step.
+Done.
+- Story follows the live prototype path (`HandheldEditor kind="story"`: Cover, CTA, Details, Review on the canvas), not the unused `StoryEditor` form. Theme = the cover text, beats are not editable (none in the live path, stored as `[]`), min and max come from the "Creator's slides" sheet (prototype `gapOpen`, which had no trigger; it opens from the "Creator picks the count" pill) or from the Numbered tips count. Freestyle has no prompt or must-have UI in the prototype source, so `OpenEditor` matches `SSManager.OpenEditor` and `open` keeps the defaults.
+- `SlideStage` did not fit (TikTok metric `OverlayBox` model, no inline input, no swipe); the canvas is `components/admin/briefs/canvas/*` on gesture handler and Reanimated with the prototype durations (160 slide in, 180 to 320 tools, 520 place, 1400 busy ring).
+- Extra text boxes and photo stickers (`extras`, `pics`) are not in `BriefSlide`, so the canvas edits one text box and one inset per slide; the media sheet shows the Library tab only (no camera roll tab, nothing to store a roll pick in). Requests below.
+- AI: Fill with AI and Write points call `assistRegenerateField` (`talking_points`, `hook`, `caption`, `search_phrase`); Revise chips call `assistRevise`. Generate with AI for the CTA has no endpoint: the CTA is filled from the matched Library feature's `cta` shaped by post type (`matchFeature`, port of the prototype's). Revise opens from a sparkles tool on slides that already have text (the prototype defines `ReviseSheet` without a trigger).
+- Text style: outline, box and none (the lib `SlideTextStyle.bg` union); fonts map to System, Courier New and Snell Roundhand.
+- Note tool and shot pill are on for Handheld slideshows too (prototype passed `notes={story || reel}`), otherwise a slideshow shot direction could never be written.
+- Review manager slide background uses `color.slate500` to `briefTone.canvas.chrome` (prototype `#7B8CA0` to `#2E3A48`, not tokens).
 
 ## Job 5: Manager reel editor
 
@@ -53,3 +61,7 @@ Plan: `components/admin/briefs/editor/useBriefEditor.ts` (HandheldEditor state: 
 - manager: `theme/tokens.ts` `briefTone.managerSlide` mid stop `#8FA3B6` (prototype gradient is three stops) and `briefTone.canvas.chrome` already covers `#2A3038`.
 - manager: `lib/briefs-api.ts` `SlideTextStyle.bg` add `'soft'` (prototype has outline, solid, soft, none; `'box'` maps to solid). The text background toggle cycles outline, box, none meanwhile.
 - manager: `package.json` `expo-linear-gradient` so slide gradients are real gradients instead of `GradientFill` bands.
+- manager: `lib/briefs-api.ts` `BriefSlide.extras?: { id: string; text: string; box: SlideBox; box_ig?: SlideBox; tstyle?: SlideTextStyle }[]` and `BriefSlide.pics?: { id: string; path: string; box: SlideBox; box_ig?: SlideBox }[]` (prototype extra text boxes and photo stickers), with `parseSlides` and `slidesToJson` support. The canvas edits one text box and one inset per slide meanwhile.
+- manager: `brief-assist` action for a CTA line from a feature (`field: 'cta'`, input `feature_id`, `post_type`, `title`, `index`) so Generate with AI stops using the feature's `claim` verbatim.
+- manager: `theme/tokens.ts` `briefTone.reviewSlide: ['#7B8CA0', '#2E3A48']` (prototype `photoBg('camera')` behind manager slides on Review).
+- manager: `lib/library-api.ts` `LibraryFeature.clipLength: string | null` (prototype `clip: '0:06'` badge on reel screenshots); the Shot badge shows `0:07` meanwhile.
