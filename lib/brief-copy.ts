@@ -1,0 +1,252 @@
+// Verbatim copy for the briefs redesign, from
+// claude_code_handoff/reference_ui/briefs/ss-data.js.txt. UI reads strings
+// from here; nothing in this file touches the network.
+
+import type { BriefKind, BriefMediaFormat, MustHave } from './briefs-api';
+
+export type KindCopy = {
+  name: string;
+  line: string;
+  creatorCta: string;
+};
+
+export const KIND_ORDER: BriefKind[] = ['handheld', 'story', 'open'];
+
+export const KINDS_SLIDESHOW: Record<BriefKind, KindCopy> = {
+  handheld: {
+    name: 'Handheld',
+    line: 'You write every slide. The creator adds photos.',
+    creatorCta: 'Add your photos',
+  },
+  story: {
+    name: 'Story',
+    line: 'You set the title and CTA. The creator picks the text and images.',
+    creatorCta: 'Tell your story',
+  },
+  open: {
+    name: 'Freestyle',
+    line: 'No instructions. The creator makes whatever they want.',
+    creatorCta: 'Make it',
+  },
+};
+
+export const KINDS_REEL: Record<BriefKind, KindCopy> = {
+  handheld: {
+    name: 'Handheld',
+    line: 'You write the hook and every point. The creator records.',
+    creatorCta: 'Record it',
+  },
+  story: {
+    name: 'Story',
+    line: 'You set the hook and CTA. The creator fills the middle.',
+    creatorCta: 'Tell your story',
+  },
+  open: {
+    name: 'Freestyle',
+    line: 'No instructions. The creator makes whatever they want.',
+    creatorCta: 'Make it',
+  },
+};
+
+export function kindsFor(format: BriefMediaFormat): Record<BriefKind, KindCopy> {
+  return format === 'reel' ? KINDS_REEL : KINDS_SLIDESHOW;
+}
+
+export type PostTypeCopy = {
+  /** Prototype id, stable across companies. */
+  id: string;
+  /** post_types.key for the company row. */
+  key: string;
+  format: BriefMediaFormat;
+  name: string;
+  line: string;
+  about: string;
+  example: string;
+  slides: string[];
+  minPoints: number;
+  maxPoints: number;
+  clipStructure: 'hook_points_outro' | 'single_clip' | 'slide_per_point';
+};
+
+export const POST_TYPES_SLIDESHOW: PostTypeCopy[] = [
+  {
+    id: 'howto',
+    key: 'how_to',
+    format: 'slideshow',
+    name: 'How to',
+    line: 'Cover, 3 to 7 slides, close',
+    about: 'Slideshow with clean hook on how to do X.\nEx: "How to get a college soccer offer"',
+    example: 'How to email a college coach',
+    slides: ['Subject line they open', 'First line: who you are', 'Link your film', 'Ask one question'],
+    minPoints: 3,
+    maxPoints: 7,
+    clipStructure: 'slide_per_point',
+  },
+  {
+    id: 'tips',
+    key: 'numbered_tips',
+    format: 'slideshow',
+    name: 'Numbered tips',
+    line: 'Cover, 3 to 10 slides, close',
+    about: 'Slideshow with a number in the hook and one tip a slide.\nEx: "5 tips for the perfect highlight video"',
+    example: '5 tips for the perfect highlight video',
+    slides: ['Best clip first', 'Under 3 minutes', 'Spot shadow yourself', 'No music', 'Name and grad year on frame one'],
+    minPoints: 3,
+    maxPoints: 10,
+    clipStructure: 'slide_per_point',
+  },
+  {
+    id: 'start',
+    key: 'getting_started',
+    format: 'slideshow',
+    name: 'Getting started',
+    line: 'Cover, 3 to 7 slides, close',
+    about: 'Slideshow for someone starting from zero, first steps in order.\nEx: "Starting recruiting as a sophomore"',
+    example: 'Starting recruiting as a sophomore',
+    slides: ['Make your list of 30 schools', 'Film one game', 'Email 5 coaches a week'],
+    minPoints: 3,
+    maxPoints: 7,
+    clipStructure: 'slide_per_point',
+  },
+  {
+    id: 'myths',
+    key: 'myths',
+    format: 'slideshow',
+    name: 'Myths',
+    line: 'Cover, 3 to 6 slides, close',
+    about: 'Slideshow that calls out one myth a slide, then the truth.\nEx: "4 recruiting myths that cost you offers"',
+    example: '4 recruiting myths that cost you offers',
+    slides: ['Coaches find you', 'You need a recruiter', 'Only juniors get looked at'],
+    minPoints: 3,
+    maxPoints: 6,
+    clipStructure: 'slide_per_point',
+  },
+];
+
+export const POST_TYPES_REEL: PostTypeCopy[] = [
+  {
+    id: 'talking',
+    key: 'talking_head',
+    format: 'reel',
+    name: 'Talking head',
+    line: 'Hook, 3 to 6 points, close',
+    about: 'One person to camera. Credential first, then the hook, then the points.\nEx: "What a $40 camera sees that your coach misses"',
+    example: 'What a $40 camera sees that your coach misses',
+    slides: ['Your off ball runs', 'Where you look before the pass', 'How fast you recover'],
+    minPoints: 3,
+    maxPoints: 6,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'tips',
+    key: 'numbered_list',
+    format: 'reel',
+    name: 'Numbered list',
+    line: 'Hook, 3 to 8 points, close',
+    about: 'A number in the hook, one point a clip.\nEx: "5 tips for the perfect highlight video"',
+    example: '5 tips for the perfect highlight video',
+    slides: ['Best plays first', 'Under 3 minutes', 'Spot shadow yourself', 'No music'],
+    minPoints: 3,
+    maxPoints: 8,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'howto',
+    key: 'how_to_reel',
+    format: 'reel',
+    name: 'How to',
+    line: 'Hook, 3 to 6 steps, close',
+    about: 'Steps in order, each one shown on camera.\nEx: "How to email a college coach"',
+    example: 'How to email a college coach',
+    slides: ['Subject line they open', 'First line: who you are', 'Link your film', 'Ask one question'],
+    minPoints: 3,
+    maxPoints: 6,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'explainer',
+    key: 'explainer',
+    format: 'reel',
+    name: 'Explainer',
+    line: 'Hook, 2 to 5 beats, close',
+    about: 'One idea explained start to finish, with B roll.\nEx: "Why coaches ignore your emails"',
+    example: 'Why coaches ignore your emails',
+    slides: ['They get 200 a week', 'Yours has no film', 'Yours has no question'],
+    minPoints: 2,
+    maxPoints: 5,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'storytime',
+    key: 'storytime',
+    format: 'reel',
+    name: 'Storytime',
+    line: 'Hook, the story, close',
+    about: 'First person, past tense. The turn in the story is the plug.\nEx: "How I went from no offers to D1"',
+    example: 'How I went from no offers to D1',
+    slides: ['Where it started', 'The setback', 'The turn', 'Where I am now'],
+    minPoints: 2,
+    maxPoints: 6,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'green',
+    key: 'green_screen_react',
+    format: 'reel',
+    name: 'Green screen react',
+    line: 'Hook, 2 to 5 reacts, close',
+    about: 'A screenshot or clip behind the creator. They react to it.\nEx: "Reacting to a coach reply"',
+    example: 'Reacting to a real coach reply',
+    slides: ['What the coach said', 'What it really means', 'What to send back'],
+    minPoints: 2,
+    maxPoints: 5,
+    clipStructure: 'hook_points_outro',
+  },
+  {
+    id: 'longtext',
+    key: 'long_text',
+    format: 'reel',
+    name: 'Long text',
+    line: 'One clip, one long text',
+    about: 'A 6 second clip with a long text on it, longer than the clip, so it gets rewatched.\nEx: "Things nobody tells you about recruiting"',
+    example: 'Things nobody tells you about recruiting',
+    slides: [],
+    minPoints: 1,
+    maxPoints: 1,
+    clipStructure: 'single_clip',
+  },
+];
+
+export function postTypesFor(format: BriefMediaFormat): PostTypeCopy[] {
+  return format === 'reel' ? POST_TYPES_REEL : POST_TYPES_SLIDESHOW;
+}
+
+export function postTypeByKey(key: string | null | undefined): PostTypeCopy | null {
+  if (!key) return null;
+  return [...POST_TYPES_SLIDESHOW, ...POST_TYPES_REEL].find((t) => t.key === key) ?? null;
+}
+
+export const FORMAT_LABEL: Record<BriefMediaFormat, string> = {
+  slideshow: 'Slideshow',
+  reel: 'Reel',
+};
+
+export const FORMAT_LABEL_PLURAL: Record<BriefMediaFormat, string> = {
+  slideshow: 'Slideshows',
+  reel: 'Reels',
+};
+
+export const ROLE_LABEL = { cover: 'Cover', point: 'Point', cta: 'CTA' } as const;
+
+/** Must-have toggles for a Freestyle brief. The prototype shows "Mention Inkbound once". */
+export function defaultMustHaves(companyName: string): MustHave[] {
+  return [
+    { id: 'plug', label: `Mention ${companyName} once`, on: true },
+    { id: 'shot', label: 'One product screenshot', on: false },
+  ];
+}
+
+/** Two digit slot label: 1 -> "01". */
+export function slotLabel(index: number): string {
+  return String(index + 1).padStart(2, '0');
+}

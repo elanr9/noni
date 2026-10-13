@@ -1,5 +1,14 @@
 import {
   ArrowLeftRight,
+  LayoutGrid,
+  Timer,
+  Grid3x3,
+  Type,
+  Maximize2,
+  Move,
+  ArrowLeft,
+  ChevronsLeftRight,
+  Smartphone,
   ArrowRight,
   AtSign,
   Captions,
@@ -171,6 +180,15 @@ const ICONS = {
   'undo-2': Undo2,
   'volume-2': Volume2,
   'volume-x': VolumeX,
+  'layout-grid': LayoutGrid,
+  timer: Timer,
+  'grid-3x3': Grid3x3,
+  type: Type,
+  'maximize-2': Maximize2,
+  move: Move,
+  'arrow-left': ArrowLeft,
+  'chevrons-left-right': ChevronsLeftRight,
+  smartphone: Smartphone,
 } as const;
 
 export type IconName = keyof typeof ICONS;

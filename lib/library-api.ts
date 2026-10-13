@@ -401,3 +401,84 @@ export async function markOurPostUsed(
   const item = await findOrCreateOurPostItem(companyId, userId, post);
   await markLibraryItemUsed(item, briefId);
 }
+
+// ---------------------------------------------------------------------------
+// Library features for the briefs redesign. A feature is a product_features
+// row; the CTA slide of a brief picks one, and the General row is the fallback.
+
+export type ProductFeatureRow = Database['public']['Tables']['product_features']['Row'];
+
+export type LibraryFeature = {
+  id: string;
+  companyId: string;
+  title: string;
+  description: string;
+  /** The plug line a creator says or writes on the CTA slide. */
+  cta: string;
+  clipUrl: string | null;
+  screenshotUrl: string | null;
+  isGeneral: boolean;
+};
+
+/** Pure: a product_features row to the shape the brief editor shows. */
+export function libraryFeatureFromRow(row: ProductFeatureRow): LibraryFeature {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    title: row.name,
+    description: row.what_it_does,
+    cta: row.claim,
+    clipUrl: row.clip_url,
+    screenshotUrl: row.screenshot_url,
+    isGeneral: row.is_general,
+  };
+}
+
+/** Pure: General first, then by title. */
+export function sortLibraryFeatures(features: LibraryFeature[]): LibraryFeature[] {
+  return [...features].sort((a, b) => {
+    if (a.isGeneral !== b.isGeneral) return a.isGeneral ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+export async function listLibraryFeatures(companyId: string): Promise<LibraryFeature[]> {
+  const { data, error } = await supabase
+    .from('product_features')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('approved', true)
+    .eq('rejected', false);
+  if (error) throw error;
+  return sortLibraryFeatures((data ?? []).map(libraryFeatureFromRow));
+}
+
+export async function getLibraryFeature(id: string): Promise<LibraryFeature | null> {
+  const { data, error } = await supabase.from('product_features').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? libraryFeatureFromRow(data) : null;
+}
+
+/** The company's General feature, used when no feature fits the post. */
+export async function getGeneralFeature(companyId: string): Promise<LibraryFeature | null> {
+  const { data, error } = await supabase
+    .from('product_features')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('is_general', true)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? libraryFeatureFromRow(data) : null;
+}
+
+/** Pure: pick the feature a CTA should plug, by id, else General, else the first one. */
+export function pickFeature(
+  features: LibraryFeature[],
+  featureId: string | null | undefined,
+): LibraryFeature | null {
+  if (featureId) {
+    const exact = features.find((f) => f.id === featureId);
+    if (exact) return exact;
+  }
+  return features.find((f) => f.isGeneral) ?? features[0] ?? null;
+}

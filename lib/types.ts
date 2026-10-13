@@ -977,7 +977,9 @@ export type Database = {
           company_id: string
           created_at: string | null
           created_by: string | null
+          creator_note: string | null
           cta: string | null
+          cta_feature_id: string | null
           example_transcript: string | null
           example_url: string | null
           format: string
@@ -987,13 +989,18 @@ export type Database = {
           hook_options: Json
           id: string
           kill_reason: string | null
+          kind: string | null
           library_item_id: string | null
+          open: Json | null
           point_count: number | null
           post_type_id: string | null
           review_result: Json | null
           reviewed_at: string | null
           script: string | null
           search_phrase: string | null
+          slides: Json
+          status: string
+          story: Json | null
           subtitles: boolean
           subtitles_y: number
           talking_points: Json
@@ -1008,7 +1015,9 @@ export type Database = {
           company_id: string
           created_at?: string | null
           created_by?: string | null
+          creator_note?: string | null
           cta?: string | null
+          cta_feature_id?: string | null
           example_transcript?: string | null
           example_url?: string | null
           format?: string
@@ -1018,13 +1027,18 @@ export type Database = {
           hook_options?: Json
           id?: string
           kill_reason?: string | null
+          kind?: string | null
           library_item_id?: string | null
+          open?: Json | null
           point_count?: number | null
           post_type_id?: string | null
           review_result?: Json | null
           reviewed_at?: string | null
           script?: string | null
           search_phrase?: string | null
+          slides?: Json
+          status?: string
+          story?: Json | null
           subtitles?: boolean
           subtitles_y?: number
           talking_points?: Json
@@ -1039,7 +1053,9 @@ export type Database = {
           company_id?: string
           created_at?: string | null
           created_by?: string | null
+          creator_note?: string | null
           cta?: string | null
+          cta_feature_id?: string | null
           example_transcript?: string | null
           example_url?: string | null
           format?: string
@@ -1049,13 +1065,18 @@ export type Database = {
           hook_options?: Json
           id?: string
           kill_reason?: string | null
+          kind?: string | null
           library_item_id?: string | null
+          open?: Json | null
           point_count?: number | null
           post_type_id?: string | null
           review_result?: Json | null
           reviewed_at?: string | null
           script?: string | null
           search_phrase?: string | null
+          slides?: Json
+          status?: string
+          story?: Json | null
           subtitles?: boolean
           subtitles_y?: number
           talking_points?: Json
@@ -1084,6 +1105,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "briefs_cta_feature_id_fkey"
+            columns: ["cta_feature_id"]
+            isOneToOne: false
+            referencedRelation: "product_features"
             referencedColumns: ["id"]
           },
           {
@@ -3842,11 +3870,14 @@ export type Database = {
         Row: {
           approved: boolean
           claim: string
+          clip_url: string | null
           company_id: string
           created_at: string
           id: string
+          is_general: boolean
           name: string
           rejected: boolean
+          screenshot_url: string | null
           source: string
           source_ref: string | null
           surface: string | null
@@ -3855,11 +3886,14 @@ export type Database = {
         Insert: {
           approved?: boolean
           claim: string
+          clip_url?: string | null
           company_id: string
           created_at?: string
           id?: string
+          is_general?: boolean
           name: string
           rejected?: boolean
+          screenshot_url?: string | null
           source: string
           source_ref?: string | null
           surface?: string | null
@@ -3868,11 +3902,14 @@ export type Database = {
         Update: {
           approved?: boolean
           claim?: string
+          clip_url?: string | null
           company_id?: string
           created_at?: string
           id?: string
+          is_general?: boolean
           name?: string
           rejected?: boolean
+          screenshot_url?: string | null
           source?: string
           source_ref?: string | null
           surface?: string | null

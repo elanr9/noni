@@ -100,6 +100,53 @@ export const postTypeTone = {
 
 export type PostTypeKey = keyof typeof postTypeTone;
 
+/**
+ * Briefs redesign tones, from reference_ui/briefs (SSShared KIND_TONE, creator Tag
+ * tones, canvas surfaces). Kind: handheld blue, story violet, open amber.
+ */
+export const briefTone = {
+  kind: {
+    handheld: { bg: '#E7F4FD', fg: '#0B76AD', accent: '#1BA6EE' },
+    story: { bg: '#EEE9FB', fg: '#5B3FC9', accent: '#7C5CE6' },
+    open: { bg: '#FDF2DF', fg: '#E08A16', accent: '#E08A16' },
+  },
+  format: {
+    slideshow: { bg: '#E6F6FD', fg: '#0B5C9E' },
+    reel: { bg: '#FBE9DC', fg: '#B8551B' },
+  },
+  postType: { bg: '#E4F5EC', fg: '#1F8F5F' },
+  /** Post type grid tiles cycle through these four pairs. */
+  postTypeTiles: [
+    { bg: '#E7F4FD', fg: '#0B76AD' },
+    { bg: '#EEE9FB', fg: '#5B3FC9' },
+    { bg: '#E4F5EC', fg: '#1F8F5F' },
+    { bg: '#FDF2DF', fg: '#E08A16' },
+  ],
+  /** Filled dot and done step color on dark canvases. */
+  done: '#22C55E',
+  canvas: { bg: '#1C2128', chrome: '#2A3038', thumb: '#2A3038' },
+  /** "You" legend swatch and manager slide placeholder gradient (top to bottom). */
+  managerSlide: ['#CFDCE8', '#4F6276'],
+  /** Creator preview sheet gradient (top to bottom). */
+  previewSky: ['#E9F3FC', '#B7C6D4', '#3C4B59'],
+  /** Dashed creator slide stripes. */
+  creatorStripe: ['#F3F7FB', '#EAF0F6'],
+  confetti: ['#1BA6EE', '#F6C445', '#3DBE5B', '#E5484D', '#7C5CE6'],
+  /** Library feature screenshot placeholder tones (ss-data library.tone / bar). */
+  featureTones: {
+    general: { tone: '#E3F1FC', bar: '#0B5C9E' },
+    bestfit: { tone: '#DCE9F7', bar: '#2F6FD1' },
+    hl: { tone: '#E8E4F6', bar: '#5B4BC4' },
+    reply: { tone: '#FBE9DC', bar: '#D9742B' },
+    search: { tone: '#FDF2DF', bar: '#C9850E' },
+    inbox: { tone: '#E1F3EA', bar: '#1F8F5F' },
+    sent: { tone: '#E6F6FD', bar: '#1BA6EE' },
+    school: { tone: '#F6E7DC', bar: '#B8551B' },
+  },
+} as const;
+
+export type BriefKindTone = keyof typeof briefTone.kind;
+
 export const type = {
   size: {
     hero: 44,

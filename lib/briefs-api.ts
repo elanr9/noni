@@ -2262,3 +2262,428 @@ export async function listCampaignManagers(
     name: p.full_name?.trim() || 'Manager',
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Briefs redesign (slideshow and reel): kinds, slides, story, freestyle.
+// The week is still a campaigns row and a slot is a stamped campaign_briefs
+// row; these helpers read and write the new briefs columns from migration 117.
+// DB format stays 'video' | 'photo_carousel'; the UI speaks 'reel' | 'slideshow'.
+
+export type BriefMediaFormat = 'slideshow' | 'reel';
+export type BriefKind = 'handheld' | 'story' | 'open';
+export type BriefStatus = 'draft' | 'ready' | 'archived';
+export type SlideRole = 'cover' | 'point' | 'cta';
+
+/** Text box position as fractions of the slide: center x, center y, width. */
+export type SlideBox = { x: number; y: number; w: number };
+
+export type SlideTextStyle = {
+  size?: number;
+  align?: 'left' | 'center' | 'right';
+  bg?: 'none' | 'box' | 'outline';
+  color?: string;
+  font?: string;
+};
+
+export type BriefSlide = {
+  role: SlideRole;
+  /** On-screen text. For reels this is the point label. */
+  text: string;
+  /** Shot direction for slideshows; the "say" line for reels. */
+  shot: string;
+  /** Library feature whose screenshot sits on the slide, usually the CTA. */
+  inset_feature_id: string | null;
+  box?: SlideBox;
+  inset_box?: SlideBox;
+  box_ig?: SlideBox;
+  inset_box_ig?: SlideBox;
+  tstyle?: SlideTextStyle;
+};
+
+export type StorySettings = { theme: string; beats: string[]; min: number; max: number };
+export type MustHave = { id: string; label: string; on: boolean };
+export type OpenSettings = { prompt: string; must: MustHave[]; min?: number; max?: number };
+
+export type WeekBrief = {
+  id: string;
+  companyId: string;
+  format: BriefMediaFormat;
+  kind: BriefKind;
+  postTypeId: string | null;
+  postTypeKey: string | null;
+  postTypeName: string | null;
+  title: string;
+  caption: string;
+  searchTerm: string;
+  hashtags: string[];
+  slides: BriefSlide[];
+  story: StorySettings | null;
+  open: OpenSettings | null;
+  cta: { text: string; featureId: string | null };
+  creatorNote: string | null;
+  status: BriefStatus;
+};
+
+/** One numbered slot in a week lane. brief is null while the slot is empty. */
+export type WeekSlot = {
+  index: number;
+  briefId: string;
+  format: BriefMediaFormat;
+  brief: WeekBrief | null;
+};
+
+export type WeekLanes = {
+  campaign: Campaign;
+  slideshow: WeekSlot[];
+  reel: WeekSlot[];
+};
+
+export function toMediaFormat(format: string): BriefMediaFormat {
+  return format === 'photo_carousel' ? 'slideshow' : 'reel';
+}
+
+export function toBriefFormat(format: BriefMediaFormat): BriefFormat {
+  return format === 'slideshow' ? 'photo_carousel' : 'video';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseBox(value: unknown): SlideBox | undefined {
+  if (!isRecord(value)) return undefined;
+  const { x, y, w } = value;
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number') return undefined;
+  return { x, y, w };
+}
+
+function parseTextStyle(value: unknown): SlideTextStyle | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: SlideTextStyle = {};
+  if (typeof value.size === 'number') out.size = value.size;
+  if (value.align === 'left' || value.align === 'center' || value.align === 'right') out.align = value.align;
+  if (value.bg === 'none' || value.bg === 'box' || value.bg === 'outline') out.bg = value.bg;
+  if (typeof value.color === 'string') out.color = value.color;
+  if (typeof value.font === 'string') out.font = value.font;
+  return out;
+}
+
+export function parseSlides(json: Json | null | undefined): BriefSlide[] {
+  if (!Array.isArray(json)) return [];
+  const out: BriefSlide[] = [];
+  for (const raw of json) {
+    if (!isRecord(raw)) continue;
+    const role = raw.role === 'cover' || raw.role === 'point' || raw.role === 'cta' ? raw.role : null;
+    if (!role) continue;
+    const slide: BriefSlide = {
+      role,
+      text: typeof raw.text === 'string' ? raw.text : '',
+      shot: typeof raw.shot === 'string' ? raw.shot : '',
+      inset_feature_id: typeof raw.inset_feature_id === 'string' ? raw.inset_feature_id : null,
+    };
+    const box = parseBox(raw.box);
+    const insetBox = parseBox(raw.inset_box);
+    const boxIg = parseBox(raw.box_ig);
+    const insetBoxIg = parseBox(raw.inset_box_ig);
+    const tstyle = parseTextStyle(raw.tstyle);
+    if (box) slide.box = box;
+    if (insetBox) slide.inset_box = insetBox;
+    if (boxIg) slide.box_ig = boxIg;
+    if (insetBoxIg) slide.inset_box_ig = insetBoxIg;
+    if (tstyle) slide.tstyle = tstyle;
+    out.push(slide);
+  }
+  return out;
+}
+
+export function parseStory(json: Json | null | undefined): StorySettings | null {
+  if (!isRecord(json)) return null;
+  const beats = Array.isArray(json.beats)
+    ? json.beats.filter((b): b is string => typeof b === 'string')
+    : [];
+  return {
+    theme: typeof json.theme === 'string' ? json.theme : '',
+    beats,
+    min: typeof json.min === 'number' ? json.min : 2,
+    max: typeof json.max === 'number' ? json.max : 10,
+  };
+}
+
+export function parseOpen(json: Json | null | undefined): OpenSettings | null {
+  if (!isRecord(json)) return null;
+  const must: MustHave[] = [];
+  if (Array.isArray(json.must)) {
+    for (const raw of json.must) {
+      if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
+      must.push({ id: raw.id, label: raw.label, on: raw.on === true });
+    }
+  }
+  const out: OpenSettings = { prompt: typeof json.prompt === 'string' ? json.prompt : '', must };
+  if (typeof json.min === 'number') out.min = json.min;
+  if (typeof json.max === 'number') out.max = json.max;
+  return out;
+}
+
+function parseStatus(value: string | null | undefined): BriefStatus {
+  return value === 'ready' || value === 'archived' ? value : 'draft';
+}
+
+function parseKind(value: string | null | undefined): BriefKind | null {
+  return value === 'handheld' || value === 'story' || value === 'open' ? value : null;
+}
+
+/** Pure: a briefs row (with its post type) to the redesign shape, or null while the slot is empty. */
+export function weekBriefFromRow(row: BriefWithType): WeekBrief | null {
+  const kind = parseKind(row.kind);
+  if (!kind) return null;
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    format: toMediaFormat(row.format),
+    kind,
+    postTypeId: row.post_type_id,
+    postTypeKey: row.post_types?.key ?? null,
+    postTypeName: row.post_types?.label ?? null,
+    title: row.title === PLACEHOLDER_BRIEF_TITLE ? '' : row.title,
+    caption: row.caption ?? '',
+    searchTerm: row.search_phrase ?? '',
+    hashtags: row.hashtags ?? [],
+    slides: parseSlides(row.slides),
+    story: parseStory(row.story),
+    open: parseOpen(row.open),
+    cta: { text: row.cta ?? '', featureId: row.cta_feature_id },
+    creatorNote: row.creator_note,
+    status: parseStatus(row.status),
+  };
+}
+
+/** Pure: the stamped rows of a week split into two numbered lanes. */
+export function weekLanesFromItems(campaign: Campaign, items: CampaignBriefItem[]): WeekLanes {
+  const lanes: WeekLanes = { campaign, slideshow: [], reel: [] };
+  for (const item of items) {
+    if (item.briefs.archived_at) continue;
+    const format = toMediaFormat(item.briefs.format);
+    const lane = lanes[format];
+    lane.push({
+      index: lane.length,
+      briefId: item.briefs.id,
+      format,
+      brief: weekBriefFromRow(item.briefs),
+    });
+  }
+  return lanes;
+}
+
+export async function listWeekLanes(campaignId: string): Promise<WeekLanes> {
+  const [campaign, items] = await Promise.all([getCampaign(campaignId), listCampaignBriefs(campaignId)]);
+  if (!campaign) throw new Error('Week not found');
+  return weekLanesFromItems(campaign, items);
+}
+
+export async function listWeekSlots(campaignId: string, format: BriefMediaFormat): Promise<WeekSlot[]> {
+  const lanes = await listWeekLanes(campaignId);
+  return lanes[format];
+}
+
+/** "Week 2" style number: weeks since the company's first week, 1 based. */
+export async function weekNumber(campaign: Campaign): Promise<number> {
+  const { count, error } = await supabase
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', campaign.company_id)
+    .not('drop_date', 'is', null)
+    .lte('drop_date', campaign.drop_date ?? '9999-12-31');
+  if (error) throw error;
+  return Math.max(1, count ?? 1);
+}
+
+/** Structurally matches PostTypeCopy in lib/brief-copy.ts. */
+export type PostTypeSpec = {
+  key: string;
+  name: string;
+  format: BriefMediaFormat;
+  minPoints: number;
+  maxPoints: number;
+  clipStructure: 'hook_points_outro' | 'single_clip' | 'slide_per_point';
+};
+
+/** The company's post_types row for a key, created from the spec when missing. */
+export async function resolvePostTypeId(companyId: string, spec: PostTypeSpec): Promise<string> {
+  const { data: existing, error } = await supabase
+    .from('post_types')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('key', spec.key)
+    .maybeSingle();
+  if (error) throw error;
+  if (existing) return existing.id;
+  const { data: created, error: insertError } = await supabase
+    .from('post_types')
+    .insert({
+      company_id: companyId,
+      key: spec.key,
+      label: spec.name,
+      family: toBriefFormat(spec.format),
+      min_points: spec.minPoints,
+      max_points: spec.maxPoints,
+      clip_structure: spec.clipStructure,
+      requires_plug: spec.clipStructure !== 'single_clip',
+      requires_credential: false,
+      sort_order: 100,
+    })
+    .select('id')
+    .single();
+  if (insertError) throw insertError;
+  return created.id;
+}
+
+export type WeekBriefInput = {
+  kind: BriefKind;
+  postTypeId: string | null;
+  title: string;
+  caption: string;
+  searchTerm: string;
+  hashtags: string[];
+  slides: BriefSlide[];
+  story: StorySettings | null;
+  open: OpenSettings | null;
+  cta: { text: string; featureId: string | null };
+  creatorNote: string | null;
+};
+
+function slidesToJson(slides: BriefSlide[]): Json {
+  return slides.map((s) => {
+    const out: Record<string, Json> = {
+      role: s.role,
+      text: s.text,
+      shot: s.shot,
+      inset_feature_id: s.inset_feature_id,
+    };
+    if (s.box) out.box = s.box;
+    if (s.inset_box) out.inset_box = s.inset_box;
+    if (s.box_ig) out.box_ig = s.box_ig;
+    if (s.inset_box_ig) out.inset_box_ig = s.inset_box_ig;
+    if (s.tstyle) out.tstyle = { ...s.tstyle } as Json;
+    return out;
+  });
+}
+
+function weekBriefPatch(input: WeekBriefInput, status: BriefStatus) {
+  return {
+    kind: input.kind,
+    post_type_id: input.postTypeId,
+    title: input.title.trim() || PLACEHOLDER_BRIEF_TITLE,
+    caption: input.caption || null,
+    search_phrase: input.searchTerm || null,
+    hashtags: input.hashtags,
+    slides: slidesToJson(input.slides),
+    story: input.story ? ({ ...input.story } as Json) : null,
+    open: input.open ? ({ prompt: input.open.prompt, must: input.open.must, min: input.open.min ?? null, max: input.open.max ?? null } as Json) : null,
+    cta: input.cta.text || null,
+    cta_feature_id: input.cta.featureId,
+    creator_note: input.creatorNote,
+    status,
+  };
+}
+
+/** Save the editor state into the slot's brief row, keeping it a draft. */
+export async function saveWeekBrief(briefId: string, input: WeekBriefInput): Promise<void> {
+  const { error } = await supabase.from('briefs').update(weekBriefPatch(input, 'draft')).eq('id', briefId);
+  if (error) throw error;
+}
+
+/** "Add to week": save and mark the brief ready so the slot shows as filled. */
+export async function addBriefToWeek(briefId: string, input: WeekBriefInput): Promise<void> {
+  const { error } = await supabase.from('briefs').update(weekBriefPatch(input, 'ready')).eq('id', briefId);
+  if (error) throw error;
+}
+
+/** Empty a slot again: the row stays in the week with every redesign field cleared. */
+export async function clearWeekSlot(briefId: string): Promise<void> {
+  const { error } = await supabase
+    .from('briefs')
+    .update({
+      kind: null,
+      post_type_id: null,
+      title: PLACEHOLDER_BRIEF_TITLE,
+      caption: null,
+      search_phrase: null,
+      hashtags: [],
+      slides: [],
+      story: null,
+      open: null,
+      cta: null,
+      cta_feature_id: null,
+      creator_note: null,
+      status: 'draft',
+    })
+    .eq('id', briefId);
+  if (error) throw error;
+}
+
+export async function getWeekBrief(briefId: string): Promise<WeekBrief | null> {
+  const row = await getBrief(briefId);
+  return row ? weekBriefFromRow(row) : null;
+}
+
+/** A creator's assignment with its brief in the redesign shape. */
+export type CreatorBriefItem = {
+  assignmentId: string;
+  scheduledDate: string;
+  slotIndex: number;
+  status: Database['public']['Tables']['assignments']['Row']['status'];
+  brief: WeekBrief;
+};
+
+type AssignmentWithTypedBrief = Database['public']['Tables']['assignments']['Row'] & {
+  briefs: BriefWithType;
+};
+
+/** Pure: keep only assignments whose brief has a kind, oldest slot first. */
+export function creatorBriefItems(rows: AssignmentWithTypedBrief[]): CreatorBriefItem[] {
+  const out: CreatorBriefItem[] = [];
+  for (const row of rows) {
+    const brief = weekBriefFromRow(row.briefs);
+    if (!brief) continue;
+    out.push({
+      assignmentId: row.id,
+      scheduledDate: row.scheduled_date,
+      slotIndex: row.slot_index,
+      status: row.status,
+      brief,
+    });
+  }
+  return out.sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.slotIndex - b.slotIndex);
+}
+
+/** The creator's briefs for one day (YYYY-MM-DD in America/New_York). */
+export async function listCreatorBriefsForDay(params: {
+  companyId: string;
+  creatorId: string;
+  day: string;
+}): Promise<CreatorBriefItem[]> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('*, briefs:brief_id (*, post_types(*))')
+    .eq('company_id', params.companyId)
+    .eq('creator_id', params.creatorId)
+    .eq('scheduled_date', params.day)
+    .order('slot_index', { ascending: true });
+  if (error) throw error;
+  return creatorBriefItems((data ?? []) as unknown as AssignmentWithTypedBrief[]);
+}
+
+export async function getCreatorBriefItem(params: {
+  companyId: string;
+  assignmentId: string;
+}): Promise<CreatorBriefItem | null> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('*, briefs:brief_id (*, post_types(*))')
+    .eq('company_id', params.companyId)
+    .eq('id', params.assignmentId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return creatorBriefItems([data as unknown as AssignmentWithTypedBrief])[0] ?? null;
+}
