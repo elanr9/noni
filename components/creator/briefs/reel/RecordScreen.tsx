@@ -321,11 +321,7 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
         <View style={styles.topRow} pointerEvents="box-none">
           {cur && cur.say && tele && !play ? (
             <View style={styles.prompter}>
-              <View style={styles.prompterHead}>
-                {cur.role === 'cta' ? <Icon name="zap" size={12} color={color.blue300} /> : null}
-                <Text style={[styles.prompterLabel, { color: cur.role === 'cta' ? color.blue300 : color.whiteA60 }]}>{label}</Text>
-              </View>
-              <BeatPrompter label="" text={cur.say} credential={null} />
+              <BeatPrompter label={label} text={cur.say} credential={null} />
               <Pressable accessibilityRole="button" accessibilityLabel="Hide prompter" hitSlop={10} onPress={() => setTele(false)} style={styles.prompterClose}>
                 <Icon name="x" size={14} color={color.white} />
               </Pressable>
@@ -465,9 +461,7 @@ const styles = StyleSheet.create({
   segments: { flexDirection: 'row', gap: 3, height: 3 },
   segment: { flex: 1, height: 3, borderRadius: 99 },
   topRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingRight: 56 },
-  prompter: { flex: 1, minWidth: 0, borderRadius: 14, backgroundColor: color.inkA55, paddingTop: 10, paddingBottom: 4, paddingRight: 30 },
-  prompterHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20 },
-  prompterLabel: { fontFamily: typeToken.font.ui, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  prompter: { flex: 1, minWidth: 0, borderRadius: 14, backgroundColor: color.inkA55, paddingRight: 24 },
   prompterClose: { position: 'absolute', top: 6, right: 6, width: 26, height: 26, borderRadius: 999, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center' },
   closeBtn: { width: 44, height: 44, borderRadius: 999, backgroundColor: color.scrim, alignItems: 'center', justifyContent: 'center' },
   inset: { position: 'absolute' },

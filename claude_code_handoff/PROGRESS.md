@@ -8,7 +8,7 @@
 | 4 | Manager slideshow editor | manager agent | briefs-manager | pending |
 | 5 | Manager reel editor | manager agent | briefs-manager | pending |
 | 6 | Creator home and slideshow | creator agent | briefs-creator | done |
-| 7 | Creator reel record and editor | creator agent | briefs-creator | in progress |
+| 7 | Creator reel record and editor | creator agent | briefs-creator | done |
 | 8 | Full loop test and polish | orchestrator | briefs-redesign | pending |
 
 ## Job 1: Audit
@@ -60,6 +60,17 @@ Plan:
 - `reel/RecordScreen.tsx`: `Viewfinder`, `useRecorder`, `useCapturePermissions`, `SideRail` (flip, flash, timer, grid), `RecordButton`, `BeatPrompter` in the prompter card with hide and show, progress segments per planned clip, time readout, back, redo last, Next clip or Done, the plug card for Story and Freestyle, Close this post. `reel/ClipPlayback.tsx`: the take plays back right away (expo-video) with Redo this clip, Add extra clip, Next clip.
 - `reel/ReelEditor.tsx`: header (back, `Auto cut · N pauses removed`, next), `VideoStage` + `OverlayLayer`, transport (`00:00/00:29`, play, undo, swap), `TimelineStrip` with `OverlayLane` (text track) and the captions bar, clip tools when a block is selected (Split, Trim, Redo clip, Delete), toolbar Text, Image, Captions, AI (`AskAiSheet` reel mode, Cut the dead air).
 - `app/(creator)/make/record/[id].tsx`, `app/(creator)/make/edit/[id].tsx` (edit, caption for Story and Freestyle, review with the player in the frame and the Script tab, submit through `submitProject`, then `make/sent`).
+
+Done (commits `briefs: job 7 creator 1/2`, `briefs: job 7 creator reel record and editor`).
+- Record: one take per point with the say line in the prompter card (`BeatPrompter`), playback right after each take (`useClipPlayback`, `ClipVideo`, `ScrubBar`) with Redo this clip, Add extra clip and Next clip, the plug card for Story and Freestyle, Close this post keeps the draft. Long text stops at 6 seconds.
+- Editor: `VideoStage` + `OverlayLayer`, `TimelineStrip` + `OverlayLane` (trim handles on the selected clip, hold to reorder), Split, Trim stepper, Redo clip, Delete, Text, Image, Captions, AI with Cut the dead air (`speechBounds`, iOS). `Auto cut · N pauses removed` counts the clips the cut shortened.
+- Drafts: the plan and local clip URIs live in AsyncStorage per assignment; the document autosaves to `creator_projects` and clips upload in the background; each landed take is written to `recording_drafts` through `saveDraftSegment`. Submit clears all three.
+- Could not match (and why):
+  - The text track renders under the clip track (`TimelineStrip` owns the lane order); the prototype draws it above.
+  - Prompter card uses `BeatPrompter` type (26pt text, blue uppercase label) instead of the prototype's 15.5pt line; the zap icon on the plug label is dropped.
+  - Review `Clip i of n` follows the thumbnail taps, not the player's playhead.
+  - Flash on the front camera is the screen brightness wash the studio already uses; zoom pills (0.5x, 1x, 2x) are the viewfinder pinch instead.
+  - Captions track: the bar reflects `subtitles.enabled`; there is no on device transcript preview.
 
 ## Job 8: Full loop test and polish
 
