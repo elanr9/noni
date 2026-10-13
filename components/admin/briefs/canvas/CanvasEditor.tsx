@@ -141,10 +141,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
     .onEnd((e) => {
       if (Math.abs(e.translationX) > 50) runOnJS(step)(e.translationX < 0 ? 1 : -1);
     });
-  const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(tapCanvas)();
-  });
-  const canvasGesture = Gesture.Race(swipe, tap);
+  // Taps are handled by a backdrop Pressable under the content, so the tool
+  // buttons, stickers and the text input keep their own touches.
+  const canvasGesture = swipe;
 
   const genBtn =
     onGenerate && !cur.text.trim() && !busy ? (
@@ -189,6 +188,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
         <View style={[styles.frame, { width: W, height: H }]}>
           <Animated.View key={sel} entering={FadeIn.duration(160)} style={StyleSheet.absoluteFill}>
             <LinearGradient colors={[briefTone.canvas.chrome, briefTone.canvas.bg]} style={StyleSheet.absoluteFill} />
+            <Pressable accessibilityLabel={editing ? 'Done' : 'Edit text'} onPress={tapCanvas} style={StyleSheet.absoluteFill} />
             {!lib && !cur.text && !ctaPick ? (
               <View pointerEvents="none" style={styles.emptyHint}>
                 <Icon name={reel ? 'video' : 'camera'} size={36} color={color.whiteA28} />
