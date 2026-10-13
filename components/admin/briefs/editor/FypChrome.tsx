@@ -2,7 +2,7 @@
 // Slideshows are letterboxed with the tabs band, dots, caption and tab bar;
 // reels get the rail, caption and "original sound" over the clip.
 
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientFill';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';

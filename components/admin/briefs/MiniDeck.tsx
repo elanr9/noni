@@ -1,7 +1,7 @@
 // Four tiny slides on a kind row (SSManager.jsx MiniDeck). Text box = words
 // you wrote. Small card = your screenshot. Dashed camera slot = the creator's.
 
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../shared/briefs/GradientFill';
 import { StyleSheet, View } from 'react-native';
 
 import type { BriefKind } from '../../../lib/briefs-api';

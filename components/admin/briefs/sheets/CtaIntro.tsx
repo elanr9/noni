@@ -1,7 +1,7 @@
 // Full screen intro before the CTA step (SSFlow.jsx CtaIntro): a bouncing
 // zap badge, the title, three rows that rise in, and "Let's go".
 
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientFill';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInUp, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

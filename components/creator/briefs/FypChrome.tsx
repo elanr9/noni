@@ -2,7 +2,7 @@
 // Slideshows are letterboxed: top tabs band, the slide, a bottom band with
 // dots, handle, caption and the tab bar. Reels get the gradient and the
 // floating caption. The avatar is the creator's real profile photo.
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../shared/briefs/GradientFill';
 import { useEffect, useState, type JSX } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 

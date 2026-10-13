@@ -6,20 +6,20 @@ Branch `briefs-redesign`. Lanes `briefs-manager` and `briefs-creator` are merged
 
 - DB: migration `117_brief_slides_kind_features` (briefs.kind, slides, story, open, cta_feature_id, status, creator_note; product_features.clip_url, screenshot_url, is_general). Inkbound reset with a JSON backup in `supabase/backups/inkbound-2026-10-13/` (git ignored); week 2 seeded (`scripts/seed-inkbound-briefs.ts`).
 - API: `lib/briefs-api.ts` "Briefs redesign" section, `lib/library-api.ts` features, `lib/brief-copy.ts` verbatim copy, `lib/submissions.ts` `submitProject` caption and hashtags.
-- Shared: `components/shared/briefs/*`, `theme/tokens.ts` `briefTone`, new `Icon` names, `expo-linear-gradient`.
+- Shared: `components/shared/briefs/*` (gradients drawn with `react-native-svg` in `GradientFill`), `theme/tokens.ts` `briefTone`, new `Icon` names. No new native dependency.
 - Manager: `app/(admin)/week/[id].tsx` (week, counters, slots, publish footer), `app/(admin)/brief/kind.tsx`, `app/(admin)/brief/[id].tsx`, `components/admin/briefs/**` (canvas, text toolbar, safe zones, sheets, details, review, reel script).
 - Creator: `app/(creator)/(tabs)/index.tsx` (home with 1 left and All done), `app/(creator)/make/**` (start, slideshow pick, edit, caption, review, record, reel editor, sent), `components/creator/briefs/**`.
 
 ## Loop test
 
-Ran at the data level against the live project, not on a device (no Xcode or simulator on this machine, and `expo-linear-gradient` is a new native dependency so the installed app needs a new build before the JS can run on a phone).
+Ran at the data level against the live project, not on a device (no Xcode or simulator on this machine). No new native dependency was added, so the existing dev client install loads this branch from `npx expo start`.
 
 1. Manager: week 2 has slideshow 01 (handheld, Numbered tips), reel 01 (handheld, Numbered list) and reel 02 (story, Talking head) with `status = 'ready'` and `reviewed_at` set, which is what `week-plan` and `publish-campaign` treat as complete.
 2. Publish: assignments written for today for the three Inkbound creators with approved accounts (3 each), campaign marked published.
 3. Creator: `listCreatorBriefsForDay` select shape returns the three briefs with kind, format, post type, 7 or 2 slides and the CTA feature id.
 4. Review: the creator flows submit through `submitProject` / `createAssignmentSubmission`, the same path the existing review queue already reads; no code in `app/(admin)/review` changed.
 
-The device pass (manager fills one slot of each kind for both formats, creator makes and sends each, manager sees them in Review) still needs a build and a phone. Run it after `eas build` and report differences with the fix prompt in `00_START_HERE.md`.
+The device pass (manager fills one slot of each kind for both formats, creator makes and sends each, manager sees them in Review) runs on the existing install with `npx expo start`. Report differences with the fix prompt in `00_START_HERE.md`.
 
 ## Could not match, and why
 

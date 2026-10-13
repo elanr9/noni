@@ -4,7 +4,7 @@
 // creator has picked one, the toned gradient only as the fallback.
 import { useState, type JSX, type ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../shared/briefs/GradientFill';
 
 import type { LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, shadow, type as typeToken } from '../../../theme/tokens';

@@ -4,7 +4,7 @@
 // creator posts it. Tap to type, drag to move, pinch to resize, swipe for the
 // next slide.
 
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientFill';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';

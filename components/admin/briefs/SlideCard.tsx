@@ -1,7 +1,7 @@
 // One 9:16 slide (SSShared.jsx SlideCard). Solid = the manager wrote it,
 // dashed = the creator fills it in. Tiny cards (w <= 70) draw text as bars.
 
-import { LinearGradient, type LinearGradientProps } from 'expo-linear-gradient';
+import { GradientFill as LinearGradient, type GradientStops } from '../../shared/briefs/GradientFill';
 import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -14,7 +14,7 @@ import { Shot, ShotPlaceholder, type FeatureTone } from './Shot';
 import { SlideText } from './SlideText';
 
 export type SlideWho = 'manager' | 'creator' | 'mixed';
-export type GradientStops = LinearGradientProps['colors'];
+export type { GradientStops };
 
 export interface SlideCardProps {
   w?: number;

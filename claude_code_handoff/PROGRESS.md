@@ -31,7 +31,7 @@ Plan: rewrite `app/(admin)/week/[id].tsx` on `listWeekLanes` + `weekNumber` (Bri
 Done.
 - Week screen replaced wholesale: the lane switcher, type filter, "posts made" tag and done-week `PostsMadeList` are gone, as the prototype has none of them. The existing `WeekFooter` (publish, day planner, start next week) sits below the slot list when the week is published or has ready slots, with readyCount = slots across both lanes whose brief is `ready`. The "Not planned yet" state still points to `week-setup` because a week with no stamped rows has no slots to tap.
 - Freestyle saves from the kind picker with title `Freestyle` and `open = { prompt: '', must: defaultMustHaves(company) }`, then returns to the week with the `Added to slot 02` `InkToast` through `router.dismissTo`.
-- Gradients are `expo-linear-gradient`: three stop `briefTone.managerSlide` on manager slides, `briefTone.reviewSlide` on Review, hard stop diagonal `briefTone.creatorStripe` stripes on creator slides.
+- Gradients are `GradientFill` (react-native-svg): three stop `briefTone.managerSlide` on manager slides, `briefTone.reviewSlide` on Review, hard stop diagonal `briefTone.creatorStripe` stripes on creator slides.
 - Post type tile icons follow KindScreen verbatim; the peek sheet "Link in bio" example uses the `sent` feature tone placeholder since seeded features have no screenshot.
 
 ## Job 4: Manager slideshow editor
@@ -99,12 +99,12 @@ Done (commits `briefs: job 7 creator 1/2`, `briefs: job 7 creator reel record an
 
 ## Job 8: Full loop test and polish
 Plan: data level loop (publish seeded briefs to Inkbound creators, verify creator day query), `reviewed_at` set by `addBriefToWeek` so publishing accepts redesign briefs, dash grep, typecheck, lint, tests, `DONE.md`.
-Done. See `DONE.md`. Device pass is pending a new build (new native dependency `expo-linear-gradient`); no Xcode or simulator on this machine.
+Done. See `DONE.md`. Device pass runs on the existing install with `npx expo start`; no Xcode or simulator on this machine for an automated pass.
 
 ## Shared change requests
 (lanes write requests here and stop that item)
 Manager lane (jobs 3 to 5):
-- landed (1bad266, c51e253) and adopted: `InkToast`, `briefTone.textSwatches`, `briefTone.managerSlide` three stops, `briefTone.reviewSlide`, `SlideTextStyle.bg 'soft'`, `expo-linear-gradient`, `BriefSlide.extras` and `pics` (lib only; the canvas does not model them yet).
+- landed (1bad266, c51e253) and adopted: `InkToast`, `briefTone.textSwatches`, `briefTone.managerSlide` three stops, `briefTone.reviewSlide`, `SlideTextStyle.bg 'soft'`, `GradientFill` (react-native-svg, replaced expo-linear-gradient), `BriefSlide.extras` and `pics` (lib only; the canvas does not model them yet).
 - manager: `brief-assist` action for a CTA line from a feature (`field: 'cta'`, input `feature_id`, `post_type`, `title`, `index`) so Generate with AI stops using the feature's `claim` verbatim.
 - manager: `lib/library-api.ts` `LibraryFeature.clipLength: string | null` (prototype `clip: '0:06'` badge on reel screenshots); the Shot badge shows `0:07` meanwhile.
 
