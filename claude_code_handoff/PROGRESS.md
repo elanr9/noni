@@ -33,6 +33,13 @@ Done.
 ## Job 5: Manager reel editor
 
 ## Job 6: Creator home and slideshow
+Plan (branch `briefs-creator`):
+- `app/(creator)/(tabs)/index.tsx`: keep the setup checklist, `CreatorQueueProvider`, toast and the tab bar; replace the body with `components/creator/briefs/home/*` (`DayStrip`, `TodayCard`, `AlsoTodayRow`, `AllDoneBanner`). Today's items come from `listCreatorBriefsForDay` (post type join) and refresh whenever the queue provider's today list changes; statuses map assigned and changes_requested to blue, recorded, submitted and approved to amber `In review`, posted to green `Posted`.
+- `components/creator/briefs/model.ts`: pure helpers (creator status, left count, `buildSlides` per kind with the per creator shuffle and CTA renumber from `SSCreator.creatorSlides`, role labels, text box layout from `SSShared.layoutOf`).
+- `components/creator/briefs/MiniSlide.tsx` (SlideCard), `FeatureShot.tsx` (Shot placeholder keyed by `briefTone.featureTones`), `StartScreen.tsx`, `slides/PickStep.tsx`, `slides/EditStep.tsx` (wraps `SlideStage` with `CropPhoto` crops for TikTok 9:16 and Instagram 4:5), `slides/FreestylePicker.tsx` (system multi select picker plus the numbered strip), `slides/AskAiSheet.tsx` (`assistRegenerateField`), `DetailsStep.tsx` (caption, hashtags, search phrase, Fill with AI), `ReviewStep.tsx` (FYP chrome, swipe, thumbs, Submit for approval), `drafts.ts` (AsyncStorage drafts keyed by assignment id).
+- `app/(creator)/make/[id].tsx`: start, select, pick, edit, details, review phases. Submit builds a `SlideshowDocument` (assets, crops, text boxes) and goes through `submitProject` so the render bakes the manager's text and the Instagram cut; status moves inside `lib/submissions.ts`.
+- `app/(creator)/make/sent.tsx`: confetti, Sent!, streak (`fetchMyStreak`), on approval (`fetchBountySettings`), left today, Next post or Back home.
+- `app/(creator)/_layout.tsx`: register `make/[id]`, `make/record/[id]`, `make/edit/[id]`, `make/sent` as fullScreenModal.
 
 ## Job 7: Creator reel record and editor
 
