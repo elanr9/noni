@@ -15,6 +15,7 @@ import { StartScreen } from '../../../components/creator/briefs/StartScreen';
 import { clearSlideshowDraft, loadSlideshowDraft, saveSlideshowDraft } from '../../../components/creator/briefs/drafts';
 import {
   buildSlides,
+  hashtagList,
   ownSlide,
   plugSlide,
   slideBoxes,
@@ -249,7 +250,14 @@ export default function MakeScreen(): JSX.Element {
       }
       doc = { ...doc, assets, slides: docSlides };
       const projectId = await saveProject({ companyId, creatorId, assignmentId: id, document: doc });
-      await submitProject({ assignment, companyId, creatorId, projectId, document: doc });
+      await submitProject({
+        assignment,
+        companyId,
+        creatorId,
+        projectId,
+        document: doc,
+        ...(ownDetails ? { caption: caption.trim(), hashtags: hashtagList(tags) } : {}),
+      });
       await clearSlideshowDraft(id);
       router.replace({
         pathname: '/(creator)/make/sent',

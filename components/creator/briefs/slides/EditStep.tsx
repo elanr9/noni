@@ -14,7 +14,7 @@ import { centeredCrop } from '../../slides/photo-crop';
 import { Icon, type IconName } from '../../../ui/Icon';
 import { FeatureShot } from '../FeatureShot';
 import { SLIDE_RATIO } from '../MiniSlide';
-import { layoutOf, patchSlideBox, patchSlideInset, roleLabel, slideBoxes, type CreatorSlide, type SlidePlatform } from '../model';
+import { layoutOf, patchSlideBox, patchSlideInset, picUri, roleLabel, slideBoxes, type CreatorSlide, type SlidePlatform } from '../model';
 import { SlideDots } from './SlideDots';
 import { INSTAGRAM_ASPECT, TIKTOK_ASPECT } from './photo-picker';
 
@@ -130,6 +130,20 @@ export function EditStep(props: EditStepProps): JSX.Element {
               cropping={photo?.source && crop ? { source: photo.source, frameAspect, onChange: setCrop } : undefined}
               tint={briefTone.canvas.bg}
             />
+            {(cur.pics ?? []).map((p) => {
+              const uri = picUri(p.src);
+              if (!uri) return null;
+              const pw = W * p.box.w;
+              const ph = (pw * 4) / 3;
+              return (
+                <Image
+                  key={p.id}
+                  source={{ uri }}
+                  style={[styles.pic, { left: p.box.x * W - pw / 2, top: p.box.y * stageH - ph / 2, width: pw, height: ph, borderRadius: pw * 0.03 }]}
+                  resizeMode="cover"
+                />
+              );
+            })}
             {cur.insetFeatureId && feature && !insetUri ? (
               <View pointerEvents="none" style={[styles.insetGhost, { left: L.inset.x * W - (L.inset.w * W) / 2, top: `${L.inset.y * 100}%` }]}>
                 <FeatureShot feature={feature} w={L.inset.w * W} />
@@ -321,6 +335,7 @@ const styles = StyleSheet.create({
   canvas: { borderRadius: 22, overflow: 'hidden', backgroundColor: briefTone.canvas.bg, alignItems: 'center', justifyContent: 'center' },
   stageWrap: { overflow: 'hidden' },
   insetGhost: { position: 'absolute' },
+  pic: { position: 'absolute' },
   flex: { flex: 1 },
   topRow: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
   round: { width: 44, height: 44, borderRadius: 999, backgroundColor: color.inkA55, alignItems: 'center', justifyContent: 'center' },

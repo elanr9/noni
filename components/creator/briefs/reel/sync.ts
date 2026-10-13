@@ -15,6 +15,7 @@ import {
   type VideoDocument,
 } from '../../../../lib/edit-document';
 import { isVideoEditorAvailable, speechBounds } from '../../../../modules/video-editor';
+import { color } from '../../../../theme/tokens';
 import { layoutOf, SLIDE_TEXT_SIZE } from '../model';
 import type { ReelPlanItem } from './plan';
 
@@ -48,7 +49,7 @@ function overlayFor(item: ReelPlanItem, range: { startMs: number; endMs: number 
     kind: 'text',
     id: overlayIdFor(item),
     text: item.text,
-    color: '#FFFFFF',
+    color: color.white,
     bg: true,
     size: SLIDE_TEXT_SIZE * (item.tstyle?.size ?? 1),
     x: L.text.x,

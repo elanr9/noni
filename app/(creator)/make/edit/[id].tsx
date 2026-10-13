@@ -10,7 +10,7 @@ import { DetailsStep } from '../../../../components/creator/briefs/DetailsStep';
 import { useAvatarUrl } from '../../../../components/creator/briefs/FypChrome';
 import { ReviewStep, type ScriptRow } from '../../../../components/creator/briefs/ReviewStep';
 import { clearReelDraft } from '../../../../components/creator/briefs/drafts';
-import { splitCaption, type CreatorSlide } from '../../../../components/creator/briefs/model';
+import { hashtagList, splitCaption, type CreatorSlide } from '../../../../components/creator/briefs/model';
 import { ReelEditor } from '../../../../components/creator/briefs/reel/ReelEditor';
 import type { ReelPlanItem } from '../../../../components/creator/briefs/reel/plan';
 import { cutDeadAir, overlayIdFor, pruneBlockIds, syncPlanOverlays } from '../../../../components/creator/briefs/reel/sync';
@@ -171,7 +171,14 @@ export default function EditRoute(): JSX.Element {
     try {
       await saveProject({ ...scope, document: doc });
       useStudioStore.getState().markSaved(doc);
-      await submitProject({ assignment, companyId: scope.companyId, creatorId: scope.creatorId, projectId, document: doc });
+      await submitProject({
+        assignment,
+        companyId: scope.companyId,
+        creatorId: scope.creatorId,
+        projectId,
+        document: doc,
+        ...(ownDetails ? { caption: meta.caption.trim(), hashtags: hashtagList(meta.tags) } : {}),
+      });
       await Promise.all([clearReelDraft(scope.assignmentId), clearDraft(scope.companyId, scope.assignmentId).catch(() => undefined)]);
       reel.forgetDraft();
       router.replace({

@@ -1,6 +1,6 @@
 // TikTok style reel editor over the studio engine: preview with the text
 // overlays, play and time, undo and swap, the scrubbable timeline (text
-// track and clip track, trim handles, hold to reorder), the captions bar,
+// track above the clip track, trim handles, hold to reorder), the captions bar,
 // clip tools when a clip is selected and the Text, Image, Captions, AI
 // toolbar. From RLEditor.jsx ReelEditor.
 import { useRef, useState, type JSX } from 'react';
@@ -233,7 +233,12 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
             <Text style={styles.emptyClipText}>Record</Text>
           </Pressable>
         ) : (
-          <TimelineStrip doc={doc} overlayLane={<OverlayLane doc={doc} />} />
+          <>
+            <View style={styles.textLane}>
+              <OverlayLane doc={doc} />
+            </View>
+            <TimelineStrip doc={doc} />
+          </>
         )}
         <View style={styles.captionsBar}>
           <Icon name="layout-list" size={13} color={doc.subtitles.enabled ? color.white : color.whiteA45} />
@@ -296,6 +301,7 @@ const styles = StyleSheet.create({
   playBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   miniBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   timeline: { flex: 1, minHeight: 0, justifyContent: 'flex-start' },
+  textLane: { minHeight: 26, marginBottom: 4, overflow: 'hidden' },
   emptyClip: { alignSelf: 'center', marginTop: 28, width: 120, height: 56, borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: color.whiteA45, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center', gap: 2 },
   emptyClipText: { fontFamily: typeToken.font.ui, fontSize: 10.5, fontWeight: '700', color: color.white },
   captionsBar: { marginHorizontal: 16, marginTop: 6, height: 30, paddingHorizontal: 10, borderRadius: 6, backgroundColor: color.whiteA16, flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -4,14 +4,14 @@
 // creator has picked one, the toned gradient only as the fallback.
 import { useState, type JSX, type ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import type { LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, shadow, type as typeToken } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { photoLayout, type PhotoCrop } from '../slides/photo-crop';
 import { FeatureShot } from './FeatureShot';
-import { layoutOf, type CreatorSlide } from './model';
+import { layoutOf, picUri, type CreatorSlide } from './model';
 
 export const SLIDE_RATIO = 16 / 9;
 
@@ -21,7 +21,7 @@ export type MiniSlideProps = {
   photoUri?: string | null;
   photoCrop?: PhotoCrop;
   feature?: LibraryFeature | null;
-  layout?: Pick<CreatorSlide, 'box' | 'insetBox' | 'boxIg' | 'insetBoxIg' | 'insetFeatureId'>;
+  layout?: Pick<CreatorSlide, 'box' | 'insetBox' | 'boxIg' | 'insetBoxIg' | 'insetFeatureId' | 'extras' | 'pics'>;
   textScale?: number;
   who?: 'manager' | 'creator' | 'mixed';
   label?: string;
@@ -96,17 +96,23 @@ export function MiniSlide(props: MiniSlideProps): JSX.Element {
           resizeMode={photoCrop ? 'stretch' : 'cover'}
         />
       ) : !creator ? (
-        <Svg width={w} height={h} style={StyleSheet.absoluteFill}>
-          <Defs>
-            <LinearGradient id="ms" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={briefTone.managerSlide[0]} />
-              <Stop offset="0.55" stopColor={color.slate400} />
-              <Stop offset="1" stopColor={briefTone.managerSlide[1]} />
-            </LinearGradient>
-          </Defs>
-          <Rect width={w} height={h} fill="url(#ms)" />
-        </Svg>
+        <LinearGradient colors={briefTone.managerSlide} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFill} />
       ) : null}
+
+      {(layout?.pics ?? []).map((p) => {
+        const uri = picUri(p.src);
+        if (!uri) return null;
+        const pw = w * p.box.w;
+        const ph = (pw * 4) / 3;
+        return (
+          <Image
+            key={p.id}
+            source={{ uri }}
+            style={[styles.pic, { left: p.box.x * w - pw / 2, top: p.box.y * h - ph / 2, width: pw, height: ph, borderRadius: pw * 0.03 }]}
+            resizeMode="cover"
+          />
+        );
+      })}
 
       {who === 'creator' && !photoUri ? (
         <View style={styles.creatorBody} pointerEvents="none">
@@ -144,6 +150,21 @@ export function MiniSlide(props: MiniSlideProps): JSX.Element {
         </CenteredAt>
       ) : null}
 
+      {(layout?.extras ?? [])
+        .filter((e) => e.text)
+        .map((e) => {
+          const efs = Math.max(8, Math.round(w * 0.072 * (e.tstyle?.size ?? 1)));
+          return (
+            <CenteredAt key={e.id} x={e.box.x} y={e.box.y} width={w * e.box.w} frameWidth={w}>
+              {w <= 70 ? (
+                <View style={[styles.bar, styles.extraBar, { height: Math.max(2, w * 0.045) }]} />
+              ) : (
+                <Text style={[styles.text, { fontSize: efs, lineHeight: Math.round(efs * 1.22), borderRadius: w * 0.05, paddingVertical: w * 0.035, paddingHorizontal: w * 0.055 }]}>{e.text}</Text>
+              )}
+            </CenteredAt>
+          );
+        })}
+
       {index !== undefined ? (
         <View
           style={[
@@ -169,6 +190,8 @@ const styles = StyleSheet.create({
   creatorLabel: { fontFamily: typeToken.font.ui, fontWeight: '700', color: color.slate400, textAlign: 'center' },
   barsBox: { width: '100%', backgroundColor: color.white, ...shadow.shadowCard },
   bar: { borderRadius: 99, backgroundColor: color.ink },
+  extraBar: { width: '60%', backgroundColor: color.white },
+  pic: { position: 'absolute' },
   text: {
     backgroundColor: color.white,
     color: color.ink,

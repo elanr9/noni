@@ -2,11 +2,12 @@
 // Slideshows are letterboxed: top tabs band, the slide, a bottom band with
 // dots, handle, caption and the tab bar. Reels get the gradient and the
 // floating caption. The avatar is the creator's real profile photo.
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState, type JSX } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { supabase } from '../../../lib/supabase';
-import { color, type as typeToken } from '../../../theme/tokens';
+import { briefTone, color, type as typeToken } from '../../../theme/tokens';
 import { Icon, type IconName } from '../../ui/Icon';
 
 /** Letterbox bands TikTok shows around a slideshow (SSCanvas TT_SS). */
@@ -58,7 +59,11 @@ export function FypChrome({
 }): JSX.Element {
   const avatar = (
     <View style={styles.avatar}>
-      {avatarUri ? <Image source={{ uri: avatarUri }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
+      {avatarUri ? (
+        <Image source={{ uri: avatarUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      ) : (
+        <LinearGradient colors={briefTone.reviewSlide} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      )}
     </View>
   );
   const rail = (
@@ -125,7 +130,7 @@ const styles = StyleSheet.create({
   tabDim: { color: color.whiteA60, fontFamily: typeToken.font.ui, fontSize: 15, fontWeight: '700' },
   tabOn: { color: color.white, fontFamily: typeToken.font.ui, fontSize: 15, fontWeight: '700', borderBottomWidth: 2, borderBottomColor: color.white, paddingBottom: 4 },
   rail: { position: 'absolute', right: 10, alignItems: 'center', gap: 14 },
-  avatar: { width: 44, height: 44, borderRadius: 999, borderWidth: 2, borderColor: color.white, backgroundColor: color.slate400, overflow: 'hidden' },
+  avatar: { width: 44, height: 44, borderRadius: 999, borderWidth: 2, borderColor: color.white, overflow: 'hidden' },
   railItem: { alignItems: 'center', gap: 3 },
   railText: { color: color.white, fontFamily: typeToken.font.ui, fontSize: 12, fontWeight: '700' },
   bottomBand: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: color.ink900, paddingTop: 10, paddingHorizontal: 14, gap: 6 },

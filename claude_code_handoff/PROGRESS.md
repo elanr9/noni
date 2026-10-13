@@ -53,6 +53,9 @@ Done (commits `briefs: job 6 creator 1/3`, `2/3`, `briefs: job 6 creator home an
   - Home drops `ElsewhereStrip`, week navigation, swap and the overdue catch up lock, none of which are in the prototype. Overdue posts stay reachable from Posts.
   - FYP handle is `@firstname`; the profile has no TikTok handle. Fonts stay System.
   - The CTA feature inset shows on the canvas and in review but is not baked (see Shared change requests).
+  - Manager `pics` stickers render only when `src` is a URL or local file; storage paths need a signed URL the lane does not resolve. Extras render as locked text boxes and bake with the slide.
+
+Review round (`briefs: jobs 6 and 7 review fixes`): rebased on `briefs-redesign` clean (no conflicts); `LinearGradient` for the manager slide and avatar fallbacks (`briefTone.managerSlide`, `briefTone.reviewSlide`); manager `extras` and `pics` drawn on locked slides (MiniSlide, EditStep, review); Story and Freestyle caption and hashtags now go through `submitProject` (request 1 landed, local only path dropped); last two hex literals replaced with `color.white`; reel text track moved above the clip track.
 
 ## Job 7: Creator reel record and editor
 Plan:
@@ -66,7 +69,7 @@ Done (commits `briefs: job 7 creator 1/2`, `briefs: job 7 creator reel record an
 - Editor: `VideoStage` + `OverlayLayer`, `TimelineStrip` + `OverlayLane` (trim handles on the selected clip, hold to reorder), Split, Trim stepper, Redo clip, Delete, Text, Image, Captions, AI with Cut the dead air (`speechBounds`, iOS). `Auto cut · N pauses removed` counts the clips the cut shortened.
 - Drafts: the plan and local clip URIs live in AsyncStorage per assignment; the document autosaves to `creator_projects` and clips upload in the background; each landed take is written to `recording_drafts` through `saveDraftSegment`. Submit clears all three.
 - Could not match (and why):
-  - The text track renders under the clip track (`TimelineStrip` owns the lane order); the prototype draws it above.
+  - The text track (`OverlayLane`) now sits above the strip, but above its ruler too; the prototype has ruler, text, clips.
   - Prompter card uses `BeatPrompter` type (26pt text, blue uppercase label) instead of the prototype's 15.5pt line; the zap icon on the plug label is dropped.
   - Review `Clip i of n` follows the thumbnail taps, not the player's playhead.
   - Flash on the front camera is the screen brightness wash the studio already uses; zoom pills (0.5x, 1x, 2x) are the viewfinder pinch instead.
@@ -78,7 +81,7 @@ Done (commits `briefs: job 7 creator 1/2`, `briefs: job 7 creator reel record an
 (lanes write requests here and stop that item)
 
 Creator lane (jobs 6 and 7):
-1. `lib/submissions.ts` `submitProject(params)`: add `caption?: string; hashtags?: string[]; searchPhrase?: string` written to new columns `submissions.caption text`, `submissions.hashtags text[]`, `submissions.search_phrase text` (migration 118), read by the review screen and post-approved. Story and Freestyle creators write their own caption in `DetailsStep`; until then it stays in the local draft and the brief caption posts.
+1. Landed (`bbb5100`): `submitProject` takes `caption` and `hashtags`; the creator lane passes them for Story and Freestyle. The search phrase from `DetailsStep` still has no home.
 2. `lib/edit-document.ts` `Slide`: add `inset?: { url: string; x: number; y: number; width: number } | null` (mirrored in `supabase/functions/_shared/editDocument.ts` and baked by render-submission). The CTA feature screenshot shows on the creator canvas and review but is not in the posted slide today.
 3. `lib/briefs-api.ts`: `assistAsk(params: { question: string; draft: RegenDraftPayload }): Promise<string[]>` (brief-assist action `ask`) for the free "Ask for anything" field in `AskAiSheet`. The field is omitted until it exists.
 4. `lib/creator-queue.tsx`: expose `todayBriefs: CreatorBriefItem[]` from the provider (the `post_types` join) so Home reads one source instead of refetching `listCreatorBriefsForDay` on focus. Optional.

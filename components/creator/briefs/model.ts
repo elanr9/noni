@@ -5,12 +5,15 @@ import type { OverlayBox } from '../../../lib/overlay-boxes';
 import type {
   BriefSlide,
   SlideBox,
+  SlideExtra,
+  SlidePic,
   SlideRole,
   SlideTextStyle,
   WeekBrief,
 } from '../../../lib/briefs-api';
 import type { PickedPhoto } from '../../../lib/submissions';
 import type { TaskStatus } from '../../../lib/tasks';
+import { color } from '../../../theme/tokens';
 
 /** Home and sent screen status buckets (SSCreator CREATOR_POSTS.status). */
 export type CreatorStatus = 'assigned' | 'review' | 'posted';
@@ -42,6 +45,9 @@ export type CreatorSlide = {
   boxIg?: SlideBox;
   insetBoxIg?: SlideBox;
   tstyle?: SlideTextStyle;
+  /** The manager's extra text boxes and photo stickers, locked on the slide. */
+  extras?: SlideExtra[];
+  pics?: SlidePic[];
   photo: PickedPhoto | null;
 };
 
@@ -66,6 +72,8 @@ function fromBrief(slide: BriefSlide, own = false): CreatorSlide {
   if (slide.box_ig) out.boxIg = slide.box_ig;
   if (slide.inset_box_ig) out.insetBoxIg = slide.inset_box_ig;
   if (slide.tstyle) out.tstyle = slide.tstyle;
+  if (slide.extras?.length) out.extras = slide.extras;
+  if (slide.pics?.length) out.pics = slide.pics;
   return out;
 }
 
@@ -168,22 +176,41 @@ export function layoutOf(
 /** Prototype text is 0.072 of the frame width times tstyle.size. */
 export const SLIDE_TEXT_SIZE = 0.072;
 
-/** The slide text as the one OverlayBox SlideStage draws and the render bakes. */
+/** The slide text, plus the manager's extras, as the OverlayBoxes SlideStage draws and the render bakes. */
 export function slideBoxes(slide: CreatorSlide, platform: SlidePlatform = 'tiktok'): OverlayBox[] {
-  if (!slide.text.trim()) return [];
-  const L = layoutOf(slide, platform);
-  return [
-    {
+  const out: OverlayBox[] = [];
+  if (slide.text.trim()) {
+    const L = layoutOf(slide, platform);
+    out.push({
       id: `${slide.id}-main`,
       text: slide.text,
-      color: '#FFFFFF',
+      color: color.white,
       bg: true,
       size: SLIDE_TEXT_SIZE * (slide.tstyle?.size ?? 1),
       x: L.text.x,
       y: L.text.y,
       width: L.text.w,
-    },
-  ];
+    });
+  }
+  for (const e of slide.extras ?? []) {
+    if (!e.text.trim()) continue;
+    out.push({
+      id: `${slide.id}-x-${e.id}`,
+      text: e.text,
+      color: color.white,
+      bg: true,
+      size: SLIDE_TEXT_SIZE * (e.tstyle?.size ?? 1),
+      x: e.box.x,
+      y: e.box.y,
+      width: e.box.w,
+    });
+  }
+  return out;
+}
+
+/** Sticker sources the app can show directly; storage paths need a signed URL the lane does not have. */
+export function picUri(src: string): string | null {
+  return /^(https?:|file:|ph:|assets-library:)/.test(src) ? src : null;
 }
 
 export function patchSlideBox(slide: CreatorSlide, platform: SlidePlatform, x: number, y: number): CreatorSlide {
