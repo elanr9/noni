@@ -360,12 +360,25 @@ export async function submitProject(params: {
   creatorId: string;
   projectId: string;
   document: EditDocument;
+  /** Story and Freestyle creators write their own caption; stored on the assignment. */
+  caption?: string;
+  hashtags?: string[];
 }): Promise<Assignment> {
   const { assignment, companyId, creatorId, projectId, document } = params;
   if (!allAssetsUploaded(document)) {
     throw new Error('Still uploading your clips');
   }
   const version = await nextVersion('assignment_id', assignment.id);
+  if (params.caption !== undefined) {
+    const tags = (params.hashtags ?? []).map((t) => `#${t.replace(/^#/, '')}`).join(' ');
+    const captionText = [params.caption.trim(), tags].filter(Boolean).join(' ');
+    const { error } = await supabase
+      .from('assignments')
+      .update({ caption: captionText || null })
+      .eq('id', assignment.id)
+      .eq('company_id', companyId);
+    if (error) throw error;
+  }
   const project = { id: projectId, document: serializeEditDocument(document) };
 
   if (document.format === 'slideshow') {
