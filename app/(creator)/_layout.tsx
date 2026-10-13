@@ -168,6 +168,38 @@ export default function CreatorLayout() {
           />
           <Stack.Screen name="post/[id]" />
           <Stack.Screen name="posts/[id]" />
+          <Stack.Screen
+            name="make/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
+            name="make/record/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
+            name="make/edit/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
+            name="make/sent"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.fade,
+              animationDuration: motion.base,
+            }}
+          />
         </Stack>
       </CreatorToastProvider>
     </CreatorQueueProvider>
