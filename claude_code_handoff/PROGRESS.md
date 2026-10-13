@@ -7,8 +7,8 @@
 | 3 | Manager week and kind picker | manager agent | briefs-manager | in progress |
 | 4 | Manager slideshow editor | manager agent | briefs-manager | pending |
 | 5 | Manager reel editor | manager agent | briefs-manager | pending |
-| 6 | Creator home and slideshow | creator agent | briefs-creator | in progress |
-| 7 | Creator reel record and editor | creator agent | briefs-creator | pending |
+| 6 | Creator home and slideshow | creator agent | briefs-creator | done |
+| 7 | Creator reel record and editor | creator agent | briefs-creator | in progress |
 | 8 | Full loop test and polish | orchestrator | briefs-redesign | pending |
 
 ## Job 1: Audit
@@ -41,9 +41,28 @@ Plan (branch `briefs-creator`):
 - `app/(creator)/make/sent.tsx`: confetti, Sent!, streak (`fetchMyStreak`), on approval (`fetchBountySettings`), left today, Next post or Back home.
 - `app/(creator)/_layout.tsx`: register `make/[id]`, `make/record/[id]`, `make/edit/[id]`, `make/sent` as fullScreenModal.
 
+Done (commits `briefs: job 6 creator 1/3`, `2/3`, `briefs: job 6 creator home and slideshow`).
+- Home: `TodayCard`, `AlsoTodayRow` (fixed 78pt), `DayStrip`, `AllDoneBanner`; 1 left and All done states come from the live statuses. Tapping an Also today row moves it into the main card, as in the prototype.
+- Slideshow: start, pick, edit (TikTok 9:16 and Instagram 4:5 crops through `SlideStage` + `CropPhoto`, text and inset move by hold and drag), Story beats typed on own slides, Freestyle select and Ask AI, caption step, review, submit through `submitProject` (text boxes and both crops ride in the `SlideshowDocument` so the render bakes them). Draft in AsyncStorage per assignment.
+- Sent screen with confetti, streak, bounty amount and left today; Next post returns to Home, which selects the next assigned post.
+- Could not match (and why):
+  - Camera roll grid: the system picker (`expo-image-picker`, multi select up to 10) replaces the in-app grid. `FreestylePicker` keeps the title, the numbered strip and `Next (n)`.
+  - Canvas letterbox bands (`TT_SS`): the repo's `TikTokChrome` ghost (rail and caption guides) and its 9:16 plus 4:5 crop model are reused instead of black bands.
+  - Text style sheet (fonts, swatches, backgrounds, align): the slide text is the one white `OverlayBox` the render bakes; `tstyle.size` is honored, font, color, bg and align are not. Own slide text is typed in a bottom box with Done, not in place.
+  - Ask AI free question field: no endpoint (see Shared change requests), so only the quick asks render.
+  - Home drops `ElsewhereStrip`, week navigation, swap and the overdue catch up lock, none of which are in the prototype. Overdue posts stay reachable from Posts.
+  - FYP handle is `@firstname`; the profile has no TikTok handle. Fonts stay System.
+  - The CTA feature inset shows on the canvas and in review but is not baked (see Shared change requests).
+
 ## Job 7: Creator reel record and editor
 
 ## Job 8: Full loop test and polish
 
 ## Shared change requests
 (lanes write requests here and stop that item)
+
+Creator lane (jobs 6 and 7):
+1. `lib/submissions.ts` `submitProject(params)`: add `caption?: string; hashtags?: string[]; searchPhrase?: string` written to new columns `submissions.caption text`, `submissions.hashtags text[]`, `submissions.search_phrase text` (migration 118), read by the review screen and post-approved. Story and Freestyle creators write their own caption in `DetailsStep`; until then it stays in the local draft and the brief caption posts.
+2. `lib/edit-document.ts` `Slide`: add `inset?: { url: string; x: number; y: number; width: number } | null` (mirrored in `supabase/functions/_shared/editDocument.ts` and baked by render-submission). The CTA feature screenshot shows on the creator canvas and review but is not in the posted slide today.
+3. `lib/briefs-api.ts`: `assistAsk(params: { question: string; draft: RegenDraftPayload }): Promise<string[]>` (brief-assist action `ask`) for the free "Ask for anything" field in `AskAiSheet`. The field is omitted until it exists.
+4. `lib/creator-queue.tsx`: expose `todayBriefs: CreatorBriefItem[]` from the provider (the `post_types` join) so Home reads one source instead of refetching `listCreatorBriefsForDay` on focus. Optional.
