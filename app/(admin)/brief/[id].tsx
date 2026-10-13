@@ -7,6 +7,7 @@ import { StyleSheet, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BriefEditor } from '../../../components/admin/briefs/editor/BriefEditor';
 import { OpenEditor } from '../../../components/admin/briefs/OpenEditor';
 import {
   parseFormat,
@@ -109,16 +110,25 @@ export default function BriefEditorScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safe}>
-      <View style={styles.skeleton}>
-        <SkeletonCard height={44} />
-        <SkeletonCard height={320} />
-      </View>
-    </SafeAreaView>
+    <View style={styles.dark}>
+      <BriefEditor
+        briefId={briefId}
+        companyId={active?.companyId ?? ''}
+        companyName={active?.name ?? ''}
+        brief={brief}
+        format={format}
+        kind={kind}
+        postType={postType}
+        features={features}
+        onBack={() => router.back()}
+        onSaved={() => router.dismissTo(weekHref(campaignId, slotLabel(slot), format))}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: color.offWhite },
+  dark: { flex: 1, backgroundColor: color.ink900 },
   skeleton: { gap: 12, paddingHorizontal: space.gutter, paddingTop: 8 },
 });

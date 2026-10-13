@@ -36,6 +36,7 @@ Done.
 - Post type tile icons follow KindScreen verbatim; the peek sheet "Link in bio" example uses the `sent` feature tone placeholder since seeded features have no screenshot.
 
 ## Job 4: Manager slideshow editor
+Plan: `components/admin/briefs/editor/useBriefEditor.ts` (HandheldEditor state: steps, slides, count, AI actions, save mapping), `editor/BriefEditor.tsx` (step switch, sheets), `canvas/CanvasEditor.tsx` + `PlatformGhost.tsx` + `TextBoxView.tsx` + `InsetSticker.tsx` + `TextToolbar.tsx` + `CanvasFooter.tsx` (Reanimated and gesture handler), `editor/DetailsStep.tsx` + `TagField.tsx`, `editor/ReviewScreen.tsx` + `FypChrome.tsx`, `sheets/MediaSheet.tsx`, `CountSheet.tsx`, `FeatureSheet.tsx`, `CtaIntro.tsx`, `ReviseSheet.tsx`; wire `app/(admin)/brief/[id].tsx` to it. Commits per sub step.
 
 ## Job 5: Manager reel editor
 
