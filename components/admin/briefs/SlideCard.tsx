@@ -34,6 +34,8 @@ export interface SlideCardProps {
   /** No radius, border or shadow: the card fills a frame. */
   bare?: boolean;
   video?: boolean;
+  /** Gradient stops behind a manager slide; defaults to briefTone.managerSlide. */
+  background?: readonly string[];
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
 }
@@ -55,6 +57,7 @@ export function SlideCard({
   accent = color.blue500,
   bare = false,
   video = false,
+  background,
   style,
   children,
 }: SlideCardProps) {
@@ -86,7 +89,7 @@ export function SlideCard({
         style,
       ]}
     >
-      {creator ? <Stripes w={w} /> : <GradientFill stops={briefTone.managerSlide} />}
+      {creator ? <Stripes w={w} /> : <GradientFill stops={background ?? briefTone.managerSlide} />}
       {who === 'creator' ? (
         <View style={styles.creatorBody}>
           <Icon name="camera" size={Math.round(w * 0.17)} color={color.slate300} />
