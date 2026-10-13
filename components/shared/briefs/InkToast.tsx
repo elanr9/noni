@@ -2,7 +2,7 @@
 // text, leading icon, radius 16, 20pt side gutters, 40pt from the bottom,
 // noni-toast-in (14pt rise, 0.98 scale) over motion.base, gone after 2200ms.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,7 +19,7 @@ export interface InkToastProps {
 
 export function InkToast({ visible, message, icon = 'check', durationMs = 2200, onHide }: InkToastProps) {
   const insets = useSafeAreaInsets();
-  const progress = useRef(new Animated.Value(0)).current;
+  const [progress] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (!visible || message.length === 0) {
