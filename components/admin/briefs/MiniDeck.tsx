@@ -1,12 +1,12 @@
 // Four tiny slides on a kind row (SSManager.jsx MiniDeck). Text box = words
 // you wrote. Small card = your screenshot. Dashed camera slot = the creator's.
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, View } from 'react-native';
 
 import type { BriefKind } from '../../../lib/briefs-api';
 import { briefTone, color } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
-import { GradientFill } from './GradientFill';
 
 const N = 4;
 const W = 30;
@@ -40,7 +40,7 @@ export function MiniDeck({ kind }: { kind: BriefKind }) {
         const shot = (kind === 'handheld' && i % 2 === 1) || cta;
         return (
           <View key={i} style={[styles.slide, cta ? styles.slideCta : styles.slideCreator]}>
-            {cta ? <GradientFill stops={briefTone.managerSlide} bands={8} /> : null}
+            {cta ? <LinearGradient colors={briefTone.managerSlide} style={StyleSheet.absoluteFill} /> : null}
             {!text && !shot ? <Icon name="camera" size={14} color={color.slate300} /> : null}
             {shot ? <ShotBox /> : null}
             {text ? <TextBox lines={shot ? 1 : 2} /> : null}

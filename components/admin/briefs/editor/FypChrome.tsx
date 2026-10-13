@@ -2,11 +2,11 @@
 // Slideshows are letterboxed with the tabs band, dots, caption and tab bar;
 // reels get the rail, caption and "original sound" over the clip.
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { Icon, type IconName } from '../../../ui/Icon';
-import { GradientFill } from '../GradientFill';
 import { TT_SS } from '../canvas/layout';
 
 const TABS: IconName[] = ['house', 'users', 'plus', 'inbox', 'circle-user-round'];
@@ -24,7 +24,7 @@ function Rail({ gap }: { gap: number }) {
   return (
     <View style={{ alignItems: 'center', gap }}>
       <View style={styles.avatar}>
-        <GradientFill stops={[color.slate500, briefTone.canvas.chrome]} bands={6} />
+        <LinearGradient colors={[color.slate500, briefTone.canvas.chrome]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       </View>
       <R icon="heart" n="12.4K" />
       <R icon="message-circle" n="312" />
@@ -85,11 +85,7 @@ export function FypChrome({
   }
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View style={[styles.band, styles.clear, { bottom: 0, height: 0.38 * h }]}>
-        {Array.from({ length: 10 }).map((_, i) => (
-          <View key={i} style={{ flex: 1, backgroundColor: color.ink900, opacity: (i / 9) * 0.65 }} />
-        ))}
-      </View>
+      <LinearGradient colors={['transparent', color.scrimStrong]} style={[styles.band, { bottom: 0, height: 0.38 * h }]} />
       <View style={{ position: 'absolute', right: 10, bottom: 0.14 * h }}>
         <Rail gap={16} />
       </View>
@@ -110,7 +106,6 @@ export function FypChrome({
 
 const styles = StyleSheet.create({
   band: { position: 'absolute', left: 0, right: 0, backgroundColor: color.ink900 },
-  clear: { backgroundColor: 'transparent' },
   tab: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15 },
   tabOn: { color: color.white, borderBottomWidth: 2, borderBottomColor: color.white, paddingBottom: 4 },
   railItem: { alignItems: 'center', gap: 3 },

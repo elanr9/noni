@@ -59,7 +59,7 @@ export default function KindScreen() {
         hashtags: [],
         slides: [],
         story: null,
-        open: { prompt: '', must: defaultMustHaves(active?.name ?? ''), min: 4, max: 10 },
+        open: { prompt: '', must: defaultMustHaves(active?.name ?? '') },
         cta: { text: '', featureId: null },
         creatorNote: null,
       });

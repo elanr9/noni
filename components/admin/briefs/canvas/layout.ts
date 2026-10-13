@@ -88,18 +88,7 @@ export const LONGTEXT_TSTYLE: SlideTextStyle = { size: 0.62, align: 'left', bg: 
 export const LONGTEXT_BOX: SlideBox = { x: 0.5, y: 0.42, w: 0.86 };
 
 // Text styling, Instagram Stories style (SSCanvas SWATCHES, FONTS, DEFAULT_TSTYLE).
-// The prototype's nine swatches are not all tokens yet (see PROGRESS.md shared
-// change requests); the closest existing tokens stand in until then.
-export const SWATCHES: readonly string[] = [
-  color.white,
-  color.ink,
-  color.blue500,
-  briefTone.confetti[2],
-  briefTone.confetti[1],
-  color.amber,
-  briefTone.confetti[3],
-  briefTone.confetti[4],
-];
+export const SWATCHES: readonly string[] = briefTone.textSwatches;
 
 export type FontKey = 'modern' | 'classic' | 'typewriter' | 'signature';
 export const FONTS: Record<FontKey, { label: string; family: string; weight: '500' | '700' | '800'; scale: number; italic: boolean; letterSpacing: number }> = {

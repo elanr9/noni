@@ -27,12 +27,11 @@ Done.
 - Could not match: the prototype's Figtree font (fonts stay System); screenshot URLs for seeded features are null until a manager uploads one, so the editor shows the toned placeholder.
 
 ## Job 3: Manager week and kind picker
-Plan: rewrite `app/(admin)/week/[id].tsx` on `listWeekLanes` + `weekNumber` (BriefHeader, two FormatCounterCards that switch format, FilledSlotRow / EmptySlotRow); new `app/(admin)/brief/kind.tsx` (kind rows with MiniDeck, post type grid, peek sheet); new `components/admin/briefs/` MiniDeck, Shot, SlideCard, PostTypePeekSheet, GradientFill; register `brief/kind` and `brief/[id]` in `app/(admin)/_layout.tsx`.
+Plan: rewrite `app/(admin)/week/[id].tsx` on `listWeekLanes` + `weekNumber` (BriefHeader, two FormatCounterCards that switch format, FilledSlotRow / EmptySlotRow); new `app/(admin)/brief/kind.tsx` (kind rows with MiniDeck, post type grid, peek sheet); new `components/admin/briefs/` MiniDeck, Shot, SlideCard, PostTypePeekSheet; register `brief/kind` and `brief/[id]` in `app/(admin)/_layout.tsx`.
 Done.
-- Week screen replaced wholesale: the lane switcher, type filter, "posts made" tag, publish footer (`WeekFooter`, day planner) and done-week `PostsMadeList` are gone, as the prototype has none of them. The "Not planned yet" state still points to `week-setup` because a week with no stamped rows has no slots to tap. Needs a decision on where publishing lives now.
-- Freestyle saves from the kind picker with title `Freestyle` and `open` defaults (`prompt ''`, `defaultMustHaves(company)`, min 4, max 10 from ss-data) and returns to the week with the `Added to slot 02` toast through `router.dismissTo`.
-- Toast uses the shared `SoftToast` (green success tone); the prototype's toast is ink with white text (request below).
-- No gradient dependency in the app: manager slide gradients are drawn by `GradientFill` (banded interpolation of `briefTone.managerSlide`); creator stripes are rotated bands of `briefTone.creatorStripe`.
+- Week screen replaced wholesale: the lane switcher, type filter, "posts made" tag and done-week `PostsMadeList` are gone, as the prototype has none of them. The existing `WeekFooter` (publish, day planner, start next week) sits below the slot list when the week is published or has ready slots, with readyCount = slots across both lanes whose brief is `ready`. The "Not planned yet" state still points to `week-setup` because a week with no stamped rows has no slots to tap.
+- Freestyle saves from the kind picker with title `Freestyle` and `open = { prompt: '', must: defaultMustHaves(company) }`, then returns to the week with the `Added to slot 02` `InkToast` through `router.dismissTo`.
+- Gradients are `expo-linear-gradient`: three stop `briefTone.managerSlide` on manager slides, `briefTone.reviewSlide` on Review, hard stop diagonal `briefTone.creatorStripe` stripes on creator slides.
 - Post type tile icons follow KindScreen verbatim; the peek sheet "Link in bio" example uses the `sent` feature tone placeholder since seeded features have no screenshot.
 
 ## Job 4: Manager slideshow editor
@@ -42,9 +41,10 @@ Done.
 - `SlideStage` did not fit (TikTok metric `OverlayBox` model, no inline input, no swipe); the canvas is `components/admin/briefs/canvas/*` on gesture handler and Reanimated with the prototype durations (160 slide in, 180 to 320 tools, 520 place, 1400 busy ring).
 - Extra text boxes and photo stickers (`extras`, `pics`) are not in `BriefSlide`, so the canvas edits one text box and one inset per slide; the media sheet shows the Library tab only (no camera roll tab, nothing to store a roll pick in). Requests below.
 - AI: Fill with AI and Write points call `assistRegenerateField` (`talking_points`, `hook`, `caption`, `search_phrase`); Revise chips call `assistRevise`. Generate with AI for the CTA has no endpoint: the CTA is filled from the matched Library feature's `cta` shaped by post type (`matchFeature`, port of the prototype's). Revise opens from a sparkles tool on slides that already have text (the prototype defines `ReviseSheet` without a trigger).
-- Text style: outline, box and none (the lib `SlideTextStyle.bg` union); fonts map to System, Courier New and Snell Roundhand.
+- Text style: outline, box, soft and none from `briefTone.textSwatches`; fonts map to System, Courier New and Snell Roundhand.
+- `BriefSlide.extras` and `pics` exist in lib, but the canvas still models one text box and one inset per slide (no extra text boxes or photo stickers). Loaded values round trip through save untouched; the canvas does not draw or edit them yet.
+- Story saves `story = { theme: cover text, beats: [], min, max }` from the Creator's slides sheet (or count - 1 for Numbered tips).
 - Note tool and shot pill are on for Handheld slideshows too (prototype passed `notes={story || reel}`), otherwise a slideshow shot direction could never be written.
-- Review manager slide background uses `color.slate500` to `briefTone.canvas.chrome` (prototype `#7B8CA0` to `#2E3A48`, not tokens).
 
 ## Job 5: Manager reel editor
 Plan: same shell as job 4 with `format: 'reel'`; verify the reel branches in `useBriefEditor` (Hook and Points steps, say line in `BriefSlide.shot`, Long text steps and seed), `CanvasEditor` (reel ghost, "Creator's clip", hook script and creator says pills, Write the hook, Draft with AI), `ReviewScreen` (Watch and Script, play, clip counter, script list) and the reel kind picker; fill the hook line from Write points.
@@ -62,12 +62,6 @@ Done.
 
 ## Shared change requests
 (lanes write requests here and stop that item)
-- manager: `components/states/SoftToast.tsx` or a new `components/shared/InkToast.tsx`: `InkToast({ visible, message, onHide })`, ink background, white 600 14px text, check icon, radius 16, bottom 40 (prototype toast). Week screen uses `SoftToast` tone `success` meanwhile.
-- manager: `theme/tokens.ts` `briefTone.textSwatches: string[]` with the prototype's nine swatches `#FFFFFF #0F1720 #1BA6EE #3DBE5B #F6C445 #F58B1F #E5484D #D6246E #8E24AA`. Canvas uses white, ink, blue500, amber and `briefTone.confetti` meanwhile (pink `#D6246E` and purple `#8E24AA` missing).
-- manager: `theme/tokens.ts` `briefTone.managerSlide` mid stop `#8FA3B6` (prototype gradient is three stops) and `briefTone.canvas.chrome` already covers `#2A3038`.
-- manager: `lib/briefs-api.ts` `SlideTextStyle.bg` add `'soft'` (prototype has outline, solid, soft, none; `'box'` maps to solid). The text background toggle cycles outline, box, none meanwhile.
-- manager: `package.json` `expo-linear-gradient` so slide gradients are real gradients instead of `GradientFill` bands.
-- manager: `lib/briefs-api.ts` `BriefSlide.extras?: { id: string; text: string; box: SlideBox; box_ig?: SlideBox; tstyle?: SlideTextStyle }[]` and `BriefSlide.pics?: { id: string; path: string; box: SlideBox; box_ig?: SlideBox }[]` (prototype extra text boxes and photo stickers), with `parseSlides` and `slidesToJson` support. The canvas edits one text box and one inset per slide meanwhile.
+- landed (1bad266, c51e253) and adopted: `InkToast`, `briefTone.textSwatches`, `briefTone.managerSlide` three stops, `briefTone.reviewSlide`, `SlideTextStyle.bg 'soft'`, `expo-linear-gradient`, `BriefSlide.extras` and `pics` (lib only; the canvas does not model them yet).
 - manager: `brief-assist` action for a CTA line from a feature (`field: 'cta'`, input `feature_id`, `post_type`, `title`, `index`) so Generate with AI stops using the feature's `claim` verbatim.
-- manager: `theme/tokens.ts` `briefTone.reviewSlide: ['#7B8CA0', '#2E3A48']` (prototype `photoBg('camera')` behind manager slides on Review).
 - manager: `lib/library-api.ts` `LibraryFeature.clipLength: string | null` (prototype `clip: '0:06'` badge on reel screenshots); the Shot badge shows `0:07` meanwhile.

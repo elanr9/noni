@@ -1,6 +1,7 @@
 // One 9:16 slide (SSShared.jsx SlideCard). Solid = the manager wrote it,
 // dashed = the creator fills it in. Tiny cards (w <= 70) draw text as bars.
 
+import { LinearGradient, type LinearGradientProps } from 'expo-linear-gradient';
 import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -9,11 +10,11 @@ import type { LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { fontSizeFor, layoutOf, resolveTextStyle, SLIDE_RATIO } from './canvas/layout';
-import { GradientFill } from './GradientFill';
 import { Shot, ShotPlaceholder, type FeatureTone } from './Shot';
 import { SlideText } from './SlideText';
 
 export type SlideWho = 'manager' | 'creator' | 'mixed';
+export type GradientStops = LinearGradientProps['colors'];
 
 export interface SlideCardProps {
   w?: number;
@@ -35,7 +36,7 @@ export interface SlideCardProps {
   bare?: boolean;
   video?: boolean;
   /** Gradient stops behind a manager slide; defaults to briefTone.managerSlide. */
-  background?: readonly string[];
+  background?: GradientStops;
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
 }
@@ -89,7 +90,7 @@ export function SlideCard({
         style,
       ]}
     >
-      {creator ? <Stripes w={w} /> : <GradientFill stops={background ?? briefTone.managerSlide} />}
+      {creator ? <Stripes w={w} /> : <LinearGradient colors={background ?? briefTone.managerSlide} style={StyleSheet.absoluteFill} />}
       {who === 'creator' ? (
         <View style={styles.creatorBody}>
           <Icon name="camera" size={Math.round(w * 0.17)} color={color.slate300} />
@@ -176,19 +177,20 @@ export function CenteredAt({
   );
 }
 
-/** Diagonal creator stripes, drawn as rotated bands. */
+/** Diagonal creator stripes (repeating-linear-gradient 135deg, 6px bands): hard stops on one gradient. */
 function Stripes({ w }: { w: number }) {
+  const h = w * SLIDE_RATIO;
   const band = Math.max(4, w * 0.04);
-  const count = Math.ceil((w * SLIDE_RATIO * 2) / band);
-  return (
-    <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.stripes]}>
-      <View style={[styles.stripeSheet, { width: w * 4, height: w * 4, marginLeft: -w * 1.5, marginTop: -w * 1.2 }]}>
-        {Array.from({ length: count }).map((_, i) => (
-          <View key={i} style={{ height: band, backgroundColor: i % 2 ? briefTone.creatorStripe[1] : briefTone.creatorStripe[0] }} />
-        ))}
-      </View>
-    </View>
-  );
+  const diagonal = Math.hypot(w, h);
+  const count = Math.max(2, Math.ceil(diagonal / band));
+  const colors: [string, string, ...string[]] = [briefTone.creatorStripe[0], briefTone.creatorStripe[0]];
+  const locations: [number, number, ...number[]] = [0, 1 / count];
+  for (let i = 1; i < count; i++) {
+    const c = i % 2 ? briefTone.creatorStripe[1] : briefTone.creatorStripe[0];
+    colors.push(c, c);
+    locations.push(i / count, (i + 1) / count);
+  }
+  return <LinearGradient pointerEvents="none" colors={colors} locations={locations} start={{ x: 0, y: 0 }} end={{ x: 1, y: w / h }} style={StyleSheet.absoluteFill} />;
 }
 
 const styles = StyleSheet.create({
@@ -208,6 +210,4 @@ const styles = StyleSheet.create({
   creatorLabel: { fontFamily: typeToken.font.ui, fontWeight: '700', color: color.slate400, textAlign: 'center' },
   badge: { position: 'absolute', borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderColor: color.line },
   badgeText: { fontFamily: typeToken.font.ui, fontWeight: '800' },
-  stripes: { overflow: 'hidden' },
-  stripeSheet: { transform: [{ rotate: '135deg' }] },
 });

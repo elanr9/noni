@@ -4,6 +4,7 @@
 // creator posts it. Tap to type, drag to move, pinch to resize, swipe for the
 // next slide.
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -16,11 +17,10 @@ import { pickFeature, type LibraryFeature } from '../../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { Icon, type IconName } from '../../../ui/Icon';
 import type { EditorSlide } from '../editor/types';
-import { GradientFill } from '../GradientFill';
 import { Shot } from '../Shot';
 import { CenteredAt } from '../SlideCard';
-import { SlideText, slideTextStyle } from '../SlideText';
-import { blockedFor, clamp, fontSizeFor, insetRect, isLight, layoutOf, overlaps, resolveTextStyle, SLIDE_RATIO, textRect, zoneName, type Ghost, type Platform, type ResolvedTextStyle } from './layout';
+import { SlideText, slideTextStyle, textInkFor } from '../SlideText';
+import { blockedFor, clamp, fontSizeFor, insetRect, layoutOf, overlaps, resolveTextStyle, SLIDE_RATIO, textRect, zoneName, type Ghost, type Platform, type ResolvedTextStyle } from './layout';
 import { PlatformGhost } from './PlatformGhost';
 import { Sticker } from './Sticker';
 import { TextToolbar, WidthSlider, type ToolPanel } from './TextToolbar';
@@ -188,7 +188,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
       <GestureDetector gesture={canvasGesture}>
         <View style={[styles.frame, { width: W, height: H }]}>
           <Animated.View key={sel} entering={FadeIn.duration(160)} style={StyleSheet.absoluteFill}>
-            <GradientFill stops={[briefTone.canvas.chrome, briefTone.canvas.bg]} bands={10} />
+            <LinearGradient colors={[briefTone.canvas.chrome, briefTone.canvas.bg]} style={StyleSheet.absoluteFill} />
             {!lib && !cur.text && !ctaPick ? (
               <View pointerEvents="none" style={styles.emptyHint}>
                 <Icon name={reel ? 'video' : 'camera'} size={36} color={color.whiteA28} />
@@ -256,7 +256,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                       value={cur.text}
                       onChangeText={(t) => patch({ text: t })}
                       selectionColor={color.blue500}
-                      style={[slideTextStyle(ts, fs), styles.input, { color: ts.bg === 'box' ? (isLight(ts.color) ? color.ink : color.white) : ts.color, minWidth: W * L.text.w * 0.5, maxWidth: W * L.text.w }]}
+                      style={[slideTextStyle(ts, fs), styles.input, { color: textInkFor(ts), minWidth: W * L.text.w * 0.5, maxWidth: W * L.text.w }]}
                     />
                   </SlideText>
                 </CenteredAt>

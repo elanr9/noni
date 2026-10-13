@@ -13,7 +13,7 @@ import { clamp, FONTS, SWATCHES, type FontKey, type ResolvedTextStyle, type Text
 
 export type ToolPanel = 'font' | 'color' | null;
 
-const NEXT_BG: Record<TextBg, TextBg> = { outline: 'box', box: 'none', none: 'outline' };
+const NEXT_BG: Record<TextBg, TextBg> = { outline: 'box', box: 'soft', soft: 'none', none: 'outline' };
 const NEXT_ALIGN: Record<ResolvedTextStyle['align'], ResolvedTextStyle['align']> = { center: 'left', left: 'right', right: 'center' };
 
 export function TextToolbar({
@@ -88,7 +88,7 @@ export function TextToolbar({
           </View>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Text background" onPress={() => onChange({ bg: NEXT_BG[ts.bg] })} style={styles.tool}>
-          <View style={[styles.bgGlyph, { backgroundColor: ts.bg === 'box' ? color.white : 'transparent' }]}>
+          <View style={[styles.bgGlyph, { backgroundColor: ts.bg === 'box' ? color.white : ts.bg === 'soft' ? color.whiteA45 : 'transparent' }]}>
             <Text style={[styles.bgA, { color: ts.bg === 'box' ? color.ink : color.white }]}>A</Text>
           </View>
         </Pressable>

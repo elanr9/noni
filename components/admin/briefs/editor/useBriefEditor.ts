@@ -352,7 +352,7 @@ export function useBriefEditor(opts: BriefEditorOptions) {
     story: story
       ? {
           theme: title,
-          beats: brief?.story?.beats ?? [],
+          beats: [],
           min: tipsStory ? Math.max(1, (count ?? 2) - 1) : gap.min,
           max: tipsStory ? Math.max(1, (count ?? 2) - 1) : gap.max,
         }

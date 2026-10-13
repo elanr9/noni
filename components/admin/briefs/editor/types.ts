@@ -22,5 +22,7 @@ export function stripEditorSlide(s: EditorSlide): BriefSlide {
   if (s.box_ig) out.box_ig = s.box_ig;
   if (s.inset_box_ig) out.inset_box_ig = s.inset_box_ig;
   if (s.tstyle) out.tstyle = s.tstyle;
+  if (s.extras?.length) out.extras = s.extras;
+  if (s.pics?.length) out.pics = s.pics;
   return out;
 }

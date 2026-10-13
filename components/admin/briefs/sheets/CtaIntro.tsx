@@ -1,6 +1,7 @@
 // Full screen intro before the CTA step (SSFlow.jsx CtaIntro): a bouncing
 // zap badge, the title, three rows that rise in, and "Let's go".
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInUp, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +9,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { color, radius, shadow, type as typeToken } from '../../../../theme/tokens';
 import { Button } from '../../../ui/Button';
 import { Icon, type IconName } from '../../../ui/Icon';
-import { GradientFill } from '../GradientFill';
 
 export const CTA_INTRO_ROWS: [IconName, string][] = [
   ['pencil', "Write one line, in the creator's voice, that sells Inkbound."],
@@ -36,7 +36,7 @@ export function CtaIntro({
   const insets = useSafeAreaInsets();
   return (
     <Animated.View entering={FadeInUp.duration(240)} style={[StyleSheet.absoluteFill, styles.root]}>
-      <GradientFill stops={[color.blue100, color.offWhite, color.offWhite]} bands={8} />
+      <LinearGradient colors={[color.blue100, color.offWhite]} locations={[0, 0.55]} style={StyleSheet.absoluteFill} />
       <View style={{ height: insets.top }} />
       <View style={styles.backRow}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.back}>

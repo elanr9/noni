@@ -13,7 +13,6 @@ import { StepStrip, type BriefStep } from '../../../shared/briefs';
 import { Icon } from '../../../ui/Icon';
 import { clamp, SLIDE_RATIO } from '../canvas/layout';
 import { NextButton } from '../canvas/CanvasFooter';
-import { GradientFill } from '../GradientFill';
 import { Shot } from '../Shot';
 import { SlideCard } from '../SlideCard';
 import { FypChrome } from './FypChrome';
@@ -187,7 +186,6 @@ export function ReviewScreen({
             <Animated.View style={[styles.track, { width: W * items.length, height: H }, trackStyle]}>
               {items.map((s) => (
                 <View key={s.id} style={{ width: W, height: H, backgroundColor: briefTone.canvas.bg }}>
-                  {s.who !== 'creator' ? <GradientFill stops={[color.slate500, briefTone.canvas.chrome]} bands={12} /> : null}
                   <SlideCard
                     w={W}
                     bare
@@ -199,7 +197,7 @@ export function ReviewScreen({
                     who={s.who ?? 'mixed'}
                     label={s.label}
                     video={reel}
-                    background={[color.slate500, briefTone.canvas.chrome]}
+                    background={briefTone.reviewSlide}
                     style={s.who === 'creator' ? styles.creatorFrame : styles.clear}
                   />
                 </View>

@@ -99,7 +99,7 @@ export default function BriefEditorScreen() {
               hashtags: brief?.hashtags ?? [],
               slides: [],
               story: null,
-              open: brief?.open ?? { prompt: '', must: defaultMustHaves(active?.name ?? ''), min: 4, max: 10 },
+              open: brief?.open ?? { prompt: '', must: defaultMustHaves(active?.name ?? '') },
               cta: brief?.cta ?? { text: '', featureId: null },
               creatorNote: brief?.creatorNote ?? null,
             })

@@ -21,6 +21,13 @@ export function slideTextStyle(ts: ResolvedTextStyle, fs: number): TextStyle {
   };
 }
 
+/** The letter color a box or soft background needs under this style. */
+export function textInkFor(ts: ResolvedTextStyle): string {
+  if (ts.bg === 'box') return isLight(ts.color) ? color.ink : color.white;
+  if (ts.bg === 'soft') return isLight(ts.color) ? (ts.color === color.white ? color.ink : ts.color) : color.white;
+  return ts.color;
+}
+
 export function SlideText({
   text,
   ts,
@@ -41,14 +48,17 @@ export function SlideText({
       </OutlinedText>
     );
   }
-  if (ts.bg === 'box') {
-    const ink = isLight(ts.color) ? color.ink : color.white;
+  if (ts.bg === 'box' || ts.bg === 'soft') {
+    const light = isLight(ts.color);
+    const soft = ts.bg === 'soft';
+    const ink = textInkFor(ts);
+    const fill = soft ? (light ? color.whiteA75 : `${ts.color}B8`) : ts.color;
     return (
       <View
         style={[
-          styles.box,
+          soft ? null : styles.box,
           {
-            backgroundColor: ts.color,
+            backgroundColor: fill,
             borderRadius: fs * 0.35,
             paddingVertical: fs * 0.35,
             paddingHorizontal: fs * 0.55,
