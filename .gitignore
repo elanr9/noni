@@ -30,3 +30,6 @@ expo-env.d.ts
 # supabase local
 .supabase/
 supabase/.temp/
+
+# inkbound backups (never commit)
+supabase/backups/

@@ -1,0 +1,417 @@
+/* Manager side of slideshow briefs. Three kinds, one editor shape: the deck
+   up top, the selected slide's words under it, the post's caption last. */
+const NS = () => window.NoniDesignSystem_710e43;
+const PAD = 24;
+const Screen = ({ children, style }) => <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `0 ${PAD}px 130px`, display: 'flex', flexDirection: 'column', gap: 22, scrollbarWidth: 'none', ...style }}>{children}</div>;
+const Section = ({ label, right, children }) => <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}><SLabel right={right}>{label}</SLabel>{children}</div>;
+const Legend = ({ accent }) => (
+  <div style={{ display: 'flex', gap: 14, font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: 'linear-gradient(180deg,#CFDCE8,#4F6276)' }} />You</span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, border: '1.5px dashed var(--line-strong)' }} />Creator</span>
+  </div>
+);
+
+/* Pinned bottom bar: preview on the left, the one real action on the right. */
+function BottomBar({ onPreview, onSave, label = 'Add to week', disabled }) {
+  const { Icon } = NS();
+  return (
+    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `14px ${PAD}px 34px`, background: 'linear-gradient(180deg, rgba(247,250,253,0) 0%, var(--off-white) 30%)', display: 'flex', gap: 10 }}>
+      {onPreview ? <button type="button" onClick={onPreview} aria-label="Preview as creator" style={{ width: 56, height: 56, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="eye" size={22} color="var(--ink)" /></button> : null}
+      <SButton onClick={onSave} disabled={disabled} style={{ flex: 1 }}>{label}</SButton>
+    </div>
+  );
+}
+
+/* ---------- Week ---------- */
+function WeekScreen({ slots, onNew, onOpen, format = 'slideshow' }) {
+  const { Icon } = NS();
+  const W = window.SS.week;
+  const reel = format === 'reel';
+  const done = slots.filter(Boolean).length;
+  const Tile = ({ icon, name, done: d, total, active }) => (
+    <div style={{ flex: 1, padding: '16px 18px', borderRadius: 'var(--radius-lg)', background: active ? 'var(--blue-500)' : 'var(--white)', border: active ? 'none' : '1px solid var(--border)', boxShadow: active ? 'var(--shadow-accent)' : 'var(--shadow-card)', color: active ? '#fff' : 'var(--ink)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: '700 14px var(--font-ui)' }}><Icon name={icon} size={17} color={active ? '#fff' : 'var(--ink)'} />{name}</div>
+      <div style={{ marginTop: 10, font: '800 30px var(--font-display)', letterSpacing: '-0.8px' }}>{d}<span style={{ font: '600 16px var(--font-ui)', opacity: 0.6, marginLeft: 3 }}>/ {total}</span></div>
+      <div style={{ marginTop: 10, height: 6, borderRadius: 99, background: active ? 'rgba(255,255,255,0.3)' : 'var(--fill-quiet)' }}><div style={{ width: `${(d / total) * 100}%`, height: '100%', borderRadius: 99, background: active ? '#fff' : 'var(--blue-500)' }} /></div>
+    </div>
+  );
+  return (<>
+    <SHeader onBack={() => {}} title={`Week ${W.n}`} sub={`${W.range} · ${W.opens}`} right={<button type="button" aria-label="Messages" style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Icon name="message-circle" size={19} color="var(--ink)" /></button>} />
+    <Screen style={{ gap: 18, paddingBottom: 40 }}>
+      <div style={{ display: 'flex', gap: 12 }}>{reel ? <><Tile icon="video" name="Reels" done={done} total={slots.length} active /><Tile icon="images" name="Slideshows" done={W.slots.filter(Boolean).length} total={W.slots.length} /></> : <><Tile icon="video" name="Reels" done={W.reelSlots.filter(Boolean).length} total={W.reelSlots.length} /><Tile icon="images" name="Slideshows" done={done} total={slots.length} active /></>}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {slots.map((s, i) => s ? (
+          <button key={i} type="button" onClick={() => onOpen(i)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--white)', boxShadow: 'var(--shadow-card)', cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ font: '700 13px var(--font-ui)', color: 'var(--slate-400)', width: 22 }}>{String(i + 1).padStart(2, '0')}</span>
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ font: '700 16px var(--font-ui)', letterSpacing: '-0.2px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><KindChip kind={s.kind} />{s.type ? <SChip tone="quiet">{s.type}</SChip> : null}</span>
+            </span>
+            <Icon name="chevron-right" size={18} color="var(--slate-300)" />
+          </button>
+        ) : (
+          <button key={i} type="button" onClick={() => onNew(i)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 16px', borderRadius: 'var(--radius-lg)', border: '1.5px dashed var(--line-strong)', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ font: '700 13px var(--font-ui)', color: 'var(--slate-400)', width: 22 }}>{String(i + 1).padStart(2, '0')}</span>
+            <span style={{ flex: 1, font: '600 15px var(--font-ui)', color: 'var(--slate-400)' }}>Empty</span>
+            <Icon name="plus" size={18} color="var(--slate-400)" />
+          </button>
+        ))}
+      </div>
+    </Screen>
+  </>);
+}
+
+/* ---------- Pick a kind ---------- */
+/* Four tiny slides. Text box = words you wrote. Small card = your screenshot.
+   Dashed camera slot = the creator's photo. */
+function MiniDeck({ kind }) {
+  const { Icon } = NS();
+  const n = 4; const w = 30; const h = 53;
+  const TextBox = ({ lines = 2 }) => <span style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '3px 4px', borderRadius: 3, background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.22)' }}>{Array.from({ length: lines }).map((_, i) => <span key={i} style={{ height: 2.5, borderRadius: 2, background: 'var(--ink)', width: i === lines - 1 ? '65%' : '100%' }} />)}</span>;
+  const ShotBox = () => <span style={{ display: 'block', width: '70%', margin: '0 auto', borderRadius: 3, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.22)' }}><span style={{ display: 'block', height: 4, background: '#2F6FD1' }} /><span style={{ display: 'block', height: 12, background: '#DCE9F7' }} /></span>;
+  return (
+    <span style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>
+      {Array.from({ length: n }).map((_, i) => {
+        const cta = kind !== 'handheld' && i === n - 1;
+        const text = kind === 'handheld' || (kind === 'story' && i === 0) || cta;
+        const shot = (kind === 'handheld' && i % 2 === 1) || cta;
+        return (
+          <span key={i} style={{ position: 'relative', width: w, height: h, borderRadius: 7, overflow: 'hidden', background: cta ? 'linear-gradient(180deg,#CFDCE8,#4F6276)' : 'repeating-linear-gradient(135deg,#F3F7FB 0 4px,#EAF0F6 4px 8px)', border: cta ? 'none' : '1.5px dashed var(--line-strong)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: 4 }}>
+            {!text && !shot ? <span style={{ display: 'flex', justifyContent: 'center' }}><Icon name="camera" size={14} color="var(--slate-300)" /></span> : null}
+            {shot ? <ShotBox /> : null}
+            {text ? <TextBox lines={shot ? 1 : 2} /> : null}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+function KindScreen({ slot, onBack, onPick, format = 'slideshow' }) {
+  const { Icon } = NS();
+  const reel = format === 'reel';
+  const KINDS = reel ? window.SS.kindsReel : window.SS.kinds;
+  const [kind, setKind] = React.useState(null);
+  const types = kind ? window.SS.postTypes[reel ? 'reel' : 'handheld'] : null;
+  const Row = ({ onClick, left, name, line, chip }) => (
+    <button type="button" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 18px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--white)', boxShadow: 'var(--shadow-card)', cursor: 'pointer', textAlign: 'left' }}>
+      {left}
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{chip || <span style={{ font: '700 18px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>{name}</span>}</span>
+        <span style={{ font: '500 14px/1.4 var(--font-ui)', color: 'var(--slate-500)', textWrap: 'pretty' }}>{line}</span>
+      </span>
+      <Icon name="chevron-right" size={18} color="var(--slate-300)" />
+    </button>
+  );
+  const [peek, setPeek] = React.useState(null);
+  if (kind && types) return (<>
+    <SHeader onBack={() => setKind(null)} title="Kind of post" sub={`${window.SS.kinds[kind].name} · Slot ${String(slot + 1).padStart(2, '0')}`} right={<KindChip kind={kind} />} />
+    <Screen style={{ gap: 12, paddingBottom: 40 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {types.map((t, i) => { const tone = [['var(--blue-100)', 'var(--blue-700)'], ['#EEE9FB', '#5B3FC9'], ['var(--green-soft)', 'var(--green)'], ['var(--amber-soft)', 'var(--amber)']][i % 4]; return (
+          <button key={t.id} type="button" onClick={() => setPeek(t)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, padding: '18px 16px 16px', borderRadius: 'var(--radius-lg)', border: 'none', background: tone[0], cursor: 'pointer', textAlign: 'left', minHeight: 132 }}>
+            <span style={{ width: 36, height: 36, borderRadius: 999, background: 'rgba(255,255,255,0.75)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={reel ? ['mic', 'layout-list', 'layout-grid', 'sparkles', 'message-circle', 'images', 'pencil'][i % 7] : ['layout-list', 'layout-grid', 'zap', 'circle-alert'][i % 4]} size={18} color={tone[1]} /></span>
+            <span style={{ font: '700 17px var(--font-display)', letterSpacing: '-0.3px', color: tone[1] }}>{t.name}</span>
+            <span style={{ font: '500 13px/1.35 var(--font-ui)', color: 'var(--ink)', opacity: 0.7 }}>{t.line}</span>
+          </button>
+        ); })}
+      </div>
+    </Screen>
+    {peek ? (
+      <SSheet onClose={() => setPeek(null)}>
+        {(dismiss) => (
+          <div style={{ padding: '6px 24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <SChip tone={KIND_TONE[kind]} style={{ font: '700 14px var(--font-ui)', padding: '6px 12px' }}>{peek.name}</SChip>
+              <span style={{ font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>{peek.line}</span>
+              <button type="button" onClick={() => dismiss()} aria-label="Close" style={{ marginLeft: 'auto', width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--fill-quiet)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={17} color="var(--slate-500)" /></button>
+            </div>
+            <p style={{ margin: 0, font: '500 16px/1.45 var(--font-ui)', color: 'var(--ink)', textWrap: 'pretty', whiteSpace: 'pre-line' }}>{peek.about}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <SLabel>Example</SLabel>
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none', padding: '4px 24px 8px', margin: '0 -24px' }}>
+                <SlideCard w={104} text={peek.example} photo="roll3" tstyle={{ size: 1.15 }} who="mixed" />
+                {peek.slides.map((s, i) => <SlideCard key={i} w={104} text={kind === 'story' ? '' : s} label={kind === 'story' ? s : ''} photo={kind === 'story' ? null : `roll${(i * 4 + 7) % 15}`} tstyle={{ size: 1.05 }} who={kind === 'story' ? 'creator' : 'mixed'} />)}
+                <SlideCard w={104} text="Link in bio" inset="sent" photo="roll11" tstyle={{ size: 1.1 }} who="mixed" />
+              </div>
+            </div>
+            <SButton onClick={() => dismiss(() => onPick(kind, peek))}>Continue with {peek.name}</SButton>
+          </div>
+        )}
+      </SSheet>
+    ) : null}
+  </>);
+  return (<>
+    <SHeader onBack={onBack} title={reel ? 'New reel' : 'New slideshow'} sub={`Slot ${String(slot + 1).padStart(2, '0')} · Week ${window.SS.week.n}`} />
+    <Screen style={{ gap: 12, paddingBottom: 40 }}>
+      <h2 style={{ margin: '4px 0 6px', font: '700 22px/1.25 var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)', textWrap: 'pretty' }}>What post type do you want to use?</h2>
+      {['handheld', 'story', 'open'].map((k) => { const K = KINDS[k]; return <Row key={k} onClick={() => k === 'open' ? onPick(k, null) : setKind(k)} left={<MiniDeck kind={k} />} name={K.name} line={K.line} />; })}
+    </Screen>
+  </>);
+}
+
+/* ---------- Creator preview ---------- */
+function PreviewSheet({ kind, title, count, firstSlide, onClose }) {
+  const { Icon } = NS();
+  const K = window.SS.kinds[kind];
+  return (
+    <SSheet onClose={onClose}>
+      <div style={{ padding: '10px 24px 0' }}>
+        <h2 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>On the creator's Home</h2>
+        <p style={{ margin: '4px 0 16px', font: '400 14px var(--font-ui)', color: 'var(--slate-500)' }}>Friday 7:00 PM · Inkbound</p>
+        <div style={{ borderRadius: 24, overflow: 'hidden', border: '1px solid var(--border)', boxShadow: 'var(--shadow-raised)', background: 'var(--white)' }}>
+          <div style={{ position: 'relative', height: 300, background: 'linear-gradient(180deg, #E9F3FC 0%, #B7C6D4 45%, #3C4B59 100%)' }}>
+            <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', gap: 8 }}><KindChip kind={kind} /><SChip tone="quiet" icon="images" style={{ background: 'rgba(255,255,255,0.8)' }}>Slideshow</SChip></div>
+            {firstSlide ? <div style={{ position: 'absolute', right: 16, top: 48 }}><SlideCard w={84} {...firstSlide} /></div> : null}
+            <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16, display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+              <span style={{ flex: 1, font: '700 20px/1.25 var(--font-display)', letterSpacing: '-0.4px', color: '#fff', textWrap: 'pretty' }}>{title || 'Untitled'}</span>
+              <span style={{ padding: '5px 10px', borderRadius: 999, background: 'rgba(15,23,32,0.6)', color: '#fff', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap' }}>{count}</span>
+            </div>
+          </div>
+          <div style={{ padding: 14 }}><SButton style={{ width: '100%' }} icon={kind === 'handheld' ? 'image-plus' : kind === 'story' ? 'camera' : 'sparkles'}>{K.creatorCta}</SButton></div>
+        </div>
+      </div>
+    </SSheet>
+  );
+}
+
+/* ---------- Handheld: a slide builder ---------- */
+const ROLE_LABEL = { cover: 'Cover', point: 'Point', cta: 'CTA' };
+function ReviseSheet({ onPick, onClose }) {
+  const { Icon } = NS();
+  const [text, setText] = React.useState('');
+  return (
+    <SSheet onClose={onClose} height="62%">
+      {(dismiss) => (<>
+        <div style={{ padding: '10px 24px 12px' }}>
+          <h2 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>Revise with AI</h2>
+          <p style={{ margin: '4px 0 0', font: '400 14px var(--font-ui)', color: 'var(--slate-500)' }}>Say what should change. The rest stays.</p>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {window.SS.handheld.revise.map((r) => <button key={r} type="button" onClick={() => dismiss(() => onPick(r))} style={{ padding: '14px 16px', borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--blue-50)', color: 'var(--ink)', font: '600 15px var(--font-ui)', textAlign: 'left', cursor: 'pointer' }}>{r}</button>)}
+        </div>
+        <div style={{ display: 'flex', gap: 8, padding: '12px 20px 0' }}>
+          <SField value={text} onChange={setText} placeholder="What should change?" style={{ flex: 1, padding: '11px 16px' }} />
+          <button type="button" disabled={!text.trim()} onClick={() => dismiss(() => onPick(text))} aria-label="Send" style={{ width: 50, height: 50, borderRadius: 999, border: 'none', background: text.trim() ? 'var(--blue-500)' : 'var(--fill-quiet)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="send" size={18} color={text.trim() ? '#fff' : 'var(--slate-400)'} /></button>
+        </div>
+      </>)}
+    </SSheet>
+  );
+}
+
+function HandheldEditor({ slot, onBack, onSave, initial, onDark, kind = 'handheld', postType, format = 'slideshow' }) {
+  const { Icon } = NS();
+  const reel = format === 'reel';
+  const lt = reel && postType && postType.id === 'longtext';
+  const D = reel ? window.SS.reel : window.SS.handheld;
+  const story = kind === 'story';
+  const tipsStory = story && postType && postType.id === 'tips';
+  const [count, setCountN] = React.useState(null);
+  const seed = (arr) => { const a = arr.map((s, i) => ({ ...s, id: i })); if (story) return a; const c = a.findIndex((s) => s.role === 'cta'); if (c > 0) { const [cta] = a.splice(c, 1); a.splice(3, 0, cta); } return a; };
+  const STEPS = story ? [{ id: 'cover', name: reel ? 'Hook' : 'Cover' }, { id: 'cta', name: 'CTA' }, { id: 'details', name: 'Details' }, { id: 'review', name: 'Review' }] : lt ? [{ id: 'cover', name: 'Text' }, { id: 'cta', name: 'CTA line' }, { id: 'details', name: 'Details' }, { id: 'review', name: 'Review' }] : [{ id: 'cover', name: reel ? 'Hook' : 'Cover' }, { id: 'points', name: reel ? 'Points' : 'Slides' }, { id: 'details', name: 'Details' }, { id: 'review', name: 'Review' }];
+  const [step, setStep] = React.useState(initial ? 'review' : 'cover');
+  const stepIdx = STEPS.findIndex((s) => s.id === step);
+  const [gap, setGap] = React.useState({ min: 4, max: 8 });
+  const [gapOpen, setGapOpen] = React.useState(false);
+  const [slides, setSlides] = React.useState(initial ? seed(D.slides) : [{ id: 0, role: 'cover', text: lt && initial ? window.SS.longtext : '', shot: '', inset: null, tstyle: lt ? { size: 0.62, align: 'left', bg: 'none' } : undefined, box: lt ? { x: 0.5, y: 0.42, w: 0.86 } : undefined }, { id: 1, role: 'cta', text: '', shot: '', inset: null }]);
+  const ctaPos = React.useRef(2 + Math.floor(Math.random() * 4));
+  const INTRO_KEY = 'noni.ss.ctaIntroSeen.manager';
+  const introSeen = React.useRef(Boolean(localStorage.getItem(INTRO_KEY)));
+  const showIntro = () => { if (introSeen.current) return false; introSeen.current = true; localStorage.setItem(INTRO_KEY, '1'); setSheet('intro'); return true; };
+  const [sel, setSel] = React.useState(0);
+  const [search, setSearch] = React.useState('');
+  const [caption, setCaption] = React.useState('');
+  const [tags, setTags] = React.useState('');
+  const [sheet, setSheet] = React.useState(null);
+  const [busy, setBusy] = React.useState(null);
+  React.useEffect(() => { onDark && onDark(step !== 'details' || sheet === 'fyp'); }, [step, sheet]);
+  const [reword, setReword] = React.useState(true);
+  const nextId = React.useRef(100);
+  const ctaIdx = slides.findIndex((s) => s.role === 'cta');
+  const cur = slides[sel];
+  const title = slides[0]?.text || '';
+  const points = slides.filter((s) => s.role === 'point');
+  const ctaOk = Boolean(slides[ctaIdx]?.text?.trim());
+  const pointsOk = points.length > 0 && points.every((p) => p.text.trim()) && (story || ctaOk);
+  const lastIdx = slides.length - 1;
+  const onLastPoint = step === 'points' && sel >= lastIdx;
+  const onCta = !story && step === 'points' && cur?.role === 'cta';
+  React.useEffect(() => { if (onCta && !ctaOk) showIntro(); }, [onCta]);
+  const patchAt = (at, p) => setSlides((arr) => arr.map((s, i) => i === at ? { ...s, ...p } : s));
+  const setCount = (n) => { setSlides((arr) => { const cov = arr[0], cta = arr.find((s) => s.role === 'cta'), m = cta && !story ? Math.max(1, n - 1) : n, pts = arr.filter((s) => s.role === 'point').slice(0, m); while (pts.length < m) pts.push({ id: nextId.current++, role: 'point', text: '', shot: '', inset: null }); if (!cta) return [cov, ...pts]; if (story) return [cov, ...pts, cta]; const at = Math.min(ctaPos.current, pts.length + 1) - 1; pts.splice(at, 0, cta); return [cov, ...pts]; }); setSel(1); };
+  const go = (id) => { setStep(id); if (id === 'cover') setSel(0); if (id === 'cta') { setSel(ctaIdx); if (tipsStory && !count) setSheet('count'); else if (!ctaOk) showIntro(); } if (id === 'points') { if (points.length) setSel(1); else setSheet('count'); } };
+  const isCta = (s) => s.role === 'cta';
+  const next = () => { if (step === 'points' && !onLastPoint) { setSel(sel + 1); return; } go(STEPS[stepIdx + 1].id); };
+  const generateCta = () => { const it = matchFeature(title, postType, story || lt ? null : ctaIdx); setBusy('cta'); setTimeout(() => { patchAt(ctaIdx, lt ? { text: it.cta, inset: null, genAt: Date.now() } : { text: it.cta, inset: it.id, box: { x: 0.44, y: 0.56, w: 0.66 }, insetBox: { x: 0.44, y: 0.27, w: 0.42 }, boxIg: { x: 0.5, y: 0.64, w: 0.72 }, insetBoxIg: { x: 0.5, y: 0.38, w: 0.42 }, genAt: Date.now() }); setBusy(null); }, 1700); };
+  const pickFeature = (it) => { const shaped = matchFeature(title, postType, story || lt ? null : ctaIdx, it.id); setBusy('cta'); setTimeout(() => { patchAt(ctaIdx, { text: shaped.cta, inset: lt ? null : it.id, genAt: Date.now() }); setBusy(null); }, 1300); };
+  const selfCta = (it) => { if (it) patchAt(ctaIdx, { inset: it.id }); setSel(ctaIdx); };
+  const writePoints = () => { setBusy('points'); setTimeout(() => { let k = 0; const ctaIt = matchFeature(title, postType, ctaIdx); setSlides((arr) => arr.map((s) => { if (reel && s.role === 'cover' && !s.shot) return { ...s, shot: D.hookSay }; if (s.role === 'point' && !s.text.trim()) { const i = (k++) % D.tips.length; return { ...s, text: D.tips[i], shot: reel && D.say ? D.say[i] : s.shot, genAt: Date.now() }; } if (s.role === 'cta' && !s.text.trim()) return { ...s, text: ctaIt.cta, inset: ctaIt.id, shot: reel ? 'Say it while the recording plays' : s.shot, box: { x: 0.44, y: 0.56, w: 0.66 }, insetBox: { x: 0.44, y: 0.27, w: 0.42 }, boxIg: { x: 0.5, y: 0.64, w: 0.72 }, insetBoxIg: { x: 0.5, y: 0.38, w: 0.42 }, genAt: Date.now() }; return s; })); setBusy(null); }, 1600); };
+  const writeHook = () => { setBusy('hook'); setTimeout(() => { patchAt(0, { shot: D.hookSay, genAt: Date.now() }); setBusy(null); }, 1200); };
+  const fillDetails = () => { setBusy('details'); setTimeout(() => { setCaption(D.caption.split(' #')[0]); setTags('#' + D.caption.split(' #').slice(1).join(' #')); setSearch(D.search); setBusy(null); }, 1400); };
+  const Spinner = () => <span style={{ width: 16, height: 16, borderRadius: 999, border: '2.5px solid var(--blue-200)', borderTopColor: 'var(--blue-500)', animation: 'ss-spin 0.8s linear infinite' }} />;
+  const kindLabel = postType ? `${postType.name} · ${window.SS.kinds[kind].name}` : window.SS.kinds[kind].name;
+  const save = () => onSave({ title: lt ? (title.split(/[.!?]/)[0] || 'Long text') : title, kind, type: postType ? postType.name : undefined, count: story ? (tipsStory ? count : '') : slides.length });
+  const reviewGap = tipsStory ? { min: Math.max(1, (count || 2) - 1), max: Math.max(1, (count || 2) - 1) } : { min: 3, max: 3 };
+
+
+  if (step === 'review') return <ReviewScreen slides={slides} caption={caption} tags={tags} onBack={() => go('details')} onSave={save} steps={STEPS} current={stepIdx} onJump={go} story={story} gap={reviewGap} openCount={story && !tipsStory} format={format} />;
+
+  const tagList = tags.split(/\s+/).map((t) => t.replace(/^#/, '')).filter(Boolean);
+  if (step === 'details') return (<>
+    <SHeader onBack={() => go(story ? 'cta' : 'points')} title="Details" right={<div style={{ overflowX: 'auto', scrollbarWidth: 'none', display: 'flex' }}><StepStrip steps={STEPS} current={stepIdx} onJump={go} /></div>} />
+    <Screen style={{ gap: 22, paddingTop: 6 }}>
+      <SButton variant="secondary" icon={busy === 'details' ? undefined : 'sparkles'} onClick={fillDetails} disabled={busy === 'details'}>{busy === 'details' ? <><Spinner />Writing</> : 'Fill with AI'}</SButton>
+      <Section label="Caption"><SField multiline value={caption} onChange={setCaption} placeholder="Under the post" /></Section>
+      <Section label="Hashtags" right={<span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-400)' }}>{tagList.length} / 5</span>}><TagField tags={tagList} onChange={(l) => setTags(l.map((t) => '#' + t).join(' '))} /></Section>
+      <Section label="Search phrase"><SField icon="search" value={search} onChange={setSearch} placeholder="What they type into TikTok" /></Section>
+    </Screen>
+    <BottomBar onPreview={() => setSheet('fyp')} onSave={() => go('review')} label="Review the post" disabled={!caption.trim()} />
+    {sheet === 'fyp' ? <ReviewScreen slides={slides} caption={caption} tags={tags} onBack={() => setSheet(null)} story={story} gap={reviewGap} openCount={story && !tipsStory} popup format={format} /> : null}
+  </>);
+
+  const Thumb = ({ s, i, lbl }) => <button type="button" onClick={() => setSel(i)} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: 3, borderRadius: 8, border: 'none', background: sel === i ? 'rgba(255,255,255,0.16)' : 'transparent', cursor: 'pointer', flex: '0 0 auto' }}><SlideCard w={30} text={s.text} inset={s.inset} box={s.box} insetBox={s.insetBox} photo={s.photo} extras={s.extras} who="mixed" accent="#fff" />{lbl ? <span style={{ font: '700 9.5px var(--font-ui)', color: 'rgba(255,255,255,0.7)' }}>{lbl}</span> : null}</button>;
+  const nextOk = step === 'cover' ? Boolean(title.trim()) && (!reel || Boolean(slides[0].shot && slides[0].shot.trim())) : step === 'points' ? (onLastPoint ? pointsOk : Boolean(cur?.text?.trim())) : step === 'cta' ? ctaOk : true;
+  const nextLabel = step === 'cover' ? (story ? 'CTA' : lt ? 'CTA line' : reel ? 'Points' : 'Slides') : step === 'points' ? (onLastPoint ? 'Details' : reel ? 'Next point' : 'Next slide') : 'Details';
+  const footer = (
+    <CanvasFooter steps={STEPS} current={stepIdx} onJump={go} onNext={next} nextLabel={nextLabel} nextOk={nextOk}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 }}>
+        {step === 'points' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {slides.map((s, i) => { if (i === 0) return null; const done = Boolean(s.text.trim()), on = sel === i, c = isCta(s); return <button key={s.id} type="button" onClick={() => setSel(i)} aria-label={c ? 'CTA slide' : `Slide ${i}`} style={{ width: 34, height: 34, borderRadius: 999, border: on ? (c ? '2px solid var(--blue-500)' : 'none') : c ? '2px solid var(--blue-500)' : done ? 'none' : '1.5px solid rgba(255,255,255,0.3)', background: on ? '#fff' : done ? (c ? 'var(--blue-500)' : '#22C55E') : 'transparent', color: on ? (c ? 'var(--blue-500)' : 'var(--ink)') : c && !done ? 'var(--blue-500)' : '#fff', cursor: 'pointer', font: '800 13px var(--font-ui)', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>{done && !on ? <Icon name="check" size={15} color="#fff" /> : c ? <Icon name="zap" size={14} color={on ? 'var(--blue-500)' : 'var(--blue-500)'} /> : i}</button>; })}
+              <button type="button" onClick={() => setSheet('count')} aria-label="Change count" style={{ width: 34, height: 34, borderRadius: 999, border: '1.5px dashed rgba(255,255,255,0.3)', background: 'transparent', cursor: 'pointer', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color="#fff" /></button>
+            </div>
+          </div>
+        ) : (<>
+          <span style={{ flex: 1 }} />
+          {step === 'cta' && tipsStory ? <button type="button" onClick={() => setSheet('count')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', borderRadius: 999, border: '1px dashed rgba(255,255,255,0.4)', background: 'transparent', color: '#fff', cursor: 'pointer', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="camera" size={13} color="#fff" />{count || 0} points · creator records {Math.max(0, (count || 0) - 1)}</button> : null}
+          {step === 'cta' && story && !tipsStory ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', borderRadius: 999, background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.8)', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="camera" size={13} color="rgba(255,255,255,0.8)" />Creator picks the count</span> : null}
+        </>)}
+      </div>
+    </CanvasFooter>
+  );
+
+  return (<>
+    <CanvasEditor key={step} slides={slides} sel={sel} setSel={setSel} patchAt={patchAt} onAddPoint={null} onBack={stepIdx ? () => go(STEPS[stepIdx - 1].id) : onBack} onNext={next} nextDisabled={!nextOk} hasCta onToggleCta={null} onRemove={null} busy={busy === 'cta' ? 'Writing your CTA' : busy === 'hook' ? 'Writing the hook script' : busy === 'points' ? (reel ? 'Writing your points and lines' : 'Writing your points') : null} onGenerate={step === 'cta' || onCta ? generateCta : step === 'points' ? writePoints : null} generateLabel={step === 'points' && !onCta ? 'Fill with AI' : 'Generate with AI'} onSecondary={step === 'cta' || onCta ? () => setSheet('feature') : null} secondaryLabel={ctaOk ? 'Different feature' : 'Pick a feature'} onWriteNote={reel && step === 'cover' ? writeHook : null} kindLabel={kindLabel} gap={null} footer={footer} notes={story || reel} />
+    {sheet === 'intro' ? <CtaIntro onGo={() => setSheet(null)} onBack={() => { setSheet(null); if (onCta) setSel(Math.max(1, sel - 1)); else go(STEPS[stepIdx - 1].id); }} /> : null}
+    {gapOpen ? <SSheet onClose={() => setGapOpen(false)}><div style={{ padding: '10px 24px 0', display: 'flex', flexDirection: 'column', gap: 14 }}><h2 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>Creator's slides</h2><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1px solid var(--border)' }}><Stepper value={gap.min} onChange={(v) => setGap({ ...gap, min: Math.min(v, gap.max) })} min={1} max={18} /><span style={{ font: '600 14px var(--font-ui)', color: 'var(--slate-500)' }}>to</span><Stepper value={gap.max} onChange={(v) => setGap({ ...gap, max: Math.max(v, gap.min) })} min={1} max={18} /></div><SButton onClick={() => setGapOpen(false)}>Done</SButton></div></SSheet> : null}
+    {sheet === 'feature' ? <FeatureSheet current={slides[ctaIdx]?.inset} onPick={pickFeature} onSelf={selfCta} onClose={() => setSheet(null)} /> : null}
+    {sheet === 'count' ? <CountSheet value={tipsStory ? (count || 5) : (slides.length - 1 > 1 ? slides.length - 1 : 5)} onDone={(n) => { if (tipsStory) { setCountN(n); if (!ctaOk) showIntro(); } else setCount(n); }} onClose={() => setSheet(null)} /> : null}
+  </>);
+}
+
+/* Hashtags as chips. Space, comma or enter adds; backspace on empty removes the last. */
+function TagField({ tags, onChange }) {
+  const { Icon } = NS();
+  const [v, setV] = React.useState('');
+  const ref = React.useRef(null);
+  const add = (raw) => { const t = raw.replace(/^#+/, '').replace(/[^\w]/g, '').toLowerCase(); if (t && !tags.includes(t)) onChange([...tags, t]); setV(''); };
+  const onKey = (e) => { if (e.key === ' ' || e.key === ',' || e.key === 'Enter') { e.preventDefault(); add(v); } else if (e.key === 'Backspace' && !v && tags.length) onChange(tags.slice(0, -1)); };
+  return (
+    <div onClick={() => ref.current && ref.current.focus()} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minHeight: 56, padding: '10px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', cursor: 'text' }}>
+      {tags.map((t) => <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 32, padding: '0 6px 0 11px', borderRadius: 999, background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 14px var(--font-ui)' }}>#{t}<button type="button" onClick={(e) => { e.stopPropagation(); onChange(tags.filter((x) => x !== t)); }} aria-label={`Remove ${t}`} style={{ width: 22, height: 22, borderRadius: 999, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><Icon name="x" size={13} color="var(--blue-700)" /></button></span>)}
+      <input ref={ref} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={onKey} onBlur={() => v && add(v)} placeholder={tags.length ? '' : 'collegesoccer'} style={{ flex: 1, minWidth: 90, border: 'none', outline: 'none', background: 'transparent', font: '500 16px var(--font-ui)', color: 'var(--ink)', padding: '4px 0', height: 32 }} />
+    </div>
+  );
+}
+
+/* The one slide every Story and Open brief must carry: the manager's CTA. */
+function CtaCard({ cta, setCta, onLibrary, accent = 'violet' }) {
+  const { Icon } = NS();
+  const lib = window.SS.library.find((l) => l.id === cta.inset);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+      <SLabel right={<SChip tone={accent}>Last slide</SChip>}>Your CTA</SLabel>
+      <textarea value={cta.text} onChange={(e) => setCta({ ...cta, text: e.target.value })} rows={3} placeholder="The one slide you write" style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', background: 'transparent', padding: 0, color: 'var(--ink)', font: '700 20px/1.3 var(--font-display)', letterSpacing: '-0.3px' }} />
+      <div style={{ height: 1, background: 'var(--line)' }} />
+      <button type="button" onClick={onLibrary} style={{ display: 'flex', alignItems: 'center', gap: 12, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, textAlign: 'left' }}>
+        <span style={{ width: 44, height: 56, borderRadius: 8, background: lib?.tone || 'transparent', border: lib ? 'none' : '1.5px dashed var(--line-strong)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lib ? <Shot item={lib} w={28} /> : <Icon name="image-plus" size={18} color="var(--slate-400)" />}</span>
+        <span style={{ flex: 1, font: '700 15px var(--font-ui)', color: 'var(--ink)' }}>{lib ? lib.title : 'Add a screenshot'}</span>
+        <Icon name="chevron-right" size={16} color="var(--slate-300)" />
+      </button>
+    </div>
+  );
+}
+
+/* ---------- Story ---------- */
+function StoryEditor({ slot, onBack, onSave }) {
+  const { Icon } = NS();
+  const D = window.SS.story;
+  const [theme, setTheme] = React.useState(D.theme);
+  const [beats, setBeats] = React.useState(D.beats);
+  const [min, setMin] = React.useState(D.min);
+  const [max, setMax] = React.useState(D.max);
+  const [cta, setCta] = React.useState(D.cta);
+  const [sel, setSel] = React.useState(beats.length);
+  const [sheet, setSheet] = React.useState(null);
+  const items = [...beats.map((b, i) => ({ id: `b${i}`, who: 'creator', label: b })), { id: 'cta', who: 'manager', text: cta.text, inset: cta.inset }];
+  const editingCta = sel === beats.length;
+  const setBeat = (i, v) => setBeats((arr) => arr.map((b, j) => j === i ? v : b));
+  const removeBeat = (i) => { setBeats((arr) => arr.filter((_, j) => j !== i)); setSel(beats.length - 1); };
+  const addBeat = () => { setBeats((arr) => [...arr, '']); setSel(beats.length); };
+  return (<>
+    <SHeader onBack={onBack} title={`Slideshow ${String(slot + 1).padStart(2, '0')}`} sub={`Week ${window.SS.week.n}`} right={<KindChip kind="story" />} />
+    <Screen>
+      <Section label="Theme"><SField big multiline value={theme} onChange={setTheme} placeholder="The story every creator tells their own way" /></Section>
+      <Section label={`${beats.length} beats and your CTA`} right={<Legend />}>
+        <Deck items={items} w={118} selected={sel} onSelect={setSel} onAdd={addBeat} accent="#7C5CE6" />
+      </Section>
+      {editingCta ? <CtaCard cta={cta} setCta={setCta} onLibrary={() => setSheet('library')} /> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+          <SLabel right={beats.length > 2 ? <button type="button" onClick={() => removeBeat(sel)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', cursor: 'pointer', font: '700 13px var(--font-ui)', color: 'var(--slate-500)', padding: 0 }}><Icon name="trash-2" size={15} color="var(--slate-500)" />Remove</button> : null}>Beat {sel + 1}</SLabel>
+          <input value={beats[sel] ?? ''} onChange={(e) => setBeat(sel, e.target.value)} placeholder="A moment in the story" style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: 0, color: 'var(--ink)', font: '700 20px/1.3 var(--font-display)', letterSpacing: '-0.3px' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, font: '500 14px var(--font-ui)', color: 'var(--slate-500)' }}><Icon name="camera" size={16} color="var(--slate-400)" />The creator's photo and words</div>
+        </div>
+      )}
+      <Section label="Slides">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1px solid var(--border)' }}>
+          <Stepper value={min} onChange={(v) => setMin(Math.min(v, max))} min={2} max={20} /><span style={{ font: '600 14px var(--font-ui)', color: 'var(--slate-500)' }}>to</span><Stepper value={max} onChange={(v) => setMax(Math.max(v, min))} min={2} max={20} />
+        </div>
+      </Section>
+      <Section label="Caption" right={<SChip tone="quiet" icon="sparkles">AI, after the photos land</SChip>}><div style={{ padding: '13px 16px', borderRadius: 'var(--radius-md)', background: 'var(--fill-quiet)', font: '500 15px var(--font-ui)', color: 'var(--slate-400)' }}>Written from the creator's slides</div></Section>
+    </Screen>
+    <BottomBar onPreview={() => setSheet('preview')} onSave={() => onSave({ title: theme, kind: 'story', count: `${min} to ${max}` })} disabled={!theme.trim() || !cta.text.trim()} />
+    {sheet === 'library' ? <LibrarySheet current={cta.inset} onPick={(id) => setCta({ ...cta, inset: id })} onClose={() => setSheet(null)} /> : null}
+    {sheet === 'preview' ? <PreviewSheet kind="story" title={theme} count={`${min} to ${max} slides`} firstSlide={{ who: 'creator', label: beats[0] }} onClose={() => setSheet(null)} /> : null}
+  </>);
+}
+
+/* ---------- Open ---------- */
+function OpenEditor({ slot, onBack, onSave }) {
+  return (<>
+    <SHeader onBack={onBack} title={`Slideshow ${String(slot + 1).padStart(2, '0')}`} sub={`Week ${window.SS.week.n}`} right={<KindChip kind="open" />} />
+    <Screen>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center', padding: '40px 24px' }}>
+        <div style={{ font: '700 20px var(--font-ui)', color: 'var(--ink)' }}>Empty post</div>
+        <div style={{ font: '500 15px var(--font-ui)', color: 'var(--slate-500)' }}>The creator makes whatever they want.</div>
+      </div>
+    </Screen>
+    <BottomBar onSave={() => onSave({ title: 'Freestyle', kind: 'open', count: '' })} />
+  </>);
+}
+
+/* ---------- Shell ---------- */
+function SlideshowBriefs({ start = 'week', label, format = 'slideshow' }) {
+  window.SS.activeFormat = format;
+  const reel = format === 'reel';
+  const PT = window.SS.postTypes[reel ? 'reel' : 'handheld'];
+  const [slots, setSlots] = React.useState(reel ? window.SS.week.reelSlots : window.SS.week.slots);
+  const [screen, setScreen] = React.useState(start === 'week' ? { name: 'week' } : start === 'kind' ? { name: 'kind', slot: reel ? 2 : 1 } : { name: 'edit', kind: start, slot: reel ? 2 : 1, initial: start === 'handheld', postType: start === 'handheld' ? PT[1] : start === 'story' ? PT[0] : null });
+  const [toast, setToast] = React.useState(null);
+  const [dark, setDark] = React.useState(false);
+  React.useEffect(() => { if (!(screen.name === 'edit' && (screen.kind === 'handheld' || screen.kind === 'story'))) setDark(false); }, [screen]);
+  const save = (post) => { setSlots((arr) => arr.map((s, i) => i === screen.slot ? post : s)); setScreen({ name: 'week' }); setToast(`Added to slot ${String(screen.slot + 1).padStart(2, '0')}`); setTimeout(() => setToast(null), 2200); };
+  const back = () => setScreen(screen.name === 'edit' ? { name: 'kind', slot: screen.slot } : { name: 'week' });
+  let body;
+  if (screen.name === 'week') body = <WeekScreen format={format} slots={slots} onNew={(i) => setScreen({ name: 'kind', slot: i })} onOpen={(i) => setScreen({ name: 'edit', kind: slots[i].kind, slot: i, initial: true, postType: PT.find((t) => t.name === slots[i].type) })} />;
+  else if (screen.name === 'kind') body = <KindScreen format={format} slot={screen.slot} onBack={back} onPick={(k, t) => k === 'open' ? save({ title: 'Freestyle', kind: 'open', count: '' }) : setScreen({ name: 'edit', kind: k, slot: screen.slot, postType: t })} />;
+  else if (screen.kind === 'handheld' || screen.kind === 'story') body = <HandheldEditor key={screen.kind} format={format} slot={screen.slot} onBack={back} onSave={save} initial={screen.initial && screen.kind === 'handheld'} onDark={setDark} kind={screen.kind} postType={screen.postType || (screen.kind === 'handheld' ? PT[1] : PT[0])} />;
+  else body = <OpenEditor slot={screen.slot} onBack={back} onSave={save} />;
+  return (
+    <Phone label={label} dark={dark}>
+      <div key={`${screen.name}-${screen.kind}-${screen.slot}`} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', animation: 'noni-screen-in var(--dur-base) var(--ease-out) both', position: 'relative' }}>{body}</div>
+      {toast ? <div style={{ position: 'absolute', left: 20, right: 20, bottom: 40, padding: '12px 16px', borderRadius: 16, background: 'var(--ink)', color: '#fff', font: '600 14px var(--font-ui)', boxShadow: 'var(--shadow-float)', zIndex: 90, display: 'flex', alignItems: 'center', gap: 10, animation: 'noni-toast-in var(--dur-base) var(--ease-out) both' }}><window.NoniDesignSystem_710e43.Icon name="check" size={16} color="#fff" />{toast}</div> : null}
+    </Phone>
+  );
+}
+
+Object.assign(window, { SlideshowBriefs });

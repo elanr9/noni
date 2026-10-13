@@ -1,0 +1,284 @@
+/* Creator side. Home shows the week's posts; opening a Handheld slideshow
+   lands on an empty TikTok frame with the manager's words already on it.
+   Tap to add a photo, drag and pinch to frame it (separately for TikTok and
+   Instagram), tap any text to move or restyle it. Then preview and submit. */
+const RNS = () => window.NoniDesignSystem_710e43;
+
+/* Per-creator rewording and shuffle of the manager's brief. Stand-in for the backend. */
+const REWORD = {
+  'Best clip first. Coaches decide in 10 seconds.': 'Your best clip goes first. Coaches decide in ten seconds.',
+  'Keep it under 3 minutes. Nobody watches minute 4.': 'Three minutes max. Minute four never gets watched.',
+  'Spot shadow yourself before every clip so they know who to watch.': 'Spot shadow yourself before each clip so they know who to follow.',
+  'No music. Coaches mute it anyway.': 'Skip the music. Coaches mute it anyway.',
+  'Put your name, grad year, position and email on the first frame.': 'Name, grad year, position and email on frame one.',
+};
+function creatorSlides(brief) {
+  const cov = brief.find((s) => s.role === 'cover'), cta = brief.find((s) => s.role === 'cta');
+  const pts = brief.filter((s) => s.role === 'point').map((s) => ({ ...s, text: REWORD[s.text] || s.text }));
+  for (let i = pts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pts[i], pts[j]] = [pts[j], pts[i]]; }
+  const at = 1 + Math.floor(Math.random() * Math.min(3, pts.length));
+  const ctaNum = at + 1;
+  pts.splice(at, 0, { ...cta, text: cta.text.replace(/^Tip \d+/, `Tip ${ctaNum}`) });
+  return [cov, ...pts].map((s, i) => ({ ...s, id: i, bg: null, shot: s.shot }));
+}
+
+const CREATOR_REELS = [
+  { id: 'r1', time: '10:00 AM', title: '5 tips for the perfect highlight video', format: 'reel', kind: 'handheld', type: 'Numbered list', status: 'assigned', note: 'Natural light. Say the hook to camera, then cut.' },
+  { id: 'r2', time: '1:00 PM', title: 'What a $40 camera sees that your coach misses', format: 'reel', kind: 'story', type: 'Talking head', status: 'assigned', note: 'Say your credential first.' },
+  { id: 'r3', time: '4:00 PM', title: 'Freestyle', format: 'reel', kind: 'open', type: '', status: 'assigned' },
+  { id: 'r4', time: '7:00 PM', title: 'Things nobody tells you about recruiting', format: 'reel', kind: 'handheld', type: 'Long text', status: 'assigned', note: 'Six seconds, straight face, let the text do the work.' },
+];
+const CREATOR_POSTS = [
+  { id: 'c1', time: '10:00 AM', title: '5 tips for the perfect highlight video', format: 'slideshow', kind: 'handheld', type: 'Numbered tips', status: 'assigned', note: 'Use real game photos, not stock. Your own film if you have it.' },
+  { id: 'c2', time: '1:00 PM', title: 'My journey to D1', format: 'slideshow', kind: 'story', type: 'Numbered tips', count: 5, status: 'assigned', note: 'Your real story, your real photos. One beat a slide.' },
+  { id: 'c3', time: '4:00 PM', title: 'Freestyle', format: 'slideshow', kind: 'open', type: '', status: 'assigned' },
+  { id: 'c4', time: '7:00 PM', title: 'What a $40 camera sees that your coach misses', format: 'reel', kind: 'story', type: 'Talking head', status: 'assigned', note: 'Say your credential first. Natural light if you can.' },
+];
+
+const Tag = ({ tone, icon, children }) => { const { Icon } = RNS(); return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 999, background: tone[0], color: tone[1], font: '700 13px var(--font-ui)', whiteSpace: 'nowrap', flex: '0 0 auto' }}>{icon ? <Icon name={icon} size={14} color={tone[1]} /> : null}{children}</span>; };
+
+function CreatorHome({ posts, onCreate }) {
+  const { Icon } = RNS();
+  const [slot, setSlot] = React.useState(Math.max(0, posts.findIndex((p) => p.status === 'assigned')));
+  const cur = posts[Math.min(slot, posts.length - 1)];
+  const days = [['M', 13], ['T', 14], ['W', 15], ['T', 16], ['F', 17], ['S', 18], ['S', 19]];
+  const dot = (s) => (s === 'posted' ? 'var(--green)' : s === 'review' ? 'var(--amber)' : 'var(--blue-300)');
+  const left = posts.filter((p) => p.status === 'assigned').length;
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 24px 104px', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px 0 6px', borderRadius: 999, background: 'var(--white)', border: '1px solid var(--border)', font: '700 13px var(--font-ui)', color: 'var(--ink)' }}><span style={{ width: 22, height: 22, borderRadius: 999, background: '#0B5C9E', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: '800 11px var(--font-ui)' }}>I</span>Inkbound</span>
+        <span style={{ flex: 1 }} />
+        <Icon name="message-circle" size={23} color="var(--ink)" /><Icon name="bell" size={23} color="var(--ink)" />
+      </div>
+      <h1 style={{ margin: 0, font: '700 26px/1.12 var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>Welcome back, Elan.</h1>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {days.map(([d, n], i) => { const on = i === 0; return (
+          <div key={n} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '7px 0 6px', borderRadius: 'var(--radius-md)', border: `1px solid ${on ? 'transparent' : 'var(--border)'}`, background: on ? 'var(--ink)' : 'var(--white)' }}>
+            <span style={{ font: '600 11px var(--font-ui)', color: on ? 'rgba(255,255,255,0.8)' : 'var(--slate-400)' }}>{d}</span>
+            <span style={{ font: '700 16px var(--font-display)', color: on ? '#fff' : 'var(--ink)' }}>{n}</span>
+            <span style={{ display: 'flex', gap: 3, height: 5 }}>{on ? posts.map((p) => <span key={p.id} style={{ width: 5, height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.85)' }} />) : <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--line-strong)' }} />}</span>
+          </div>
+        ); })}
+      </div>
+      {left === 0 ? <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 'var(--radius-lg)', background: 'var(--green-soft)' }}><span style={{ width: 36, height: 36, borderRadius: 999, background: 'var(--green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="check" size={18} color="#fff" /></span><span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}><span style={{ font: '700 15px var(--font-ui)', color: 'var(--ink)' }}>All done for today</span><span style={{ font: '500 13px var(--font-ui)', color: 'var(--slate-500)' }}>{posts.filter((p) => p.status === 'posted').length} posted, {posts.filter((p) => p.status === 'review').length} in review. Next post Tuesday.</span></span></div> : null}
+      <div key={cur.id} style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16, borderRadius: 'var(--radius-2xl)', background: 'var(--white)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', animation: 'noni-screen-in var(--dur-base) var(--ease-out) both' }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -18px', padding: '0 18px' }}>
+          <Tag tone={cur.format === 'reel' ? ['#FBE9DC', '#B8551B'] : ['#E6F6FD', '#0B5C9E']} icon={cur.format === 'reel' ? 'video' : 'images'}>{cur.format === 'reel' ? 'Reel' : 'Slideshow'}</Tag>
+          <Tag tone={{ handheld: ['var(--blue-100)', 'var(--blue-700)'], story: ['#EEE9FB', '#5B3FC9'], open: ['var(--amber-soft)', 'var(--amber)'] }[cur.kind]}>{window.SS.kinds[cur.kind].name}</Tag>
+          {cur.type ? <Tag tone={['var(--green-soft)', 'var(--green)']}>{cur.type}</Tag> : null}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span style={{ font: '800 22px/1.2 var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)', textWrap: 'pretty' }}>{cur.title}</span>
+        </div>
+        {cur.status === 'posted' ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 999, background: 'var(--green-soft)', color: 'var(--green)', font: '700 13px var(--font-ui)' }}><Icon name="circle-check-big" size={14} />Posted</span><span style={{ flex: 1, font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>Counting views</span></div>
+        : cur.status === 'review' ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 999, background: 'var(--amber-soft)', color: 'var(--amber)', font: '700 13px var(--font-ui)' }}><Icon name="clock" size={14} />In review</span><span style={{ flex: 1, font: '600 13px var(--font-ui)', color: 'var(--slate-500)' }}>Inkbound is looking at it</span></div>
+        : <SButton icon={cur.format === 'reel' ? 'video' : 'images'} onClick={() => onCreate(cur)} style={{ width: '100%' }}>{cur.format === 'reel' ? 'Record reel now' : 'Create slideshow now'}</SButton>}
+      </div>
+      {posts.length > 1 ? <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ font: '700 11.5px var(--font-ui)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--slate-400)', padding: '2px 2px 0' }}>{left === 0 ? 'Also today' : left === 1 ? 'Also today \u00b7 1 left to make' : `Also today \u00b7 ${left} left to make`}</span>
+        {posts.map((p, i) => i === slot ? null : (
+          <button key={p.id} type="button" onClick={() => setSlot(i)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ width: 36, height: 36, borderRadius: 11, flex: '0 0 auto', background: p.status === 'posted' ? 'var(--green-soft)' : p.status === 'review' ? 'var(--amber-soft)' : 'var(--blue-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={p.status === 'posted' ? 'circle-check-big' : p.status === 'review' ? 'clock' : p.format === 'reel' ? 'video' : 'images'} size={18} color={p.status === 'posted' ? 'var(--green)' : p.status === 'review' ? 'var(--amber)' : 'var(--blue-700)'} /></span>
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ font: '700 14.5px/1.25 var(--font-ui)', color: 'var(--ink)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.title}</span>
+              <span style={{ display: 'flex', gap: 5 }}><SChip tone="quiet" style={{ height: 22, padding: '0 8px', font: '700 11.5px var(--font-ui)' }}>{p.format === 'reel' ? 'Reel' : 'Slideshow'}</SChip><KindChip kind={p.kind} style={{ height: 22, padding: '0 8px', font: '700 11.5px var(--font-ui)' }} /></span>
+            </span>
+            <Icon name="chevron-right" size={18} color="var(--slate-300)" />
+          </button>
+        ))}
+      </div> : null}
+    </div>
+  );
+}
+
+function buildSlides(post) {
+  const own = (id) => ({ id, role: 'point', text: '', own: true, bg: null, inset: null });
+  if (post.kind === 'story') { const k = post.count ? Math.max(1, post.count - 1) : 3; return [{ id: 0, role: 'cover', text: post.title, bg: null, inset: null }, ...Array.from({ length: k }).map((_, j) => own(j + 1)), { id: 99, role: 'cta', text: window.SS.story.cta.text, inset: window.SS.story.cta.inset, bg: null }]; }
+  if (post.kind === 'open') return [];
+  return creatorSlides(window.SS.handheld.slides);
+}
+const CWrap = ({ children }) => <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', animation: 'ss-fade 260ms var(--ease-out) both' }}>{children}</div>;
+
+/* Handheld slideshow, creator side. One slide at a time: pick a photo,
+   frame it and tune the text, next. Then review everything and submit. */
+function CreatorHandheld({ post, onBack, onSubmit, onDark }) {
+  const { Icon } = RNS();
+  const story = post.kind === 'story', open = post.kind === 'open', flexible = (story && !post.count) || open;
+  const nextId = React.useRef(200);
+  const [slides, setSlides] = React.useState(() => buildSlides(post));
+  const [i, setI] = React.useState(0);
+  const [phase, setPhase] = React.useState('start'); // start | pick | edit | review
+  const [sheet, setSheet] = React.useState(false);
+  const [fromReview, setFromReview] = React.useState(false);
+  const [justPicked, setJustPicked] = React.useState(false);
+  const [caption, setCaption] = React.useState('');
+  const [tags, setTags] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [ai, setAi] = React.useState(false);
+  const [picker, setPicker] = React.useState(false);
+  const ownDetails = story || open;
+  const mkBg = (src) => ({ src, tiktok: { x: 0, y: 0, s: 1 }, instagram: { x: 0, y: 0, s: 1 } });
+  const addPhotos = (srcs) => { setSlides((arr) => { const base = arr.filter((s) => s.role !== 'cta'); const cta = arr.find((s) => s.role === 'cta'); const add = srcs.map((src, k) => ({ id: nextId.current++, role: base.length + k === 0 ? 'cover' : 'point', text: '', own: true, bg: mkBg(src), inset: null })); return cta ? [...base, ...add, cta] : [...base, ...add]; }); setPicker(false); setPhase('edit'); };
+  const fillDetails = () => { setBusy(true); setTimeout(() => { const own = slides.filter((s) => s.own && s.text.trim()).map((s) => s.text.trim()); const lead = (slides[0].text || post.title).replace(/[.!?]$/, ''); setCaption(own.length ? `${lead}. ${own[0].replace(/[.!?]$/, '')}. Here is how it went.` : `${lead}. Here is how it went.`); setTags('#collegesoccer #d1recruiting #soccerrecruiting #highlightvideo #collegerecruiting'); setSearch(lead.toLowerCase()); setBusy(false); }, 1400); };
+  const boxRef = React.useRef(null);
+  const [fw, setFw] = React.useState(240);
+  React.useLayoutEffect(() => { const el = boxRef.current; if (!el) return; const m = () => setFw(Math.max(180, Math.min(300, Math.floor((el.clientHeight - 8) * 9 / 16)))); m(); const ro = new ResizeObserver(m); ro.observe(el); return () => ro.disconnect(); }, [phase, i]);
+  const n = slides.length, cur = slides[i] || { role: 'point', text: '', own: true }, cta = cur.role === 'cta';
+  React.useEffect(() => { onDark && onDark(phase === 'edit' || phase === 'review'); }, [phase]);
+  const capText = ownDetails ? caption : window.SS.handheld.caption.split(' #')[0];
+  const tagText = ownDetails ? tags : '#' + window.SS.handheld.caption.split(' #').slice(1).join(' #');
+  const patchAt = (at, p) => setSlides((arr) => arr.map((s, k) => k === at ? { ...s, ...p } : s));
+  const roleLabel = (s, k) => s.role === 'cover' ? 'Cover slide' : s.role === 'cta' ? 'Your plug' : s.own ? `Your slide ${k + 1}` : `Tip ${k}`;
+  const ownCount = slides.filter((s) => s.own).length;
+  const addSlide = () => { const id = nextId.current++; setSlides((arr) => { const a = [...arr]; a.splice(i + 1, 0, { id, role: 'point', text: '', own: true, bg: null, inset: null }); return a; }); setI(i + 1); setPhase('pick'); };
+  const removeSlide = () => { if (!cur.own || ownCount <= (open ? 2 : 1)) return; setSlides((arr) => arr.filter((_, k) => k !== i).map((s, k) => k === 0 && s.own ? { ...s, role: 'cover' } : s)); setI(Math.max(0, i - 1)); setPhase('edit'); };
+  const ensurePlug = (arr) => { if (arr.some((s) => s.role === 'cta')) return arr; const it = matchFeature(arr[0].text || post.title, null); const short = it.general ? 'Inkbound makes recruiting easier than anything I have tried. Link in bio.' : it.cta; return [...arr, { id: 98, role: 'cta', text: short, inset: it.id, bg: null, box: { x: 0.44, y: 0.58, w: 0.66 }, insetBox: { x: 0.44, y: 0.3, w: 0.42 }, boxIg: { x: 0.5, y: 0.62, w: 0.74 }, insetBoxIg: { x: 0.5, y: 0.38, w: 0.4 }, tstyle: { size: 0.82 } }]; };
+  const setPhoto = (src) => { patchAt(i, { bg: { src, tiktok: { x: 0, y: 0, s: 1 }, instagram: { x: 0, y: 0, s: 1 } } }); setSheet(false); setJustPicked(true); setTimeout(() => setPhase('edit'), 60); };
+  const next = () => { setJustPicked(false); if (i === n - 1) { setPhase(ownDetails ? 'details' : 'review'); return; } setI(i + 1); setPhase(slides[i + 1].bg ? 'edit' : 'pick'); };
+  const prev = () => { setJustPicked(false); if (i === 0) { setPhase('start'); return; } setI(i - 1); setPhase('edit'); };
+  const Dots = ({ dark }) => <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>{slides.map((s, k) => <span key={s.id} style={{ width: k === i ? 20 : 7, height: 7, borderRadius: 99, background: k === i ? (dark ? '#fff' : 'var(--ink)') : s.bg ? '#22C55E' : (dark ? 'rgba(255,255,255,0.3)' : 'var(--line-strong)'), transition: 'width 160ms' }} />)}</div>;
+  if (phase === 'start') {
+    const tone = { handheld: ['var(--blue-100)', 'var(--blue-700)', 'var(--blue-500)'], story: ['#EEE9FB', '#5B3FC9', '#7C5CE6'], open: ['var(--amber-soft)', 'var(--amber)', 'var(--amber)'] }[post.kind];
+    const fan = post.kind === 'handheld' ? [{ text: 'Best plays first', photo: 'roll3' }, { text: post.title, photo: 'roll7' }, { text: 'No music', photo: 'roll11' }] : post.kind === 'story' ? [{ who: 'creator', label: 'Your photo' }, { text: post.title, photo: 'roll7' }, { who: 'creator', label: 'Your words' }] : [{ who: 'creator', label: 'Anything' }, { who: 'creator', label: 'You decide' }, { who: 'creator', label: 'Go wild' }];
+    const head = post.kind === 'handheld' ? 'This is a Handheld post!' : post.kind === 'story' ? 'This is a Story post!' : 'This is a Freestyle post!';
+    const sub = post.kind === 'handheld' ? "Everything's ready, just add your pictures and send for approval!" : post.kind === 'story' ? 'The cover and plug are set. The middle is yours: your photos, your words if you want them.' : `No brief. Make whatever you want. Mention ${window.SS.co.name} somewhere in it.`;
+    return (<CWrap key="start">
+      <SHeader onBack={onBack} title={open ? 'Freestyle' : post.title} sub={post.format === 'reel' ? 'Reel' : 'Slideshow'} />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '0 24px 30px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
+          <div style={{ position: 'relative', width: 280, height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ position: 'absolute', width: 240, height: 240, borderRadius: 999, background: tone[0] }} />
+            {fan.map((f, k) => <span key={k} style={{ position: 'absolute', transform: `translateX(${(k - 1) * 78}px) rotate(${(k - 1) * 12}deg) translateY(${k === 1 ? -6 : 10}px)`, zIndex: k === 1 ? 2 : 1 }}><span style={{ display: 'block', animation: `ss-rise 480ms var(--ease-out) ${120 + k * 90}ms both` }}><SlideCard w={k === 1 ? 108 : 94} text={f.text} photo={f.photo} who={f.who || 'mixed'} label={f.label} tstyle={{ size: 0.95 }} /></span></span>)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
+            <span style={{ font: '800 26px/1.15 var(--font-display)', letterSpacing: '-0.6px', color: 'var(--ink)' }}>{head}</span>
+            <span style={{ font: '500 16px/1.45 var(--font-ui)', color: 'var(--slate-500)', textWrap: 'pretty', maxWidth: 300 }}>{sub}</span>
+          </div>
+          {post.note ? <div style={{ alignSelf: 'stretch', display: 'flex', gap: 12, padding: '14px 16px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)', textAlign: 'left' }}><span style={{ width: 34, height: 34, borderRadius: 999, background: tone[0], display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="message-circle" size={16} color={tone[1]} /></span><span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}><span style={{ font: '700 11.5px var(--font-ui)', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--slate-400)' }}>Note from Inkbound</span><span style={{ font: '500 14.5px/1.4 var(--font-ui)', color: 'var(--ink)', textWrap: 'pretty' }}>{post.note}</span></span></div> : null}
+        </div>
+        <SButton onClick={() => open ? setPhase('select') : setPhase('pick')} style={{ width: '100%', background: tone[2], boxShadow: 'none' }}>{open ? 'Pick your photos' : "Let's go"}</SButton>
+      </div>
+    </CWrap>);
+  }
+  if (phase === 'select') return <CWrap key="select"><FreestylePicker min={2} onDone={(srcs) => { setI(0); addPhotos(srcs); }} onClose={() => setPhase('start')} /></CWrap>;
+  if (phase === 'details') { const tagList = tags.split(/\s+/).map((t) => t.replace(/^#/, '')).filter(Boolean); return (<CWrap key="details">
+    <SHeader onBack={() => { setI(n - 1); setPhase('edit'); }} title="Caption" sub="Last step before review" />
+    <Screen>
+      <SButton variant="secondary" icon={busy ? undefined : 'sparkles'} onClick={fillDetails} disabled={busy}>{busy ? 'Reading your slides' : 'Fill with AI'}</SButton>
+      <Section label="Caption"><SField multiline value={caption} onChange={setCaption} placeholder="Under the post" /></Section>
+      <Section label="Hashtags" right={<span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-400)' }}>{tagList.length} / 5</span>}><TagField tags={tagList} onChange={(arr) => setTags(arr.map((t) => '#' + t).join(' '))} /></Section>
+      <Section label="Search phrase"><SField icon="search" value={search} onChange={setSearch} placeholder="What they type into TikTok" /></Section>
+    </Screen>
+    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '14px 24px 34px', background: 'linear-gradient(180deg, rgba(247,250,253,0) 0%, var(--off-white) 30%)' }}><SButton icon="eye" onClick={() => setPhase('review')} disabled={!caption.trim()} style={{ width: '100%' }}>Review the post</SButton></div>
+  </CWrap>); }
+  if (phase === 'review') return <CWrap key="review"><ReviewScreen slides={slides} initial={i} caption={capText} tags={tagText} onBack={() => { setFromReview(false); if (ownDetails) setPhase('details'); else { setI(n - 1); setPhase('edit'); } }} onSave={onSubmit} onEdit={(k) => { setI(k); setJustPicked(false); setFromReview(true); setPhase('edit'); }} saveLabel="Submit for approval" saveIcon="send" creator /></CWrap>;
+  if (phase === 'edit' && open) {
+    const lastOwn = !slides.some((s) => s.role === 'cta') && i === n - 1;
+    const footer = (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, padding: '0 14px 4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'none', padding: '2px 2px', height: 46, flexShrink: 0 }}>
+          {slides.map((s, k) => <button key={s.id} type="button" onClick={() => { setJustPicked(false); setI(k); }} aria-label={`Slide ${k + 1}`} style={{ width: 26, height: 40, flex: '0 0 auto', padding: 0, borderRadius: 6, border: 'none', cursor: 'pointer', position: 'relative', overflow: 'hidden', background: s.bg ? photoBg(s.bg.src) : '#2A3038', boxShadow: k === i ? '0 0 0 2px #fff' : 'none', opacity: k === i ? 1 : 0.75 }}>{s.role === 'cta' ? <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(27,166,238,0.35)' }}><Icon name="zap" size={14} color="#fff" /></span> : s.text ? <span style={{ position: 'absolute', left: 5, right: 5, top: '45%', height: 2.5, borderRadius: 2, background: '#fff' }} /> : null}</button>)}
+          <button type="button" onClick={() => setPicker(true)} aria-label="Add photos" style={{ width: 26, height: 40, flex: '0 0 auto', borderRadius: 6, border: '1.5px dashed rgba(255,255,255,0.4)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color="#fff" /></button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" onClick={() => setAi(true)} style={{ height: 44, padding: '0 16px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="sparkles" size={16} color="var(--blue-500)" />Ask AI</button>
+          {cur.own && slides.filter((s) => s.own).length > 2 ? <button type="button" onClick={removeSlide} aria-label="Remove slide" style={{ width: 44, height: 44, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="trash-2" size={17} color="#fff" /></button> : null}
+          <span style={{ flex: 1 }} />
+          <button type="button" onClick={fromReview ? () => { setFromReview(false); setPhase('review'); } : next} style={{ height: 44, padding: '0 18px', borderRadius: 999, border: 'none', background: 'var(--blue-500)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{fromReview ? 'Done' : lastOwn ? 'Caption' : 'Next'}<Icon name={fromReview ? 'check' : 'arrow-right'} size={16} color="#fff" /></button>
+        </div>
+      </div>
+    );
+    return (<CWrap key={`edit${i}`}>
+      <CanvasEditor key={i} creator autoCrop={justPicked} slides={slides} sel={i} setSel={setI} patchAt={patchAt} onBack={fromReview ? () => { setFromReview(false); setPhase('review'); } : () => setPhase('select')} onNext={next} nextDisabled={false} hasCta onToggleCta={null} onRemove={null} busy={null} kindLabel={cta ? 'Your plug slide' : `Slide ${i + 1}`} gap={null} footer={footer} notes={false} />
+      {ai ? <AiSheet slides={slides} i={i} onApply={(k, t) => patchAt(k, { text: t, genAt: Date.now() })} onApplyAll={(items) => setSlides((arr) => { let j = 0; return arr.map((s) => s.own ? { ...s, text: items[j++] || s.text, genAt: Date.now() } : s); })} onAddSlides={() => setPicker(true)} onClose={() => setAi(false)} /> : null}
+      {picker ? <FreestylePicker title="Add photos" onDone={addPhotos} onClose={() => setPicker(false)} /> : null}
+    </CWrap>);
+  }
+  if (phase === 'edit') {
+    const footer = (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, padding: '0 14px 6px' }}>
+        <Dots dark />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button type="button" onClick={() => setPhase('pick')} aria-label="Change photo" title="Change photo" style={{ height: 44, padding: flexible && cur.own ? '0 13px' : '0 14px', borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="switch-camera" size={16} color="#fff" />{flexible && cur.own ? null : 'Change photo'}</button>
+          {flexible && cur.own && !fromReview ? <button type="button" onClick={addSlide} style={{ height: 44, padding: '0 14px', borderRadius: 999, border: '1px dashed rgba(255,255,255,0.4)', background: 'transparent', color: '#fff', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flex: '0 0 auto' }}><Icon name="plus" size={16} color="#fff" />Add slide</button> : <span style={{ flex: 1, textAlign: 'center', font: '700 13px var(--font-ui)', color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap' }}>{i + 1} of {n}</span>}
+          {flexible && cur.own && !fromReview ? <span style={{ flex: 1 }} /> : null}
+          <button type="button" onClick={fromReview ? () => { setFromReview(false); setPhase('review'); } : next} style={{ height: 44, padding: '0 18px', borderRadius: 999, border: 'none', background: 'var(--blue-500)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', flex: '1 1 auto', minWidth: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>{fromReview ? 'Done' : i === n - 1 ? (ownDetails ? 'Caption' : 'Review all') : flexible && cur.own ? 'Next' : `Next: ${roleLabel(slides[i + 1], i + 1)}`}<Icon name={fromReview ? 'check' : i === n - 1 && (!open || slides.some((s) => s.role === 'cta')) ? 'eye' : 'arrow-right'} size={16} color="#fff" /></button>
+        </div>
+      </div>
+    );
+    return <CWrap key={`edit${i}`}><CanvasEditor key={i} creator autoCrop={justPicked} slides={slides} sel={i} setSel={setI} patchAt={patchAt} onBack={fromReview ? () => { setFromReview(false); setPhase('review'); } : prev} onNext={next} nextDisabled={false} hasCta onToggleCta={null} onRemove={flexible && cur.own && ownCount > (open ? 2 : 1) ? removeSlide : null} busy={null} kindLabel={cta ? 'Your plug slide' : roleLabel(cur, i)} gap={null} footer={footer} notes={false} /></CWrap>;
+  }
+  return (<CWrap key={`pick${i}`}>
+    <SHeader onBack={prev} title={roleLabel(cur, i)} sub={flexible && cur.own ? (open && !slides.some((s) => s.role === 'cta') ? `Slide ${i + 1}` : `Slide ${i + 1} of ${n}`) : `Slide ${i + 1} of ${n}`} right={cta ? <SChip tone="brand" icon="zap">Plug</SChip> : null} />
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '0 24px 30px', gap: 12 }}>
+      <Dots />
+      {cur.role === 'cover' && cur.text ? <span style={{ textAlign: 'center', font: '800 22px/1.2 var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)', textWrap: 'pretty', padding: '0 8px' }}>{post.title}</span> : null}
+      {cur.own ? <span style={{ textAlign: 'center', font: '600 15px var(--font-ui)', color: 'var(--slate-500)' }}>{cur.role === 'cover' ? 'Your cover. Add a photo, then a title if you want one.' : 'Your photo. Text is optional.'}</span> : null}
+      <div ref={boxRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+        <div style={{ position: 'relative', width: fw, height: Math.round(fw * 16 / 9), borderRadius: 24, overflow: 'hidden', boxShadow: cta ? '0 0 0 2.5px var(--blue-500), var(--shadow-raised)' : 'var(--shadow-raised)', background: '#1C2128' }}>
+          <SlideCard w={fw} text={cur.text} inset={cur.inset} box={cur.box} insetBox={cur.insetBox} tstyle={cur.tstyle} who="manager" bare />
+          <span style={{ position: 'absolute', inset: 0, opacity: 0.92, pointerEvents: 'none' }}><PlatformGhost platform="tiktok" strong w={fw} h={Math.round(fw * 16 / 9)} /></span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <SButton icon="images" onClick={() => setSheet(true)} style={{ width: '100%' }}>Choose a photo</SButton>
+        <SButton icon="camera" variant="secondary" onClick={() => setPhoto('camera')} style={{ width: '100%' }}>Take a photo</SButton>
+      </div>
+    </div>
+    {sheet ? <MediaSheet onPhoto={setPhoto} onInset={() => {}} onClose={() => setSheet(false)} mediaLabel="Inkbound" /> : null}
+  </CWrap>);
+}
+
+/* After submit. Confetti, the post, a streak, the next thing. */
+function SentScreen({ post, left, onHome }) {
+  const { Icon } = RNS();
+  const bits = React.useMemo(() => Array.from({ length: 26 }).map((_, k) => ({ k, x: Math.random() * 100, d: Math.random() * 0.7, r: Math.random() * 360, c: ['#1BA6EE', '#F6C445', '#3DBE5B', '#E5484D', '#7C5CE6'][k % 5], w: 6 + Math.random() * 6 })), []);
+  const [count, setCount] = React.useState(0);
+  React.useEffect(() => { let n = 0; const id = setInterval(() => { n += 1; setCount(n); if (n >= 12) clearInterval(id); }, 55); return () => clearInterval(id); }, []);
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--off-white)' }}>
+      <style>{'@keyframes ss-confetti{0%{transform:translateY(-40px) rotate(0deg);opacity:1}100%{transform:translateY(760px) rotate(720deg);opacity:0}}@keyframes ss-pop-in{0%{transform:scale(0.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}'}</style>
+      {bits.map((b) => <span key={b.k} style={{ position: 'absolute', left: `${b.x}%`, top: 0, width: b.w, height: b.w * 0.6, borderRadius: 2, background: b.c, transform: `rotate(${b.r}deg)`, animation: `ss-confetti ${1.6 + b.d}s cubic-bezier(0.2,0.6,0.4,1) ${b.d * 0.6}s both`, pointerEvents: 'none' }} />)}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, padding: '0 28px' }}>
+        <span style={{ width: 112, height: 112, borderRadius: 999, background: 'var(--green)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 16px 40px rgba(61,190,91,0.35)', animation: 'ss-pop-in 560ms var(--ease-out) 120ms both' }}><Icon name="check" size={56} color="#fff" /></span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center', animation: 'ss-rise 420ms var(--ease-out) 320ms both' }}>
+          <span style={{ font: '800 30px/1.1 var(--font-display)', letterSpacing: '-0.8px', color: 'var(--ink)' }}>Sent!</span>
+          <span style={{ font: '500 16px/1.4 var(--font-ui)', color: 'var(--slate-500)', textWrap: 'pretty', maxWidth: 300 }}>{post.title === 'Freestyle' ? 'Your freestyle post' : post.title} is with Inkbound. You'll hear back today.</span>
+        </div>
+        <div style={{ display: 'flex', gap: 10, width: '100%', animation: 'ss-rise 420ms var(--ease-out) 460ms both' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '16px 12px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)' }}><span style={{ font: '800 28px var(--font-display)', letterSpacing: '-0.6px', color: 'var(--ink)' }}>{count}</span><span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>day streak</span></div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '16px 12px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)' }}><span style={{ font: '800 28px var(--font-display)', letterSpacing: '-0.6px', color: 'var(--ink)' }}>$18</span><span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>on approval</span></div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '16px 12px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)' }}><span style={{ font: '800 28px var(--font-display)', letterSpacing: '-0.6px', color: left ? 'var(--ink)' : 'var(--green)' }}>{left}</span><span style={{ font: '600 12.5px var(--font-ui)', color: 'var(--slate-500)' }}>left today</span></div>
+        </div>
+      </div>
+      <div style={{ padding: '0 24px 30px', display: 'flex', flexDirection: 'column', gap: 10, animation: 'ss-rise 420ms var(--ease-out) 600ms both' }}>
+        <SButton icon={left ? 'arrow-right' : 'house'} onClick={onHome} style={{ width: '100%' }}>{left ? 'Next post' : 'Back home'}</SButton>
+      </div>
+    </div>
+  );
+}
+
+function CreatorSlideshow({ label, scenario = 'morning' }) {
+  const { TabBar } = RNS();
+  const [tab, setTab] = React.useState('Home');
+  const [posts, setPosts] = React.useState(() => scenario === 'reels' || scenario === 'editor' ? CREATOR_REELS : scenario === 'done' ? CREATOR_POSTS.map((p, i) => ({ ...p, status: i === 1 ? 'review' : 'posted' })) : scenario === 'one' ? CREATOR_POSTS.map((p, i) => ({ ...p, status: i === 0 ? 'posted' : i === 1 ? 'assigned' : 'review' })) : CREATOR_POSTS);
+  const [screen, setScreen] = React.useState(() => scenario === 'editor' ? { name: 'make', post: CREATOR_REELS[0], startAt: 'edit' } : { name: 'home' });
+  const [dark, setDark] = React.useState(scenario === 'editor');
+  const [toast, setToast] = React.useState(null);
+  const submit = () => { const post = screen.post; const nextPosts = posts.map((p) => p.id === post.id ? { ...p, status: 'review' } : p); setPosts(nextPosts); setDark(false); setScreen({ name: 'sent', post, left: nextPosts.filter((p) => p.status === 'assigned').length }); };
+  let body;
+  if (screen.name === 'home') body = <CreatorHome posts={posts} onCreate={(p) => setScreen({ name: 'make', post: p })} />;
+  else if (screen.name === 'sent') body = <SentScreen post={screen.post} left={screen.left} onHome={() => setScreen({ name: 'home' })} />;
+  else if (screen.post.format === 'reel') body = <CreatorReel startAt={screen.startAt} post={screen.post} onBack={() => { setScreen({ name: 'home' }); setDark(false); }} onSubmit={submit} onDark={setDark} />;
+  else body = <CreatorHandheld post={screen.post} onBack={() => { setScreen({ name: 'home' }); setDark(false); }} onSubmit={submit} onDark={setDark} />;
+  return (
+    <Phone label={label} dark={dark}>
+      <div key={screen.name} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', animation: 'noni-screen-in var(--dur-base) var(--ease-out) both', position: 'relative' }}>{body}</div>
+      {screen.name === 'home' ? <TabBar active={tab} onSelect={setTab} style={{ position: 'absolute', left: 16, right: 16, bottom: 22 }} items={[{ label: 'Home', icon: 'house', dot: posts.some((p) => p.status === 'assigned') }, { label: 'Posts', icon: 'layout-list' }, { label: 'Messages', icon: 'message-circle' }, { label: 'Analytics', icon: 'chart-column' }, { label: 'Profile', icon: 'circle-user-round' }]} /> : null}
+      {toast ? <div style={{ position: 'absolute', left: 20, right: 20, bottom: 40, padding: '12px 16px', borderRadius: 16, background: 'var(--ink)', color: '#fff', font: '600 14px var(--font-ui)', boxShadow: 'var(--shadow-float)', zIndex: 90, display: 'flex', alignItems: 'center', gap: 10, animation: 'noni-toast-in var(--dur-base) var(--ease-out) both' }}><window.NoniDesignSystem_710e43.Icon name="send" size={16} color="#fff" />{toast}</div> : null}
+    </Phone>
+  );
+}
+Object.assign(window, { CreatorSlideshow });

@@ -1,0 +1,479 @@
+/* Full-screen slide canvas. The slide is drawn at the size TikTok and
+   Instagram show it, with each app's own chrome ghosted on top, so a text
+   box or screenshot sitting behind a button or a crop line is visible
+   before any creator ever posts it. Drag to move, corner to resize. */
+const CNS = () => window.NoniDesignSystem_710e43;
+
+/* Blocked regions per platform, fractions of a 9:16 frame. */
+const IG_BAR = (1 - (5 / 4) / (16 / 9)) / 2;
+const BLOCKED = {
+  tiktok: [
+    { id: 'rail', x: 0.84, y: 0.42, w: 0.16, h: 0.46 },
+    { id: 'caption', x: 0, y: 0.70, w: 0.80, h: 0.30 },
+  ],
+  instagram: [
+    { id: 'top', x: 0, y: 0, w: 1, h: IG_BAR },
+    { id: 'bottom', x: 0, y: 1 - IG_BAR, w: 1, h: IG_BAR },
+    { id: 'counter', x: 0.80, y: IG_BAR + 0.02, w: 0.17, h: 0.05 },
+  ],
+};
+/* TikTok shows slideshows letterboxed: top tabs band, photo, then a black band with dots, caption and the tab bar. */
+const TT_SS = { top: 0.09, bottom: 0.22 };
+window.TT_SS = TT_SS;
+BLOCKED.tiktokSlideshow = [
+  { id: 'nav', x: 0, y: 0, w: 1, h: TT_SS.top },
+  { id: 'caption', x: 0, y: 1 - TT_SS.bottom, w: 1, h: TT_SS.bottom },
+  { id: 'rail', x: 0.84, y: 0.40, w: 0.16, h: 0.36 },
+];
+const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/* Ghosted chrome. Everything is positioned in fractions so it scales. */
+function PlatformGhost({ platform, w, h, strong, light }) {
+  const { Icon } = CNS();
+  const f = (v) => `${v * 100}%`;
+  const ink = light ? 'rgba(15,23,32,0.5)' : strong ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.55)';
+  const bar = light ? 'rgba(15,23,32,0.1)' : 'rgba(0,0,0,0.78)';
+  const dim = light ? 'rgba(15,23,32,0.18)' : 'rgba(255,255,255,0.35)';
+  const fs = Math.round(w * 0.04);
+  if (platform === 'instagram') {
+    const band = light ? bar : '#000';
+    const soft = light ? 'rgba(15,23,32,0.4)' : 'rgba(255,255,255,0.55)';
+    return (
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: f(IG_BAR), background: band, display: 'flex', alignItems: 'flex-end', padding: `0 ${w * 0.04}px ${w * 0.03}px` }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: w * 0.025, width: '100%' }}><span style={{ width: w * 0.085, height: w * 0.085, borderRadius: 99, background: dim }} /><span style={{ color: ink, font: `700 ${fs}px var(--font-ui)` }}>elan.recruiting</span><span style={{ flex: 1 }} /><span style={{ display: 'flex', gap: 3 }}>{[0, 1, 2].map((i) => <span key={i} style={{ width: 3, height: 3, borderRadius: 99, background: ink }} />)}</span></span>
+        </div>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: f(IG_BAR), background: band, padding: `${w * 0.03}px ${w * 0.04}px`, display: 'flex', flexDirection: 'column', gap: w * 0.022 }}>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ display: 'flex', gap: w * 0.035, flex: 1 }}>{['heart', 'message-circle', 'send'].map((n) => <Icon key={n} name={n} size={Math.round(w * 0.065)} color={ink} />)}</span>
+            <span style={{ display: 'flex', gap: 4, flex: 1, justifyContent: 'center' }}>{[0, 1, 2, 3, 4].map((i) => <span key={i} style={{ width: i === 0 ? 6 : 5, height: i === 0 ? 6 : 5, borderRadius: 99, background: i === 0 ? '#1BA6EE' : soft }} />)}</span>
+            <span style={{ display: 'flex', justifyContent: 'flex-end', flex: 1 }}><Icon name="bookmark" size={Math.round(w * 0.065)} color={ink} /></span>
+          </span>
+          <span style={{ color: ink, font: `700 ${fs * 0.9}px var(--font-ui)` }}>1,204 likes</span>
+          <span style={{ height: fs * 0.7, width: '88%', borderRadius: 99, background: dim }} /><span style={{ height: fs * 0.7, width: '60%', borderRadius: 99, background: dim }} />
+        </div>
+        <span style={{ position: 'absolute', right: w * 0.04, top: `calc(${f(IG_BAR)} + ${w * 0.03}px)`, padding: `${w * 0.012}px ${w * 0.03}px`, borderRadius: 99, background: 'rgba(0,0,0,0.6)', color: '#fff', font: `700 ${fs}px var(--font-ui)` }}>1/7</span>
+      </div>
+    );
+  }
+  const rail = ['heart', 'message-circle', 'bookmark', 'share-2'];
+  if (window.SS && window.SS.activeFormat !== 'reel') {
+    const band = light ? bar : '#000';
+    return (
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: f(TT_SS.top), background: band, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: w * 0.06, padding: `0 0 ${w * 0.025}px` }}>
+          <span style={{ color: dim, font: `700 ${fs}px var(--font-ui)` }}>Following</span><span style={{ color: ink, font: `700 ${fs}px var(--font-ui)`, borderBottom: `2px solid ${ink}`, paddingBottom: 3 }}>For you</span>
+        </div>
+        <div style={{ position: 'absolute', right: w * 0.03, bottom: f(TT_SS.bottom + 0.02), display: 'flex', flexDirection: 'column', alignItems: 'center', gap: w * 0.03 }}>
+          <span style={{ width: w * 0.11, height: w * 0.11, borderRadius: 99, background: dim, border: `1.5px solid ${ink}`, flexShrink: 0 }} />
+          {rail.map((n) => <span key={n} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><Icon name={n} size={Math.round(w * 0.085)} color={ink} /><span style={{ color: ink, font: `700 ${fs * 0.8}px var(--font-ui)` }}>12.4K</span></span>)}
+        </div>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: f(TT_SS.bottom), background: band, padding: `${w * 0.025}px ${w * 0.04}px 0`, display: 'flex', flexDirection: 'column', gap: w * 0.02 }}>
+          <span style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>{[0, 1, 2, 3, 4].map((i) => <span key={i} style={{ width: 5, height: 5, borderRadius: 99, background: i === 1 ? ink : dim }} />)}</span>
+          <span style={{ color: ink, font: `700 ${fs * 1.05}px var(--font-ui)` }}>elan.recruiting</span>
+          <span style={{ height: fs * 0.75, width: '82%', borderRadius: 99, background: dim }} /><span style={{ height: fs * 0.75, width: '55%', borderRadius: 99, background: dim }} />
+          <span style={{ marginTop: 'auto', height: w * 0.12, borderTop: `1px solid ${dim}`, display: 'flex', alignItems: 'center', justifyContent: 'space-around', margin: `auto -${w * 0.04}px 0` }}>{['house', 'users', 'plus', 'inbox', 'circle-user-round'].map((n, i) => <Icon key={n} name={n} size={Math.round(w * (i === 2 ? 0.075 : 0.06))} color={i === 0 ? ink : dim} />)}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: f(0.34), background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%)' }} />
+      <div style={{ position: 'absolute', right: w * 0.03, top: f(0.42), height: f(0.46), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ width: w * 0.11, height: w * 0.11, borderRadius: 99, background: dim, border: `1.5px solid ${ink}` }} />
+        {rail.map((n) => <span key={n} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><Icon name={n} size={Math.round(w * 0.085)} color={ink} /><span style={{ color: ink, font: `700 ${fs * 0.8}px var(--font-ui)` }}>12.4K</span></span>)}
+        <span style={{ width: w * 0.1, height: w * 0.1, borderRadius: 99, background: dim, border: `${w * 0.02}px solid ${light ? 'rgba(15,23,32,0.35)' : 'rgba(0,0,0,0.6)'}` }} />
+      </div>
+      <div style={{ position: 'absolute', left: w * 0.04, width: f(0.74), top: f(0.70), height: f(0.26), display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: w * 0.025 }}>
+        <span style={{ color: ink, font: `700 ${fs * 1.1}px var(--font-ui)` }}>@elan.recruiting</span>
+        <span style={{ height: fs * 0.8, width: '95%', borderRadius: 99, background: dim }} /><span style={{ height: fs * 0.8, width: '88%', borderRadius: 99, background: dim }} /><span style={{ height: fs * 0.8, width: '55%', borderRadius: 99, background: dim }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: ink, font: `600 ${fs * 0.9}px var(--font-ui)`, whiteSpace: 'nowrap' }}><Icon name="music-2" size={fs} color={ink} />original sound</span>
+      </div>
+    </div>
+  );
+}
+
+function useDrag(W, H, onMove, onEnd) {
+  const st = React.useRef(null);
+  return {
+    onPointerDown: (e) => { st.current = { x: e.clientX, y: e.clientY, moved: false }; e.currentTarget.setPointerCapture(e.pointerId); e.stopPropagation(); },
+    onPointerMove: (e) => { if (!st.current) return; const dx = (e.clientX - st.current.x) / W, dy = (e.clientY - st.current.y) / H; if (Math.abs(dx) + Math.abs(dy) > 0.002) st.current.moved = true; st.current = { ...st.current, x: e.clientX, y: e.clientY }; onMove(dx, dy); },
+    onPointerUp: (e) => { const m = st.current?.moved; st.current = null; onEnd && onEnd(m, e); },
+    onPointerCancel: () => { st.current = null; },
+  };
+}
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const IgIcon = ({ size = 13, color = '#fff' }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="2.5" width="19" height="19" rx="5.5" /><circle cx="12" cy="12" r="4.3" /><circle cx="17.6" cy="6.4" r="1.1" fill={color} stroke="none" /></svg>;
+window.IgIcon = IgIcon;
+const CropIcon = ({ size = 20, color = '#fff' }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M18 22V8a2 2 0 0 0-2-2H2" /></svg>;
+
+/* Text styling, Instagram Stories style. */
+const SWATCHES = ['#FFFFFF', '#0F1720', '#1BA6EE', '#3DBE5B', '#F6C445', '#F58B1F', '#E5484D', '#D6246E', '#8E24AA'];
+const FONTS = { modern: { label: 'Modern', font: '800 1em var(--font-display)', ls: '-0.3px' }, classic: { label: 'Classic', font: '800 1em "Nunito", var(--font-ui)', ls: '0' }, typewriter: { label: 'Typewriter', font: '700 0.92em "Courier New", monospace', ls: '0' }, signature: { label: 'Signature', font: 'italic 500 1.15em "Snell Roundhand", "Brush Script MT", cursive', ls: '0' } };
+const DEFAULT_TSTYLE = { font: 'modern', color: '#FFFFFF', bg: 'outline', align: 'center', size: 1 };
+const light = (hex) => { const n = parseInt(hex.slice(1), 16); const r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (r * 299 + g * 587 + b * 114) / 1000 > 150; };
+function textBoxStyle(ts, fs) {
+  const f = FONTS[ts.font] || FONTS.modern;
+  const base = { display: 'inline-block', font: f.font, fontSize: fs, lineHeight: 1.2, letterSpacing: f.ls, textAlign: ts.align, wordBreak: 'break-word', whiteSpace: 'pre-wrap', borderRadius: fs * 0.35, padding: (ts.bg === 'none' || ts.bg === 'outline') ? 0 : `${fs * 0.35}px ${fs * 0.55}px` };
+  if (ts.bg === 'outline') return { ...base, color: ts.color, WebkitTextStroke: `${Math.max(1, fs * 0.055)}px ${light(ts.color) ? '#000' : '#fff'}`, paintOrder: 'stroke fill', textShadow: '0 1px 6px rgba(0,0,0,0.35)' };
+  if (ts.bg === 'solid') return { ...base, background: ts.color, color: light(ts.color) ? '#0F1720' : '#fff', boxShadow: '0 1px 8px rgba(0,0,0,0.18)' };
+  if (ts.bg === 'soft') return { ...base, background: light(ts.color) ? 'rgba(255,255,255,0.78)' : ts.color + 'B8', color: light(ts.color) ? ts.color === '#FFFFFF' ? '#0F1720' : ts.color : '#fff' };
+  return { ...base, color: ts.color, textShadow: '0 1px 10px rgba(0,0,0,0.45)' };
+}
+
+/* Per-range styling inside one box: spans = [{ start, end, color?, font? }]. */
+function runsOf(text, spans, ts, fs) {
+  const t = text || '';
+  if (!spans || !spans.length) return [<span key="a">{t}</span>];
+  const per = new Array(t.length).fill(null);
+  spans.forEach((sp) => { for (let i = Math.max(0, sp.start); i < Math.min(t.length, sp.end); i++) per[i] = { ...(per[i] || {}), ...sp }; });
+  const out = []; let i = 0;
+  while (i < t.length) { let j = i + 1; const k = JSON.stringify(per[i]); while (j < t.length && JSON.stringify(per[j]) === k) j++; const sp = per[i]; const st = {}; if (sp) { if (sp.color) { st.color = sp.color; if (ts.bg === 'outline') st.WebkitTextStroke = `${Math.max(1, fs * 0.055)}px ${light(sp.color) ? '#000' : '#fff'}`; } if (sp.font && FONTS[sp.font]) { st.font = FONTS[sp.font].font; st.fontSize = fs; st.letterSpacing = FONTS[sp.font].ls; } } out.push(<span key={i} style={st}>{t.slice(i, j)}</span>); i = j; }
+  return out;
+}
+function shiftSpans(spans, pos, delta) {
+  if (!spans || !delta) return spans;
+  return spans.map((sp) => { if (sp.start >= pos) return { ...sp, start: Math.max(pos, sp.start + delta), end: Math.max(pos, sp.end + delta) }; if (sp.end > pos) return { ...sp, end: Math.max(sp.start, sp.end + delta) }; return sp; }).filter((sp) => sp.end > sp.start);
+}
+
+/* Camera roll stand-ins. */
+const ROLL = Array.from({ length: 15 }).map((_, i) => ({ id: 'roll' + i, bg: `linear-gradient(${135 + i * 20}deg, hsl(${(i * 47) % 360} 45% 62%), hsl(${(i * 47 + 60) % 360} 40% 30%))` }));
+function photoBg(photo) { if (!photo) return null; if (photo === 'camera') return 'linear-gradient(180deg, #7B8CA0, #2E3A48)'; return ROLL.find((r) => r.id === photo)?.bg || null; }
+
+/* Media sheet: camera roll or product media (screenshots for slideshows,
+   screen recordings for reels), plus the camera. Every pick lands on the
+   slide as a movable sticker, never as the background. */
+function MediaSheet({ onPhoto, onInset, current, onClose, mediaLabel = 'Media' }) {
+  const { Icon } = CNS();
+  const [tab, setTab] = React.useState('roll');
+  const Tab = ({ k, l }) => <button type="button" onClick={() => setTab(k)} style={{ padding: '7px 14px', borderRadius: 999, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', background: tab === k ? 'var(--ink)' : 'var(--fill-quiet)', color: tab === k ? '#fff' : 'var(--slate-500)', font: '700 13px var(--font-ui)' }}>{l}</button>;
+  return (
+    <SSheet onClose={onClose} height="74%">
+      {(dismiss) => (<>
+        <div style={{ padding: '10px 20px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Tab k="roll" l="Camera roll" /><Tab k="library" l={mediaLabel} />
+          <button type="button" onClick={() => dismiss(() => onPhoto('camera'))} style={{ marginLeft: 'auto', width: 38, height: 38, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Camera"><Icon name="camera" size={18} color="var(--ink)" /></button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px' }}>
+          {tab === 'roll' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 4 }}>
+              {ROLL.map((r) => <button key={r.id} type="button" onClick={() => dismiss(() => onPhoto(r.id))} style={{ aspectRatio: '3 / 4', borderRadius: 6, border: 'none', background: r.bg, cursor: 'pointer', boxShadow: current === r.id ? '0 0 0 3px var(--blue-500)' : 'none' }} />)}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 12 }}>
+              {window.SS.library.map((it) => (
+                <button key={it.id} type="button" onClick={() => dismiss(() => onInset(it.id))} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left' }}>
+                  <span style={{ aspectRatio: '3 / 4', width: '100%', borderRadius: 12, background: it.tone, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Shot item={it} w={60} /></span>
+                  <span style={{ font: '700 13px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{it.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </>)}
+    </SSheet>
+  );
+}
+
+/* One movable text box. Drag to move, pinch (or scroll) to change the text
+   size, tap without moving to edit. Width comes from the side bar. */
+function TextBoxView({ bx, W, H, active, hit, onActivate, onMove, onScale, onTap, onDrop, fs, pop }) {
+  const pts = React.useRef(new Map()); const lastDist = React.useRef(null); const moved = React.useRef(false);
+  const dist = () => { const [a, b] = [...pts.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const h = {
+    onPointerDown: (e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.current.size === 1) moved.current = false; if (pts.current.size === 2) lastDist.current = dist(); },
+    onPointerMove: (e) => { const p = pts.current.get(e.pointerId); if (!p) return; const n = { x: e.clientX, y: e.clientY }; pts.current.set(e.pointerId, n); if (pts.current.size >= 2) { const d = dist(); if (lastDist.current) onScale(d / lastDist.current); lastDist.current = d; moved.current = true; return; } const dx = (n.x - p.x) / W, dy = (n.y - p.y) / H; if (Math.abs(dx) + Math.abs(dy) > 0.002) moved.current = true; onMove(dx, dy); },
+    onPointerUp: (e) => { pts.current.delete(e.pointerId); if (pts.current.size < 2) lastDist.current = null; if (pts.current.size === 0) { if (!moved.current) onTap(); else onDrop && onDrop(); } },
+    onPointerCancel: (e) => { pts.current.delete(e.pointerId); lastDist.current = null; },
+    onWheel: (e) => { onScale(1 - e.deltaY * 0.0025); },
+  };
+  return (
+    <div {...h} onPointerDown={(e) => { onActivate(); h.onPointerDown(e); }} style={{ position: 'absolute', left: `${bx.box.x * 100}%`, top: `${bx.box.y * 100}%`, width: W * bx.box.w, transform: 'translate(-50%,-50%)', display: 'flex', justifyContent: bx.ts.align === 'left' ? 'flex-start' : bx.ts.align === 'right' ? 'flex-end' : 'center', cursor: 'grab', outline: hit ? '1.5px dashed #FF6B70' : 'none', outlineOffset: 6, borderRadius: 8, touchAction: 'none' }}>
+      <span style={{ ...textBoxStyle(bx.ts, fs), animation: pop ? 'ss-place 520ms var(--ease-out) 260ms both' : 'none' }}>{runsOf(bx.text, bx.spans, bx.ts, fs)}</span>
+    </div>
+  );
+}
+
+/* A photo sticker: a 3:4 picture dropped on the slide. Drag to move, pinch
+   or the corner handle to resize, drag to the bottom to delete. */
+function PicSticker({ pic, W, H, active, hit, onActivate, onMove, onScale, onDrop, children, ratio = 4 / 3 }) {
+  const { Icon } = CNS();
+  const pts = React.useRef(new Map()); const lastDist = React.useRef(null); const moved = React.useRef(false); const raw = React.useRef(null);
+  const dist = () => { const [a, b] = [...pts.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const h = {
+    onPointerDown: (e) => { e.stopPropagation(); onActivate(); e.currentTarget.setPointerCapture(e.pointerId); pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.current.size === 1) { moved.current = false; raw.current = { x: pic.box.x, y: pic.box.y }; } if (pts.current.size === 2) lastDist.current = dist(); },
+    onPointerMove: (e) => { const p = pts.current.get(e.pointerId); if (!p) return; const n = { x: e.clientX, y: e.clientY }; pts.current.set(e.pointerId, n); if (pts.current.size >= 2) { const d = dist(); if (lastDist.current) onScale(d / lastDist.current); lastDist.current = d; moved.current = true; return; } moved.current = true; raw.current = { x: raw.current.x + (n.x - p.x) / W, y: raw.current.y + (n.y - p.y) / H }; onMove(raw.current.x, raw.current.y); },
+    onPointerUp: (e) => { pts.current.delete(e.pointerId); if (pts.current.size < 2) lastDist.current = null; if (pts.current.size === 0 && moved.current) onDrop(); },
+    onPointerCancel: (e) => { pts.current.delete(e.pointerId); lastDist.current = null; },
+    onWheel: (e) => onScale(1 - e.deltaY * 0.0025),
+  };
+  const pw = W * pic.box.w, ph = pw * ratio;
+  if (children) return <div {...h} style={{ position: 'absolute', left: `${pic.box.x * 100}%`, top: `${pic.box.y * 100}%`, transform: 'translate(-50%,-50%)', cursor: 'grab', touchAction: 'none', outline: hit ? '1.5px dashed #FF6B70' : 'none', outlineOffset: 4, borderRadius: pw * 0.09 }}>{children}</div>;
+  return (
+    <div {...h} style={{ position: 'absolute', left: `${pic.box.x * 100}%`, top: `${pic.box.y * 100}%`, width: pw, height: ph, transform: 'translate(-50%,-50%)', borderRadius: pw * 0.03, background: photoBg(pic.src), boxShadow: '0 4px 18px rgba(0,0,0,0.35)', cursor: 'grab', touchAction: 'none', outline: hit ? '1.5px dashed #FF6B70' : 'none', outlineOffset: 4 }} />
+  );
+}
+
+/* The editor. Full-bleed slide, Instagram-style tools over it, a thin strip
+   of slides along the bottom. Tap the slide to type; tap elsewhere for
+   another text box; tap a box to edit it. */
+function CanvasEditor({ slides, sel, setSel, patchAt, onAddPoint, onBack, onNext, nextDisabled, hasCta, onToggleCta, onRemove, busy, kindLabel, gap, footer, onGenerate, onSecondary, secondaryLabel, onWriteNote, generateLabel = 'Generate with AI', notes = true, creator = false, autoCrop = false, noCrop = false }) {
+  const { Icon } = CNS();
+  const W = 390, H = Math.round(W * 16 / 9);
+  const [ghost, setGhost] = React.useState('tiktok');
+  const ctaPick = (c) => Boolean(c && c.role === 'cta' && !(c.text || '').trim() && onSecondary);
+  const [editing, setEditing] = React.useState(() => !creator && slides[sel] && !slides[sel].text && !ctaPick(slides[sel]) ? 'main' : null); // 'main' | extraId | null
+  const [panel, setPanel] = React.useState(null);
+  const [media, setMedia] = React.useState(false);
+  const [shotOpen, setShotOpen] = React.useState(false);
+  const [active, setActive] = React.useState('main');
+  const nextId = React.useRef(1);
+  const cur = slides[sel];
+  const plat = ghost === 'instagram' ? 'instagram' : 'tiktok';
+  const bk = plat === 'instagram' ? 'boxIg' : 'box', ik = plat === 'instagram' ? 'insetBoxIg' : 'insetBox';
+  const L = layoutOf(cur, plat);
+  const lib = cur.inset ? window.SS.library.find((l) => l.id === cur.inset) : null;
+  const patch = (p) => patchAt(sel, p);
+  const pk = plat === 'instagram' ? 'boxIg' : 'box';
+  const pics = (cur.pics || []).map((p) => ({ ...p, box: plat === 'instagram' ? (p.boxIg || { ...p.box, y: clamp(p.box.y, 0.22, 0.78) }) : p.box }));
+  const patchPic = (id, box) => patch({ pics: (cur.pics || []).map((p) => p.id === id ? { ...p, [pk]: box } : p) });
+  const removePic = (id) => { patch({ pics: (cur.pics || []).filter((p) => p.id !== id) }); setActive('main'); };
+  const addPic = (src) => { const id = 'p' + Date.now(); const box = { x: 0.5, y: 0.5, w: 0.5 }; patch({ pics: [...(cur.pics || []), { id, src, box, boxIg: box }] }); setActive(id); };
+  const [dragging, setDragging] = React.useState(null); // pic id while moving
+  const [overTrash, setOverTrash] = React.useState(false);
+  const extras = cur.extras || [];
+  const boxes = [{ id: 'main', text: cur.text, spans: cur.spans || [], box: L.text, ts: { ...DEFAULT_TSTYLE, ...(cur.tstyle || {}) } }, ...extras.map((e) => ({ id: e.id, text: e.text, spans: e.spans || [], box: (plat === 'instagram' ? (e.boxIg || { ...e.box, y: clamp(e.box.y, 0.22, 0.78) }) : e.box), ts: { ...DEFAULT_TSTYLE, ...(e.tstyle || {}) } }))];
+  const patchBox = (id, p) => {
+    if (id === 'main') { const q = {}; if ('text' in p) q.text = p.text; if ('box' in p) q[bk] = p.box; if ('ts' in p) q.tstyle = p.ts; if ('spans' in p) q.spans = p.spans; patch(q); }
+    else patch({ extras: extras.map((e) => e.id === id ? { ...e, ...('text' in p ? { text: p.text } : {}), ...('box' in p ? { [bk]: p.box } : {}), ...('ts' in p ? { tstyle: p.ts } : {}), ...('spans' in p ? { spans: p.spans } : {}) } : e) });
+  };
+  const removeBox = (id) => { if (id === 'main') patch({ text: '' }); else patch({ extras: extras.filter((e) => e.id !== id) }); };
+  const edBox = boxes.find((b) => b.id === editing);
+  const ts = edBox ? edBox.ts : boxes[0].ts;
+  const [selRange, setSelRange] = React.useState(null);
+  const [guides, setGuides] = React.useState({});
+  const SNAP = 0.018;
+  const snapTo = (id, x, y) => {
+    const xs = [0.5], ys = [0.5];
+    boxes.filter((b) => b.id !== id && b.text).forEach((b) => { xs.push(b.box.x); ys.push(b.box.y); });
+    if (lib && id !== 'inset') { xs.push(L.inset.x); ys.push(L.inset.y); }
+    pics.filter((p) => p.id !== id).forEach((p) => { xs.push(p.box.x); ys.push(p.box.y); });
+    let gx = null, gy = null;
+    for (const v of xs) if (Math.abs(x - v) < SNAP) { x = v; gx = v; break; }
+    for (const v of ys) if (Math.abs(y - v) < SNAP) { y = v; gy = v; break; }
+    setGuides({ x: gx, y: gy });
+    return { x, y };
+  };
+  const clearGuides = () => setGuides({});
+  const setTs = (p) => {
+    if (!edBox) return;
+    const r = selRange;
+    if (r && r.end > r.start && ('color' in p || 'font' in p)) { patchBox(edBox.id, { spans: [...edBox.spans, { start: r.start, end: r.end, ...p }] }); return; }
+    patchBox(edBox.id, { ts: { ...edBox.ts, ...p } });
+  };
+  const trackSel = (e) => { const el = e.target; setSelRange(el.selectionStart !== el.selectionEnd ? { start: el.selectionStart, end: el.selectionEnd } : null); };
+  const firstRun = React.useRef(true);
+  React.useEffect(() => { if (firstRun.current) { firstRun.current = false; return; } setEditing(!creator && cur && !cur.text && !ctaPick(cur) ? 'main' : null); setPanel(null); setShotOpen(false); setActive('main'); }, [sel]);
+  const finish = () => { if (edBox && !edBox.text.trim()) { if (edBox.id !== 'main') removeBox(edBox.id); else if (edBox.text) patch({ text: '' }); } setEditing(null); setPanel(null); };
+  const taRef = React.useRef(null);
+  React.useEffect(() => { if (editing) { const t = setTimeout(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 30); return () => clearTimeout(t); } }, [editing]);
+  /* Creator mode: the photo fills the frame and is framed per platform.
+     bg = { src, tiktok: { x, y, s }, instagram: { x, y, s } }. Drag to move,
+     pinch or scroll to zoom. */
+  const bg = creator ? cur.bg : null;
+  const bgT = bg ? (bg[plat] || { x: 0, y: 0, s: 1 }) : null;
+  const PH_AR = 3 / 4;
+  const areaOf = (pl) => { const a = pl === 'instagram' ? { top: IG_BAR, bottom: IG_BAR } : (window.SS.activeFormat !== 'reel' ? TT_SS : { top: 0, bottom: 0 }); const ah = H * (1 - a.top - a.bottom); const pw = Math.max(W, ah * PH_AR), ph = pw / PH_AR; return { top: a.top, bottom: a.bottom, aw: W, ah, pw, ph, minS: Math.min(W / pw, ah / ph) }; };
+  const setBgT = (t) => { const g = areaOf(plat); const sc = clamp(t.s, g.minS, 3.5); const mx = Math.max(0, (g.pw * sc - g.aw) / 2), my = Math.max(0, (g.ph * sc - g.ah) / 2); patch({ bg: { ...cur.bg, [plat]: { x: clamp(t.x, -mx, mx), y: clamp(t.y, -my, my), s: sc } } }); };
+  const setBg = (src) => patch({ bg: { src, tiktok: { x: 0, y: 0, s: 1 }, instagram: { x: 0, y: 0, s: 1 } } });
+  const [hint, setHint] = React.useState(false);
+  const [cropping, setCropping] = React.useState(() => Boolean(autoCrop && creator && cur.bg));
+  const [guided, setGuided] = React.useState(() => Boolean(autoCrop && creator && cur.bg));
+  const reel = window.SS.activeFormat === 'reel';
+  const area = plat === 'instagram' ? { top: IG_BAR, bottom: IG_BAR } : (!reel ? TT_SS : { top: 0, bottom: 0 });
+  const pan = React.useRef({ pts: new Map(), dist: null, moved: false });
+  const panDown = (e) => { const p = pan.current; p.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (p.pts.size === 1) p.moved = false; if (p.pts.size === 2) { const [a, b] = [...p.pts.values()]; p.dist = Math.hypot(a.x - b.x, a.y - b.y); } e.currentTarget.setPointerCapture(e.pointerId); };
+  const panMove = (e) => { const p = pan.current; const prev = p.pts.get(e.pointerId); if (!prev || !bgT) return; const n = { x: e.clientX, y: e.clientY }; p.pts.set(e.pointerId, n); if (p.pts.size >= 2) { const [a, b] = [...p.pts.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (p.dist) setBgT({ ...bgT, s: bgT.s * (d / p.dist) }); p.dist = d; p.moved = true; return; } const dx = n.x - prev.x, dy = n.y - prev.y; if (Math.abs(dx) + Math.abs(dy) > 1) p.moved = true; setBgT({ ...bgT, x: bgT.x + dx, y: bgT.y + dy }); };
+  const panUp = (e) => { const p = pan.current; p.pts.delete(e.pointerId); if (p.pts.size < 2) p.dist = null; if (p.pts.size === 0 && !p.moved) { if (editing) { finish(); return; } if (!bg) { setMedia(true); return; } if (cropping) return; if (!(cur.text || '').trim()) { setActive('main'); setEditing('main'); return; } const r = e.currentTarget.getBoundingClientRect(); const x = clamp((e.clientX - r.left) / W, 0.15, 0.85), y = clamp((e.clientY - r.top) / H, 0.12, 0.72); const id = 'x' + Date.now() + (nextId.current++); patch({ extras: [...extras, { id, text: '', box: { x, y, w: 0.72 }, [bk]: { x, y, w: 0.72 }, tstyle: { ...DEFAULT_TSTYLE } }] }); setActive(id); setEditing(id); } };
+  const panWheel = (e) => { if (bgT) setBgT({ ...bgT, s: bgT.s * (1 - e.deltaY * 0.0025) }); };
+  const tapCanvas = (e) => {
+    e.preventDefault();
+    if (creator) { panDown(e); return; }
+    const r = e.currentTarget.getBoundingClientRect(); const x = clamp((e.clientX - r.left) / W, 0.15, 0.85), y = clamp((e.clientY - r.top) / H, 0.08, 0.9);
+    if (editing) { finish(); return; }
+    if (!cur.text) { if (ctaPick(cur)) return; setActive('main'); setEditing('main'); return; }
+    const id = 'x' + Date.now() + (nextId.current++);
+    patch({ extras: [...extras, { id, text: '', box: { x, y, w: 0.72 }, [bk]: { x, y, w: 0.72 }, tstyle: { ...DEFAULT_TSTYLE } }] }); setActive(id); setEditing(id);
+  };
+  const fsOf = (b) => Math.round(W * 0.072 * b.ts.size);
+  const rectOf = (b) => { const fs = fsOf(b); const lines = Math.max(1, Math.ceil((b.text || ' ').length / Math.max(6, (b.box.w * W) / (fs * 0.52)))); const th = (lines * fs * 1.2 + ((b.ts.bg === 'none' || b.ts.bg === 'outline') ? 0 : fs * 0.7)) / H; return { x: b.box.x - b.box.w / 2, y: b.box.y - th / 2, w: b.box.w, h: th }; };
+  const ih = (L.inset.w * W * 0.62) / H;
+  const insetRect = { x: L.inset.x - L.inset.w / 2, y: L.inset.y - ih / 2, w: L.inset.w, h: ih };
+  const blocked = ghost === 'off' ? [] : (ghost === 'tiktok' && window.SS.activeFormat !== 'reel' ? BLOCKED.tiktokSlideshow : BLOCKED[ghost]);
+  const hits = {}; boxes.forEach((b) => { if (b.text) { const h = blocked.find((z) => overlaps(rectOf(b), z)); if (h) hits[b.id] = h; } });
+  const insetHit = lib ? blocked.find((z) => overlaps(insetRect, z)) : null;
+  const hitName = (z) => z ? (ghost === 'instagram' ? (z.id === 'counter' ? 'Behind the slide counter' : 'Cropped off on Instagram') : ({ nav: 'Behind the top tabs', rail: 'Behind the like and share buttons', caption: 'Behind the caption', tabs: 'Behind the tab bar' })[z.id]) : null;
+  let warn = hitName(Object.values(hits)[0]) || hitName(insetHit);
+  const hitIds = new Set([...Object.values(hits), insetHit].filter(Boolean).map((z) => z.id));
+  const isCover = cur.role === 'cover';
+  const stop = (e) => e.stopPropagation();
+  const picRect = (p) => { const ph = (p.box.w * W * 4 / 3) / H; return { x: p.box.x - p.box.w / 2, y: p.box.y - ph / 2, w: p.box.w, h: ph }; };
+  const picHits = {}; pics.forEach((p) => { const z = blocked.find((zz) => overlaps(picRect(p), zz)); if (z) picHits[p.id] = z; });
+  Object.values(picHits).forEach((z) => hitIds.add(z.id)); if (!warn) warn = hitName(Object.values(picHits)[0]);
+  const Round = ({ icon, onClick, on, label: l, danger, size = 42 }) => <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); onClick(); }} aria-label={l} title={l} style={{ width: size, height: size, borderRadius: 999, border: 'none', background: on ? (danger ? '#E5484D' : '#fff') : 'rgba(20,24,30,0.55)', backdropFilter: 'blur(8px)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name={icon} size={Math.round(size * 0.48)} color={on && !danger ? 'var(--ink)' : '#fff'} /></button>;
+  const ghostLabel = { off: 'Clean', tiktok: 'TikTok', instagram: 'Instagram' }[ghost];
+  const edFs = edBox ? fsOf(edBox) : 0;
+  const pop = Boolean(cur.genAt && Date.now() - cur.genAt < 1500);
+  const picking = !editing && !busy && ctaPick(cur);
+  const genBtn = onGenerate && !(cur.text || '').trim() && !busy ? <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); setEditing(null); setPanel(null); onGenerate(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 46, padding: '0 20px 0 16px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 15px var(--font-ui)', boxShadow: '0 6px 24px rgba(0,0,0,0.35)', animation: 'ss-rise 320ms var(--ease-out) 120ms both' }}><Icon name="sparkles" size={17} color="var(--blue-500)" />{generateLabel}</button> : null;
+  const secBtn = onSecondary && !busy ? <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); setEditing(null); setPanel(null); onSecondary(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(20,24,30,0.55)', backdropFilter: 'blur(8px)', color: '#fff', cursor: 'pointer', font: '700 13px var(--font-ui)', whiteSpace: 'nowrap', animation: 'ss-rise 320ms var(--ease-out) 200ms both' }}><Icon name="sparkles" size={14} color="#fff" />{secondaryLabel}</button> : null;
+  return (
+    <div style={{ position: 'absolute', top: -54, left: 0, right: 0, bottom: 0, zIndex: 70, background: '#000', display: 'flex', flexDirection: 'column', animation: 'noni-screen-in var(--dur-base) var(--ease-out) both' }}>
+      <div style={{ height: 54, flexShrink: 0 }} />
+      <div onPointerDown={tapCanvas} onPointerMove={creator ? panMove : undefined} onPointerUp={creator ? panUp : undefined} onPointerCancel={creator ? panUp : undefined} onWheel={creator && !editing ? panWheel : undefined} style={{ position: 'relative', width: W, height: H, borderRadius: 22, overflow: 'hidden', background: 'linear-gradient(180deg, #2A3038 0%, #1C2128 100%)', touchAction: 'none', flexShrink: 0, cursor: bg ? 'grab' : 'default' }}>
+        {bg ? (() => { const g = areaOf(plat); return <div style={{ position: 'absolute', left: 0, right: 0, top: `${area.top * 100}%`, bottom: `${area.bottom * 100}%`, overflow: 'hidden', background: '#000', pointerEvents: 'none' }}><div style={{ position: 'absolute', left: '50%', top: '50%', width: g.pw, height: g.ph, marginLeft: -g.pw / 2, marginTop: -g.ph / 2, background: photoBg(bg.src), transform: `translate(${bgT.x}px, ${bgT.y}px) scale(${bgT.s})`, transformOrigin: 'center' }} /></div>; })() : null}
+        {creator && hint && bg ? <span style={{ position: 'absolute', left: 0, right: 0, top: '46%', display: 'flex', justifyContent: 'center', pointerEvents: 'none', animation: 'ss-fade 240ms var(--ease-out) both' }}><span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(20,24,30,0.7)', color: '#fff', font: '600 13px var(--font-ui)' }}>Drag to move · pinch to zoom · framed per app</span></span> : null}
+        {!creator && !pics.length && !lib && !boxes.some((b) => b.text) && !ctaPick(cur) ? <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}><Icon name={reel ? 'video' : 'camera'} size={36} color="rgba(255,255,255,0.28)" /><span style={{ font: '600 13px var(--font-ui)', color: 'rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>{reel ? "Creator's clip" : "Creator's photo"}</span></span></span> : null}
+        {ghost !== 'off' && !cropping ? <span style={{ position: 'absolute', inset: 0, opacity: 0.55, pointerEvents: 'none' }}><PlatformGhost platform={ghost} w={W} h={H} /></span> : null}
+        {cropping ? <><span style={{ position: 'absolute', left: 0, right: 0, top: 0, height: `${area.top * 100}%`, background: 'rgba(0,0,0,0.85)', pointerEvents: 'none' }} /><span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${area.bottom * 100}%`, background: 'rgba(0,0,0,0.85)', pointerEvents: 'none' }} /></> : null}
+        {!editing ? blocked.filter((z) => hitIds.has(z.id)).map((z) => <span key={z.id} style={{ position: 'absolute', left: `${z.x * 100}%`, top: `${z.y * 100}%`, width: `${z.w * 100}%`, height: `${z.h * 100}%`, background: 'rgba(229,72,77,0.22)', outline: '1.5px dashed #FF6B70', outlineOffset: -1, pointerEvents: 'none' }} />) : null}
+        {editing ? <span style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', animation: 'ss-fade 220ms var(--ease-out) both' }} /> : null}
+        {guides.x != null ? <span style={{ position: 'absolute', top: 0, bottom: 0, left: `${guides.x * 100}%`, width: 1.5, marginLeft: -0.75, background: '#1BA6EE', boxShadow: '0 0 0 0.5px rgba(255,255,255,0.6)', pointerEvents: 'none', zIndex: 5 }} /> : null}
+        {guides.y != null ? <span style={{ position: 'absolute', left: 0, right: 0, top: `${guides.y * 100}%`, height: 1.5, marginTop: -0.75, background: '#1BA6EE', boxShadow: '0 0 0 0.5px rgba(255,255,255,0.6)', pointerEvents: 'none', zIndex: 5 }} /> : null}
+        {!editing && !cropping ? pics.map((p) => <PicSticker key={p.id} pic={p} W={W} H={H} active={active === p.id} hit={picHits[p.id]}
+          onActivate={() => setActive(p.id)}
+          onMove={(rx, ry) => { setDragging(p.id); const q = snapTo(p.id, clamp(rx, 0.05, 0.95), clamp(ry, 0.05, 0.98)); setOverTrash(q.y > 0.9 && Math.abs(q.x - 0.5) < 0.15); patchPic(p.id, { ...p.box, ...q }); }}
+          onDrop={() => { clearGuides(); if (overTrash) removePic(p.id); setDragging(null); setOverTrash(false); }}
+          onScale={(r) => patchPic(p.id, { ...p.box, w: clamp(p.box.w * r, 0.15, 1) })}
+          />) : null}
+        {dragging ? <div style={{ position: 'absolute', left: 0, right: 0, bottom: 14, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 6, animation: 'ss-fade 160ms var(--ease-out) both' }}><span style={{ width: 36, height: 36, borderRadius: 999, border: '1.5px solid #fff', background: overTrash ? '#E5484D' : 'rgba(0,0,0,0.4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transform: overTrash ? 'scale(1.3)' : 'none', transition: 'transform 120ms var(--ease-out), background 120ms' }}><Icon name="trash-2" size={16} color="#fff" /></span></div> : null}
+        {lib && !editing && !cropping ? <PicSticker pic={{ id: 'inset', box: L.inset }} W={W} H={H} hit={insetHit} onActivate={() => setActive('inset')}
+          onMove={(rx, ry) => { setDragging('inset'); const q = snapTo('inset', clamp(rx, 0.1, 0.9), clamp(ry, 0.08, 0.95)); setOverTrash(q.y > 0.9 && Math.abs(q.x - 0.5) < 0.15); patch({ [ik]: { ...L.inset, ...q } }); }}
+          onDrop={() => { clearGuides(); if (overTrash) { patch({ inset: null }); setActive('main'); } setDragging(null); setOverTrash(false); }}
+          onScale={(r) => patch({ [ik]: { ...L.inset, w: clamp(L.inset.w * r, 0.25, 0.9) } })}><span style={{ display: 'block', animation: pop ? 'ss-place 520ms var(--ease-out) both' : 'none' }}><Shot item={lib} w={W * L.inset.w} /></span></PicSticker> : null}
+        {!cropping ? boxes.filter((b) => b.text && b.id !== editing).map((b) => (
+          <TextBoxView key={b.id} bx={b} W={W} H={H} fs={fsOf(b)} pop={pop && b.id === 'main'} active={active === b.id && !editing} hit={hits[b.id]}
+            onActivate={() => setActive(b.id)} onTap={() => { if (editing) finish(); else setEditing(b.id); }}
+            onMove={(dx, dy) => { const p = snapTo(b.id, clamp(b.box.x + dx, 0.1, 0.9), clamp(b.box.y + dy, 0.06, 0.94)); patchBox(b.id, { box: { ...b.box, ...p } }); }} onDrop={clearGuides}
+            onScale={(r) => patchBox(b.id, { ts: { ...b.ts, size: clamp(b.ts.size * r, 0.5, 2.4) } })} />
+        )) : null}
+        {edBox ? (<>
+          <div onPointerDown={stop} onWheel={(e) => setTs({ size: clamp(ts.size * (1 - e.deltaY * 0.0025), 0.5, 2.4) })} style={{ position: 'absolute', left: `${edBox.box.x * 100}%`, top: `${edBox.box.y * 100}%`, width: W * edBox.box.w, transform: 'translate(-50%,-50%)', animation: 'ss-fade 180ms var(--ease-out) both', display: 'flex', justifyContent: ts.align === 'left' ? 'flex-start' : ts.align === 'right' ? 'flex-end' : 'center' }}>
+            <span style={{ ...textBoxStyle(ts, edFs), position: 'relative', width: '100%', display: 'block', minHeight: edFs * 1.2 }}>
+              <span aria-hidden="true" style={{ display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{runsOf(edBox.text, edBox.spans, ts, edFs)}{'\u200b'}</span>
+              <textarea autoFocus rows={1} value={edBox.text} onSelect={trackSel} onKeyUp={trackSel} onMouseUp={trackSel} onChange={(e) => { const nv = e.target.value, ov = edBox.text; const delta = nv.length - ov.length; const pos = e.target.selectionStart - Math.max(delta, 0); patchBox(edBox.id, { text: nv, spans: shiftSpans(edBox.spans, pos, delta) }); }} ref={(el) => { taRef.current = el; }} style={(() => { const b = textBoxStyle(ts, edFs); return { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', margin: 0, padding: b.padding || 0, boxSizing: 'border-box', border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', background: 'transparent', color: 'transparent', WebkitTextStroke: '0', textShadow: 'none', caretColor: '#1BA6EE', font: b.font, fontSize: edFs, lineHeight: 1.2, letterSpacing: b.letterSpacing, textAlign: ts.align, whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }; })()} />
+            </span>
+          </div>
+          <div onPointerDown={stop} style={{ position: 'absolute', left: 10, top: '26%', height: '36%', width: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'ss-slide-left 260ms var(--ease-out) 60ms both' }}>
+            <input type="range" min={0.3} max={0.95} step={0.01} value={edBox.box.w} onChange={(e) => patchBox(edBox.id, { box: { ...edBox.box, w: Number(e.target.value) } })} aria-label="Text box width" style={{ width: H * 0.36, transform: 'rotate(-90deg)', accentColor: '#fff' }} />
+          </div>
+          <div onPointerDown={stop} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', animation: 'ss-rise 260ms var(--ease-out) both' }}>
+            {edBox.id === 'main' && (genBtn || secBtn) ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 8 }}>{genBtn}{secBtn}</div> : null}
+            {panel === 'font' ? <div style={{ display: 'flex', gap: 6, animation: 'ss-pop 180ms var(--ease-out) both' }}>{Object.entries(FONTS).map(([k, f]) => <button key={k} type="button" onClick={() => setTs({ font: k })} style={{ padding: '8px 14px', borderRadius: 10, border: 'none', background: ts.font === k ? '#fff' : 'rgba(0,0,0,0.45)', color: ts.font === k ? 'var(--ink)' : '#fff', cursor: 'pointer', font: f.font, fontSize: 14 }}>{f.label}</button>)}</div> : null}
+            {panel === 'color' ? <div style={{ display: 'flex', gap: 9, animation: 'ss-pop 180ms var(--ease-out) both' }}>{SWATCHES.map((c) => <button key={c} type="button" onClick={() => setTs({ color: c })} aria-label={c} style={{ width: 30, height: 30, borderRadius: 999, border: '2.5px solid #fff', background: c, cursor: 'pointer', boxShadow: ts.color === c ? '0 0 0 2.5px #1BA6EE' : '0 1px 4px rgba(0,0,0,0.3)' }} />)}</div> : null}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: 6, borderRadius: 16, background: 'rgba(20,24,30,0.72)', backdropFilter: 'blur(10px)' }}>
+              <button type="button" onClick={() => setPanel(panel === 'font' ? null : 'font')} style={{ width: 46, height: 40, borderRadius: 11, border: 'none', background: panel === 'font' ? 'rgba(255,255,255,0.25)' : 'transparent', color: '#fff', cursor: 'pointer', font: '800 17px var(--font-display)' }}>Aa</button>
+              <button type="button" onClick={() => setPanel(panel === 'color' ? null : 'color')} aria-label="Color" style={{ width: 46, height: 40, borderRadius: 11, border: 'none', background: panel === 'color' ? 'rgba(255,255,255,0.25)' : 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: 22, height: 22, borderRadius: 999, background: 'conic-gradient(#E5484D,#F6C445,#3DBE5B,#1BA6EE,#8E24AA,#E5484D)', border: '2px solid #fff' }} /></button>
+              <button type="button" onClick={() => setTs({ bg: ts.bg === 'outline' ? 'solid' : ts.bg === 'solid' ? 'soft' : ts.bg === 'soft' ? 'none' : 'outline' })} aria-label="Text background" style={{ width: 46, height: 40, borderRadius: 11, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: 24, height: 24, borderRadius: 6, border: '2px solid #fff', background: ts.bg === 'solid' ? '#fff' : ts.bg === 'soft' ? 'rgba(255,255,255,0.45)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: ts.bg === 'solid' ? 'var(--ink)' : '#fff', font: '800 13px var(--font-display)', WebkitTextStroke: ts.bg === 'outline' ? '0.6px #000' : '0' }}>A</span></button>
+              <button type="button" onClick={() => setTs({ align: ts.align === 'center' ? 'left' : ts.align === 'left' ? 'right' : 'center' })} aria-label="Align" style={{ width: 46, height: 40, borderRadius: 11, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', flexDirection: 'column', alignItems: ts.align === 'left' ? 'flex-start' : ts.align === 'right' ? 'flex-end' : 'center', justifyContent: 'center', gap: 3, padding: '0 11px' }}>{[22, 14, 18].map((w, i) => <span key={i} style={{ width: w, height: 2.5, borderRadius: 2, background: '#fff' }} />)}</button>
+              {edBox.id !== 'main' || edBox.text ? <button type="button" onClick={() => { removeBox(edBox.id); setEditing(null); setPanel(null); }} aria-label="Delete text" style={{ width: 46, height: 40, borderRadius: 11, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="trash-2" size={18} color="#fff" /></button> : null}
+            </div>
+          </div>
+        </>) : null}
+        <div style={{ position: 'absolute', top: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: picking ? 10 : 'auto' }}>
+          {editing ? <span style={{ flex: 1 }} /> : <Round icon="chevron-left" label="Back" onClick={onBack} />}
+          <span style={{ flex: 1 }} />
+          {editing ? <button type="button" onPointerDown={stop} onClick={finish} style={{ height: 36, padding: '0 14px', borderRadius: 999, border: 'none', background: 'transparent', color: '#fff', cursor: 'pointer', font: '700 16px var(--font-ui)', textShadow: '0 1px 6px rgba(0,0,0,0.5)', animation: 'ss-fade 200ms var(--ease-out) both' }}>Done</button> : null}
+        </div>
+        {!editing && !picking && !cropping ? (
+          <div style={{ position: 'absolute', right: 12, top: 56, display: 'flex', flexDirection: 'row', gap: 8, animation: 'ss-fade 200ms var(--ease-out) both' }}>
+            <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); if (!cur.text) { setActive('main'); setEditing('main'); } else { const id = 'x' + Date.now(); patch({ extras: [...extras, { id, text: '', box: { x: 0.42, y: clamp(L.text.y + 0.18, 0.1, 0.85), w: 0.72 }, [bk]: { x: 0.42, y: clamp(L.text.y + 0.18, 0.2, 0.78), w: 0.72 }, tstyle: { ...DEFAULT_TSTYLE } }] }); setActive(id); setEditing(id); } }} aria-label="Text" style={{ width: 42, height: 42, borderRadius: 999, border: 'none', background: 'rgba(20,24,30,0.55)', backdropFilter: 'blur(8px)', color: '#fff', cursor: 'pointer', font: '800 16px var(--font-display)' }}>Aa</button>
+            <Round icon="image-plus" label="Add media" onClick={() => setMedia(true)} on={Boolean(lib || pics.length)} />
+            {creator && bg && !noCrop ? <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); setEditing(null); setCropping(true); }} aria-label="Crop" title="Crop" style={{ width: 42, height: 42, borderRadius: 999, border: 'none', background: 'rgba(20,24,30,0.55)', backdropFilter: 'blur(8px)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><CropIcon size={20} /></button> : null}
+            {!isCover && onToggleCta ? <Round icon="zap" label="CTA slide" onClick={onToggleCta} on={cur.role === 'cta'} /> : null}
+            {notes && !reel ? <Round icon="message-circle" label="Note for the creator" onClick={() => setShotOpen(!shotOpen)} on={Boolean(cur.shot) || shotOpen} /> : null}
+            {!isCover && onRemove && !(gap && cur.role === 'cta') ? <Round icon="trash-2" label="Delete slide" onClick={onRemove} /> : null}
+          </div>
+        ) : null}
+        {shotOpen ? <div onPointerDown={stop} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 14, animation: 'ss-fade 180ms var(--ease-out) both', zIndex: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 16px', borderRadius: 18, background: 'rgba(20,24,30,0.92)', animation: 'ss-rise 240ms var(--ease-out) both' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, font: '700 11px var(--font-ui)', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }}><Icon name={reel ? 'mic' : 'message-circle'} size={14} color="rgba(255,255,255,0.7)" />{reel ? (isCover ? 'Hook script \u00b7 word for word' : 'What the creator says') : 'Note for the creator'}</span>
+            <textarea autoFocus rows={1} value={cur.shot} onChange={(e) => { patch({ shot: e.target.value }); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} ref={(el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setShotOpen(false); } }} placeholder={reel ? (isCover ? 'The hook, exactly as they should say it' : 'What the creator says on this clip') : 'Note for the creator on this slide'} style={{ width: '100%', minHeight: 48, maxHeight: 260, border: 'none', outline: 'none', resize: 'none', background: 'transparent', color: '#fff', font: '600 17px/1.4 var(--font-ui)', padding: 0, overflowY: 'auto' }} />
+          </div>
+        </div> : null}
+        {!creator && !editing && !shotOpen && !ctaPick(cur) && (reel ? notes : cur.shot) ? (cur.shot ? (
+          <button type="button" onPointerDown={stop} onClick={(e) => { e.stopPropagation(); setShotOpen(true); }} style={{ position: 'absolute', left: 12, right: 64, bottom: (genBtn && secBtn) ? 124 : (genBtn || secBtn) ? 84 : (warn ? 52 : 12), display: 'flex', alignItems: 'flex-start', gap: 10, padding: '11px 13px', borderRadius: 16, border: 'none', background: 'rgba(20,24,30,0.72)', backdropFilter: 'blur(10px)', color: '#fff', cursor: 'pointer', textAlign: 'left' }}><Icon name={reel ? 'mic' : 'message-circle'} size={15} color="rgba(255,255,255,0.6)" /><span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>{reel ? <span style={{ font: '700 10.5px var(--font-ui)', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>{isCover ? 'Hook script \u00b7 word for word' : 'Creator says'}</span> : null}<span style={{ font: '500 13.5px/1.4 var(--font-ui)' }}>{cur.shot}</span></span><Icon name="pencil" size={14} color="rgba(255,255,255,0.6)" /></button>
+        ) : (
+          <div onPointerDown={stop} style={{ position: 'absolute', left: 12, right: 12, bottom: (genBtn && secBtn) ? 124 : (genBtn || secBtn) ? 84 : (warn ? 52 : 12), display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, font: '700 11px var(--font-ui)', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}><Icon name="mic" size={13} color="rgba(255,255,255,0.7)" />{isCover ? 'Hook script, word for word' : 'What the creator says'}</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); setShotOpen(true); }} style={{ flex: 1, height: 46, borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, boxShadow: '0 6px 24px rgba(0,0,0,0.35)' }}><Icon name="pencil" size={15} color="var(--ink)" />{isCover ? 'Write the hook' : 'Write the line'}</button>
+              {onWriteNote && !busy ? <button type="button" onClick={(e) => { e.stopPropagation(); onWriteNote(); }} style={{ flex: 1, height: 46, borderRadius: 999, border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(20,24,30,0.6)', backdropFilter: 'blur(8px)', color: '#fff', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><Icon name="sparkles" size={15} color="#fff" />Draft with AI</button> : null}
+            </div>
+          </div>
+        )) : null}
+        {!editing && !cropping && cur.caption ? <span style={{ position: 'absolute', left: '6%', right: '20%', top: '58%', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}><span style={{ display: 'inline-block', padding: '6px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.55)', color: '#fff', font: '800 17px/1.25 var(--font-ui)', textAlign: 'center', textWrap: 'pretty' }}>{cur.caption}</span></span> : null}
+        {cropping ? (<>
+          <div style={{ position: 'absolute', left: 0, right: 0, top: `${area.top * 100}%`, bottom: `${area.bottom * 100}%`, pointerEvents: 'none', boxShadow: '0 0 0 2px rgba(255,255,255,0.9) inset', backgroundImage: 'linear-gradient(rgba(255,255,255,0.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.35) 1px, transparent 1px)', backgroundSize: '33.34% 33.34%' }} />
+          <span style={{ position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)', padding: '6px 12px', borderRadius: 999, background: 'rgba(20,24,30,0.7)', color: '#fff', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', pointerEvents: 'none' }}>Crop for {plat === 'instagram' ? 'Instagram · 4:5' : reel ? 'TikTok · 9:16' : 'TikTok'}</span>
+          <div onPointerDown={stop} style={{ position: 'absolute', left: 12, right: 12, bottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button type="button" onClick={() => setBgT({ x: 0, y: 0, s: 1 })} style={{ height: 42, padding: '0 14px', borderRadius: 999, border: 'none', background: 'rgba(20,24,30,0.7)', color: '#fff', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="rotate-ccw" size={15} color="#fff" />Reset</button>
+            <span style={{ flex: 1 }} />
+            {guided && plat === 'tiktok' ? <button type="button" onClick={() => setGhost('instagram')} style={{ height: 42, padding: '0 16px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 7 }}><IgIcon size={15} color="var(--ink)" />Crop for Instagram<Icon name="arrow-right" size={15} color="var(--ink)" /></button>
+            : <button type="button" onClick={() => { setCropping(false); const g = guided; setGuided(false); if (g) { setGhost('tiktok'); if (creator && !(cur.text || '').trim() && cur.role !== 'cta') { setActive('main'); setEditing('main'); } } }} style={{ height: 42, padding: '0 18px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>Done<Icon name="check" size={16} color="var(--ink)" /></button>}
+          </div>
+        </>) : null}
+        {!editing && !cropping && warn ? (
+          <div style={{ position: 'absolute', left: 12, bottom: 12, right: 64, display: 'flex' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 999, background: '#E5484D', color: '#fff', font: '700 12.5px var(--font-ui)' }}><Icon name="circle-alert" size={14} color="#fff" />{warn}</span>
+          </div>
+        ) : null}
+        {!editing && !picking ? <div onPointerDown={stop} style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, padding: 3, borderRadius: 999, background: 'rgba(20,24,30,0.6)', backdropFilter: 'blur(8px)' }}>{[['tiktok', 'music-2', 'TikTok'], ['instagram', 'ig', 'Instagram']].map(([k, ic, l]) => <button key={k} type="button" onClick={() => setGhost(ghost === k ? 'off' : k)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: ghost === k ? '#fff' : 'transparent', color: ghost === k ? 'var(--ink)' : 'rgba(255,255,255,0.85)', font: '700 12.5px var(--font-ui)' }}>{ic === 'ig' ? <IgIcon size={13} color={ghost === k ? 'var(--ink)' : 'rgba(255,255,255,0.85)'} /> : <Icon name={ic} size={13} color={ghost === k ? 'var(--ink)' : 'rgba(255,255,255,0.85)'} />}{l}</button>)}</div> : null}
+        {!editing && !picking && !cropping && kindLabel ? <span style={{ position: 'absolute', left: 12, top: 63, height: 42, display: 'inline-flex', alignItems: 'center', padding: '0 12px', borderRadius: 999, background: 'rgba(20,24,30,0.55)', backdropFilter: 'blur(8px)', color: '#fff', font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap' }}>{kindLabel}</span> : null}
+        {!editing && ctaPick(cur) && !busy ? <div onPointerDown={stop} style={{ position: 'absolute', inset: 0, zIndex: 9, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(10px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 28px', animation: 'ss-fade 220ms var(--ease-out) both' }}>
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10, padding: '22px 18px 18px', borderRadius: 24, background: 'rgba(20,24,30,0.92)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)', animation: 'ss-rise 300ms var(--ease-out) 80ms both' }}>
+            <span style={{ width: 44, height: 44, borderRadius: 999, alignSelf: 'center', background: 'var(--blue-500)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="zap" size={22} color="#fff" /></span>
+            <span style={{ textAlign: 'center', font: '700 19px var(--font-display)', letterSpacing: '-0.3px', color: '#fff', marginBottom: 8 }}>Your call to action</span>
+            <button type="button" onClick={(e) => { e.stopPropagation(); onGenerate && onGenerate(); }} style={{ width: '100%', height: 50, borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="sparkles" size={17} color="var(--blue-500)" />Generate with AI</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); onSecondary(); }} style={{ width: '100%', height: 50, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="layout-grid" size={16} color="#fff" />Pick a feature</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); setActive('main'); setEditing('main'); }} style={{ width: '100%', height: 50, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="pencil" size={16} color="#fff" />Write it yourself</button>
+          </div>
+        </div> : null}
+        {!editing && !cropping && !ctaPick(cur) && (genBtn || secBtn) ? <div style={{ position: 'absolute', left: 0, right: 0, bottom: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>{genBtn}{secBtn}</div> : null}
+        {busy ? <span style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#fff', animation: 'ss-fade 200ms var(--ease-out) both' }}><span style={{ position: 'relative', width: 72, height: 72, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ position: 'absolute', inset: 0, borderRadius: 999, background: 'var(--blue-500)', opacity: 0.35, animation: 'ss-ring 1.4s var(--ease-out) infinite' }} /><span style={{ position: 'absolute', inset: 10, borderRadius: 999, background: 'var(--blue-500)', animation: 'ss-pulse 1.4s ease-in-out infinite' }} /><Icon name="sparkles" size={26} color="#fff" /></span><span style={{ font: '700 16px var(--font-ui)', letterSpacing: '-0.2px' }}>{typeof busy === 'string' ? busy : 'Revising'}</span></span> : null}
+      </div>
+      {shotOpen ? (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px 6px' }}>
+          <span style={{ flex: 1, font: '600 13px var(--font-ui)', color: 'rgba(255,255,255,0.6)' }}>{reel ? (isCover ? 'Hook script' : 'Teleprompter line') : 'Note for the creator'}</span>
+          <button type="button" onClick={() => setShotOpen(false)} style={{ height: 44, padding: '0 16px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 15px var(--font-ui)', flex: '0 0 auto' }}>Done</button>
+        </div>
+      ) : cropping ? <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, font: '600 13px var(--font-ui)', color: 'rgba(255,255,255,0.6)' }}>{guided ? <><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: 99, background: plat === 'tiktok' ? '#fff' : '#22C55E' }} />TikTok</span><span style={{ width: 14, height: 1, background: 'rgba(255,255,255,0.3)' }} /><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: plat === 'instagram' ? 1 : 0.5 }}><span style={{ width: 8, height: 8, borderRadius: 99, background: plat === 'instagram' ? '#fff' : 'rgba(255,255,255,0.3)' }} />Instagram</span></> : 'Each app keeps its own crop'}</div> : footer ? footer : (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 6px' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', padding: '4px 2px' }}>
+          {slides.map((s, i) => { const need = s.role === 'cover' || s.role === 'cta'; const done = Boolean(s.text && s.text.trim()); const lbl = s.role === 'cover' ? (reel ? 'Hook' : 'Cover') : s.role === 'cta' ? 'CTA' : `Point ${i}`; return (
+            <React.Fragment key={s.id}>
+              {onAddPoint && s.role === 'cta' ? <button type="button" onClick={onAddPoint} aria-label="Add slide" style={{ width: 34, height: 60, flex: '0 0 auto', borderRadius: 6, border: '1.5px dashed rgba(255,255,255,0.35)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color="#fff" /></button> : null}
+              {gap && s.role === 'cta' ? <button type="button" onClick={gap.onTap} title={`${gap.min} to ${gap.max} creator slides`} style={{ width: 34, height: 60, padding: 0, flex: '0 0 auto', borderRadius: 6, border: '1.5px dashed rgba(255,255,255,0.35)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, color: 'rgba(255,255,255,0.7)', font: '700 10px var(--font-ui)' }}><Icon name="camera" size={13} color="rgba(255,255,255,0.6)" /><span>{`${gap.min}-${gap.max}`}</span></button> : null}
+              <button type="button" onClick={() => setSel(i)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 60, padding: '0 8px 0 3px', flex: '0 0 auto', borderRadius: 10, border: 'none', cursor: 'pointer', background: sel === i ? 'rgba(255,255,255,0.14)' : 'transparent', textAlign: 'left' }}>
+                <SlideCard w={34} text={s.text} inset={s.inset} box={s.box} insetBox={s.insetBox} pics={s.pics} extras={s.extras} who="mixed" accent="#fff" />
+                {need ? <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: '700 12px var(--font-ui)', color: '#fff', whiteSpace: 'nowrap' }}>{done ? <Icon name="check" size={12} color="#4ADE80" /> : <span style={{ width: 12, height: 12, borderRadius: 99, border: '1.5px solid rgba(255,255,255,0.5)' }} />}{lbl}</span>
+                  <span style={{ font: '500 11px var(--font-ui)', color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap' }}>{s.role === 'cover' ? (done ? 'Title' : 'Write it') : (done ? 'Done' : 'Write it')}</span>
+                </span> : null}
+              </button>
+            </React.Fragment>
+          ); })}
+          {onAddPoint && !slides.some((s) => s.role === 'cta') ? <button type="button" onClick={onAddPoint} aria-label="Add slide" style={{ width: 34, height: 60, flex: '0 0 auto', borderRadius: 6, border: '1.5px dashed rgba(255,255,255,0.35)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={16} color="#fff" /></button> : null}
+        </div>
+        {(() => { const cov = slides.find((s) => s.role === 'cover'), ct = slides.find((s) => s.role === 'cta'); const covOk = cov && cov.text && cov.text.trim(), ctOk = ct && ct.text && ct.text.trim(); const go = !covOk ? () => setSel(slides.indexOf(cov)) : !ctOk ? () => setSel(slides.indexOf(ct)) : onNext; const label = !covOk ? 'Cover' : !ctOk ? 'CTA' : 'Next'; const prim = covOk && ctOk; return (
+          <button type="button" onClick={go} style={{ height: 44, padding: '0 16px', borderRadius: 999, border: prim ? 'none' : '1px solid rgba(255,255,255,0.25)', background: prim ? 'var(--blue-500)' : 'rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>{label}<Icon name="arrow-right" size={16} color="#fff" /></button>
+        ); })()}
+      </div>
+      )}
+      {media ? <MediaSheet onPhoto={(src) => { if (creator && !bg) { setBg(src); setHint(true); setTimeout(() => setHint(false), 2600); } else addPic(src); }} onInset={(id) => { patch({ inset: id }); setActive('inset'); }} onClose={() => setMedia(false)} mediaLabel={reel ? 'Screen recordings' : 'Screenshots'} /> : null}
+    </div>
+  );
+}
+
+Object.assign(window, { CanvasEditor, PlatformGhost, BLOCKED, MediaSheet, PicSticker, TextBoxView, photoBg, textBoxStyle, DEFAULT_TSTYLE });

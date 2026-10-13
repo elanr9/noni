@@ -1,0 +1,209 @@
+/* Slideshow brief vocabulary. The post is the form: every editor shows the
+   deck as real 9:16 slides. Solid = the manager wrote it. Dashed = the
+   creator fills it in. */
+const DS = () => window.NoniDesignSystem_710e43;
+const SLIDE_RATIO = 16 / 9;
+
+/* A fake product screenshot: tinted card with a header bar and text lines. */
+function Shot({ item, w }) {
+  if (!item) return null;
+  const video = window.SS && window.SS.activeFormat === 'reel';
+  return (
+    <div style={{ position: 'relative', width: w, borderRadius: w * 0.09, overflow: 'hidden', background: '#fff', boxShadow: '0 2px 10px rgba(11,32,56,0.18)', border: '1px solid rgba(255,255,255,0.8)' }}>
+      <div style={{ height: w * 0.16, background: item.bar }} />
+      <div style={{ padding: w * 0.08, display: 'flex', flexDirection: 'column', gap: w * 0.06, background: item.tone }}>
+        <span style={{ height: w * 0.06, width: '70%', borderRadius: 99, background: 'rgba(15,23,32,0.45)' }} />
+        <span style={{ height: w * 0.05, width: '92%', borderRadius: 99, background: 'rgba(15,23,32,0.18)' }} />
+        <span style={{ height: w * 0.05, width: '80%', borderRadius: 99, background: 'rgba(15,23,32,0.18)' }} />
+        <span style={{ height: w * 0.05, width: '55%', borderRadius: 99, background: 'rgba(15,23,32,0.18)' }} />
+      </div>
+      {video && w >= 40 ? <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: w * 0.26, height: w * 0.26, borderRadius: 999, background: 'rgba(15,23,32,0.6)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: 0, height: 0, marginLeft: w * 0.025, borderTop: `${w * 0.065}px solid transparent`, borderBottom: `${w * 0.065}px solid transparent`, borderLeft: `${w * 0.1}px solid #fff` }} /></span></span> : null}
+      {video && w >= 80 ? <span style={{ position: 'absolute', right: w * 0.05, bottom: w * 0.05, padding: `${w * 0.01}px ${w * 0.04}px`, borderRadius: 99, background: 'rgba(15,23,32,0.7)', color: '#fff', font: `700 ${Math.max(8, w * 0.07)}px var(--font-ui)` }}>{item.clip || '0:07'}</span> : null}
+    </div>
+  );
+}
+
+/* Where things sit on the slide, as fractions of the frame. Centre x/y, width w. */
+function layoutOf({ box, insetBox, boxIg, insetBoxIg, inset, text }, platform = 'tiktok') {
+  const cl = (v, a, b) => Math.min(b, Math.max(a, v));
+  if (platform === 'instagram') {
+    const i = insetBoxIg || (insetBox ? { ...insetBox, y: cl(insetBox.y, 0.26, 0.74) } : { x: 0.5, y: 0.40, w: 0.56 });
+    const t = boxIg || (box ? { ...box, y: cl(box.y, 0.22, 0.78) } : (inset ? { x: 0.5, y: 0.66, w: 0.66 } : { x: 0.5, y: 0.5, w: 0.66 }));
+    return { text: t, inset: i };
+  }
+  const i = insetBox || { x: 0.5, y: 0.32, w: 0.56 };
+  const t = box || (inset ? { x: 0.5, y: 0.60, w: 0.66 } : { x: 0.5, y: 0.45, w: 0.66 });
+  return { text: t, inset: i };
+}
+
+/* One slide. who: 'manager' | 'creator' | 'mixed'. text renders as the
+   TikTok-style white box. inset: a library item. ghost: a dashed slot. */
+function SlideCard({ w = 150, text, inset, box, insetBox, photo, bgT, pics, tstyle, extras, who = 'manager', label, index, selected, onClick, dim, accent = 'var(--blue-500)', children, bare }) {
+  const { Icon } = DS();
+  const h = Math.round(w * SLIDE_RATIO);
+  const creator = who !== 'manager';
+  const fs = Math.max(8, Math.round(w * 0.072));
+  const lib = inset ? window.SS.library.find((l) => l.id === inset) : null;
+  const L = layoutOf({ box, insetBox, inset, text });
+  return (
+    <button type="button" onClick={onClick} aria-label={`Slide ${index != null ? index + 1 : ''}`} style={{ position: 'relative', width: w, height: h, flex: '0 0 auto', padding: 0, borderRadius: bare ? 0 : w * 0.11, overflow: 'hidden', cursor: onClick ? 'pointer' : 'default', textAlign: 'left', opacity: dim ? 0.55 : 1,
+      border: bare ? 'none' : creator ? '1.5px dashed var(--line-strong)' : '1px solid var(--border)',
+      background: (photo && !bgT && window.photoBg && window.photoBg(photo)) || (creator ? 'repeating-linear-gradient(135deg, #F3F7FB 0 6px, #EEF3F8 6px 12px)' : 'linear-gradient(180deg, #CFDCE8 0%, #8FA3B6 55%, #4F6276 100%)'),
+      boxShadow: bare ? 'none' : selected ? `0 0 0 3px ${accent}, var(--shadow-card)` : 'var(--shadow-card)', transition: 'box-shadow 160ms var(--ease-out)' }}>
+      {photo && bgT ? (() => { const T = (window.SS && window.SS.activeFormat !== 'reel' && window.TT_SS) || { top: 0, bottom: 0 }; const ah = h * (1 - T.top - T.bottom); const pw = Math.max(w, ah * 0.75), ph = pw / 0.75; const k = w / 390; return <span style={{ position: 'absolute', left: 0, right: 0, top: `${T.top * 100}%`, bottom: `${T.bottom * 100}%`, overflow: 'hidden', background: '#000' }}><span style={{ position: 'absolute', left: '50%', top: '50%', width: pw, height: ph, marginLeft: -pw / 2, marginTop: -ph / 2, background: window.photoBg(photo), transform: `translate(${bgT.x * k}px, ${bgT.y * k}px) scale(${bgT.s})`, transformOrigin: 'center' }} /></span>; })() : null}
+      {who === 'creator' ? (
+        <span style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: w * 0.04, color: 'var(--slate-400)' }}>
+          <Icon name="camera" size={Math.round(w * 0.17)} color="var(--slate-300)" />
+          {w >= 110 && label ? <span style={{ font: `700 ${Math.round(w * 0.075)}px var(--font-ui)`, textAlign: 'center', padding: `0 ${w * 0.1}px`, lineHeight: 1.25 }}>{label}</span> : null}
+        </span>
+      ) : null}
+      {pics && pics.length ? pics.map((p) => <span key={p.id} style={{ position: 'absolute', left: `${p.box.x * 100}%`, top: `${p.box.y * 100}%`, width: w * p.box.w, height: w * p.box.w * 4 / 3, transform: 'translate(-50%,-50%)', borderRadius: w * p.box.w * 0.03, background: window.photoBg ? window.photoBg(p.src) : '#889', boxShadow: '0 1px 6px rgba(0,0,0,0.3)' }} />) : null}
+      {lib ? <span style={{ position: 'absolute', left: `${L.inset.x * 100}%`, top: `${L.inset.y * 100}%`, transform: 'translate(-50%,-50%)' }}><Shot item={lib} w={w * L.inset.w} /></span> : null}
+      {text ? (
+        <span style={{ position: 'absolute', left: `${L.text.x * 100}%`, top: `${L.text.y * 100}%`, width: w * L.text.w, transform: 'translate(-50%,-50%)', display: 'flex', justifyContent: 'center' }}>
+          {w <= 70 ? (
+            <span style={{ display: 'flex', flexDirection: 'column', gap: w * 0.035, width: '100%', background: '#fff', borderRadius: w * 0.06, padding: `${w * 0.06}px ${w * 0.07}px`, boxShadow: '0 1px 4px rgba(0,0,0,0.18)' }}>{[1, 0.8, 0.55].slice(0, Math.min(3, Math.ceil(text.length / 18))).map((f, i) => <span key={i} style={{ height: Math.max(2, w * 0.045), width: `${f * 100}%`, borderRadius: 99, background: 'var(--ink)' }} />)}</span>
+          ) : (
+          <span style={window.textBoxStyle ? window.textBoxStyle({ ...window.DEFAULT_TSTYLE, ...(tstyle || {}) }, Math.round(fs * ((tstyle && tstyle.size) || 1))) : { display: 'inline-block', background: '#fff', color: 'var(--ink)', borderRadius: w * 0.05, padding: `${w * 0.035}px ${w * 0.055}px`, font: `800 ${fs}px/1.22 var(--font-display)`, textAlign: 'center' }}>{text}</span>
+          )}
+        </span>
+      ) : null}
+      {extras && extras.length ? extras.filter((e) => e.text).map((e) => <span key={e.id} style={{ position: 'absolute', left: `${e.box.x * 100}%`, top: `${e.box.y * 100}%`, width: w * e.box.w, transform: 'translate(-50%,-50%)', display: 'flex', justifyContent: 'center' }}>{w <= 70 ? <span style={{ height: Math.max(2, w * 0.045), width: '60%', borderRadius: 99, background: '#fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.4)' }} /> : <span style={window.textBoxStyle({ ...window.DEFAULT_TSTYLE, ...(e.tstyle || {}) }, Math.round(fs * ((e.tstyle && e.tstyle.size) || 1)))}>{e.text}</span>}</span>) : null}
+      {index != null ? <span style={{ position: 'absolute', top: w * 0.06, left: w * 0.06, minWidth: w * 0.16, height: w * 0.16, padding: `0 ${w * 0.04}px`, borderRadius: 99, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: creator ? 'var(--white)' : 'rgba(15,23,32,0.6)', color: creator ? 'var(--slate-500)' : '#fff', font: `800 ${Math.round(w * 0.085)}px var(--font-ui)`, border: creator ? '1px solid var(--line)' : 'none' }}>{index + 1}</span> : null}
+      {children}
+    </button>
+  );
+}
+
+/* Horizontal deck. items: [{ text, inset, who, label }]. */
+function Deck({ items, w = 132, selected, onSelect, onAdd, accent, pad = 24, children }) {
+  const { Icon } = DS();
+  const h = Math.round(w * SLIDE_RATIO);
+  const ref = React.useRef(null);
+  React.useEffect(() => { const el = ref.current; if (!el || selected == null) return; const kid = el.children[selected]; if (kid) el.scrollTo({ left: Math.max(0, kid.offsetLeft - pad - 40), behavior: 'smooth' }); }, [selected]);
+  return (
+    <div ref={ref} style={{ display: 'flex', gap: 10, overflowX: 'auto', flexShrink: 0, padding: `6px ${pad}px 10px`, margin: `0 -${pad}px`, scrollbarWidth: 'none' }}>
+      {items.map((s, i) => <SlideCard key={s.id ?? i} w={w} index={i} text={s.text} inset={s.inset} box={s.box} insetBox={s.insetBox} photo={s.photo} pics={s.pics} tstyle={s.tstyle} who={s.who} label={s.label} selected={selected === i} onClick={onSelect ? () => onSelect(i) : undefined} accent={accent} />)}
+      {onAdd ? <button type="button" onClick={onAdd} aria-label="Add slide" style={{ width: w * 0.62, height: h, flex: '0 0 auto', borderRadius: w * 0.11, border: '1.5px dashed var(--line-strong)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={22} color="var(--slate-400)" /></button> : null}
+      {children}
+    </div>
+  );
+}
+
+/* Bottom sheet with slide-in, drag to dismiss. children may be fn(dismiss). */
+function SSheet({ onClose, children, height = 'auto' }) {
+  const [shown, setShown] = React.useState(false);
+  const [drag, setDrag] = React.useState(0);
+  const start = React.useRef(null); const closing = React.useRef(false);
+  React.useLayoutEffect(() => { const t = setTimeout(() => setShown(true), 0); return () => clearTimeout(t); }, []);
+  const dismiss = (after) => { if (closing.current) return; closing.current = true; setShown(false); setTimeout(() => { onClose(); after && after(); }, 240); };
+  const onDown = (e) => { start.current = e.clientY; e.currentTarget.setPointerCapture(e.pointerId); };
+  const onMove = (e) => { if (start.current == null) return; setDrag(Math.max(0, e.clientY - start.current)); };
+  const onUp = () => { if (start.current == null) return; const d = drag; start.current = null; setDrag(0); if (d > 90) dismiss(); };
+  const content = typeof children === 'function' ? children(dismiss) : children;
+  const hostRef = React.useRef(null);
+  if (hostRef.current === null) hostRef.current = (() => { const el = document.querySelector('[data-phone-overlay]'); return el || false; })();
+  const node = (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 80, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', pointerEvents: 'auto' }}>
+      <div onClick={() => dismiss()} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', opacity: shown ? 1 : 0, transition: 'opacity var(--dur-base) var(--ease-out)' }} />
+      <div style={{ position: 'relative', height, maxHeight: '90%', display: 'flex', flexDirection: 'column', background: 'var(--white)', borderRadius: 'var(--radius-2xl) var(--radius-2xl) 0 0', boxShadow: 'var(--shadow-raised)', paddingBottom: 28, transform: shown ? `translateY(${drag}px)` : 'translateY(100%)', transition: drag ? 'none' : 'transform var(--dur-base) var(--ease-out)' }}>
+        <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} style={{ padding: '10px 0 4px', display: 'flex', justifyContent: 'center', cursor: 'grab', touchAction: 'none' }}><span style={{ width: 40, height: 5, borderRadius: 999, background: 'var(--line-strong)' }} /></div>
+        {content}
+      </div>
+    </div>
+  );
+  return hostRef.current ? ReactDOM.createPortal(node, hostRef.current) : node;
+}
+
+const SLabel = ({ children, right, style }) => <div style={{ display: 'flex', alignItems: 'center', gap: 8, ...style }}><span style={{ flex: 1, font: '700 12px var(--font-ui)', letterSpacing: 'var(--tracking-label)', textTransform: 'uppercase', color: 'var(--slate-500)' }}>{children}</span>{right}</div>;
+
+/* Auto-growing text field styled like a Noni field. */
+function SField({ value, onChange, placeholder, big, multiline, icon, style }) {
+  const { Icon } = DS();
+  const ref = React.useRef(null);
+  React.useLayoutEffect(() => { if (ref.current && multiline) { ref.current.style.height = '0px'; ref.current.style.height = ref.current.scrollHeight + 'px'; } }, [value, multiline]);
+  const base = { width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', font: big ? '700 19px/1.3 var(--font-display)' : '500 16px/1.45 var(--font-ui)', letterSpacing: big ? '-0.3px' : 0, resize: 'none', padding: 0 };
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '13px 16px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1px solid var(--border)', ...style }}>
+      {icon ? <Icon name={icon} size={18} color="var(--slate-400)" style={{ marginTop: 3 }} /> : null}
+      {multiline ? <textarea ref={ref} rows={1} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={base} /> : <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={base} />}
+    </div>
+  );
+}
+
+const SChip = ({ children, tone = 'quiet', color, onClick, icon, style }) => {
+  const { Icon } = DS();
+  const map = { brand: ['var(--blue-100)', 'var(--blue-700)'], quiet: ['var(--fill-quiet)', 'var(--slate-500)'], amber: ['var(--amber-soft)', 'var(--amber)'], green: ['var(--green-soft)', 'var(--green)'], violet: ['#EEE9FB', '#5B3FC9'], ink: ['var(--ink)', '#fff'] };
+  const [bg, fg] = color || map[tone];
+  return <span onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, background: bg, color: fg, font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', cursor: onClick ? 'pointer' : 'default', ...style }}>{icon ? <Icon name={icon} size={13} color={fg} /> : null}{children}</span>;
+};
+
+const KIND_TONE = { handheld: 'brand', story: 'violet', open: 'amber' };
+const KindChip = ({ kind, style }) => <SChip tone={KIND_TONE[kind]} style={style}>{window.SS.kinds[kind].name}</SChip>;
+
+function SButton({ children, onClick, variant = 'primary', icon, disabled, style, small }) {
+  const { Icon } = DS();
+  const v = { primary: { background: 'var(--blue-500)', color: '#fff', boxShadow: 'var(--shadow-accent)' }, secondary: { background: 'var(--white)', color: 'var(--ink)', border: '1px solid var(--border)' }, ink: { background: 'var(--ink)', color: '#fff' }, quiet: { background: 'var(--fill-quiet)', color: 'var(--ink)' } }[variant];
+  return <button type="button" onClick={onClick} disabled={disabled} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: small ? 40 : 56, flexShrink: 0, padding: small ? '0 16px' : '0 22px', borderRadius: 999, border: 'none', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.35 : 1, font: `700 ${small ? 14 : 17}px var(--font-ui)`, letterSpacing: '-0.2px', whiteSpace: 'nowrap', ...v, ...style }}>{icon ? <Icon name={icon} size={small ? 16 : 20} color={v.color} /> : null}{children}</button>;
+}
+
+function SHeader({ onBack, title, sub, right, wrap = true }) {
+  const { Icon } = DS();
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 20px 12px' }}>
+      <button type="button" onClick={onBack} aria-label="Back" style={{ width: 40, height: 40, borderRadius: 999, border: 'none', background: 'var(--white)', boxShadow: 'var(--shadow-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: '0 0 auto' }}><Icon name="chevron-left" size={20} color="var(--ink)" /></button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 19px/1.2 var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)', ...(wrap ? { textWrap: 'pretty' } : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }) }}>{title}</div>
+        {sub ? <div style={{ font: '500 13px var(--font-ui)', color: 'var(--slate-500)', marginTop: 1 }}>{sub}</div> : null}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function Stepper({ value, onChange, min = 1, max = 20 }) {
+  const { Icon } = DS();
+  const B = ({ d, icon }) => <button type="button" onClick={() => onChange(Math.min(max, Math.max(min, value + d)))} style={{ width: 32, height: 32, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={15} color="var(--ink)" /></button>;
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><B d={-1} icon="chevron-down" /><span style={{ minWidth: 22, textAlign: 'center', font: '800 16px var(--font-ui)', color: 'var(--ink)' }}>{value}</span><B d={1} icon="chevron-up" /></span>;
+}
+
+/* Library grid, shared by the slide editor and the Story close slide. */
+function LibrarySheet({ onPick, onClose, current }) {
+  const { Icon } = DS();
+  const [tab, setTab] = React.useState('library');
+  return (
+    <SSheet onClose={onClose} height="70%">
+      {(dismiss) => (<>
+        <div style={{ padding: '10px 24px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h2 style={{ flex: 1, margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>Screenshot</h2>
+          <div style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 999, background: 'var(--fill-quiet)' }}>
+            {[['library', 'Library'], ['photos', 'Photos']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={{ padding: '6px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', background: tab === k ? 'var(--white)' : 'transparent', color: tab === k ? 'var(--ink)' : 'var(--slate-500)', font: '700 13px var(--font-ui)', boxShadow: tab === k ? 'var(--shadow-card)' : 'none' }}>{l}</button>)}
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px' }}>
+          {tab === 'library' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 12 }}>
+              {current ? <button type="button" onClick={() => dismiss(() => onPick(null))} style={{ aspectRatio: '3 / 4', borderRadius: 14, border: '1.5px dashed var(--line-strong)', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: 'var(--slate-500)', font: '700 13px var(--font-ui)' }}><Icon name="x" size={20} color="var(--slate-400)" />None</button> : null}
+              {window.SS.library.map((it) => (
+                <button key={it.id} type="button" onClick={() => dismiss(() => onPick(it.id))} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', textAlign: 'left' }}>
+                  <span style={{ aspectRatio: '3 / 4', borderRadius: 14, background: it.tone, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: current === it.id ? '0 0 0 3px var(--blue-500)' : 'none', position: 'relative' }}>
+                    <Shot item={it} w={64} />
+                    {current === it.id ? <span style={{ position: 'absolute', top: 8, right: 8, width: 22, height: 22, borderRadius: 999, background: 'var(--blue-500)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={14} color="#fff" /></span> : null}
+                  </span>
+                  <span style={{ font: '700 13px var(--font-ui)', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</span>
+                </button>
+              ))}
+              <button type="button" style={{ aspectRatio: '3 / 4', borderRadius: 14, border: '1.5px dashed var(--blue-300)', background: 'var(--blue-50)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: 'var(--blue-600)', font: '700 13px var(--font-ui)' }}><Icon name="image-plus" size={22} color="var(--blue-500)" />Upload</button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 4 }}>
+              {Array.from({ length: 12 }).map((_, i) => <span key={i} style={{ aspectRatio: '1', borderRadius: 6, background: `hsl(${200 + i * 9} 30% ${78 - (i % 4) * 6}%)` }} />)}
+            </div>
+          )}
+        </div>
+      </>)}
+    </SSheet>
+  );
+}
+
+Object.assign(window, { SlideCard, Deck, Shot, SSheet, SLabel, SField, SChip, KindChip, KIND_TONE, SButton, SHeader, Stepper, LibrarySheet, SLIDE_RATIO, layoutOf });

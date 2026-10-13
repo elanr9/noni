@@ -1,0 +1,253 @@
+/* Stepped brief flow: Cover → (Points) → CTA → Details → Review. */
+const FNS = () => window.NoniDesignSystem_710e43;
+
+/* Step strip. dark: on the canvas. */
+function StepStrip({ steps, current, dark, onJump }) {
+  const { Icon } = FNS();
+  const tight = steps.length >= 5;
+  const ref = React.useRef(null);
+  React.useLayoutEffect(() => { const el = ref.current && ref.current.parentElement; if (el) el.scrollLeft = el.scrollWidth; });
+  const fg = dark ? '#fff' : 'var(--ink)', dim = dark ? 'rgba(255,255,255,0.45)' : 'var(--slate-400)';
+  return (
+    <div ref={ref} style={{ display: 'flex', alignItems: 'center', gap: tight ? 2 : 4, minWidth: 0, width: 'max-content', marginLeft: 'auto' }}>
+      {steps.map((s, i) => { const done = i < current, now = i === current; return (
+        <React.Fragment key={s.id}>
+          {i && !tight ? <span style={{ width: 6, height: 1.5, background: done || now ? (dark ? 'rgba(255,255,255,0.5)' : 'var(--line-strong)') : (dark ? 'rgba(255,255,255,0.18)' : 'var(--line)'), flex: '0 0 auto' }} /> : null}
+          <button type="button" onClick={done && onJump ? () => onJump(s.id) : undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: now ? '0 12px 0 8px' : (done && steps.length <= 4) ? '0 8px 0 6px' : '0 4px', borderRadius: 999, border: 'none', cursor: done && onJump ? 'pointer' : 'default', background: now ? (dark ? '#fff' : 'var(--ink)') : 'transparent', color: now ? (dark ? 'var(--ink)' : '#fff') : done ? fg : dim, font: '700 12.5px var(--font-ui)', whiteSpace: 'nowrap', flex: '0 0 auto' }}>
+            <span style={{ width: 18, height: 18, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: done ? '#22C55E' : now ? 'transparent' : (dark ? 'rgba(255,255,255,0.12)' : 'var(--fill-quiet)'), color: done ? '#fff' : 'inherit', font: '800 10.5px var(--font-ui)' }}>{done ? <Icon name="check" size={11} color="#fff" /> : i + 1}</span>
+            {now || (done && steps.length <= 4) ? s.name : null}
+          </button>
+        </React.Fragment>
+      ); })}
+    </div>
+  );
+}
+
+/* Dark footer for canvas steps. */
+function CanvasFooter({ steps, current, onJump, onNext, nextLabel, nextOk, children }) {
+  const { Icon } = FNS();
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, padding: '2px 14px 4px', overflow: 'hidden' }}>
+      {children}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}><StepStrip steps={steps} current={current} dark onJump={onJump} /></div>
+        <button type="button" onClick={onNext} disabled={!nextOk} style={{ height: 42, padding: '0 16px', borderRadius: 999, border: 'none', background: nextOk ? 'var(--blue-500)' : 'rgba(255,255,255,0.12)', color: nextOk ? '#fff' : 'rgba(255,255,255,0.45)', cursor: nextOk ? 'pointer' : 'default', font: '700 15px var(--font-ui)', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>{nextLabel}<Icon name="arrow-right" size={16} color={nextOk ? '#fff' : 'rgba(255,255,255,0.45)'} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* Friendly full-screen intro before the CTA step. */
+function CtaIntro({ onGo, onBack, title = 'Time for your call to action slide!', sub = 'This is what makes it a "UGC" post!', rows = [['pencil', 'Write one line, in the creator\'s voice, that sells Inkbound.'], ['images', 'Add a screenshot of the feature the post is about.'], ['arrow-left-right', 'Slide order and CTA spot get shuffled for every creator.']], go = "Let's go" }) {
+  const { Icon } = FNS();
+  const row = (ic, l, i) => <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 14, animation: `ss-rise 360ms var(--ease-out) ${260 + i * 90}ms both` }}><span style={{ width: 40, height: 40, borderRadius: 999, background: 'var(--white)', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name={ic} size={18} color="var(--blue-500)" /></span><span style={{ font: '600 16px/1.3 var(--font-ui)', color: 'var(--ink)' }}>{l}</span></div>;
+  return (
+    <div style={{ position: 'absolute', top: -54, left: 0, right: 0, bottom: 0, zIndex: 80, background: 'linear-gradient(180deg, #EAF4FD 0%, #F7FAFD 55%)', display: 'flex', flexDirection: 'column', animation: 'noni-screen-in var(--dur-base) var(--ease-out) both' }}>
+      <div style={{ height: 54, flexShrink: 0 }} />
+      <div style={{ padding: '6px 12px 0' }}><button type="button" onClick={onBack} aria-label="Back" style={{ width: 42, height: 42, borderRadius: 999, border: 'none', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron-left" size={22} color="var(--ink)" /></button></div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 28, padding: '0 28px 24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22, textAlign: 'center' }}>
+          <span style={{ position: 'relative', width: 128, height: 128, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', animation: 'ss-bounce-in 620ms cubic-bezier(0.34,1.56,0.64,1) both' }}>
+            <span style={{ position: 'absolute', inset: 0, borderRadius: 999, background: 'var(--blue-500)', opacity: 0.12 }} />
+            <span style={{ position: 'absolute', inset: 18, borderRadius: 999, background: 'var(--blue-500)', boxShadow: 'var(--shadow-accent)' }} />
+            <span style={{ position: 'relative', display: 'inline-flex' }}><Icon name="zap" size={44} color="#fff" /></span>
+            <span style={{ position: 'absolute', top: 6, right: 10, animation: 'ss-pulse 1.6s ease-in-out infinite' }}><Icon name="sparkles" size={22} color="var(--blue-500)" /></span>
+          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, animation: 'ss-rise 360ms var(--ease-out) 160ms both' }}>
+            <h1 style={{ margin: 0, font: '800 30px/1.1 var(--font-display)', letterSpacing: '-0.8px', color: 'var(--ink)', textWrap: 'balance' }}>{title}</h1>
+            <p style={{ margin: 0, font: '500 16px/1.4 var(--font-ui)', color: 'var(--slate-500)' }}>{sub}</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 18px', borderRadius: 'var(--radius-xl, 20px)', background: 'rgba(255,255,255,0.7)', border: '1px solid var(--border)' }}>
+          {rows.map(([ic, l], i) => row(ic, l, i))}
+        </div>
+      </div>
+      <div style={{ padding: '0 24px 28px', display: 'flex', animation: 'ss-rise 360ms var(--ease-out) 560ms both' }}><SButton onClick={onGo} style={{ flex: 1 }}>{go}</SButton></div>
+    </div>
+  );
+}
+
+/* Feature override. Media only (the spec never pulls CTAs from References, Our posts or Ideas). One tap writes the CTA. */
+function FeatureSheet({ current, onPick, onSelf, onClose }) {
+  const { Icon } = FNS();
+  const [q, setQ] = React.useState('');
+  const items = window.SS.library.filter((it) => !q || (it.title + ' ' + it.desc).toLowerCase().includes(q.toLowerCase()));
+  return (
+    <SSheet onClose={onClose} height="88%">
+      {(dismiss) => (<>
+        <div style={{ padding: '6px 20px 10px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ margin: 0, font: '800 24px var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>Which feature does this post sell?</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 44, padding: '0 14px', borderRadius: 'var(--radius-md)', background: 'var(--white)', border: '1px solid var(--border)' }}><Icon name="search" size={16} color="var(--slate-400)" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search features" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', font: '500 15px var(--font-ui)', color: 'var(--ink)', padding: 0 }} /></div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', padding: '2px 20px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {items.map((it) => { const on = current === it.id; return (
+            <button key={it.id} type="button" onClick={() => dismiss(() => onPick(it))} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', borderRadius: 'var(--radius-lg)', border: on ? '2px solid var(--blue-500)' : '1px solid var(--border)', margin: on ? -1 : 0, background: 'var(--white)', boxShadow: 'var(--shadow-card)', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ width: 56, height: 84, borderRadius: 10, background: it.tone, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto', overflow: 'hidden' }}><Shot item={it} w={42} /></span>
+              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ font: '700 16px var(--font-ui)', letterSpacing: '-0.2px', color: 'var(--ink)' }}>{it.title}</span>
+                <span style={{ font: '500 13px/1.35 var(--font-ui)', color: 'var(--slate-500)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{it.desc}</span>
+              </span>
+              {on ? <span style={{ font: '700 12.5px var(--font-ui)', color: 'var(--blue-500)', flex: '0 0 auto' }}>Current</span> : <Icon name="sparkles" size={16} color="var(--slate-400)" />}
+            </button>
+          ); })}
+        </div>
+        <div style={{ padding: '10px 20px 0', display: 'flex', justifyContent: 'center' }}><button type="button" onClick={() => dismiss(() => onSelf && onSelf(null))} style={{ border: 'none', background: 'transparent', padding: 4, cursor: 'pointer', font: '600 14px var(--font-ui)', color: 'var(--slate-500)', textDecoration: 'underline', textUnderlineOffset: 3 }}>Write it myself</button></div>
+      </>)}
+    </SSheet>
+  );
+}
+
+/* Title to feature, by meaning, then the CTA shaped to the post type so it reads
+   as the last slide of that post, not an ad. Stand-in for the backend matcher. */
+function matchFeature(title, postType, n, forceId) {
+  const t = (title || '').toLowerCase(), L = window.SS.library, by = (id) => L.find((l) => l.id === id);
+  const rules = [[/highlight|film|clip|video|footage/, 'hl'], [/reply|respond|message|text back|follow.?up/, 'reply'], [/inbox|unread|dm/, 'inbox'], [/email|outreach|reach out|cold|campaign/, 'sent'], [/which school|find school|search|programs? (i|you) can|d1|d2|d3|division|recruited/, 'search'], [/one school|chance|acceptance|cost|tuition|scholarship/, 'school'], [/plan|priorit|fit|matters/, 'bestfit']];
+  let it = by('general');
+  for (const [re, id] of rules) if (re.test(t)) { it = by(id); break; }
+  if (forceId) it = by(forceId) || it;
+  const hook = { hl: 'Inkbound makes your highlight video in 6 minutes.', reply: 'Inkbound drafts every coach reply for you.', inbox: 'Inkbound puts every coach reply in one inbox.', sent: 'Inkbound emails 50 coaches at once.', search: 'Inkbound finds the schools you can actually get into.', school: 'Inkbound shows your real chance at every school.', bestfit: 'Inkbound builds your plan from what matters to you.' }[it.id];
+  const type = postType && postType.id;
+  const num = n ? `${n}` : null;
+  const shaped = !hook ? it.cta
+    : type === 'howto' ? `${num ? `Step ${num}` : 'Last step'}: ${hook}`
+    : type === 'tips' ? `${num ? `Tip ${num}` : 'Last tip'}: ${hook}`
+    : type === 'start' ? `${num ? `Step ${num}` : 'Start here'}: ${hook}`
+    : type === 'myths' ? `${num ? `Myth ${num}, busted` : 'Truth'}: ${hook}`
+    : type === 'storytime' ? `Then I found Inkbound. ${hook.replace(/^Inkbound /, 'It ')}`
+    : (type === 'talking' || type === 'explainer' || type === 'green' || type === 'longtext') ? hook
+    : it.cta;
+  return { ...it, cta: shaped };
+}
+Object.assign(window, { CtaIntro, matchFeature, FeatureSheet });
+
+/* How many points. */
+function CountSheet({ value, onDone, onClose }) {
+  const [n, setN] = React.useState(value);
+  return (
+    <SSheet onClose={onClose}>
+      {(dismiss) => (
+        <div style={{ padding: '10px 24px 0', display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <h2 style={{ margin: 0, font: '700 22px var(--font-display)', letterSpacing: '-0.4px', color: 'var(--ink)' }}>How many points?</h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, padding: '18px 16px', borderRadius: 'var(--radius-lg)', background: 'var(--white)', border: '1px solid var(--border)' }}>
+            <button type="button" onClick={() => setN(Math.max(2, n - 1))} aria-label="Fewer" style={{ width: 48, height: 48, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', font: '600 24px var(--font-ui)', color: 'var(--ink)' }}>−</button>
+            <span style={{ minWidth: 56, textAlign: 'center', font: '800 40px var(--font-display)', letterSpacing: '-1px', color: 'var(--ink)' }}>{n}</span>
+            <button type="button" onClick={() => setN(Math.min(10, n + 1))} aria-label="More" style={{ width: 48, height: 48, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--white)', cursor: 'pointer', font: '600 24px var(--font-ui)', color: 'var(--ink)' }}>+</button>
+          </div>
+          <SButton onClick={() => dismiss(() => onDone(n))}>Create {n} {n === 1 ? 'point' : 'points'}</SButton>
+        </div>
+      )}
+    </SSheet>
+  );
+}
+
+/* TikTok FYP chrome with real copy. */
+function FypChrome({ caption, tags, handle = '@elan.recruiting', w, index = 0, count = 1 }) {
+  const { Icon } = FNS();
+  const R = ({ icon, n }) => <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}><Icon name={icon} size={30} color="#fff" /><span style={{ font: '700 12px var(--font-ui)', color: '#fff' }}>{n}</span></span>;
+  const T = window.TT_SS || { top: 0.09, bottom: 0.22 };
+  if (window.SS && window.SS.activeFormat !== 'reel') return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: `${T.top * 100}%`, background: '#000', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 22, paddingBottom: 10 }}>
+        <span style={{ color: 'rgba(255,255,255,0.6)', font: '700 15px var(--font-ui)' }}>Following</span><span style={{ color: '#fff', font: '700 15px var(--font-ui)', borderBottom: '2px solid #fff', paddingBottom: 4 }}>For you</span>
+      </div>
+      <div style={{ position: 'absolute', right: 10, bottom: `${(T.bottom + 0.02) * 100}%`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+        <span style={{ width: 44, height: 44, borderRadius: 999, background: 'linear-gradient(135deg,#7B8CA0,#2E3A48)', border: '2px solid #fff', flexShrink: 0 }} />
+        <R icon="heart" n="12.4K" /><R icon="message-circle" n="312" /><R icon="bookmark" n="2,108" /><R icon="share-2" n="864" />
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${T.bottom * 100}%`, background: '#000', padding: '10px 14px 0', display: 'flex', flexDirection: 'column', gap: 6, color: '#fff' }}>
+        <span style={{ display: 'flex', justifyContent: 'center', gap: 4, marginBottom: 2 }}>{Array.from({ length: count }).map((_, k) => <span key={k} style={{ width: 5, height: 5, borderRadius: 99, background: k === index ? '#fff' : 'rgba(255,255,255,0.4)' }} />)}</span>
+        <span style={{ font: '700 15px var(--font-ui)' }}>{handle}</span>
+        <span style={{ font: '500 13.5px/1.35 var(--font-ui)', textWrap: 'pretty', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{caption || 'Caption'} <span style={{ fontWeight: 700 }}>{tags}</span></span>
+        <span style={{ marginTop: 'auto', height: 50, borderTop: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-around', margin: 'auto -14px 0' }}>{['house', 'users', 'plus', 'inbox', 'circle-user-round'].map((n, i) => <Icon key={n} name={n} size={i === 2 ? 28 : 24} color={i === 0 ? '#fff' : 'rgba(255,255,255,0.55)'} />)}</span>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '38%', background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.65) 100%)' }} />
+      <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: 90, background: 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.35) 100%)' }} />
+      <div style={{ position: 'absolute', right: 10, bottom: '14%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+        <span style={{ width: 44, height: 44, borderRadius: 999, background: 'linear-gradient(135deg,#7B8CA0,#2E3A48)', border: '2px solid #fff' }} />
+        <R icon="heart" n="12.4K" /><R icon="message-circle" n="312" /><R icon="bookmark" n="2,108" /><R icon="share-2" n="864" />
+      </div>
+      <div style={{ position: 'absolute', left: 14, right: 78, bottom: 18, display: 'flex', flexDirection: 'column', gap: 6, color: '#fff' }}>
+        <span style={{ font: '700 15px var(--font-ui)' }}>{handle}</span>
+        <span style={{ font: '500 14px/1.35 var(--font-ui)', textWrap: 'pretty' }}>{caption || 'Caption'} <span style={{ fontWeight: 700 }}>{tags}</span></span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: '500 13px var(--font-ui)', whiteSpace: 'nowrap' }}><Icon name="music-2" size={13} color="#fff" />original sound</span>
+      </div>
+    </div>
+  );
+}
+
+/* Review: the finished post as it scrolls on the FYP. */
+function ReviewScreen({ slides, caption, tags, onBack, onSave, steps, current, onJump, story, gap, popup, openCount, format = 'slideshow', saveLabel = 'Add to week', saveIcon = 'check', creator = false, onEdit, initial = 0 }) {
+  const { Icon } = FNS();
+  const reel = format === 'reel';
+  const [tab, setTab] = React.useState('watch');
+  const W = 390, H = Math.round(W * 16 / 9);
+  const items = story ? [slides[0], ...Array.from({ length: gap.min }).map((_, i) => ({ id: 'c' + i, who: 'creator', label: openCount ? 'Creator\'s clip' : `Creator's clip ${i + 1}` })), slides[slides.length - 1]] : slides;
+  const lib = (id) => window.SS.library.find((l) => l.id === id);
+  const scriptRows = items.map((s, k) => ({ key: s.id ?? k, role: s.role || 'creator', text: s.text || s.label || '', inset: s.inset, note: s.shot }));
+  const Tabs = ({ dark }) => <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, padding: 3, borderRadius: 999, background: dark ? 'rgba(255,255,255,0.1)' : 'rgba(20,24,30,0.6)', backdropFilter: 'blur(8px)' }}>{[['watch', 'Watch'], ['script', 'Script']].map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={{ height: 30, padding: '0 14px', borderRadius: 999, border: 'none', cursor: 'pointer', background: tab === k ? '#fff' : 'transparent', color: tab === k ? 'var(--ink)' : 'rgba(255,255,255,0.85)', font: '700 12.5px var(--font-ui)' }}>{l}</button>)}</div>;
+  const BackBtn = () => <button type="button" onClick={onBack} aria-label={popup ? 'Close' : 'Back'} style={{ position: 'absolute', top: 10, left: 12, width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(20,24,30,0.55)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Icon name={popup ? 'x' : 'chevron-left'} size={20} color="#fff" /></button>;
+  const [i, setI] = React.useState(Math.min(initial, Math.max(0, items.length - 1)));
+  const [playing, setPlaying] = React.useState(false);
+  React.useEffect(() => { if (!playing) return; const id = setInterval(() => setI((k) => { if (k >= items.length - 1) { setPlaying(false); return k; } return k + 1; }), 2000); return () => clearInterval(id); }, [playing, items.length]);
+  const [dx, setDx] = React.useState(0);
+  const drag = React.useRef(null); const lock = React.useRef(false);
+  const step = (d) => setI((k) => Math.max(0, Math.min(items.length - 1, k + d)));
+  const onDown = (e) => { drag.current = { x: e.clientX, id: e.pointerId }; e.currentTarget.setPointerCapture(e.pointerId); };
+  const onMove = (e) => { if (drag.current) setDx(e.clientX - drag.current.x); };
+  const onUp = () => { if (!drag.current) return; if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1); drag.current = null; setDx(0); };
+  const onWheel = (e) => { if (Math.abs(e.deltaX) < 12 || lock.current) return; lock.current = true; step(e.deltaX > 0 ? 1 : -1); setTimeout(() => { lock.current = false; }, 450); };
+  return (
+    <div style={{ position: 'absolute', top: -54, left: 0, right: 0, bottom: 0, zIndex: popup ? 95 : 70, background: '#000', display: 'flex', flexDirection: 'column', animation: popup ? 'ss-rise 280ms var(--ease-out) both' : 'noni-screen-in var(--dur-base) var(--ease-out) both' }}>
+      <div style={{ height: 54, flexShrink: 0 }} />
+      {reel && tab === 'script' ? (
+      <div style={{ position: 'relative', width: W, height: H, borderRadius: 22, overflow: 'hidden', flexShrink: 0, background: '#14181E', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ height: 62, flexShrink: 0 }} />
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', padding: '0 16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {scriptRows.map((r, k) => { const c = r.role === 'cta', cov = r.role === 'cover', cr = r.role === 'creator', it = c && r.inset ? lib(r.inset) : null; return (
+            <div key={r.key} style={{ display: 'flex', gap: 12, padding: '12px 14px', borderRadius: 14, background: c ? 'rgba(27,166,238,0.14)' : 'rgba(255,255,255,0.06)', border: c ? '1px solid rgba(27,166,238,0.6)' : cr ? '1px dashed rgba(255,255,255,0.25)' : '1px solid transparent' }}>
+              <span style={{ width: 26, height: 26, borderRadius: 999, flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: c ? 'var(--blue-500)' : cov ? '#fff' : 'rgba(255,255,255,0.12)', color: cov ? 'var(--ink)' : '#fff', font: '800 12px var(--font-ui)' }}>{c ? <Icon name="zap" size={13} color="#fff" /> : cov ? <Icon name="mic" size={13} color="var(--ink)" /> : cr ? <Icon name="video" size={13} color="#fff" /> : k}</span>
+              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.04em', textTransform: 'uppercase', color: c ? 'var(--blue-300)' : 'rgba(255,255,255,0.5)' }}>{c ? 'CTA \u00b7 lands anywhere per creator' : cov ? 'Hook \u00b7 script below, word for word' : cr ? 'Creator records' : story ? `Beat ${k}` : 'Point \u00b7 order shuffled per creator'}</span>
+                <span style={{ font: `${cov ? 700 : 600} 15px/1.35 var(--font-ui)`, color: cr ? 'rgba(255,255,255,0.6)' : '#fff', textWrap: 'pretty' }}>{r.text}</span>
+                {r.note ? <span style={{ font: '500 12.5px var(--font-ui)', color: 'rgba(255,255,255,0.5)' }}>{r.note}</span> : null}
+              </span>
+              {it ? <span style={{ flex: '0 0 auto', alignSelf: 'center' }}><Shot item={it} w={44} /></span> : null}
+            </div>
+          ); })}
+          {caption ? <div style={{ marginTop: 6, padding: '12px 14px', borderRadius: 14, background: 'rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 4 }}><span style={{ font: '700 11px var(--font-ui)', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)' }}>Caption</span><span style={{ font: '500 14px/1.4 var(--font-ui)', color: '#fff' }}>{caption} <span style={{ fontWeight: 700 }}>{tags}</span></span></div> : null}
+        </div>
+        <BackBtn /><Tabs dark />
+      </div>
+      ) : (
+      <div style={{ position: 'relative', width: W, height: H, borderRadius: 22, overflow: 'hidden', flexShrink: 0 }}>
+        <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel} style={{ display: 'flex', width: '100%', height: '100%', touchAction: 'pan-y', cursor: 'grab', transform: `translateX(calc(${-i * 100}% + ${dx}px))`, transition: drag.current ? 'none' : 'transform 320ms var(--ease-out)' }}>
+          {items.map((s, k) => <div key={s.id ?? k} style={{ width: '100%', height: '100%', flex: '0 0 100%', background: s.who === 'creator' ? '#1C2128' : 'linear-gradient(180deg,#2A3038,#1C2128)' }}><SlideCard w={W} text={s.text} inset={s.inset} box={s.box} insetBox={s.insetBox} photo={s.bg ? s.bg.src : (s.photo || (s.who === 'creator' ? null : 'camera'))} bgT={s.bg ? s.bg.tiktok : undefined} tstyle={s.tstyle} extras={s.extras} spans={s.spans} who={s.who || 'mixed'} label={s.label} bare />{s.caption ? <span style={{ position: 'absolute', left: '6%', right: '20%', top: '58%', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}><span style={{ display: 'inline-block', padding: '6px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.55)', color: '#fff', font: '800 17px/1.25 var(--font-ui)', textAlign: 'center', textWrap: 'pretty' }}>{s.caption}</span></span> : null}</div>)}
+        </div>
+        <FypChrome caption={caption} tags={tags} w={W} index={i} count={items.length} />
+        {reel ? <button type="button" onClick={() => { if (!playing && i >= items.length - 1) setI(0); setPlaying(!playing); }} aria-label={playing ? 'Pause' : 'Play'} style={{ position: 'absolute', left: 58, top: 10, width: 40, height: 40, borderRadius: 999, border: 'none', background: playing ? '#fff' : 'rgba(20,24,30,0.55)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={playing ? 'pause' : 'play'} size={18} color={playing ? 'var(--ink)' : '#fff'} /></button> : null}
+        {reel ? <div style={{ position: 'absolute', left: 12, right: 12, bottom: 6, height: 3, borderRadius: 99, background: 'rgba(255,255,255,0.25)' }}><div style={{ width: `${((i + 1) / items.length) * 100}%`, height: '100%', borderRadius: 99, background: '#fff', transition: 'width 320ms var(--ease-out)' }} /></div> : null}
+        {reel ? <Tabs /> : null}
+        <span style={{ position: 'absolute', top: reel ? 56 : 54, right: 14, padding: '3px 9px', borderRadius: 999, background: 'rgba(0,0,0,0.5)', color: '#fff', font: '700 12px var(--font-ui)', whiteSpace: 'nowrap' }}>{reel ? `Clip ${i + 1} of ${items.length}` : `${i + 1} / ${items.length}`}</span>
+        {items[i]?.role === 'cta' || (!story && items[i]?.inset) ? <span style={{ position: 'absolute', top: reel ? 56 : 54, left: reel ? 14 : 60, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999, background: 'var(--blue-500)', color: '#fff', font: '700 12px var(--font-ui)' }}><Icon name="zap" size={12} color="#fff" />{creator ? 'Your plug slide' : 'CTA · lands anywhere, number refilled per creator'}</span> : null}
+        {!story && !creator && items[i]?.role === 'point' ? <span style={{ position: 'absolute', top: reel ? 56 : 54, left: reel ? 14 : 60, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999, background: 'rgba(0,0,0,0.5)', color: '#fff', font: '700 12px var(--font-ui)' }}><Icon name="arrow-left-right" size={12} color="#fff" />Order shuffled per creator</span> : null}
+        {story && items[i]?.who === 'creator' ? <span style={{ position: 'absolute', top: reel ? 56 : 54, left: reel ? 14 : 60, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999, background: 'rgba(0,0,0,0.5)', color: '#fff', font: '700 12px var(--font-ui)' }}><Icon name={reel ? 'video' : 'camera'} size={12} color="#fff" />{openCount ? 'Creator picks the count' : `Creator records ${gap.min}`}</span> : null}
+        <BackBtn />
+        {creator && onEdit ? <button type="button" onClick={() => onEdit(i)} style={{ position: 'absolute', top: 10, right: 12, height: 40, padding: '0 14px 0 12px', borderRadius: 999, border: 'none', background: '#fff', color: 'var(--ink)', cursor: 'pointer', font: '700 14px var(--font-ui)', display: 'inline-flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}><Icon name="pencil" size={15} color="var(--ink)" />Edit</button> : null}
+      </div>
+      )}
+      {popup ? <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 14px 6px' }}><span style={{ font: '600 13px var(--font-ui)', color: 'rgba(255,255,255,0.6)' }}>Preview</span></div> : creator ? <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '4px 14px 6px' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', padding: '3px 2px' }}>{items.map((s, k) => <button key={s.id ?? k} type="button" onClick={() => setI(k)} aria-label={`Slide ${k + 1}`} style={{ width: 26, height: 46, flex: '0 0 auto', padding: 0, borderRadius: 6, border: 'none', cursor: 'pointer', position: 'relative', overflow: 'hidden', background: s.bg ? photoBg(s.bg.src) : '#2A3038', boxShadow: k === i ? '0 0 0 2px #fff' : 'none', opacity: k === i ? 1 : 0.7, transition: 'box-shadow 160ms, opacity 160ms' }}>{s.role === 'cta' ? <span style={{ position: 'absolute', right: 2, top: 2, width: 10, height: 10, borderRadius: 999, background: 'var(--blue-500)' }} /> : null}</button>)}</div>
+        <button type="button" onClick={onSave} style={{ height: 42, padding: '0 16px', borderRadius: 999, border: 'none', background: 'var(--blue-500)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>{saveLabel}<Icon name={saveIcon} size={16} color="#fff" /></button>
+      </div> : <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '4px 14px 6px' }}>
+        <div style={{ flex: 1, minWidth: 0, overflowX: 'auto', scrollbarWidth: 'none' }}><StepStrip steps={steps} current={current} dark onJump={onJump} /></div>
+        <button type="button" onClick={onSave} style={{ height: 42, padding: '0 16px', borderRadius: 999, border: 'none', background: 'var(--blue-500)', color: '#fff', cursor: 'pointer', font: '700 15px var(--font-ui)', flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>{saveLabel}<Icon name={saveIcon} size={16} color="#fff" /></button>
+      </div>}
+    </div>
+  );
+}
+
+Object.assign(window, { StepStrip, CanvasFooter, FeatureSheet, CountSheet, FypChrome, ReviewScreen });

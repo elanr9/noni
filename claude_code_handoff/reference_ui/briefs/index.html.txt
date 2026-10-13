@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Noni — Slideshow briefs</title>
+<link rel="stylesheet" href="../../styles.css">
+<style>@keyframes noni-screen-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes noni-toast-in{from{opacity:0;transform:translateY(14px) scale(0.98)}to{opacity:1;transform:none}}
+@keyframes ss-spin{to{transform:rotate(360deg)}}
+@keyframes ss-fade{from{opacity:0}to{opacity:1}}
+@keyframes ss-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes ss-slide-left{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+@keyframes ss-pop{from{opacity:0;transform:scale(0.96)}to{opacity:1;transform:none}}
+@keyframes ss-place{0%{opacity:0;transform:scale(0.7) translateY(10px)}60%{opacity:1;transform:scale(1.04)}100%{opacity:1;transform:none}}
+@keyframes ss-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+@keyframes ss-ring{0%{transform:scale(0.8);opacity:0.45}100%{transform:scale(1.5);opacity:0}}
+@keyframes ss-bounce-in{from{opacity:0;transform:scale(0.4)}to{opacity:1;transform:none}}
+#root button{transition:transform 90ms var(--ease-out)}
+#root button:active{transform:scale(0.97)}
+#root textarea::placeholder,#root input::placeholder{color:var(--slate-400)}
+a{color:var(--blue-600)}a:hover{color:var(--blue-700)}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="ss-data.js"></script>
+<script type="text/babel" data-presets="react" src="../../ui_kits/shared/Phone.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSShared.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSCanvas.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSFlow.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSManager.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSFreestyle.jsx"></script>
+<script type="text/babel" data-presets="react" src="SSCreator.jsx"></script>
+<script type="text/babel" data-presets="react" src="RLEditor.jsx"></script>
+<script type="text/babel" data-presets="react" src="RLCreator.jsx"></script>
+</head>
+<body style="margin:0;min-height:100vh;background:var(--off-white);display:flex;align-items:flex-start;justify-content:center;padding:32px 24px 60px">
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+function Kit() {
+  const [start, setStart] = React.useState('week');
+  const [format, setFormat] = React.useState('slideshow');
+  const [role, setRole] = React.useState('manager');
+  const [scenario, setScenario] = React.useState('morning');
+  const [n, setN] = React.useState(0);
+  const Toggle = ({ on, onClick, children }) => <button type="button" onClick={onClick} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', cursor: 'pointer', background: on ? 'var(--ink)' : 'transparent', color: on ? '#fff' : 'var(--slate-500)', font: '700 13px var(--font-ui)', whiteSpace: 'nowrap', flex: '0 0 auto' }}>{children}</button>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22, maxWidth: 900 }}>
+      <div style={{ textAlign: 'center', maxWidth: 620 }}>
+        <h1 style={{ margin: 0, font: '700 26px var(--font-display)', letterSpacing: '-0.5px', color: 'var(--ink)' }}>{format === 'reel' ? 'Reel briefs' : 'Slideshow briefs'}</h1>
+        <p style={{ margin: '8px 0 0', font: '400 15px/1.5 var(--font-ui)', color: 'var(--slate-500)' }}>{format === 'reel' ? 'The post is the form. The hook and points are yours, the clips are the creator\'s. Tap an empty slot to pick a kind.' : 'The post is the form. Solid slides are yours, dashed slides are the creator\'s. Tap an empty slot to pick a kind.'}</p>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: 4, padding: 5, borderRadius: 999, background: 'var(--white)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-card)' }}>
+        {[['manager', 'Manager'], ['creator', 'Creator']].map(([k, l]) => <Toggle key={k} on={role === k} onClick={() => { setRole(k); setN((x) => x + 1); }}>{l}</Toggle>)}
+      </div>
+      {role === 'creator' ? <div style={{ display: 'flex', gap: 4, padding: 5, borderRadius: 999, background: 'var(--white)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-card)' }}>{[['morning', 'Slideshows'], ['reels', 'Reels'], ['editor', 'Reel editor'], ['one', '1 left'], ['done', 'All done']].map(([k, l]) => <Toggle key={k} on={scenario === k} onClick={() => { setScenario(k); setN((x) => x + 1); }}>{l}</Toggle>)}</div> : null}
+      {role === 'manager' ? <>
+      <div style={{ display: 'flex', gap: 4, padding: 5, borderRadius: 999, background: 'var(--white)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-card)' }}>
+        {[['slideshow', 'Slideshow'], ['reel', 'Reel']].map(([k, l]) => <Toggle key={k} on={format === k} onClick={() => { setFormat(k); setN((x) => x + 1); }}>{l}</Toggle>)}
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: 5, borderRadius: 999, background: 'var(--white)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-card)' }}>
+        {[['week', 'Week'], ['kind', 'Kind'], ['handheld', 'Handheld'], ['story', 'Story'], ['open', 'Freestyle']].map(([k, l]) => <Toggle key={k} on={start === k} onClick={() => { setStart(k); setN((x) => x + 1); }}>{l}</Toggle>)}
+      </div>
+      </>: null}
+      </div>
+      {role === 'manager' ? <SlideshowBriefs key={`${format}${start}${n}`} start={start} format={format} label="Campaign manager" /> : <CreatorSlideshow key={`c${n}`} scenario={scenario} label="Creator" />}
+    </div>
+  );
+}
+const start = () => (window.SlideshowBriefs && window.CreatorSlideshow && window.CreatorReel && window.NoniDesignSystem_710e43) ? ReactDOM.createRoot(document.getElementById('root')).render(<Kit />) : setTimeout(start, 30);
+start();
+</script>
+</body></html>

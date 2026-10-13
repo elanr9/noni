@@ -1,0 +1,88 @@
+/* Settings, redesigned. Fits 390x844 with zero scroll. Account switching sits
+   at the top; content is toggled between Campaign managers and Company Brain;
+   support + sign out are compact circles in the header. */
+
+function CircleBtn({ icon, tone = 'plain', label, onClick }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const danger = tone === 'danger';
+  return (
+    <button type="button" onClick={onClick} aria-label={label} title={label}
+      style={{ width: 36, height: 36, flex: '0 0 auto', borderRadius: 999, border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: danger ? 'var(--danger-soft)' : 'var(--white)', boxShadow: 'var(--shadow-card)' }}>
+      <Icon name={icon} size={17} color={danger ? 'var(--danger)' : 'var(--slate-500)'} />
+    </button>
+  );
+}
+
+function SwitchAccountsCard({ onSwitch }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  return (
+    <Card pad={0} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
+      <Avatar name="Founders" size={40} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: '700 16px var(--font-display)', letterSpacing: '-0.3px', color: 'var(--ink)' }}>Founders</div>
+        <div style={{ marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>Campaign manager</div>
+      </div>
+      <button type="button" onClick={onSwitch}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--blue-100)', color: 'var(--blue-700)', font: '700 13px var(--font-ui)', whiteSpace: 'nowrap' }}>
+        <Icon name="chevrons-up-down" size={14} />Switch accounts
+      </button>
+    </Card>
+  );
+}
+
+function ManagersPane() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <SectionLabel>Campaign managers</SectionLabel>
+      <Card pad={0} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
+        <Avatar name="Founders" size={26} tone="quiet" />
+        <div style={{ flex: 1, minWidth: 0, font: '600 13px var(--font-ui)', color: 'var(--ink)' }}>Founders</div>
+        <TypeChip>Not connected</TypeChip>
+      </Card>
+    </div>
+  );
+}
+
+function BrainPane() { return null; }
+
+function SwitchSheet({ onClose }) {
+  const { Icon } = window.NoniDesignSystem_710e43;
+  const Row = ({ icon, label, sub, on }) => (
+    <button type="button" onClick={onClose}
+      style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '14px', marginBottom: 8, borderRadius: 'var(--radius-lg)', border: 'none', cursor: 'pointer', textAlign: 'left', background: on ? 'var(--blue-100)' : 'var(--fill-quiet)' }}>
+      <Icon name={icon} size={19} color={on ? 'var(--blue-700)' : 'var(--slate-500)'} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', font: '700 15px var(--font-ui)', color: on ? 'var(--blue-700)' : 'var(--ink)' }}>{label}</span>
+        <span style={{ display: 'block', marginTop: 2, font: '600 12px var(--font-ui)', color: 'var(--slate-400)' }}>{sub}</span>
+      </span>
+      {on ? <Icon name="circle-check-big" size={18} color="var(--blue-700)" /> : null}
+    </button>
+  );
+  return (
+    <Sheet title="Switch accounts" subtitle="Same login, two sides of Noni." onClose={onClose} maxHeight="46%">
+      <Row icon="chart-column" label="Campaign manager" sub="Founders · reviews and approves" on />
+      <Row icon="video" label="Creator" sub="Record and post what you owe" />
+    </Sheet>
+  );
+}
+
+function SettingsRedesign() {
+  const [sheet, setSheet] = React.useState(false);
+  return (
+    <Phone>
+      <AdminScreen bottom={0} gap={14}>
+        <AdminHeader title="Settings" right={
+          <div style={{ display: 'flex', gap: 8, paddingTop: 2 }}>
+            <CircleBtn icon="inbox" label="Contact support" />
+            <CircleBtn icon="log-out" tone="danger" label="Log out" />
+          </div>} />
+        <SwitchAccountsCard onSwitch={() => setSheet(true)} />
+        <ManagersPane />
+      </AdminScreen>
+      {sheet ? <SwitchSheet onClose={() => setSheet(false)} /> : null}
+      <window.NoniDesignSystem_710e43.TabBar items={ADMIN_TABS} active={-1} />
+    </Phone>
+  );
+}
+
+Object.assign(window, { SettingsRedesign });
