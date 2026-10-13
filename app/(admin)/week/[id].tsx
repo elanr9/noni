@@ -141,7 +141,7 @@ export default function WeekScreen() {
         title={`Week ${week}`}
         sub={sub}
         onBack={() => router.back()}
-        right={<HeaderIconButton icon="message-circle" label="Messages" onPress={() => router.push('/(admin)/messages' as Href)} />}
+        right={<HeaderIconButton icon="message-circle" label="Messages" onPress={() => router.push('/(admin)/(tabs)/messages' as Href)} />}
       />
       <ScrollView
         showsVerticalScrollIndicator={false}
