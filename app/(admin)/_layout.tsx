@@ -72,6 +72,8 @@ export default function AdminLayout() {
       <Stack.Screen name="messages/index" options={{ title: 'Messages', headerShown: false }} />
       <Stack.Screen name="messages/[chatId]" options={{ title: 'Chat', headerShown: false }} />
       <Stack.Screen name="post/[id]" options={{ title: 'Post', headerShown: false }} />
+      <Stack.Screen name="brief/kind" options={{ title: 'Kind of post', headerShown: false }} />
+      <Stack.Screen name="brief/[id]" options={{ title: 'Brief', headerShown: false }} />
     </Stack>
   );
 }
