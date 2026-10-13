@@ -55,6 +55,11 @@ Done (commits `briefs: job 6 creator 1/3`, `2/3`, `briefs: job 6 creator home an
   - The CTA feature inset shows on the canvas and in review but is not baked (see Shared change requests).
 
 ## Job 7: Creator reel record and editor
+Plan:
+- `components/creator/briefs/reel/plan.ts` (clip plan per kind, from RLCreator clipPlan and PLUG), `reel/useReelProject.ts` (assignment, brief, features, the studio store document from `creator_projects`, the AsyncStorage plan draft, `useProjectAutosave`, `useStudioUploads`, `saveDraftSegment` once a clip lands in storage), `reel/sync.ts` (plan to document: add a take as a block, text overlays per point, remove, auto cut with `speechBounds`).
+- `reel/RecordScreen.tsx`: `Viewfinder`, `useRecorder`, `useCapturePermissions`, `SideRail` (flip, flash, timer, grid), `RecordButton`, `BeatPrompter` in the prompter card with hide and show, progress segments per planned clip, time readout, back, redo last, Next clip or Done, the plug card for Story and Freestyle, Close this post. `reel/ClipPlayback.tsx`: the take plays back right away (expo-video) with Redo this clip, Add extra clip, Next clip.
+- `reel/ReelEditor.tsx`: header (back, `Auto cut · N pauses removed`, next), `VideoStage` + `OverlayLayer`, transport (`00:00/00:29`, play, undo, swap), `TimelineStrip` with `OverlayLane` (text track) and the captions bar, clip tools when a block is selected (Split, Trim, Redo clip, Delete), toolbar Text, Image, Captions, AI (`AskAiSheet` reel mode, Cut the dead air).
+- `app/(creator)/make/record/[id].tsx`, `app/(creator)/make/edit/[id].tsx` (edit, caption for Story and Freestyle, review with the player in the frame and the Script tab, submit through `submitProject`, then `make/sent`).
 
 ## Job 8: Full loop test and polish
 
