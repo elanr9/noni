@@ -5,7 +5,7 @@
 // next slide.
 
 import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientFill';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInUp, runOnJS } from 'react-native-reanimated';
@@ -118,6 +118,20 @@ export function CanvasEditor(props: CanvasEditorProps) {
     setEditing(false);
     setPanel(null);
   };
+
+  // autoFocus is unreliable inside animated mounts, so focus by ref as well.
+  const textRef = useRef<TextInput>(null);
+  const shotRef = useRef<TextInput>(null);
+  const focusLater = useCallback((ref: React.RefObject<TextInput | null>) => {
+    const t = setTimeout(() => ref.current?.focus(), 80);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (editing) return focusLater(textRef);
+  }, [editing, focusLater]);
+  useEffect(() => {
+    if (shotOpen) return focusLater(shotRef);
+  }, [shotOpen, focusLater]);
 
   const tapCanvas = () => {
     if (editing) {
@@ -249,8 +263,10 @@ export function CanvasEditor(props: CanvasEditorProps) {
             {editing ? (
               <>
                 <CenteredAt x={L.text.x * W} y={L.text.y * H} width={W * L.text.w} align={ts.align}>
+                  <Pressable accessibilityLabel="Slide text" onPress={() => textRef.current?.focus()}>
                   <SlideText text={cur.text} ts={ts} fs={fs}>
                     <TextInput
+                      ref={textRef}
                       autoFocus
                       multiline
                       value={cur.text}
@@ -259,6 +275,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                       style={[slideTextStyle(ts, fs), styles.input, { color: textInkFor(ts), minWidth: W * L.text.w * 0.5, maxWidth: W * L.text.w }]}
                     />
                   </SlideText>
+                  </Pressable>
                 </CenteredAt>
                 <WidthSlider value={L.text.w} H={H} onChange={(w) => setBox({ ...L.text, w })} />
                 <TextToolbar ts={ts} panel={panel} setPanel={setPanel} onChange={setTs} bottomInset={keyboardInset} onDelete={cur.text ? () => { patch({ text: '' }); finish(); } : undefined}>
@@ -391,6 +408,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                   </Text>
                 </View>
                 <TextInput
+                  ref={shotRef}
                   autoFocus
                   multiline
                   value={cur.shot}
