@@ -129,6 +129,8 @@ export const briefTone = {
   managerSlide: ['#CFDCE8', '#8FA3B6', '#4F6276'],
   /** Canvas text style swatches (SSCanvas SWATCHES), in order. */
   textSwatches: ['#FFFFFF', '#0F1720', '#1BA6EE', '#3DBE5B', '#F6C445', '#F58B1F', '#E5484D', '#D6246E', '#8E24AA'],
+  /** Camera placeholder in review and pick steps (SSCanvas photoBg 'camera'), top to bottom. */
+  reviewSlide: ['#7B8CA0', '#2E3A48'],
   /** Creator preview sheet gradient (top to bottom). */
   previewSky: ['#E9F3FC', '#B7C6D4', '#3C4B59'],
   /** Dashed creator slide stripes. */

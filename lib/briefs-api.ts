@@ -2286,6 +2286,11 @@ export type SlideTextStyle = {
   font?: string;
 };
 
+/** An extra text box on a slide, beyond the main one. */
+export type SlideExtra = { id: string; text: string; box: SlideBox; tstyle?: SlideTextStyle };
+/** A photo sticker on a slide: storage path or URL plus its box (w is width as a fraction). */
+export type SlidePic = { id: string; src: string; box: SlideBox };
+
 export type BriefSlide = {
   role: SlideRole;
   /** On-screen text. For reels this is the point label. */
@@ -2299,6 +2304,8 @@ export type BriefSlide = {
   box_ig?: SlideBox;
   inset_box_ig?: SlideBox;
   tstyle?: SlideTextStyle;
+  extras?: SlideExtra[];
+  pics?: SlidePic[];
 };
 
 export type StorySettings = { theme: string; beats: string[]; min: number; max: number };
@@ -2369,6 +2376,33 @@ function parseTextStyle(value: unknown): SlideTextStyle | undefined {
   return out;
 }
 
+function parseExtras(value: unknown): SlideExtra[] {
+  if (!Array.isArray(value)) return [];
+  const out: SlideExtra[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.text !== 'string') continue;
+    const box = parseBox(raw.box);
+    if (!box) continue;
+    const extra: SlideExtra = { id: raw.id, text: raw.text, box };
+    const tstyle = parseTextStyle(raw.tstyle);
+    if (tstyle) extra.tstyle = tstyle;
+    out.push(extra);
+  }
+  return out;
+}
+
+function parsePics(value: unknown): SlidePic[] {
+  if (!Array.isArray(value)) return [];
+  const out: SlidePic[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.src !== 'string') continue;
+    const box = parseBox(raw.box);
+    if (!box) continue;
+    out.push({ id: raw.id, src: raw.src, box });
+  }
+  return out;
+}
+
 export function parseSlides(json: Json | null | undefined): BriefSlide[] {
   if (!Array.isArray(json)) return [];
   const out: BriefSlide[] = [];
@@ -2387,6 +2421,10 @@ export function parseSlides(json: Json | null | undefined): BriefSlide[] {
     const boxIg = parseBox(raw.box_ig);
     const insetBoxIg = parseBox(raw.inset_box_ig);
     const tstyle = parseTextStyle(raw.tstyle);
+    const extras = parseExtras(raw.extras);
+    const pics = parsePics(raw.pics);
+    if (extras.length) slide.extras = extras;
+    if (pics.length) slide.pics = pics;
     if (box) slide.box = box;
     if (insetBox) slide.inset_box = insetBox;
     if (boxIg) slide.box_ig = boxIg;
@@ -2565,6 +2603,8 @@ function slidesToJson(slides: BriefSlide[]): Json {
     if (s.box_ig) out.box_ig = s.box_ig;
     if (s.inset_box_ig) out.inset_box_ig = s.inset_box_ig;
     if (s.tstyle) out.tstyle = { ...s.tstyle } as Json;
+    if (s.extras?.length) out.extras = s.extras.map((e) => ({ ...e }) as Json);
+    if (s.pics?.length) out.pics = s.pics.map((p) => ({ ...p }) as Json);
     return out;
   });
 }
