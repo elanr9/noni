@@ -6,7 +6,7 @@
 | 2 | Database and API | orchestrator | briefs-redesign | done |
 | 3 | Manager week and kind picker | manager agent | briefs-manager | done |
 | 4 | Manager slideshow editor | manager agent | briefs-manager | done |
-| 5 | Manager reel editor | manager agent | briefs-manager | pending |
+| 5 | Manager reel editor | manager agent | briefs-manager | done |
 | 6 | Creator home and slideshow | creator agent | briefs-creator | in progress |
 | 7 | Creator reel record and editor | creator agent | briefs-creator | pending |
 | 8 | Full loop test and polish | orchestrator | briefs-redesign | pending |
@@ -47,6 +47,12 @@ Done.
 - Review manager slide background uses `color.slate500` to `briefTone.canvas.chrome` (prototype `#7B8CA0` to `#2E3A48`, not tokens).
 
 ## Job 5: Manager reel editor
+Plan: same shell as job 4 with `format: 'reel'`; verify the reel branches in `useBriefEditor` (Hook and Points steps, say line in `BriefSlide.shot`, Long text steps and seed), `CanvasEditor` (reel ghost, "Creator's clip", hook script and creator says pills, Write the hook, Draft with AI), `ReviewScreen` (Watch and Script, play, clip counter, script list) and the reel kind picker; fill the hook line from Write points.
+Done.
+- Reel paths run through the job 4 shell; Write points also fills an empty hook line from the first sentence of the returned script (prototype `D.hookSay`).
+- Freestyle reels title the editor `Reel 03` (prototype `OpenEditor` always says `Slideshow`, a prototype bug; `FORMAT_LABEL` is used instead).
+- Story reels reuse the Creator's clips sheet and the `Creator records N` chip; Long text uses the Text, CTA line, Details, Review steps with the small left aligned text box.
+- The reel screenshot badge shows `0:07` for every feature (no clip length on `LibraryFeature`, request above).
 
 ## Job 6: Creator home and slideshow
 

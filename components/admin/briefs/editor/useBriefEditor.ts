@@ -247,8 +247,10 @@ export function useBriefEditor(opts: BriefEditorOptions) {
       const lines = res.talking_points.map((p) => p.text?.trim() ?? '').filter(Boolean);
       const ctaIt = matchFeature(features, title, postType?.id, ctaIdx);
       let k = 0;
+      const hookSay = res.script?.split(/(?<=[.!?])\s+/)[0]?.trim() ?? '';
       setSlides((arr) =>
         arr.map((s) => {
+          if (reel && s.role === 'cover' && !s.shot.trim() && hookSay) return { ...s, shot: hookSay, genAt: Date.now() };
           if (s.role === 'point' && !s.text.trim()) {
             const line = lines[k++ % Math.max(1, lines.length)] ?? '';
             return reel ? { ...s, text: line.split(/[.!?]/)[0] ?? line, shot: line, genAt: Date.now() } : { ...s, text: line, genAt: Date.now() };
