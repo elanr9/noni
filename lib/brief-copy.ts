@@ -2,7 +2,7 @@
 // claude_code_handoff/reference_ui/briefs/ss-data.js.txt. UI reads strings
 // from here; nothing in this file touches the network.
 
-import type { BriefKind, BriefMediaFormat, MustHave } from './briefs-api';
+import type { BriefKind, BriefMediaFormat, CtaPlacement, MustHave } from './briefs-api';
 
 export type KindCopy = {
   name: string;
@@ -237,6 +237,40 @@ export const FORMAT_LABEL_PLURAL: Record<BriefMediaFormat, string> = {
 };
 
 export const ROLE_LABEL = { cover: 'Cover', point: 'Point', cta: 'CTA' } as const;
+
+export type CtaPlaceOption<K extends string> = { key: K; label: string; line: string };
+
+/**
+ * CTA position sheet rows, the same three for Story and Handheld: locked
+ * right after the hook, locked at the very end, or the creator decides.
+ */
+export function ctaPlaceOptions(reel: boolean, story: boolean): CtaPlaceOption<CtaPlacement>[] {
+  const unit = reel ? 'clips' : 'slides';
+  const one = reel ? 'point' : 'slide';
+  const post = reel ? 'reel' : 'post';
+  return [
+    {
+      key: 'after_hook',
+      label: 'Right after the hook',
+      line: story ? `Every creator says the CTA first, then tells it their way in their own ${unit}.` : `The CTA is ${one} 1, right after the cover, for every creator.`,
+    },
+    {
+      key: 'end',
+      label: 'At the very end',
+      line: story ? `Every creator tells it their way first. The CTA closes the ${post}.` : `The CTA is the last ${one} and closes the ${post} for every creator.`,
+    },
+    {
+      key: 'any',
+      label: 'Creator decides',
+      line: story ? `It starts at the end and each creator moves it where it fits their ${post}.` : 'It starts where it sits in your deck and each creator moves it where it fits.',
+    },
+  ];
+}
+
+/** Short footer pill label for the current CTA position. */
+export function ctaPosLabel(place: CtaPlacement): string {
+  return place === 'after_hook' ? 'CTA after hook' : place === 'end' ? 'CTA at end' : 'CTA: creator picks';
+}
 
 /** Must-have toggles for a Freestyle brief. The prototype shows "Mention Inkbound once". */
 export function defaultMustHaves(companyName: string): MustHave[] {

@@ -2282,12 +2282,17 @@ export type SlideTextStyle = {
   align?: 'left' | 'center' | 'right';
   /** outline = outlined letters, box = solid box, soft = translucent box. */
   bg?: 'none' | 'box' | 'outline' | 'soft';
+  /** Letter color. */
   color?: string;
+  /** Box fill when bg is box; the letter color picks a readable ink by default. */
+  bgColor?: string;
   font?: string;
 };
 
 /** An extra text box on a slide, beyond the main one. */
-export type SlideExtra = { id: string; text: string; box: SlideBox; tstyle?: SlideTextStyle };
+/** A styled run inside one text box (SSCanvas spans): chars [start, end) get this color. */
+export type TextSpan = { start: number; end: number; color?: string };
+export type SlideExtra = { id: string; text: string; box: SlideBox; tstyle?: SlideTextStyle; spans?: TextSpan[] };
 /** A photo sticker on a slide: storage path or URL plus its box (w is width as a fraction). */
 export type SlidePic = { id: string; src: string; box: SlideBox };
 
@@ -2303,12 +2308,33 @@ export type BriefSlide = {
   inset_box?: SlideBox;
   box_ig?: SlideBox;
   inset_box_ig?: SlideBox;
+  /** Per word color on the main text box. */
+  spans?: TextSpan[];
   tstyle?: SlideTextStyle;
   extras?: SlideExtra[];
   pics?: SlidePic[];
+  /** CTA slide only: where every creator's CTA goes (after_hook, end) or any, where the creator places it. */
+  place?: CtaPlacement;
 };
 
-export type StorySettings = { theme: string; beats: string[]; min: number; max: number };
+/**
+ * Where the CTA lands: locked right after the hook (cover), locked at the
+ * very end, or any, where each creator places it.
+ */
+export type CtaPlacement = 'after_hook' | 'end' | 'any';
+
+export function isCtaPlacement(v: unknown): v is CtaPlacement {
+  return v === 'after_hook' || v === 'end' || v === 'any';
+}
+
+/**
+ * The CTA placement of a brief: the CTA slide's place, else the Story
+ * setting saved before slides carried it, else any (the creator places it).
+ */
+export function ctaPlaceOf(brief: { slides: Pick<BriefSlide, 'role' | 'place'>[]; story?: Pick<StorySettings, 'ctaAt'> | null }): CtaPlacement {
+  return brief.slides.find((s) => s.role === 'cta')?.place ?? brief.story?.ctaAt ?? 'any';
+}
+export type StorySettings = { theme: string; beats: string[]; min: number; max: number; ctaAt?: CtaPlacement };
 export type MustHave = { id: string; label: string; on: boolean };
 export type OpenSettings = { prompt: string; must: MustHave[]; min?: number; max?: number };
 
@@ -2372,7 +2398,24 @@ function parseTextStyle(value: unknown): SlideTextStyle | undefined {
   if (value.align === 'left' || value.align === 'center' || value.align === 'right') out.align = value.align;
   if (value.bg === 'none' || value.bg === 'box' || value.bg === 'outline' || value.bg === 'soft') out.bg = value.bg;
   if (typeof value.color === 'string') out.color = value.color;
+  if (typeof value.bgColor === 'string') out.bgColor = value.bgColor;
   if (typeof value.font === 'string') out.font = value.font;
+  return out;
+}
+
+/** Pure: valid, in range color spans only. */
+export function parseSpans(value: unknown, length: number): TextSpan[] {
+  if (!Array.isArray(value)) return [];
+  const out: TextSpan[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.start !== 'number' || typeof raw.end !== 'number') continue;
+    const start = Math.max(0, Math.floor(raw.start));
+    const end = Math.min(length, Math.floor(raw.end));
+    if (end <= start) continue;
+    const span: TextSpan = { start, end };
+    if (typeof raw.color === 'string') span.color = raw.color;
+    out.push(span);
+  }
   return out;
 }
 
@@ -2386,6 +2429,8 @@ function parseExtras(value: unknown): SlideExtra[] {
     const extra: SlideExtra = { id: raw.id, text: raw.text, box };
     const tstyle = parseTextStyle(raw.tstyle);
     if (tstyle) extra.tstyle = tstyle;
+    const spans = parseSpans(raw.spans, raw.text.length);
+    if (spans.length) extra.spans = spans;
     out.push(extra);
   }
   return out;
@@ -2430,6 +2475,9 @@ export function parseSlides(json: Json | null | undefined): BriefSlide[] {
     if (boxIg) slide.box_ig = boxIg;
     if (insetBoxIg) slide.inset_box_ig = insetBoxIg;
     if (tstyle) slide.tstyle = tstyle;
+    const spans = parseSpans(raw.spans, slide.text.length);
+    if (spans.length) slide.spans = spans;
+    if (role === 'cta' && isCtaPlacement(raw.place)) slide.place = raw.place;
     out.push(slide);
   }
   return out;
@@ -2445,6 +2493,7 @@ export function parseStory(json: Json | null | undefined): StorySettings | null 
     beats,
     min: typeof json.min === 'number' ? json.min : 2,
     max: typeof json.max === 'number' ? json.max : 10,
+    ...(isCtaPlacement(json.ctaAt) ? { ctaAt: json.ctaAt } : {}),
   };
 }
 
@@ -2603,8 +2652,10 @@ function slidesToJson(slides: BriefSlide[]): Json {
     if (s.box_ig) out.box_ig = s.box_ig;
     if (s.inset_box_ig) out.inset_box_ig = s.inset_box_ig;
     if (s.tstyle) out.tstyle = { ...s.tstyle } as Json;
+    if (s.spans?.length) out.spans = s.spans.map((sp) => ({ ...sp }) as Json);
     if (s.extras?.length) out.extras = s.extras.map((e) => ({ ...e }) as Json);
     if (s.pics?.length) out.pics = s.pics.map((p) => ({ ...p }) as Json);
+    if (s.role === 'cta' && s.place) out.place = s.place;
     return out;
   });
 }
@@ -2684,11 +2735,35 @@ type AssignmentWithTypedBrief = Database['public']['Tables']['assignments']['Row
 };
 
 /** Pure: keep only assignments whose brief has a kind, oldest slot first. */
+/**
+ * Pure: this creator's own wording of the slides (assignments.slides_variant,
+ * written by vary-copy at publish) laid over the brief, so no two accounts
+ * post the same on-screen text. Missing or mismatched variants keep the brief.
+ */
+export function applySlidesVariant(brief: WeekBrief, variant: unknown): WeekBrief {
+  if (!Array.isArray(variant) || variant.length !== brief.slides.length) return brief;
+  const slides = brief.slides.map((s, i) => {
+    const v: unknown = variant[i];
+    const text = v && typeof v === 'object' ? (v as { text?: unknown }).text : null;
+    return typeof text === 'string' && text.trim() ? { ...s, text } : s;
+  });
+  const cover = slides.find((s) => s.role === 'cover');
+  const cta = slides.find((s) => s.role === 'cta');
+  return {
+    ...brief,
+    slides,
+    // Story and Long text read the cover from the title.
+    title: brief.kind === 'story' && cover?.text ? cover.text : brief.title,
+    cta: cta ? { ...brief.cta, text: cta.text } : brief.cta,
+  };
+}
+
 export function creatorBriefItems(rows: AssignmentWithTypedBrief[]): CreatorBriefItem[] {
   const out: CreatorBriefItem[] = [];
   for (const row of rows) {
-    const brief = weekBriefFromRow(row.briefs);
-    if (!brief) continue;
+    const base = weekBriefFromRow(row.briefs);
+    if (!base) continue;
+    const brief = applySlidesVariant(base, (row as { slides_variant?: unknown }).slides_variant);
     out.push({
       assignmentId: row.id,
       scheduledDate: row.scheduled_date,

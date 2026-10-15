@@ -4,6 +4,7 @@ import { memo, type JSX } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { updateOverlay, type ImageOverlay, type MediaAsset } from '../../../../lib/edit-document';
 import { color } from '../../../../theme/tokens';
@@ -13,6 +14,18 @@ import { useOverlayImage } from './useOverlayImage';
 import { useStageGesture } from './useStageGesture';
 
 const HIT_SLOP = 14;
+/** A phone screen recording is about this wide for its height. */
+const CLIP_ASPECT = 0.46;
+
+/** A feature screen recording: muted, looping, under the same frame as a picture. */
+function OverlayClip({ uri, radius }: { uri: string; radius: number }): JSX.Element {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return <VideoView player={player} nativeControls={false} contentFit="cover" style={[styles.image, { borderRadius: radius, overflow: 'hidden' }]} pointerEvents="none" />;
+}
 
 export type ImageOverlayItemProps = {
   overlay: ImageOverlay;
@@ -24,7 +37,9 @@ export type ImageOverlayItemProps = {
 
 export const ImageOverlayItem = memo(function ImageOverlayItem(props: ImageOverlayItemProps): JSX.Element {
   const { overlay, asset, stageWidth, stageHeight, selected } = props;
-  const { uri, aspect } = useOverlayImage(asset);
+  const { uri, aspect: measured } = useOverlayImage(asset);
+  const clip = asset?.kind === 'video';
+  const aspect = clip && !(asset?.width && asset?.height) ? CLIP_ASPECT : measured;
   const cardWidth = stageWidth * overlay.width;
   const cardHeight = cardWidth / aspect;
   const radius = stageWidth * IMAGE_CORNER_RADIUS;
@@ -55,7 +70,9 @@ export const ImageOverlayItem = memo(function ImageOverlayItem(props: ImageOverl
           accessibilityState={{ selected }}
           style={[{ width: cardWidth, height: cardHeight }, itemStyle]}
         >
-          {uri ? (
+          {uri && clip ? (
+            <OverlayClip uri={uri} radius={radius} />
+          ) : uri ? (
             <Image source={{ uri }} resizeMode="cover" style={[styles.image, { borderRadius: radius }]} />
           ) : (
             <View style={[styles.image, styles.placeholder, { borderRadius: radius }]} />

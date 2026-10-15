@@ -1,6 +1,6 @@
 // Ask AI for a Freestyle post: quick asks come back as cards you can apply.
 // From SSFreestyle.jsx AiSheet, on brief-assist regenerate_field.
-import { useState, type JSX } from 'react';
+import { useRef, useState, type JSX } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { WeekBrief } from '../../../../lib/briefs-api';
@@ -11,7 +11,8 @@ import { Icon, type IconName } from '../../../ui/Icon';
 import { suggestAllLines, suggestHooks, suggestLine } from '../ai';
 
 type AskKind = 'hook' | 'line' | 'all' | 'count';
-type Result = { kind: AskKind; title: string; items: string[] };
+/** target is the slide or clip the ask was made on, captured when asked. */
+type Result = { kind: AskKind; title: string; items: string[]; target?: string };
 
 export type AskAiSheetProps = {
   visible: boolean;
@@ -20,9 +21,11 @@ export type AskAiSheetProps = {
   lines: string[];
   /** Index into lines of the slide on screen, or -1 when it is not the creator's. */
   lineIndex: number;
+  /** Id of the slide on screen; handed back with Use so the text lands where it was asked. */
+  targetId?: string;
   reel?: boolean;
   onApplyHook: (text: string) => void;
-  onApplyLine: (text: string) => void;
+  onApplyLine: (text: string, targetId?: string) => void;
   onApplyAll: (items: string[]) => void;
   onAddSlides?: () => void;
   onCut?: () => void;
@@ -30,24 +33,49 @@ export type AskAiSheetProps = {
 };
 
 export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
-  const { visible, brief, lines, lineIndex, reel = false, onApplyHook, onApplyLine, onApplyAll, onAddSlides, onCut, onClose } = props;
+  const { visible, brief, lines, lineIndex, targetId, reel = false, onApplyHook, onApplyLine, onApplyAll, onAddSlides, onCut, onClose } = props;
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // An answer belongs to the slide it was asked on: closing the sheet drops
+  // it, and an ask still in flight when the sheet closes is ignored.
+  const askSeq = useRef(0);
+  const [openSeen, setOpenSeen] = useState(visible);
+  if (openSeen !== visible) {
+    setOpenSeen(visible);
+    if (!visible) {
+      setRes(null);
+      setError(null);
+      setBusy(false);
+    }
+  }
+  const close = () => {
+    askSeq.current += 1;
+    onClose();
+  };
   const hook = lines[0] ?? null;
   const own = lines.length;
 
   const ask = async (kind: AskKind) => {
+    const seq = ++askSeq.current;
+    const live = () => seq === askSeq.current;
     setBusy(true);
     setRes(null);
     setError(null);
     try {
-      if (kind === 'hook') setRes({ kind, title: reel ? 'Hooks' : 'Hooks for your cover', items: await suggestHooks(brief, lines) });
-      else if (kind === 'line') {
-        const at = Math.max(0, lineIndex);
-        setRes({ kind, title: reel ? 'Your line' : `Text for slide ${at + 1}`, items: await suggestLine(brief, lines, hook, at) });
-      } else if (kind === 'all') setRes({ kind, title: 'Text for every slide', items: await suggestAllLines(brief, lines, hook) });
-      else {
+      if (kind === 'hook') {
+        const items = await suggestHooks(brief, lines);
+        if (live()) setRes({ kind, title: reel ? 'Hooks' : 'Hooks for your cover', items });
+      } else if (kind === 'line') {
+        if (lineIndex < 0) return;
+        const at = lineIndex;
+        const target = targetId;
+        const items = await suggestLine(brief, lines, hook, at);
+        if (live()) setRes({ kind, title: reel ? 'Your line' : `Text for slide ${at + 1}`, items, ...(target ? { target } : {}) });
+      } else if (kind === 'all') {
+        const items = await suggestAllLines(brief, lines, hook);
+        if (live()) setRes({ kind, title: 'Text for every slide', items });
+      } else {
         const target = 6;
         setRes({
           kind,
@@ -60,9 +88,9 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
         });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not ask right now.');
+      if (live()) setError(e instanceof Error ? e.message : 'Could not ask right now.');
     } finally {
-      setBusy(false);
+      if (live()) setBusy(false);
     }
   };
 
@@ -76,14 +104,14 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
   return (
     <Sheet
       visible={visible}
-      onClose={onClose}
+      onClose={close}
       header={
         <View style={styles.head}>
           <View style={styles.spark}>
             <Icon name="sparkles" size={18} color={color.white} />
           </View>
           <Text style={styles.title}>Ask AI</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={styles.close}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={close} style={styles.close}>
             <Icon name="x" size={17} color={color.slate500} />
           </Pressable>
         </View>
@@ -97,7 +125,7 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
           </Pressable>
         ) : null}
         {chip('hook', reel ? 'Hook ideas' : 'Hook for the cover', 'zap')}
-        {chip('line', reel ? 'Rewrite my line' : 'Text for this slide', 'pencil')}
+        {lineIndex >= 0 ? chip('line', reel ? 'Rewrite my line' : 'Text for this slide', 'pencil') : null}
         {reel ? null : chip('all', 'Text for all slides', 'layout-list')}
         {chip('count', reel ? 'Is it too long?' : 'How many slides?', 'images')}
       </ScrollView>
@@ -125,8 +153,8 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
                     accessibilityRole="button"
                     onPress={() => {
                       if (res.kind === 'hook') onApplyHook(t);
-                      else onApplyLine(t);
-                      onClose();
+                      else onApplyLine(t, res.target);
+                      close();
                     }}
                     style={styles.use}
                   >
@@ -141,7 +169,7 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
                 block
                 onPress={() => {
                   onApplyAll(res.items);
-                  onClose();
+                  close();
                 }}
                 style={styles.cta}
               >
@@ -156,7 +184,7 @@ export function AskAiSheet(props: AskAiSheetProps): JSX.Element {
                 icon="image-plus"
                 onPress={() => {
                   onAddSlides();
-                  onClose();
+                  close();
                 }}
                 style={[styles.cta, styles.outline]}
               >

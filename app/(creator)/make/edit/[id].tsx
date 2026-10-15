@@ -1,21 +1,23 @@
 // Reel editor route: edit, caption for Story and Freestyle, review, submit.
-// The point text rides as text overlays synced from the plan the first time
-// the editor opens; submit freezes the studio document through submitProject.
+// The point text rides as text overlays that useReelProject keeps synced to
+// the plan after every change; submit freezes the studio document through
+// submitProject.
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import { DetailsStep } from '../../../../components/creator/briefs/DetailsStep';
 import { useAvatarUrl } from '../../../../components/creator/briefs/FypChrome';
 import { ReviewStep, type ScriptRow } from '../../../../components/creator/briefs/ReviewStep';
 import { clearReelDraft } from '../../../../components/creator/briefs/drafts';
-import { hashtagList, splitCaption, type CreatorSlide } from '../../../../components/creator/briefs/model';
+import { ctaPlace, hashtagList, splitCaption, type CreatorSlide } from '../../../../components/creator/briefs/model';
 import { ReelEditor } from '../../../../components/creator/briefs/reel/ReelEditor';
 import type { ReelPlanItem } from '../../../../components/creator/briefs/reel/plan';
-import { cutDeadAir, overlayIdFor, pruneBlockIds, syncPlanOverlays } from '../../../../components/creator/briefs/reel/sync';
+import { ReelAiSheet } from '../../../../components/creator/briefs/reel/ReelAiSheet';
+import { isOwnLine } from '../../../../components/creator/briefs/reel/reelAi';
+import { applyDeadAirCuts, findDeadAir, overlayIdFor } from '../../../../components/creator/briefs/reel/sync';
 import { useReelProject } from '../../../../components/creator/briefs/reel/useReelProject';
-import { AskAiSheet } from '../../../../components/creator/briefs/slides/AskAiSheet';
 import { OverlayLayer } from '../../../../components/creator/studio/overlays';
 import { VideoStage } from '../../../../components/creator/studio/timeline/VideoStage';
 import { useAuth } from '../../../../lib/auth';
@@ -57,22 +59,7 @@ export default function EditRoute(): JSX.Element {
   const [cutting, setCutting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const synced = useRef(false);
   const selection = useStudioStore((s) => s.selection);
-
-  // Point text onto the timeline, once per visit, after the plan and document are in.
-  useEffect(() => {
-    if (synced.current || !document || items.length === 0) return;
-    synced.current = true;
-    useStudioStore.getState().commit(onVideo((d) => syncPlanOverlays(d, items)));
-  }, [document, items]);
-
-  // Blocks removed in the editor drop out of the plan.
-  useEffect(() => {
-    if (!document) return;
-    const pruned = pruneBlockIds(document, items);
-    if (pruned !== items) setItems(() => pruned);
-  }, [document, items, setItems]);
 
   // First frame of each take for the review strip.
   useEffect(() => {
@@ -127,13 +114,12 @@ export default function EditRoute(): JSX.Element {
     [items, features],
   );
 
+  // New text goes on the plan and on the clip's overlay in one undo step;
+  // an item with no overlay yet gets one from the plan sync.
   const applyLine = (item: ReelPlanItem, text: string) => {
     setItems((arr) => arr.map((p) => (p.id === item.id ? { ...p, text } : p)));
     useStudioStore.getState().commit(
-      onVideo((d) => {
-        const withText = d.overlays.some((o) => o.id === overlayIdFor(item)) ? updateOverlay(d, overlayIdFor(item), { text }) : d;
-        return syncPlanOverlays(withText, items.map((p) => (p.id === item.id ? { ...p, text } : p)));
-      }),
+      onVideo((d) => (d.overlays.some((o) => o.id === overlayIdFor(item)) ? updateOverlay(d, overlayIdFor(item), { text }) : d)),
     );
   };
 
@@ -141,14 +127,40 @@ export default function EditRoute(): JSX.Element {
     if (!document || cutting) return;
     setCutting(true);
     try {
-      const { doc, cuts } = await cutDeadAir(document);
-      if (cuts > 0) {
-        useStudioStore.getState().commit(() => doc);
-        setMeta({ cuts: meta.cuts + cuts });
+      // Long text takes keep their six seconds.
+      const keep = new Set(items.filter((p) => p.targetMs).flatMap((p) => p.blockIds));
+      const cuts = await findDeadAir(document, keep);
+      if (cuts.length > 0) {
+        // Applied to the document as it is now, so edits made meanwhile stay.
+        useStudioStore.getState().commit(onVideo((d) => applyDeadAirCuts(d, cuts)));
+        setMeta({ cuts: meta.cuts + cuts.length });
       }
     } finally {
       setCutting(false);
     }
+  };
+
+  /** A clip whose file is gone and never uploaded: say which and offer to re record it. */
+  const lostClip = (doc: VideoDocument): boolean => {
+    const missing = new Set(reel.uploads.missing);
+    if (missing.size === 0) return false;
+    const at = doc.blocks.findIndex((b) => b.cells.some((c) => missing.has(c.assetId)));
+    if (at < 0) {
+      Alert.alert('A picture was lost', 'Remove it from the post and add it again.');
+      return true;
+    }
+    const blockId = doc.blocks[at].id;
+    const item = items.find((p) => p.blockIds.includes(blockId)) ?? null;
+    const title = `Clip ${at + 1} was lost, re record it`;
+    if (!item) {
+      Alert.alert(title, 'Delete it from the timeline and record it again.');
+      return true;
+    }
+    Alert.alert(title, 'The file is no longer on this phone.', [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Re record', onPress: () => toRecord(item) },
+    ]);
+    return true;
   };
 
   const submit = async () => {
@@ -158,6 +170,7 @@ export default function EditRoute(): JSX.Element {
       Alert.alert('Nothing recorded yet');
       return;
     }
+    if (lostClip(doc)) return;
     if (reel.uploads.failed > 0) {
       reel.uploads.retry();
       Alert.alert('Upload failed. Trying again.');
@@ -192,6 +205,9 @@ export default function EditRoute(): JSX.Element {
     }
   };
 
+  const toRecord = (item?: ReelPlanItem) =>
+    router.replace({ pathname: '/(creator)/make/record/[id]', params: { id, from: 'edit', ...(item ? { item: item.id } : {}) } });
+
   if (reel.loading || !brief || !document || !scope) {
     return (
       <View style={styles.center}>
@@ -200,9 +216,6 @@ export default function EditRoute(): JSX.Element {
       </View>
     );
   }
-
-  const toRecord = (item?: ReelPlanItem) =>
-    router.replace({ pathname: '/(creator)/make/record/[id]', params: { id, from: 'edit', ...(item ? { item: item.id } : {}) } });
 
   const capText = ownDetails ? meta.caption : splitCaption(brief.caption).text;
   const tagText = ownDetails ? meta.tags : brief.hashtags.length ? brief.hashtags.map((t) => `#${t.replace(/^#/, '')}`).join(' ') : splitCaption(brief.caption).tags;
@@ -250,52 +263,34 @@ export default function EditRoute(): JSX.Element {
         items={items}
         companyId={scope.companyId}
         cuts={meta.cuts}
+        place={ctaPlace(brief)}
         onBack={fromReview ? () => { setFromReview(false); setPhase('review'); } : () => toRecord()}
         onNext={fromReview ? () => { setFromReview(false); setPhase('review'); } : () => setPhase(ownDetails ? 'details' : 'review')}
         onAddClip={() => toRecord()}
         onRedoClip={(item) => toRecord(item)}
-        onDeleteBlock={(blockId) => setItems((arr) => arr.map((p) => ({ ...p, blockIds: p.blockIds.filter((b) => b !== blockId) })))}
         onAi={() => setAi(true)}
       />
     );
   }
 
   const selectedBlockId = selection?.kind === 'block' ? selection.blockId : null;
-  const ownItems = items.filter((p) => p.free || p.role === 'cover');
-  const lineIndex = selectedBlockId ? ownItems.findIndex((p) => p.blockIds.includes(selectedBlockId)) : -1;
+  const selectedItem = selectedBlockId ? (items.find((p) => p.blockIds.includes(selectedBlockId)) ?? null) : null;
+  const lineItem = selectedItem && isOwnLine(selectedItem) ? selectedItem : null;
 
   return (
     <View style={styles.root}>
       <Stack.Screen options={{ headerShown: false }} />
       {body}
-      <AskAiSheet
+      <ReelAiSheet
         visible={ai}
         brief={brief}
-        lines={ownLines}
-        lineIndex={lineIndex}
-        reel
+        items={items}
+        lineItem={lineItem}
         onApplyHook={(t) => {
           const cover = items.find((p) => p.role === 'cover');
           if (cover) applyLine(cover, t);
         }}
-        onApplyLine={(t) => {
-          const target = lineIndex >= 0 ? ownItems[lineIndex] : ownItems[0];
-          if (target) applyLine(target, t);
-        }}
-        onApplyAll={(lines) => {
-          let j = 0;
-          const next = items.map((p) => (p.free || p.role === 'cover' ? { ...p, text: lines[j++] ?? p.text } : p));
-          setItems(() => next);
-          useStudioStore.getState().commit(
-            onVideo((d) => {
-              let out = d;
-              for (const p of next) {
-                if (out.overlays.some((o) => o.id === overlayIdFor(p))) out = updateOverlay(out, overlayIdFor(p), { text: p.text });
-              }
-              return syncPlanOverlays(out, next);
-            }),
-          );
-        }}
+        onApplyLine={applyLine}
         onCut={() => {
           setAi(false);
           void cut();

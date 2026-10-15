@@ -11,6 +11,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { FormatTag, TypeTag } from '../../../components/creator/Chips';
+import { makeHref } from '../../../components/creator/briefs/reel/routes';
+import { parseChangesNote } from '../../../components/ReviewThread';
 import {
   estimateDurationLabel,
   exampleHandle,
@@ -29,6 +31,10 @@ import {
   publishTimeLabel,
   useCreatorQueue,
 } from '../../../lib/creator-queue';
+import {
+  latestChangesNote,
+  listAssignmentReviewEvents,
+} from '../../../lib/review-events';
 import {
   getAssignment,
   type AssignmentWithBrief,
@@ -267,9 +273,29 @@ export default function AssignmentDetailScreen() {
   // Legacy carousels (null post_type_id) still record their script as video.
   const usesUpload = !isVideo && brief.post_type_id !== null;
 
-  function onRecord() {
+  async function onRecord() {
     if (!assignment) return;
-    router.push(`/(creator)/studio/${assignment.id}`);
+    const a = assignment;
+    const changes = a.status === 'changes_requested';
+    // New style briefs run in the make flow; changes requested on a reel
+    // reopen its clips with the flagged ones first.
+    let flags: string[] = [];
+    if (changes && a.briefs.format !== 'photo_carousel') {
+      const events = await listAssignmentReviewEvents(a.id).catch(() => []);
+      const note = latestChangesNote(events);
+      flags =
+        note !== null
+          ? parseChangesNote(note)
+              .map((s) => s.label)
+              .filter((l): l is string => l !== null)
+          : [];
+    }
+    const make = makeHref(a.briefs, a.id, { changes, flags });
+    if (make !== null) {
+      router.push(make);
+      return;
+    }
+    router.push(`/(creator)/studio/${a.id}`);
   }
 
   return (
@@ -321,7 +347,7 @@ export default function AssignmentDetailScreen() {
               size="lg"
               block
               icon={usesUpload ? 'images' : 'video'}
-              onPress={onRecord}
+              onPress={() => void onRecord()}
             >
               {usesUpload ? 'Create slides' : 'Record'}
             </Button>

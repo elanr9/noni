@@ -1,5 +1,7 @@
 // Studies reference posts so the writer learns from them. Campaign managers.
 // { library_item_id } studies one Library reference; { url } studies a link;
+// the answer carries each study's id and status, and the Library polls the
+// reference_studies row (status, phase) for its live steps;
 // { backfill: true } studies every Library reference not studied yet;
 // { distill: true } rebuilds the reference playbook now.
 // Answers at once and does the work in the background: the scrape can take
@@ -13,6 +15,7 @@ import {
 } from '../_shared/wp8.ts';
 import {
   loadStudy,
+  markStudyPending,
   maybeDistillPlaybook,
   normalizeReferenceUrl,
   type ReferenceStudy,
@@ -83,6 +86,20 @@ Deno.serve(async (req) => {
   }
 
   const readable = targets.filter((t) => socialHost(t.url) !== null);
+  if (body.url && readable.length === 0) return jsonResponse({ error: 'Paste a TikTok or Instagram link.' }, 400);
+
+  // A study that is not done yet reads pending from now on, so a caller
+  // polling the row (the Library's live steps) never reads an old failure as
+  // the new result. Studies already done are not run again.
+  await Promise.all(
+    readable.map(async (t) => {
+      const existing = await loadStudy(admin, companyId, t.url);
+      if (existing?.status === 'done' && existing.pattern) return;
+      await markStudyPending(admin, companyId, t.url, t.libraryItemId).catch((e) =>
+        console.warn('study-reference mark pending failed:', e instanceof Error ? e.message : e),
+      );
+    }),
+  );
 
   EdgeRuntime.waitUntil(
     (async () => {
@@ -122,8 +139,9 @@ Deno.serve(async (req) => {
 function studySummary(
   url: string,
   study: ReferenceStudy | null,
-): { url: string; status: ReferenceStudy['status']; error: string | null } {
+): { id: string | null; url: string; status: ReferenceStudy['status']; error: string | null } {
   return {
+    id: study?.id ?? null,
     url: normalizeReferenceUrl(url),
     status: study?.status ?? 'pending',
     error: study?.status === 'failed' ? study.error : null,

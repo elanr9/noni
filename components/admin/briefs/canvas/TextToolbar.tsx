@@ -1,6 +1,6 @@
-// Text tools while editing a box (SSCanvas.jsx editing toolbar): font and
-// color panels, the Aa / color / background / align / delete bar, and the
-// vertical width slider on the left edge of the canvas.
+// Text tools while editing a box: the Aa / color / background / align / delete
+// bar and, above it, the color rows. One font (TikTok Sans). On a box the
+// letter color and the box color are picked separately.
 
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,18 +9,40 @@ import Animated, { FadeIn, FadeInLeft, runOnJS, ZoomIn } from 'react-native-rean
 
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { Icon } from '../../../ui/Icon';
-import { clamp, FONTS, SWATCHES, type FontKey, type ResolvedTextStyle, type TextBg } from './layout';
+import { clamp, SWATCHES, type ResolvedTextStyle, type TextBg } from './layout';
 
-export type ToolPanel = 'font' | 'color' | null;
+export type ToolPanel = 'color' | null;
 
-const NEXT_BG: Record<TextBg, TextBg> = { outline: 'box', box: 'soft', soft: 'none', none: 'outline' };
+const NEXT_BG: Record<TextBg, TextBg> = { outline: 'box', box: 'none', none: 'outline' };
 const NEXT_ALIGN: Record<ResolvedTextStyle['align'], ResolvedTextStyle['align']> = { center: 'left', left: 'right', right: 'center' };
+
+function SwatchRow({ label, value, onPick }: { label: string | null; value: string; onPick: (c: string) => void }) {
+  return (
+    <View style={styles.swatchRow}>
+      {label ? <Text style={styles.rowLabel}>{label}</Text> : null}
+      <View style={styles.swatches}>
+        {SWATCHES.map((c) => (
+          <Pressable
+            key={c}
+            accessibilityRole="button"
+            accessibilityLabel={c}
+            onPress={() => onPick(c)}
+            hitSlop={6}
+            style={[styles.swatch, { backgroundColor: c }, value === c ? styles.swatchOn : null]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export function TextToolbar({
   ts,
   panel,
   setPanel,
   onChange,
+  onTextColor,
+  selection = false,
   onDelete,
   bottomInset = 0,
   children,
@@ -29,67 +51,41 @@ export function TextToolbar({
   panel: ToolPanel;
   setPanel: (p: ToolPanel) => void;
   onChange: (patch: Partial<ResolvedTextStyle>) => void;
+  /** Letter color pick; colors only the selected words when there is a selection. Defaults to onChange. */
+  onTextColor?: (c: string) => void;
+  /** Words are selected in the input, so the letter swatches color just them. */
+  selection?: boolean;
   onDelete?: () => void;
   /** Lifts the bar above the keyboard. */
   bottomInset?: number;
   /** Buttons stacked above the toolbar (Generate with AI, Pick a feature). */
   children?: React.ReactNode;
 }) {
+  const box = ts.bg === 'box';
   return (
     <Animated.View entering={FadeIn.duration(260)} style={[styles.wrap, { bottom: bottomInset }]} pointerEvents="box-none">
       {children ? <View style={styles.stack}>{children}</View> : null}
-      {panel === 'font' ? (
-        <Animated.View entering={ZoomIn.duration(180)} style={styles.panel}>
-          {(Object.keys(FONTS) as FontKey[]).map((k) => (
-            <Pressable
-              key={k}
-              accessibilityRole="button"
-              onPress={() => onChange({ font: k })}
-              style={[styles.fontBtn, { backgroundColor: ts.font === k ? color.white : color.scrim }]}
-            >
-              <Text
-                style={{
-                  fontFamily: FONTS[k].family,
-                  fontWeight: FONTS[k].weight,
-                  fontStyle: FONTS[k].italic ? 'italic' : 'normal',
-                  fontSize: 14,
-                  color: ts.font === k ? color.ink : color.white,
-                }}
-              >
-                {FONTS[k].label}
-              </Text>
-            </Pressable>
-          ))}
-        </Animated.View>
-      ) : null}
       {panel === 'color' ? (
-        <Animated.View entering={ZoomIn.duration(180)} style={[styles.panel, { gap: 9 }]}>
-          {SWATCHES.map((c) => (
-            <Pressable
-              key={c}
-              accessibilityRole="button"
-              accessibilityLabel={c}
-              onPress={() => onChange({ color: c })}
-              hitSlop={6}
-              style={[styles.swatch, { backgroundColor: c }, ts.color === c ? styles.swatchOn : null]}
-            />
-          ))}
+        <Animated.View entering={ZoomIn.duration(180)} style={styles.panel}>
+          <SwatchRow
+            label={selection ? 'Words' : box ? 'Text' : null}
+            value={selection ? '' : ts.color}
+            onPick={(c) => (onTextColor ? onTextColor(c) : onChange({ color: c }))}
+          />
+          {box ? <SwatchRow label="Box" value={ts.boxColor} onPick={(c) => onChange({ boxColor: c })} /> : null}
         </Animated.View>
       ) : null}
       <View style={styles.bar}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Font" onPress={() => setPanel(panel === 'font' ? null : 'font')} style={[styles.tool, panel === 'font' ? styles.toolOn : null]}>
-          <Text style={styles.aa}>Aa</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Text style" onPress={() => onChange({ bg: NEXT_BG[ts.bg] })} style={styles.tool}>
+          <View style={[styles.bgGlyph, { backgroundColor: box ? color.white : 'transparent', borderColor: ts.bg === 'none' ? color.whiteA45 : color.white }]}>
+            <Text style={[styles.bgA, { color: box ? color.ink : color.white }]}>Aa</Text>
+          </View>
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Color" onPress={() => setPanel(panel === 'color' ? null : 'color')} style={[styles.tool, panel === 'color' ? styles.toolOn : null]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Colors" onPress={() => setPanel(panel === 'color' ? null : 'color')} style={[styles.tool, panel === 'color' ? styles.toolOn : null]}>
           <View style={styles.wheel}>
             {briefTone.confetti.map((c, i) => (
               <View key={c} style={[styles.wheelSlice, { backgroundColor: c, transform: [{ rotate: `${i * 72}deg` }] }]} />
             ))}
-          </View>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Text background" onPress={() => onChange({ bg: NEXT_BG[ts.bg] })} style={styles.tool}>
-          <View style={[styles.bgGlyph, { backgroundColor: ts.bg === 'box' ? color.white : ts.bg === 'soft' ? color.whiteA45 : 'transparent' }]}>
-            <Text style={[styles.bgA, { color: ts.bg === 'box' ? color.ink : color.white }]}>A</Text>
           </View>
         </Pressable>
         <Pressable
@@ -137,10 +133,12 @@ export function WidthSlider({ value, H, onChange }: { value: number; H: number; 
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingBottom: 14, alignItems: 'center', gap: 10 },
-  stack: { alignItems: 'center', gap: 10, marginBottom: 8 },
-  panel: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'center' },
-  fontBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, minHeight: 44, justifyContent: 'center' },
+  wrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingBottom: 12, alignItems: 'center', gap: 10 },
+  stack: { alignItems: 'center', gap: 10, marginBottom: 6 },
+  panel: { gap: 8, alignItems: 'center' },
+  swatchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowLabel: { width: 34, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.label, color: color.whiteA60 },
+  swatches: { flexDirection: 'row', gap: 9, flexWrap: 'wrap', justifyContent: 'center' },
   swatch: { width: 30, height: 30, borderRadius: 999, borderWidth: 2.5, borderColor: color.white },
   swatchOn: { borderColor: color.blue500 },
   bar: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 6, borderRadius: 16, backgroundColor: color.inkA55 },
@@ -149,8 +147,8 @@ const styles = StyleSheet.create({
   aa: { fontFamily: typeToken.font.display, fontWeight: '800', fontSize: 17, color: color.white },
   wheel: { width: 22, height: 22, borderRadius: 999, overflow: 'hidden', borderWidth: 2, borderColor: color.white, backgroundColor: color.blue500 },
   wheelSlice: { position: 'absolute', width: 11, height: 11, left: 9, top: -2, transformOrigin: 'bottom left' },
-  bgGlyph: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: color.white, alignItems: 'center', justifyContent: 'center' },
-  bgA: { fontFamily: typeToken.font.display, fontWeight: '800', fontSize: 13 },
+  bgGlyph: { minWidth: 30, height: 24, paddingHorizontal: 4, borderRadius: 6, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  bgA: { fontFamily: typeToken.font.display, fontWeight: '800', fontSize: 12 },
   alignTool: { gap: 3, paddingHorizontal: 11 },
   slider: { position: 'absolute', left: 10, width: 36, alignItems: 'center', justifyContent: 'center' },
   sliderHit: { width: 36, flex: 1, alignItems: 'center' },

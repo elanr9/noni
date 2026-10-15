@@ -7,11 +7,14 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GradientFill as LinearGradient } from '../../shared/briefs/GradientFill';
 
 import type { LibraryFeature } from '../../../lib/library-api';
+import { overlayTextContrast } from '../../../lib/overlay-boxes';
+import { spanNodes } from '../../ui/OverlayTextBox';
+import type { SlideTextStyle, TextSpan } from '../../../lib/briefs-api';
 import { briefTone, color, shadow, type as typeToken } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
 import { photoLayout, type PhotoCrop } from '../slides/photo-crop';
 import { FeatureShot } from './FeatureShot';
-import { layoutOf, picUri, type CreatorSlide } from './model';
+import { layoutOf, picUri, textLook, type CreatorSlide } from './model';
 
 export const SLIDE_RATIO = 16 / 9;
 
@@ -21,7 +24,10 @@ export type MiniSlideProps = {
   photoUri?: string | null;
   photoCrop?: PhotoCrop;
   feature?: LibraryFeature | null;
-  layout?: Pick<CreatorSlide, 'box' | 'insetBox' | 'boxIg' | 'insetBoxIg' | 'insetFeatureId' | 'extras' | 'pics'>;
+  layout?: Pick<CreatorSlide, 'box' | 'insetBox' | 'boxIg' | 'insetBoxIg' | 'insetFeatureId' | 'extras' | 'pics'> & Partial<Pick<CreatorSlide, 'tstyle'>> & {
+    /** Per word colors on the main text, copied from the manager's slide. */
+    spans?: TextSpan[];
+  };
   textScale?: number;
   who?: 'manager' | 'creator' | 'mixed';
   label?: string;
@@ -47,6 +53,14 @@ function CenteredAt({ x, y, width, frameWidth, children }: { x: number; y: numbe
       {children}
     </View>
   );
+}
+
+/** The manager's text style as the preview draws it: a filled box, or bare letters. */
+function lookStyle(tstyle: SlideTextStyle | undefined) {
+  const look = textLook(tstyle);
+  return look.bg
+    ? { backgroundColor: look.color, color: overlayTextContrast(look.color) }
+    : { backgroundColor: 'transparent', color: look.color, textShadowColor: color.inkA55, textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } };
 }
 
 export function MiniSlide(props: MiniSlideProps): JSX.Element {
@@ -142,9 +156,10 @@ export function MiniSlide(props: MiniSlideProps): JSX.Element {
               style={[
                 styles.text,
                 { fontSize: fs, lineHeight: Math.round(fs * 1.22), borderRadius: w * 0.05, paddingVertical: w * 0.035, paddingHorizontal: w * 0.055 },
+                lookStyle(layout?.tstyle),
               ]}
             >
-              {text}
+              {layout?.spans?.length ? spanNodes(text, layout.spans, lookStyle(layout.tstyle).color) : text}
             </Text>
           )}
         </CenteredAt>
@@ -159,7 +174,7 @@ export function MiniSlide(props: MiniSlideProps): JSX.Element {
               {w <= 70 ? (
                 <View style={[styles.bar, styles.extraBar, { height: Math.max(2, w * 0.045) }]} />
               ) : (
-                <Text style={[styles.text, { fontSize: efs, lineHeight: Math.round(efs * 1.22), borderRadius: w * 0.05, paddingVertical: w * 0.035, paddingHorizontal: w * 0.055 }]}>{e.text}</Text>
+                <Text style={[styles.text, { fontSize: efs, lineHeight: Math.round(efs * 1.22), borderRadius: w * 0.05, paddingVertical: w * 0.035, paddingHorizontal: w * 0.055 }, lookStyle(e.tstyle)]}>{e.spans?.length ? spanNodes(e.text, e.spans, lookStyle(e.tstyle).color) : e.text}</Text>
               )}
             </CenteredAt>
           );

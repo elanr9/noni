@@ -300,21 +300,30 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Batches of 10 in parallel: fast without flooding notify.
   let notified = 0;
-  for (const creator of creators) {
-    const res = await fetch(`${supabaseUrl}/functions/v1/notify`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authHeader,
-      },
-      body: JSON.stringify({
-        event: 'published',
-        campaign_id: campaign.id,
-        creator_id: creator.id,
-      }),
-    }).catch(() => null);
-    if (res?.ok) notified += 1;
+  for (let i = 0; i < creators.length; i += 10) {
+    const settled = await Promise.allSettled(
+      creators.slice(i, i + 10).map((creator) =>
+        fetch(`${supabaseUrl}/functions/v1/notify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+          },
+          body: JSON.stringify({
+            event: 'published',
+            campaign_id: campaign.id,
+            creator_id: creator.id,
+          }),
+        }),
+      ),
+    );
+    for (const r of settled) {
+      if (r.status !== 'fulfilled') continue;
+      if (r.value.ok) notified += 1;
+      await r.value.body?.cancel().catch(() => {});
+    }
   }
 
   await db

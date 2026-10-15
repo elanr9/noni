@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Alert } from 'react-native';
 import type { CameraView } from 'expo-camera';
 import * as Brightness from 'expo-brightness';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import type { MediaAsset } from '../../../../lib/edit-document';
 import { MAX_CLIP_MS, MIN_TAKE_MS, RECORD_ARM_MS, STOP_WATCHDOG_MS } from './constants';
@@ -24,6 +25,24 @@ type Params = {
   frontFlash: boolean;
   onAsset(asset: MediaAsset): void;
 };
+
+/**
+ * Camera takes land in the cache directory, which the OS may purge before
+ * the upload. Move each take into the documents directory; if that fails the
+ * cache file is used as it is.
+ */
+async function keepTake(uri: string): Promise<string> {
+  try {
+    const dir = new Directory(Paths.document, 'noni-takes');
+    if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+    const file = new File(uri);
+    await file.move(dir);
+    return file.uri;
+  } catch (e) {
+    console.warn('could not keep take', e);
+    return uri;
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -112,7 +131,7 @@ export function useRecorder({ cameraRef, cameraReadyAt, frontFlash, onAsset }: P
         setStartedAt(null);
         if (result?.uri) {
           setPhase('saving');
-          const asset = await videoAsset(result.uri, Math.max(MIN_TAKE_MS, Date.now() - begunAt));
+          const asset = await videoAsset(await keepTake(result.uri), Math.max(MIN_TAKE_MS, Date.now() - begunAt));
           if (sessionRef.current !== session) return;
           onAssetRef.current(asset);
         } else {

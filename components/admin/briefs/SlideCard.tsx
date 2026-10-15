@@ -5,7 +5,7 @@ import { GradientFill as LinearGradient, type GradientStops } from '../../shared
 import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import type { SlideBox, SlideTextStyle } from '../../../lib/briefs-api';
+import type { SlideBox, SlideTextStyle, TextSpan } from '../../../lib/briefs-api';
 import type { LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../theme/tokens';
 import { Icon } from '../../ui/Icon';
@@ -25,6 +25,8 @@ export interface SlideCardProps {
   box?: SlideBox;
   insetBox?: SlideBox;
   tstyle?: SlideTextStyle;
+  /** Per word colors on the text (BriefSlide.spans). */
+  spans?: TextSpan[];
   who?: SlideWho;
   label?: string;
   index?: number;
@@ -49,6 +51,7 @@ export function SlideCard({
   box,
   insetBox,
   tstyle,
+  spans,
   who = 'manager',
   label,
   index,
@@ -113,7 +116,7 @@ export function SlideCard({
               ))}
             </View>
           ) : (
-            <SlideText text={text} ts={ts} fs={fs} />
+            <SlideText text={text} ts={ts} fs={fs} spans={spans} />
           )}
         </CenteredAt>
       ) : null}

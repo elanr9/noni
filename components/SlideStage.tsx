@@ -120,6 +120,7 @@ function EditableSlideBox(props: {
       >
         <OverlayTextBox
           text={box.text}
+          spans={box.spans}
           color={box.color}
           bg={box.bg}
           fontSize={fontSize}
@@ -328,6 +329,7 @@ export function SlideStage(props: {
               >
                 <OverlayTextBox
                   text={box.text}
+                  spans={box.spans}
                   color={box.color}
                   bg={box.bg}
                   fontSize={fontSize}

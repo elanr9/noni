@@ -252,14 +252,14 @@ Deno.serve(async (req) => {
         ...(context ? [`Admin angle / context:\n${context.slice(0, 1500)}`] : []),
         ...(countLine ? [countLine] : []),
       ];
-      const postType = await resolvePostType(sourceLines, 'video');
+      const postType = await resolvePostType(sourceLines, body.family ?? 'video');
       const { outcome, warnings } = await generateValidated(
         admin,
         caller.companyId,
         generationId,
         postType,
         (priorFailures) =>
-          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+          generateOnce(brand, postType, body.family ?? 'video', sourceLines, priorFailures),
         validationCtx,
         countOptions,
       );
@@ -328,14 +328,14 @@ Deno.serve(async (req) => {
       const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
       const sourceLines = [...featureSourceLines(feature, context), ...(countLine ? [countLine] : [])];
-      const postType = await resolvePostType(sourceLines, 'video');
+      const postType = await resolvePostType(sourceLines, body.family ?? 'video');
       const { outcome, warnings } = await generateValidated(
         admin,
         caller.companyId,
         generationId,
         postType,
         (priorFailures) =>
-          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+          generateOnce(brand, postType, body.family ?? 'video', sourceLines, priorFailures),
         validationCtx,
         countOptions,
       );
@@ -380,7 +380,7 @@ Deno.serve(async (req) => {
       const validationCtx = brandValidationCtx(brand);
       const generationId = crypto.randomUUID();
       const sourceLines = [...mediaSourceLines(media, context), ...(countLine ? [countLine] : [])];
-      const postType = await resolvePostType(sourceLines, 'video');
+      const postType = await resolvePostType(sourceLines, body.family ?? 'video');
       const mediaFamily = postType?.family ?? body.family ?? 'video';
       if (mediaFamily === 'photo_carousel' && media.kind === 'recording') {
         return { error: 'Slideshows use screenshots only' };
@@ -391,7 +391,7 @@ Deno.serve(async (req) => {
         generationId,
         postType,
         (priorFailures) =>
-          generateOnce(brand, postType, 'video', sourceLines, priorFailures),
+          generateOnce(brand, postType, body.family ?? 'video', sourceLines, priorFailures),
         validationCtx,
         countOptions,
       );

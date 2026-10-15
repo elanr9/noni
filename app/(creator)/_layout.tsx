@@ -193,6 +193,22 @@ export default function CreatorLayout() {
             }}
           />
           <Stack.Screen
+            name="make/raw/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
+            name="make/cut/[id]"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: screenTransition.modal,
+              animationDuration: motion.base,
+            }}
+          />
+          <Stack.Screen
             name="make/sent"
             options={{
               presentation: 'fullScreenModal',

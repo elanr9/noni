@@ -2,8 +2,10 @@
 // overlays, play and time, undo and swap, the scrubbable timeline (text
 // track above the clip track, trim handles, hold to reorder), the captions bar,
 // clip tools when a clip is selected and the Text, Image, Captions, AI
-// toolbar. From RLEditor.jsx ReelEditor.
-import { useRef, useState, type JSX } from 'react';
+// toolbar. A plug the manager locked (after the hook, at the end) snaps back
+// when a reorder moves it out of place; one the creator places moves freely.
+// From RLEditor.jsx ReelEditor.
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,9 +14,9 @@ import {
   addOverlay,
   blockRanges,
   defaultOverlayWindow,
-  deleteBlock,
   documentDurationMs,
   MAX_OVERLAYS,
+  moveBlock,
   newId,
   splitBlockAt,
   swapCells,
@@ -24,6 +26,7 @@ import {
   type TextOverlay,
   type VideoDocument,
 } from '../../../../lib/edit-document';
+import type { CtaPlacement } from '../../../../lib/briefs-api';
 import { DEFAULT_SHOT_PLACEMENT } from '../../../../lib/media-library-api';
 import { CLASSIC_TEXT_COLOR } from '../../../../lib/overlay-boxes';
 import { onVideo, useStudioStore } from '../../../../lib/studio-store';
@@ -35,22 +38,39 @@ import { useOverlayUi } from '../../studio/overlays/overlay-ui-store';
 import { PicturePickerSheet, type PicturePick } from '../../studio/overlays/PicturePickerSheet';
 import { TimelineStrip } from '../../studio/timeline/TimelineStrip';
 import { VideoStage } from '../../studio/timeline/VideoStage';
+import { CaptionPreview } from '../raw/CaptionPreview';
 import type { ReelPlanItem } from './plan';
+import { deleteItemBlocks, lockPlug } from './sync';
 
 const TEXT_DEFAULTS = { size: 0.05, x: 0.5, y: 0.3 } as const;
 const TRIM_STEP_MS = 1000;
+const HINT_MS = 2600;
+
+/** Why the plug clip cannot move, or how to move it. */
+function plugHint(place: CtaPlacement): string {
+  if (place === 'after_hook') return 'Your plug stays right after the hook. The brief keeps it there.';
+  if (place === 'end') return 'Your plug stays at the very end. The brief keeps it there.';
+  return 'Hold the plug clip and drag it where it fits.';
+}
 
 export type ReelEditorProps = {
   doc: VideoDocument;
   items: ReelPlanItem[];
   companyId: string;
   cuts: number;
+  /** Where the plug goes: locked after the hook or at the end, or any (the creator moves it). */
+  place: CtaPlacement;
   onBack: () => void;
   onNext: () => void;
   onAddClip: () => void;
   onRedoClip: (item: ReelPlanItem) => void;
-  onDeleteBlock: (blockId: string) => void;
   onAi: () => void;
+  /** Header line in place of the auto cut count. */
+  status?: string;
+  /** Label under the sparkles tool; AI by default. */
+  aiLabel?: string;
+  /** Preview captions from the words Edit my video heard. */
+  captions?: boolean;
 };
 
 function fmt(ms: number): string {
@@ -77,40 +97,96 @@ function ClipTool({ icon, label, onPress }: { icon: IconName; label: string; onP
   );
 }
 
-function MeasuredOverlayLayer({ doc }: { doc: VideoDocument }): JSX.Element {
+export function MeasuredOverlayLayer({ doc, captions = false }: { doc: VideoDocument; captions?: boolean }): JSX.Element {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none" onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      {size && captions ? <CaptionPreview doc={doc} width={size.w} height={size.h} /> : null}
       {size ? <OverlayLayer doc={doc} stageWidth={size.w} stageHeight={size.h} /> : null}
     </View>
   );
 }
 
-export function ReelEditor(props: ReelEditorProps): JSX.Element {
-  const { doc, items, companyId, cuts, onBack, onNext, onAddClip, onRedoClip, onDeleteBlock, onAi } = props;
-  const insets = useSafeAreaInsets();
+/** Time, play and pause: the only part of the editor that follows the playhead. */
+function Transport({ total, canSwap, onSwap }: { total: number; canSwap: boolean; onSwap: () => void }): JSX.Element {
   const playheadMs = useStudioStore((s) => s.playheadMs);
   const playing = useStudioStore((s) => s.playing);
-  const selection = useStudioStore((s) => s.selection);
   const canUndo = useStudioStore((s) => s.past.length > 0);
+  const togglePlay = () => {
+    if (total === 0) return;
+    const store = useStudioStore.getState();
+    if (!playing && store.playheadMs >= total) store.setPlayhead(0);
+    store.setPlaying(!playing);
+  };
+  return (
+    <View style={styles.transport}>
+      <Text style={styles.time}>
+        {fmt(playheadMs)}
+        <Text style={styles.timeTotal}>/{fmt(total)}</Text>
+      </Text>
+      <View style={styles.flexCenter}>
+        <Pressable accessibilityRole="button" accessibilityLabel={playing ? 'Pause' : 'Play'} onPress={togglePlay} style={styles.playBtn}>
+          <Icon name={playing ? 'pause' : 'play'} size={22} color={color.white} />
+        </Pressable>
+      </View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Undo" disabled={!canUndo} onPress={() => useStudioStore.getState().undo()} style={styles.miniBtn}>
+        <Icon name="rotate-ccw" size={18} color={canUndo ? color.white : color.whiteA45} />
+      </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Swap" disabled={!canSwap} onPress={onSwap} style={styles.miniBtn}>
+        <Icon name="arrow-left-right" size={18} color={canSwap ? color.white : color.whiteA45} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** Split shows only when the playhead sits inside a clip; mounted only while a clip is selected. */
+function SplitTool({ doc }: { doc: VideoDocument }): JSX.Element | null {
+  const canSplit = useStudioStore((s) => splitBlockAt(doc, s.playheadMs) !== doc);
+  if (!canSplit) return null;
+  const split = () => {
+    const store = useStudioStore.getState();
+    store.commit(onVideo((d) => splitBlockAt(d, store.playheadMs)));
+    store.select(null);
+  };
+  return <ClipTool icon="arrow-left-right" label="Split" onPress={split} />;
+}
+
+export function ReelEditor(props: ReelEditorProps): JSX.Element {
+  const { doc, items, companyId, cuts, place, onBack, onNext, onAddClip, onRedoClip, onAi, status, aiLabel = 'AI', captions = false } = props;
+  const insets = useSafeAreaInsets();
+  const selection = useStudioStore((s) => s.selection);
   const stageRef = useRef<React.ElementRef<typeof VideoStage>>(null);
   const [picking, setPicking] = useState(false);
   const [trim, setTrim] = useState(false);
+  const [snapHint, setSnapHint] = useState(false);
+  useEffect(() => {
+    if (!snapHint) return;
+    const t = setTimeout(() => setSnapHint(false), HINT_MS);
+    return () => clearTimeout(t);
+  }, [snapHint]);
   const total = documentDurationMs(doc);
   const store = useStudioStore.getState();
 
   const block = selection?.kind === 'block' ? (doc.blocks.find((b) => b.id === selection.blockId) ?? null) : null;
   const cellIndex = selection?.kind === 'block' ? selection.cellIndex : 0;
   const selectedItem = block ? (items.find((p) => p.blockIds.includes(block.id)) ?? null) : null;
-  const canSplit = splitBlockAt(doc, playheadMs) !== doc;
   const canSwap = block !== null && block.cells.length === 2;
-  const canAdd = doc.overlays.length < MAX_OVERLAYS && total > 0;
+  const plugSelected = selectedItem?.role === 'cta';
 
-  const togglePlay = () => {
-    if (total === 0) return;
-    if (!playing && playheadMs >= total) store.setPlayhead(0);
-    store.setPlaying(!playing);
+  /** Hold to reorder: a locked plug snaps back to its place, with a short why. */
+  const reorder = (blockId: string, to: number) => {
+    let snapped = false;
+    store.commit(
+      onVideo((d) => {
+        const moved = moveBlock(d, blockId, to);
+        const locked = lockPlug(moved, items, place);
+        snapped = locked !== moved;
+        return locked.blocks.every((b, k) => b === d.blocks[k]) ? d : locked;
+      }),
+    );
+    if (snapped) setSnapHint(true);
   };
+  const canAdd = doc.overlays.length < MAX_OVERLAYS && total > 0;
 
   const addText = () => {
     if (!canAdd) return;
@@ -122,7 +198,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
       color: CLASSIC_TEXT_COLOR,
       bg: false,
       ...TEXT_DEFAULTS,
-      ...defaultOverlayWindow(doc, store.playheadMs),
+      ...defaultOverlayWindow(doc, useStudioStore.getState().playheadMs),
     };
     beginGesture();
     updateGesture((d) => addOverlay(d, overlay));
@@ -149,7 +225,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
       x: DEFAULT_SHOT_PLACEMENT.x,
       y: DEFAULT_SHOT_PLACEMENT.y,
       width: DEFAULT_SHOT_PLACEMENT.w,
-      ...defaultOverlayWindow(doc, store.playheadMs),
+      ...defaultOverlayWindow(doc, useStudioStore.getState().playheadMs),
     };
     store.commit(onVideo((d) => (d.overlays.length >= MAX_OVERLAYS ? d : addOverlay(addAsset(d, asset), overlay))));
     store.setPlayhead(overlay.startMs);
@@ -160,10 +236,6 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
     store.commit(onVideo((d) => ({ ...d, subtitles: { ...d.subtitles, enabled: !d.subtitles.enabled } })));
   };
 
-  const split = () => {
-    store.commit(onVideo((d) => splitBlockAt(d, playheadMs)));
-    store.select(null);
-  };
   const confirmDelete = () => {
     if (!block) return;
     Alert.alert('Delete this clip?', undefined, [
@@ -172,9 +244,9 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
         text: 'Delete',
         style: 'destructive',
         onPress: () => {
-          store.commit(onVideo((d) => deleteBlock(d, block.id)));
+          // Plan ids stay; the plan drops dead blocks when it reads them, so undo restores the clip with its text.
+          store.commit(onVideo((d) => deleteItemBlocks(d, items, [block.id])));
           store.select(null);
-          onDeleteBlock(block.id);
         },
       },
     ]);
@@ -192,39 +264,17 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.headerBtn}>
           <Icon name="chevron-left" size={22} color={color.white} />
         </Pressable>
-        <Text style={styles.headerText}>{cuts ? `Auto cut \u00b7 ${cuts} pause${cuts === 1 ? '' : 's'} removed` : 'Auto cut on'}</Text>
+        <Text style={styles.headerText}>{status ?? (cuts ? `Auto cut \u00b7 ${cuts} pause${cuts === 1 ? '' : 's'} removed` : 'Auto cut on')}</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Next" onPress={onNext} style={[styles.headerBtn, styles.headerNext]}>
           <Icon name="arrow-right" size={22} color={color.white} />
         </Pressable>
       </View>
 
       <VideoStage ref={stageRef} doc={doc}>
-        <MeasuredOverlayLayer doc={doc} />
+        <MeasuredOverlayLayer doc={doc} captions={captions} />
       </VideoStage>
 
-      <View style={styles.transport}>
-        <Text style={styles.time}>
-          {fmt(playheadMs)}
-          <Text style={styles.timeTotal}>/{fmt(total)}</Text>
-        </Text>
-        <View style={styles.flexCenter}>
-          <Pressable accessibilityRole="button" accessibilityLabel={playing ? 'Pause' : 'Play'} onPress={togglePlay} style={styles.playBtn}>
-            <Icon name={playing ? 'pause' : 'play'} size={22} color={color.white} />
-          </Pressable>
-        </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Undo" disabled={!canUndo} onPress={() => store.undo()} style={styles.miniBtn}>
-          <Icon name="rotate-ccw" size={18} color={canUndo ? color.white : color.whiteA45} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Swap"
-          disabled={!canSwap}
-          onPress={() => block && store.commit(onVideo((d) => swapCells(d, block.id)))}
-          style={styles.miniBtn}
-        >
-          <Icon name="arrow-left-right" size={18} color={canSwap ? color.white : color.whiteA45} />
-        </Pressable>
-      </View>
+      <Transport total={total} canSwap={canSwap} onSwap={() => block && store.commit(onVideo((d) => swapCells(d, block.id)))} />
 
       <View style={styles.timeline}>
         {doc.blocks.length === 0 ? (
@@ -237,7 +287,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
             <View style={styles.textLane}>
               <OverlayLane doc={doc} />
             </View>
-            <TimelineStrip doc={doc} />
+            <TimelineStrip doc={doc} onReorder={reorder} />
           </>
         )}
         <View style={styles.captionsBar}>
@@ -247,6 +297,13 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           </Text>
         </View>
       </View>
+
+      {snapHint || plugSelected ? (
+        <View style={styles.hint} pointerEvents="none">
+          <Icon name="zap" size={13} color={color.blue300} />
+          <Text style={styles.hintText}>{plugHint(place)}</Text>
+        </View>
+      ) : null}
 
       {trim && block ? (
         <View style={styles.trimBar}>
@@ -269,7 +326,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           <Pressable accessibilityRole="button" accessibilityLabel="Done" onPress={() => { store.select(null); setTrim(false); }} style={styles.clipDone}>
             <Icon name="chevron-down" size={20} color={color.white} />
           </Pressable>
-          {canSplit ? <ClipTool icon="arrow-left-right" label="Split" onPress={split} /> : null}
+          <SplitTool doc={doc} />
           <ClipTool icon="clock" label="Trim" onPress={() => setTrim(true)} />
           {selectedItem ? <ClipTool icon="video" label="Redo clip" onPress={() => onRedoClip(selectedItem)} /> : null}
           <ClipTool icon="trash-2" label="Delete" onPress={confirmDelete} />
@@ -279,7 +336,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           <ToolButton icon="pencil" label="Text" dim={!canAdd} onPress={addText} />
           <ToolButton icon="image-plus" label="Image" dim={!canAdd} onPress={() => { store.setPlaying(false); setPicking(true); }} />
           <ToolButton icon="layout-list" label="Captions" on={doc.subtitles.enabled} onPress={toggleCaptions} />
-          <ToolButton icon="sparkles" label="AI" onPress={onAi} />
+          <ToolButton icon="sparkles" label={aiLabel} onPress={onAi} />
         </View>
       )}
 
@@ -306,6 +363,8 @@ const styles = StyleSheet.create({
   emptyClipText: { fontFamily: typeToken.font.ui, fontSize: 10.5, fontWeight: '700', color: color.white },
   captionsBar: { marginHorizontal: 16, marginTop: 6, height: 30, paddingHorizontal: 10, borderRadius: 6, backgroundColor: color.whiteA16, flexDirection: 'row', alignItems: 'center', gap: 8 },
   captionsText: { fontFamily: typeToken.font.ui, fontSize: 11.5, fontWeight: '700' },
+  hint: { marginHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: color.ink800 },
+  hintText: { flex: 1, fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '600', color: color.whiteA75 },
   trimBar: { marginHorizontal: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: color.ink800 },
   trimLabel: { flex: 1, fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '700', color: color.white },
   trimBtn: { width: 44, height: 44, borderRadius: 999, borderWidth: 1, borderColor: color.whiteA28, alignItems: 'center', justifyContent: 'center' },

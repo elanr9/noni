@@ -5,21 +5,25 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { BriefKind, BriefMediaFormat, WeekBrief } from '../../../../lib/briefs-api';
-import { kindsFor, type PostTypeCopy } from '../../../../lib/brief-copy';
+import { ctaPlaceOptions, ctaPosLabel, kindsFor, type PostTypeCopy } from '../../../../lib/brief-copy';
 import type { LibraryFeature } from '../../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { SoftToast } from '../../../states/SoftToast';
 import { Icon } from '../../../ui/Icon';
 import { CanvasEditor } from '../canvas/CanvasEditor';
 import { CanvasFooter } from '../canvas/CanvasFooter';
+import { CheckSheet } from '../sheets/CheckSheet';
 import { CountSheet } from '../sheets/CountSheet';
 import { CtaIntro } from '../sheets/CtaIntro';
+import { CtaPlaceSheet } from '../sheets/CtaPlaceSheet';
 import { FeatureSheet } from '../sheets/FeatureSheet';
 import { GapSheet } from '../sheets/GapSheet';
+import { IdeasSheet } from '../sheets/IdeasSheet';
 import { MediaSheet } from '../sheets/MediaSheet';
 import { ReviseSheet } from '../sheets/ReviseSheet';
 import { DetailsStep } from './DetailsStep';
 import { ReviewScreen } from './ReviewScreen';
+import type { DeckIdea } from '../../../../lib/deck-ai';
 import { useBriefEditor } from './useBriefEditor';
 
 export interface BriefEditorProps {
@@ -33,6 +37,10 @@ export interface BriefEditorProps {
   features: LibraryFeature[];
   onBack: () => void;
   onSaved: () => void;
+  /** An idea from the idea chat to write the whole post from on open. */
+  initialIdea?: DeckIdea | null;
+  /** The Review step's save button; defaults to Add to week. */
+  saveLabel?: string;
 }
 
 export function BriefEditor(props: BriefEditorProps) {
@@ -52,7 +60,9 @@ export function BriefEditor(props: BriefEditorProps) {
       ? 'Writing your CTA'
       : E.busy === 'hook'
         ? 'Writing the hook script'
-        : E.busy === 'points'
+        : E.busy === 'post'
+          ? 'Writing the whole post'
+          : E.busy === 'points'
           ? E.reel
             ? 'Writing your points and lines'
             : 'Writing your points'
@@ -74,12 +84,14 @@ export function BriefEditor(props: BriefEditorProps) {
           story={E.story}
           gap={E.reviewGap}
           openCount={E.story && !E.tipsStory}
+          ctaPlace={E.ctaAt}
           steps={E.STEPS}
           current={E.stepIdx}
           onJump={E.go}
           onBack={() => E.go('details')}
           onSave={() => void E.save()}
           saving={E.saving}
+          saveLabel={props.saveLabel}
         />
         {toast}
       </View>
@@ -101,7 +113,10 @@ export function BriefEditor(props: BriefEditorProps) {
           search={E.search}
           setSearch={E.setSearch}
           busy={E.busy === 'details'}
+          locked={E.busy !== null}
           onFill={() => void E.fillDetails()}
+          checking={E.busy === 'check'}
+          onCheck={() => void E.checkPost()}
           onPreview={() => E.setSheet('fyp')}
           onReview={() => E.go('review')}
         />
@@ -115,6 +130,7 @@ export function BriefEditor(props: BriefEditorProps) {
             story={E.story}
             gap={E.reviewGap}
             openCount={E.story && !E.tipsStory}
+            ctaPlace={E.ctaAt}
             steps={E.STEPS}
             current={E.stepIdx}
             onJump={E.go}
@@ -122,6 +138,18 @@ export function BriefEditor(props: BriefEditorProps) {
             popup
           />
         ) : null}
+        <CheckSheet
+          visible={E.sheet === 'check'}
+          review={E.check}
+          reel={E.reel}
+          roles={E.slides.map((s) => s.role)}
+          applied={E.checkApplied}
+          loading={E.busy === 'check' && !E.check}
+          busy={E.busy === 'check'}
+          onApply={E.applyFix}
+          onRecheck={() => void E.checkPost()}
+          onClose={() => E.setSheet(null)}
+        />
         {toast}
       </View>
     );
@@ -131,11 +159,13 @@ export function BriefEditor(props: BriefEditorProps) {
     E.step === 'cover'
       ? Boolean(E.title.trim()) && (!E.reel || Boolean(E.slides[0]?.shot.trim()))
       : E.step === 'points'
-        ? E.onLastPoint
-          ? E.pointsOk
-          : Boolean(E.cur?.text.trim())
+        ? E.points.length === 0
+          ? false
+          : E.onLastPoint
+            ? E.pointsOk
+            : Boolean(E.cur?.text.trim())
         : E.step === 'cta'
-          ? E.ctaOk
+          ? E.ctaOk && (!E.tipsStory || E.count != null)
           : true;
   const nextLabel =
     E.step === 'cover'
@@ -155,12 +185,37 @@ export function BriefEditor(props: BriefEditorProps) {
         : 'Details';
 
   const ctaStep = E.step === 'cta' || E.onCta;
-  const onGenerate = ctaStep ? E.generateCta : E.step === 'points' ? () => void E.writePoints() : null;
-  const onSecondary = ctaStep ? () => E.setSheet('feature') : null;
+  const onGenerate = ctaStep
+    ? E.generateCta
+    : E.step === 'points'
+      ? () => void E.writePoints()
+      : E.step === 'cover'
+        ? E.openIdeas
+        : null;
+  // Long text has no inset, so there is no feature to pick.
+  const onSecondary = ctaStep && !E.lt ? () => E.setSheet('feature') : null;
+  // While AI writes, the footer cannot change the deck under it.
+  const locked = E.busy !== null;
   const ctaPick = Boolean(E.cur && E.cur.role === 'cta' && !E.cur.text.trim() && onSecondary);
+  // Where the CTA goes: Story on its CTA step, Handheld on the CTA slide.
+  const ctaPlace = E.lt ? null : (E.step === 'cta' && E.story) || E.onCta ? E.ctaAt : null;
+  const ctaPill =
+    ctaPlace !== null ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="CTA position"
+        disabled={locked}
+        onPress={() => E.setSheet('ctaPlace')}
+        style={[styles.countPill, styles.countPillQuiet, styles.ctaPill]}
+      >
+        <Icon name="megaphone" size={13} color={color.whiteA75} />
+        <Text style={[styles.countPillText, { color: color.whiteA75 }]}>{ctaPosLabel(ctaPlace)}</Text>
+        <Icon name="chevron-down" size={13} color={color.whiteA75} />
+      </Pressable>
+    ) : null;
 
   const footer = (
-    <CanvasFooter steps={E.STEPS} current={E.stepIdx} onJump={E.go} onNext={E.next} nextLabel={nextLabel} nextOk={nextOk}>
+    <CanvasFooter steps={E.STEPS} current={E.stepIdx} onJump={E.go} onNext={E.next} nextLabel={nextLabel} nextOk={nextOk} disabled={locked}>
       {E.step === 'points' ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dots} style={styles.grow}>
           {E.slides.map((s, i) => {
@@ -174,6 +229,7 @@ export function BriefEditor(props: BriefEditorProps) {
                 accessibilityRole="button"
                 accessibilityLabel={c ? 'CTA slide' : `Slide ${i}`}
                 onPress={() => E.setSel(i)}
+                disabled={locked}
                 hitSlop={5}
                 style={[
                   styles.dot,
@@ -194,25 +250,27 @@ export function BriefEditor(props: BriefEditorProps) {
               </Pressable>
             );
           })}
-          <Pressable accessibilityRole="button" accessibilityLabel="Change count" onPress={() => E.setSheet('count')} hitSlop={5} style={[styles.dot, styles.dotAdd]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Change count" disabled={locked} onPress={() => E.setSheet('count')} hitSlop={5} style={[styles.dot, styles.dotAdd]}>
             <Icon name="plus" size={15} color={color.white} />
           </Pressable>
         </ScrollView>
-      ) : (
+      ) : null}
+      {E.step === 'points' ? ctaPill : (
         <>
           <View style={styles.grow} />
           {E.step === 'cta' && E.tipsStory ? (
-            <Pressable accessibilityRole="button" onPress={() => E.setSheet('count')} style={styles.countPill}>
+            <Pressable accessibilityRole="button" disabled={locked} onPress={() => E.setSheet('count')} style={styles.countPill}>
               <Icon name="camera" size={13} color={color.white} />
-              <Text style={styles.countPillText}>{`${E.count ?? 0} points \u00b7 creator records ${Math.max(0, (E.count ?? 0) - 1)}`}</Text>
+              <Text numberOfLines={1} style={[styles.countPillText, styles.shrink]}>{`${E.count ?? 0} points \u00b7 creator records ${Math.max(0, (E.count ?? 0) - 1)}`}</Text>
             </Pressable>
           ) : null}
           {E.step === 'cta' && E.story && !E.tipsStory ? (
-            <Pressable accessibilityRole="button" onPress={() => E.setSheet('gap')} style={[styles.countPill, styles.countPillQuiet]}>
+            <Pressable accessibilityRole="button" disabled={locked} onPress={() => E.setSheet('gap')} style={[styles.countPill, styles.countPillQuiet]}>
               <Icon name="camera" size={13} color={color.whiteA75} />
-              <Text style={[styles.countPillText, { color: color.whiteA75 }]}>Creator picks the count</Text>
+              <Text numberOfLines={1} style={[styles.countPillText, styles.shrink, { color: color.whiteA75 }]}>Creator picks the count</Text>
             </Pressable>
           ) : null}
+          {ctaPill}
         </>
       )}
     </CanvasFooter>
@@ -233,8 +291,9 @@ export function BriefEditor(props: BriefEditorProps) {
         kindLabel={kindLabel}
         footer={footer}
         ctaPick={ctaPick}
+        editNonce={E.editNonce}
         onGenerate={onGenerate}
-        generateLabel={E.step === 'points' && !E.onCta ? 'Fill with AI' : 'Generate with AI'}
+        generateLabel={E.step === 'cover' ? 'Ideas with AI' : E.step === 'points' && !E.onCta ? 'Fill with AI' : 'Write the CTA'}
         onSecondary={onSecondary}
         secondaryLabel={E.ctaOk ? 'Different feature' : 'Pick a feature'}
         onWriteNote={E.reel && E.step === 'cover' ? () => void E.writeHook() : null}
@@ -253,6 +312,7 @@ export function BriefEditor(props: BriefEditorProps) {
           }}
         />
       ) : null}
+      <CtaPlaceSheet visible={E.sheet === 'ctaPlace'} options={ctaPlaceOptions(E.reel, E.story)} current={E.ctaAt} onPick={E.setCtaAt} onClose={() => E.setSheet(null)} />
       <GapSheet visible={E.sheet === 'gap'} gap={E.gap} setGap={E.setGap} onClose={() => E.setSheet(null)} reel={E.reel} />
       <FeatureSheet
         visible={E.sheet === 'feature'}
@@ -285,7 +345,25 @@ export function BriefEditor(props: BriefEditorProps) {
         }}
         onClose={() => setMedia(false)}
       />
-      <ReviseSheet visible={E.sheet === 'revise'} format={format} companyName={companyName} onPick={(f) => void E.revise(f)} onClose={() => E.setSheet(null)} />
+      <IdeasSheet
+        visible={E.sheet === 'ideas'}
+        ideas={E.ideas}
+        busy={E.ideasBusy}
+        typeName={postType?.name ?? null}
+        reel={E.reel}
+        onPick={E.pickIdea}
+        onMore={E.moreIdeas}
+        onClose={() => E.setSheet(null)}
+      />
+      <ReviseSheet
+        visible={E.sheet === 'revise'}
+        format={format}
+        companyName={companyName}
+        history={E.reviseChat}
+        working={E.busy === 'revise'}
+        onPick={(f) => void E.revise(f)}
+        onClose={() => E.setSheet(null)}
+      />
       {toast}
     </View>
   );
@@ -294,11 +372,13 @@ export function BriefEditor(props: BriefEditorProps) {
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: color.ink900 },
   grow: { flex: 1, minWidth: 0 },
-  dots: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 5 },
+  dots: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 1 },
   dot: { width: 34, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotAdd: { borderWidth: 1.5, borderStyle: 'dashed', borderColor: color.whiteA28 },
-  dotText: { fontFamily: typeToken.font.ui, fontWeight: '800', fontSize: 13 },
-  countPill: { height: 34, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderStyle: 'dashed', borderColor: color.whiteA45, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dotText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.chip },
+  countPill: { flexShrink: 1, minWidth: 0, height: 32, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderStyle: 'dashed', borderColor: color.whiteA45, flexDirection: 'row', alignItems: 'center', gap: 6 },
   countPillQuiet: { borderWidth: 0, backgroundColor: color.whiteA16 },
-  countPillText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 12.5, color: color.white },
+  ctaPill: { flexShrink: 0, gap: 5 },
+  shrink: { flexShrink: 1 },
+  countPillText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.label, color: color.white },
 });

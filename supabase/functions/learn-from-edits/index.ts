@@ -8,6 +8,10 @@
 // plus the company's current rules to Claude and write back an updated rule
 // set in ai_learnings. Rules the model retires go inactive.
 //
+// The company distill also reads ai_feedback (editor edits, rejected ideas,
+// revise notes) logged since its rules last changed, so a team that edits in
+// the editor without publishing still teaches the rules.
+//
 // Distill (global, cron only): the same over every company's fresh diffs,
 // generalised away from any one brand, into company_id null rules.
 //
@@ -293,16 +297,79 @@ async function loadRules(admin: SupabaseClient, companyId: string | null): Promi
   return (data ?? []) as LearningRow[];
 }
 
-async function distillCompany(admin: SupabaseClient, companyId: string): Promise<number> {
-  const { data } = await admin
-    .from('brief_edit_diffs')
-    .select('id, company_id, post_type_key, source_kind, diff, edit_ratio')
+type FeedbackRow = {
+  kind: string;
+  surface: string | null;
+  format: string | null;
+  role: string | null;
+  before: string | null;
+  after: string | null;
+  note: string | null;
+};
+
+const MAX_FEEDBACK_PER_RUN = 40;
+
+const oneLine = (t: string | null, max = 200) => {
+  const s = (t ?? '').replace(/\s+/g, ' ').trim();
+  return s.length > max ? `${s.slice(0, max - 3)}...` : s;
+};
+
+/** ai_feedback logged since this company's rules last changed, newest first. */
+async function recentFeedback(admin: SupabaseClient, companyId: string): Promise<FeedbackRow[]> {
+  const { data: last } = await admin
+    .from('ai_learnings')
+    .select('updated_at')
     .eq('company_id', companyId)
-    .is('learned_at', null)
-    .order('published_at', { ascending: true })
-    .limit(MAX_DIFFS_PER_COMPANY_RUN);
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  const since = (last?.[0] as { updated_at?: string } | undefined)?.updated_at ?? null;
+  let query = admin
+    .from('ai_feedback')
+    .select('kind, surface, format, role, before, after, note')
+    .eq('company_id', companyId)
+    .in('kind', ['edit', 'dismiss', 'revise'])
+    .order('created_at', { ascending: false })
+    .limit(MAX_FEEDBACK_PER_RUN);
+  if (since) query = query.gt('created_at', since);
+  const { data, error } = await query;
+  if (error) {
+    console.warn('learn-from-edits: ai_feedback skipped:', error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as FeedbackRow[];
+}
+
+function feedbackForModel(rows: FeedbackRow[]): string {
+  const lines = rows
+    .map((r) => {
+      const where = [r.format, r.role].filter(Boolean).join(' ');
+      if (r.kind === 'edit' && r.before && r.after) {
+        return `- edit${where ? ` (${where})` : ''}${r.surface === 'check' ? ' from the AI review, kept' : ''}: "${oneLine(r.before)}" -> "${oneLine(r.after)}"`;
+      }
+      if (r.kind === 'dismiss' && r.before) return `- rejected idea: "${oneLine(r.before, 120)}"`;
+      if (r.kind === 'revise' && r.note) return `- revise ask${where ? ` (${where})` : ''}: "${oneLine(r.note)}"`;
+      return '';
+    })
+    .filter(Boolean);
+  return lines.length
+    ? `EDITOR SIGNALS (${lines.length}, newest first; the manager's own edits, rejected ideas and revise asks in the editor; weigh them like edits):\n${lines.join('\n')}`
+    : '';
+}
+
+async function distillCompany(admin: SupabaseClient, companyId: string): Promise<number> {
+  const [{ data }, feedback] = await Promise.all([
+    admin
+      .from('brief_edit_diffs')
+      .select('id, company_id, post_type_key, source_kind, diff, edit_ratio')
+      .eq('company_id', companyId)
+      .is('learned_at', null)
+      .order('published_at', { ascending: true })
+      .limit(MAX_DIFFS_PER_COMPANY_RUN),
+    recentFeedback(admin, companyId),
+  ]);
   const diffs = (data ?? []) as DiffRow[];
-  if (diffs.length < MIN_DIFFS_TO_DISTILL) return 0;
+  const signals = feedbackForModel(feedback);
+  if (diffs.length < MIN_DIFFS_TO_DISTILL && !signals) return 0;
 
   const [{ data: company }, rules] = await Promise.all([
     admin.from('companies').select('name').eq('id', companyId).single(),
@@ -315,17 +382,22 @@ async function distillCompany(admin: SupabaseClient, companyId: string): Promise
   const user = [
     `Brand: ${company?.name ?? 'unknown'}`,
     rulesForModel(rules),
-    `NEW EDITS (${diffs.length} posts):\n\n${edits}`,
-  ].join('\n\n');
+    diffs.length ? `NEW EDITS (${diffs.length} posts):\n\n${edits}` : '',
+    signals,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const raw = await askClaude(distillSystem('company'), user, 4096);
   const answer = parseClaudeJson<ModelAnswer>(raw);
   const written = await applyRules(admin, companyId, rules, answer, diffs.map((d) => d.id));
 
-  await admin
-    .from('brief_edit_diffs')
-    .update({ learned_at: new Date().toISOString() })
-    .in('id', diffs.map((d) => d.id));
+  if (diffs.length) {
+    await admin
+      .from('brief_edit_diffs')
+      .update({ learned_at: new Date().toISOString() })
+      .in('id', diffs.map((d) => d.id));
+  }
   return written;
 }
 
@@ -392,6 +464,13 @@ Deno.serve(async (req) => {
         .select('company_id')
         .is('learned_at', null);
       for (const row of pending ?? []) companies.push(row.company_id);
+      // Teams that only edit in the editor still get their rules distilled.
+      const { data: fresh } = await admin
+        .from('ai_feedback')
+        .select('company_id')
+        .gt('created_at', new Date(Date.now() - 26 * 3600_000).toISOString())
+        .limit(1000);
+      for (const row of fresh ?? []) companies.push((row as { company_id: string }).company_id);
     }
     let rulesWritten = 0;
     for (const id of new Set(companies)) {

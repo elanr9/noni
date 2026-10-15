@@ -50,7 +50,7 @@
         "npm:expo-video-thumbnails@~57.0.1",
         "npm:expo-video@~57.0.3",
         "npm:expo-web-browser@~57.0.2",
-        "npm:expo@~57.0.21",
+        "npm:expo@~57.0.28",
         "npm:lucide-react-native@^1.28.0",
         "npm:react-dom@19.2.3",
         "npm:react-native-gesture-handler@2.32",

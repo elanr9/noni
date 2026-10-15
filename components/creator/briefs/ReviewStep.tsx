@@ -5,7 +5,7 @@ import { useRef, useState, type JSX, type ReactNode } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { LibraryFeature } from '../../../lib/library-api';
+import { pickFeature, type LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../theme/tokens';
 import { Icon, type IconName } from '../../ui/Icon';
 import { FeatureShot } from './FeatureShot';
@@ -19,6 +19,8 @@ export type ReviewStepProps = {
   format: 'slideshow' | 'reel';
   slides: CreatorSlide[];
   feature: LibraryFeature | null;
+  /** Slideshows: every library feature, so each inset slide shows its own feature. */
+  features?: LibraryFeature[];
   caption: string;
   tags: string;
   handle: string;
@@ -30,13 +32,15 @@ export type ReviewStepProps = {
   /** Reel thumbnails per clip, in order (first frame of each). */
   thumbs?: (string | null)[];
   submitting: boolean;
+  /** Shown next to the spinner while sending, e.g. "Uploading 3 of 8". */
+  submitLabel?: string;
   onBack: () => void;
   onEdit: (index: number) => void;
   onSubmit: () => void;
 };
 
 export function ReviewStep(props: ReviewStepProps): JSX.Element {
-  const { format, slides, feature, caption, tags, handle, avatarUri, initial = 0, stage, scriptRows, thumbs, submitting, onBack, onEdit, onSubmit } = props;
+  const { format, slides, feature, features, caption, tags, handle, avatarUri, initial = 0, stage, scriptRows, thumbs, submitting, submitLabel, onBack, onEdit, onSubmit } = props;
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
   const [areaH, setAreaH] = useState(0);
@@ -126,7 +130,7 @@ export function ReviewStep(props: ReviewStepProps): JSX.Element {
                     text={item.text}
                     photoUri={item.photo?.uri}
                     photoCrop={item.photo?.crop}
-                    feature={item.insetFeatureId ? feature : null}
+                    feature={item.insetFeatureId ? (features ? pickFeature(features, item.insetFeatureId) : feature) : null}
                     layout={item}
                     textScale={item.tstyle?.size ?? 1}
                     who={item.photo ? 'manager' : 'creator'}
@@ -176,7 +180,10 @@ export function ReviewStep(props: ReviewStepProps): JSX.Element {
         </ScrollView>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting }} disabled={submitting} onPress={onSubmit} style={styles.submit}>
           {submitting ? (
-            <ActivityIndicator color={color.white} />
+            <>
+              <ActivityIndicator color={color.white} />
+              {submitLabel ? <Text style={styles.submitText}>{submitLabel}</Text> : null}
+            </>
           ) : (
             <>
               <Text style={styles.submitText}>Submit for approval</Text>

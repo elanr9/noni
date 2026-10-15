@@ -1,6 +1,6 @@
-// Hrefs between the week, the kind picker and the brief editor. Every
-// screen passes the campaign, the slot's brief id, its index and the format
-// so none of them has to refetch the week to know where it is.
+// Hrefs between the week, the kind picker, the idea chat and the brief
+// editor. Every screen passes the campaign, the slot's brief id, its index
+// and the format so none of them has to refetch the week to know where it is.
 
 import type { Href } from 'expo-router';
 
@@ -17,6 +17,19 @@ export type SlotParams = {
 export type EditorParams = SlotParams & {
   kind?: BriefKind;
   postTypeKey?: string;
+  /** An idea from the idea chat: the editor writes the whole post from it on open. */
+  ideaCover?: string;
+  ideaSay?: string;
+  ideaCount?: string;
+  ideaAngle?: string;
+};
+
+/** The idea chat for a week; briefId and format when opened from one empty slot. */
+export type IdeasParams = {
+  campaignId: string;
+  briefId?: string;
+  format?: BriefMediaFormat;
+  week?: string;
 };
 
 export function parseFormat(value: string | undefined): BriefMediaFormat {
@@ -39,6 +52,14 @@ export function kindHref(p: SlotParams): Href {
 export function editorHref(p: EditorParams): Href {
   const { briefId, ...rest } = p;
   return { pathname: '/(admin)/brief/[id]', params: { id: briefId, ...rest } } as Href;
+}
+
+export function ideasHref(p: IdeasParams): Href {
+  const params: Record<string, string> = { campaignId: p.campaignId };
+  if (p.briefId) params.briefId = p.briefId;
+  if (p.format) params.format = p.format;
+  if (p.week) params.week = p.week;
+  return { pathname: '/(admin)/ideas/[campaignId]', params } as Href;
 }
 
 /** Back to the week; `added` is the two digit slot label the toast names. */

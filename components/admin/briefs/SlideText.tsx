@@ -1,79 +1,122 @@
-// Text on a slide, drawn with its stored style (SSCanvas textBoxStyle):
-// outline (stroke behind the letters), box (solid pill) or none (soft shadow).
+// Text on a slide, drawn the way TikTok's text tool draws it: TikTok Sans,
+// outline (white letters with a stroke), box (one bubble per line, letter
+// color and box color chosen separately) or plain. OverlayTextBox owns the
+// exact metrics. While editing, the tree stays fixed (decoration behind, one
+// TextInput in front) so switching styles never remounts the input.
 
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type TextStyle } from 'react-native';
 
-import { color } from '../../../theme/tokens';
+import type { TextSpan } from '../../../lib/briefs-api';
+import { colorRuns, OVERLAY_TEXT_SPEC, overlayTextContrast } from '../../../lib/overlay-boxes';
+import { color, type as typeToken } from '../../../theme/tokens';
 import { OutlinedText } from '../../ui/OutlinedText';
-import { FONTS, isLight, type ResolvedTextStyle } from './canvas/layout';
+import { OutlinedRuns, spanNodes } from '../../ui/OverlayTextBox';
+import type { ResolvedTextStyle } from './canvas/layout';
 
+/** The slide font: the system heavy face at TikTok's size, line height and tracking. */
 export function slideTextStyle(ts: ResolvedTextStyle, fs: number): TextStyle {
-  const f = FONTS[ts.font];
   return {
-    fontFamily: f.family,
-    fontWeight: f.weight,
-    fontStyle: f.italic ? 'italic' : 'normal',
-    fontSize: fs * f.scale,
-    lineHeight: fs * f.scale * 1.2,
-    letterSpacing: f.letterSpacing,
+    fontFamily: typeToken.font.display,
+    fontWeight: '800',
+    fontSize: fs,
+    lineHeight: Math.round(fs * 1.2),
+    letterSpacing: -0.3,
     textAlign: ts.align,
   };
 }
 
-/** The letter color a box or soft background needs under this style. */
+/** Letter color for the style: on a box the chosen color, else the text color. */
 export function textInkFor(ts: ResolvedTextStyle): string {
-  if (ts.bg === 'box') return isLight(ts.color) ? color.ink : color.white;
-  if (ts.bg === 'soft') return isLight(ts.color) ? (ts.color === color.white ? color.ink : ts.color) : color.white;
-  return ts.color;
+  if (ts.bg !== 'box') return ts.color;
+  return ts.color === ts.boxColor ? overlayTextContrast(ts.boxColor) : ts.color;
+}
+
+function alignSelfOf(align: ResolvedTextStyle['align']): 'flex-start' | 'center' | 'flex-end' {
+  return align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
 }
 
 export function SlideText({
   text,
   ts,
   fs,
+  maxWidth,
+  spans,
   children,
 }: {
   text: string;
   ts: ResolvedTextStyle;
   fs: number;
-  /** Replaces the visible text with an input sharing the same metrics. */
+  /** Per word colors; chars outside every span use the box's letter color. */
+  spans?: TextSpan[];
+  /** Widest the box may wrap, in px. */
+  maxWidth?: number;
+  /** An editing TextInput sharing the same metrics. */
   children?: ReactNode;
 }) {
+  const spec = OVERLAY_TEXT_SPEC.bubble;
+  const box = ts.bg === 'box';
+  const padX = box ? fs * spec.padX : 0;
+  const padY = box ? fs * spec.padY : 0;
+  const ink = textInkFor(ts);
   const style = slideTextStyle(ts, fs);
-  if (ts.bg === 'outline') {
+  const colored = Boolean(spans?.length);
+
+  if (children !== undefined) {
+    // With per word colors the input's own letters are transparent (see
+    // slideInputInk) and the colored runs are drawn under it at the same
+    // metrics, the way SSCanvas layers a transparent textarea over spans.
     return (
-      <OutlinedText text={text} fontSize={style.fontSize ?? fs} color={ts.color} style={style}>
-        {children}
-      </OutlinedText>
-    );
-  }
-  if (ts.bg === 'box' || ts.bg === 'soft') {
-    const light = isLight(ts.color);
-    const soft = ts.bg === 'soft';
-    const ink = textInkFor(ts);
-    const fill = soft ? (light ? color.whiteA75 : `${ts.color}B8`) : ts.color;
-    return (
-      <View
-        style={[
-          soft ? null : styles.box,
-          {
-            backgroundColor: fill,
-            borderRadius: fs * 0.35,
-            paddingVertical: fs * 0.35,
-            paddingHorizontal: fs * 0.55,
-            alignSelf: ts.align === 'left' ? 'flex-start' : ts.align === 'right' ? 'flex-end' : 'center',
-          },
-        ]}
-      >
-        {children ?? <Text style={[style, { color: ink }]}>{text}</Text>}
+      <View style={{ alignSelf: alignSelfOf(ts.align), maxWidth }}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View style={[styles.fill, { backgroundColor: box ? ts.boxColor : 'transparent', borderRadius: fs * spec.radius }]} />
+        </View>
+        {colored ? (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { paddingHorizontal: padX, paddingVertical: padY }]}>
+            <Text style={[style, { color: ink }]}>{spanNodes(text, spans, ink)}</Text>
+          </View>
+        ) : null}
+        <View style={{ paddingHorizontal: padX, paddingVertical: padY }}>{children}</View>
       </View>
     );
   }
-  return children ? <View>{children}</View> : <Text style={[style, styles.plain, { color: ts.color }]}>{text}</Text>;
+
+  if (ts.bg === 'none') {
+    return (
+      <View style={{ alignSelf: alignSelfOf(ts.align), maxWidth }}>
+        <Text style={[style, styles.plain, { color: ts.color }]}>{spanNodes(text, spans, ts.color)}</Text>
+      </View>
+    );
+  }
+
+  if (ts.bg === 'outline') {
+    return (
+      <View style={{ alignSelf: alignSelfOf(ts.align), maxWidth }}>
+        {colored ? (
+          <OutlinedRuns runs={colorRuns(text, spans, ts.color)} fontSize={fs} style={style} />
+        ) : (
+          <OutlinedText text={text} fontSize={fs} color={ts.color} style={style} />
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ alignSelf: alignSelfOf(ts.align), maxWidth }}>
+      <View style={[styles.box, { backgroundColor: ts.boxColor, borderRadius: fs * spec.radius, paddingHorizontal: padX, paddingVertical: padY }]}>
+        <Text style={[style, { color: ink }]}>{spanNodes(text, spans, ink)}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** Letter color of the editing input: transparent over colored runs. */
+export function slideInputInk(ts: ResolvedTextStyle, spans: TextSpan[] | undefined): string {
+  return spans?.length ? 'transparent' : textInkFor(ts);
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
   box: {
     shadowColor: color.ink,
     shadowOffset: { width: 0, height: 1 },

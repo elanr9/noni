@@ -14,6 +14,83 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_feedback: {
+        Row: {
+          after: string | null
+          before: string | null
+          brief_id: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          format: string | null
+          id: string
+          kind: string
+          note: string | null
+          post_type: string | null
+          role: string | null
+          surface: string
+        }
+        Insert: {
+          after?: string | null
+          before?: string | null
+          brief_id?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          format?: string | null
+          id?: string
+          kind: string
+          note?: string | null
+          post_type?: string | null
+          role?: string | null
+          surface?: string
+        }
+        Update: {
+          after?: string | null
+          before?: string | null
+          brief_id?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          format?: string | null
+          id?: string
+          kind?: string
+          note?: string | null
+          post_type?: string | null
+          role?: string | null
+          surface?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_feedback_brief_id_fkey"
+            columns: ["brief_id"]
+            isOneToOne: false
+            referencedRelation: "briefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_feedback_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_feedback_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_feedback_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_learnings: {
         Row: {
           active: boolean
@@ -149,6 +226,7 @@ export type Database = {
           publish_claimed_at: string | null
           publish_error: string | null
           scheduled_date: string
+          slides_variant: Json | null
           slot_index: number
           status: string
           storage_cleaned_at: string | null
@@ -175,6 +253,7 @@ export type Database = {
           publish_claimed_at?: string | null
           publish_error?: string | null
           scheduled_date: string
+          slides_variant?: Json | null
           slot_index?: number
           status?: string
           storage_cleaned_at?: string | null
@@ -201,6 +280,7 @@ export type Database = {
           publish_claimed_at?: string | null
           publish_error?: string | null
           scheduled_date?: string
+          slides_variant?: Json | null
           slot_index?: number
           status?: string
           storage_cleaned_at?: string | null
@@ -4086,6 +4166,7 @@ export type Database = {
           id: string
           library_item_id: string | null
           pattern: Json | null
+          phase: string | null
           platform: string | null
           slide_texts: Json | null
           status: string
@@ -4102,6 +4183,7 @@ export type Database = {
           id?: string
           library_item_id?: string | null
           pattern?: Json | null
+          phase?: string | null
           platform?: string | null
           slide_texts?: Json | null
           status?: string
@@ -4118,6 +4200,7 @@ export type Database = {
           id?: string
           library_item_id?: string | null
           pattern?: Json | null
+          phase?: string | null
           platform?: string | null
           slide_texts?: Json | null
           status?: string

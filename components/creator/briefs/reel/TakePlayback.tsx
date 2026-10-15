@@ -12,6 +12,7 @@ import { Icon } from '../../../ui/Icon';
 import { ClipVideo, ScrubBar, useClipPlayback } from '../../record/ClipPlayback';
 import { layoutOf, SLIDE_TEXT_SIZE } from '../model';
 import type { ReelPlanItem } from './plan';
+import { itemTextLook } from './sync';
 
 export function TakePlayback({
   asset,
@@ -51,7 +52,7 @@ export function TakePlayback({
             { left: L.text.x * stageWidth - (L.text.w * stageWidth) / 2, top: L.text.y * stageHeight, width: L.text.w * stageWidth },
           ]}
         >
-          <OverlayTextBox text={item.text} color={color.white} bg fontSize={fontSize} maxWidth={overlayWrapWidth(L.text.w, stageWidth)} />
+          <OverlayTextBox text={item.text} {...itemTextLook(item)} fontSize={fontSize} maxWidth={overlayWrapWidth(L.text.w, stageWidth)} />
         </View>
       ) : null}
       <View style={styles.scrub}>

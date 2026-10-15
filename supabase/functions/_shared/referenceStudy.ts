@@ -6,7 +6,7 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
-import { readSocialPost, type ReadPost } from './scrapeSocial.ts';
+import { readSocialPost, type ReadPhase, type ReadPost } from './scrapeSocial.ts';
 import { askClaude, parseClaudeJson, softenDashes } from './wp8.ts';
 
 export type PatternCard = {
@@ -72,6 +72,7 @@ const PATTERN_SYSTEM = `You break down one short form social post that performed
 - insider_details: facts, numbers, names, dates, rules or scenarios that show real expertise, copied or closely paraphrased, up to 6. Generic advice anyone could guess never goes here.
 - phrases: exact lines in the speaker's own voice worth learning from, up to 6.
 - product_mention: how a product or service is brought in, word for word, or null.
+- cta: the ask to the viewer (a product plug, comment a word, follow, link in bio), word for word, plus where it lands (right after the hook, in the middle as one of the items, or at the end); null when there is none.
 - quality: 1 to 5, how good a model this is for writing a new post (5 means specific, expert and native).
 Never invent content the source does not contain. Inside string values use single quotes for quoted speech.`;
 
@@ -134,6 +135,67 @@ export async function loadStudy(
   return (data as ReferenceStudy | null) ?? null;
 }
 
+/** A study by its row id, scoped to the company. */
+export async function loadStudyById(
+  admin: SupabaseClient,
+  companyId: string,
+  id: string,
+): Promise<ReferenceStudy | null> {
+  const { data } = await admin
+    .from('reference_studies')
+    .select(STUDY_COLUMNS)
+    .eq('company_id', companyId)
+    .eq('id', id)
+    .maybeSingle();
+  return (data as ReferenceStudy | null) ?? null;
+}
+
+/** Where a study is while it runs; the Library polls it for its live steps. */
+export type StudyPhase = 'reading' | ReadPhase | 'studying';
+
+/**
+ * Best effort: records the phase on the study row. Needs migration 119's
+ * phase column; without it the write fails quietly and the steps hold.
+ */
+export async function setStudyPhase(
+  admin: SupabaseClient,
+  companyId: string,
+  url: string,
+  phase: StudyPhase | null,
+): Promise<void> {
+  try {
+    await admin
+      .from('reference_studies')
+      .update({ phase })
+      .eq('company_id', companyId)
+      .eq('url', normalizeReferenceUrl(url));
+  } catch {
+    // The phase is decoration.
+  }
+}
+
+/**
+ * Marks a study as running before the background work starts, so a poller
+ * never reads an old failure as the new result.
+ */
+export async function markStudyPending(
+  admin: SupabaseClient,
+  companyId: string,
+  url: string,
+  libraryItemId: string | null,
+): Promise<void> {
+  const row: Record<string, unknown> = {
+    company_id: companyId,
+    url: normalizeReferenceUrl(url),
+    status: 'pending',
+    error: null,
+  };
+  if (libraryItemId) row.library_item_id = libraryItemId;
+  const { error } = await admin.from('reference_studies').upsert(row, { onConflict: 'company_id,url' });
+  if (error) throw new Error(`reference_studies write failed: ${error.message}`);
+  await setStudyPhase(admin, companyId, url, 'reading');
+}
+
 /**
  * The stored study for this reference, scraping and studying it the first
  * time. `alreadyRead` lets a caller that scraped the post itself skip the
@@ -158,7 +220,9 @@ export async function studyReference(
     return existing;
   }
 
-  const read = options.alreadyRead ?? (await readSocialPost(url));
+  const read =
+    options.alreadyRead ??
+    (await readSocialPost(url, (phase) => setStudyPhase(admin, companyId, key, phase)));
   if (!read) {
     await admin.from('reference_studies').upsert(
       {
@@ -178,6 +242,7 @@ export async function studyReference(
   if (!hasReadableSource(read)) {
     error = NO_SOURCE_ERROR;
   } else {
+    await setStudyPhase(admin, companyId, key, 'studying');
     try {
       pattern = await extractPattern({
         caption: read.post.caption,
@@ -211,6 +276,7 @@ export async function studyReference(
     .select(STUDY_COLUMNS)
     .single();
   if (upsertError) throw new Error(`reference_studies write failed: ${upsertError.message}`);
+  await setStudyPhase(admin, companyId, key, null);
   return data as ReferenceStudy;
 }
 
@@ -226,6 +292,7 @@ export function patternLines(card: PatternCard): string {
     card.insider_details.length ? `Insider details: ${card.insider_details.join(' | ')}` : null,
     card.phrases.length ? `Lines in their voice: ${card.phrases.join(' | ')}` : null,
     card.product_mention ? `Product mention: ${card.product_mention}` : null,
+    card.cta ? `CTA: ${card.cta}` : null,
     `Why it works: ${card.why_it_works}`,
   ]
     .filter((l): l is string => l !== null)

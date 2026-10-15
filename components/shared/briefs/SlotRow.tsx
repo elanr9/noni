@@ -1,8 +1,11 @@
 // Week slot rows (SSManager.jsx WeekScreen). Filled: white card, two digit
 // number, title, kind chip and post type chip, chevron. Empty: dashed row with
 // "Empty" and a plus. Both are fixed height so the list never jumps.
+// A filled row swipes left to show Clear; a long press asks to clear too.
 
+import { useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 import { Icon } from '../../ui/Icon';
 import { color, radius, shadow, type as typeToken } from '../../../theme/tokens';
@@ -20,6 +23,7 @@ export function FilledSlotRow({
   format,
   postTypeName,
   onPress,
+  onClear,
 }: {
   index: number;
   title: string;
@@ -27,12 +31,22 @@ export function FilledSlotRow({
   format: BriefMediaFormat;
   postTypeName: string | null;
   onPress: () => void;
+  /** Empty the slot again. Swipe left or long press. */
+  onClear?: () => void;
 }) {
-  return (
+  const swipe = useRef<SwipeableMethods>(null);
+  const clear = () => {
+    swipe.current?.close();
+    onClear?.();
+  };
+  const row = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Slot ${slotLabel(index)}, ${title}`}
+      accessibilityHint={onClear ? 'Swipe left or long press to clear' : undefined}
       onPress={onPress}
+      onLongPress={onClear ? clear : undefined}
+      delayLongPress={450}
       style={({ pressed }) => [styles.filled, pressed ? styles.pressed : null]}
     >
       <Text style={styles.number}>{slotLabel(index)}</Text>
@@ -47,6 +61,24 @@ export function FilledSlotRow({
       </View>
       <Icon name="chevron-right" size={18} color={color.slate300} />
     </Pressable>
+  );
+  if (!onClear) return row;
+  return (
+    <ReanimatedSwipeable
+      ref={swipe}
+      friction={1.6}
+      rightThreshold={48}
+      overshootRight={false}
+      containerStyle={styles.swipe}
+      renderRightActions={() => (
+        <Pressable accessibilityRole="button" accessibilityLabel={`Clear slot ${slotLabel(index)}`} onPress={clear} style={({ pressed }) => [styles.clear, pressed ? styles.pressed : null]}>
+          <Icon name="x" size={18} color={color.white} />
+          <Text style={styles.clearText}>Clear</Text>
+        </Pressable>
+      )}
+    >
+      {row}
+    </ReanimatedSwipeable>
   );
 }
 
@@ -91,6 +123,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   pressed: { opacity: 0.85 },
+  swipe: { overflow: 'visible' },
+  clear: {
+    width: 88,
+    height: SLOT_ROW_HEIGHT,
+    marginLeft: 10,
+    borderRadius: radius.lg,
+    backgroundColor: color.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  clearText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 13, color: color.white },
   number: { width: 22, fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 13, color: color.slate400 },
   body: { flex: 1, minWidth: 0, gap: 6 },
   title: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 16, letterSpacing: -0.2, color: color.ink },

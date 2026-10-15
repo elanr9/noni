@@ -13,6 +13,7 @@ import { BriefHeader } from '../../shared/briefs';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { MiniSlide } from './MiniSlide';
+import { ctaPlace } from './model';
 
 export type StartScreenProps = {
   brief: WeekBrief;
@@ -25,6 +26,8 @@ export type StartScreenProps = {
 
 function copyFor(brief: WeekBrief, companyName: string, clipCount: number): { head: string; sub: string; cta: string } {
   const reel = brief.format === 'reel';
+  const place = ctaPlace(brief);
+  const anywhere = 'Put the plug wherever it fits.';
   if (reel) {
     if (brief.postTypeKey === 'long_text') {
       return {
@@ -34,20 +37,42 @@ function copyFor(brief: WeekBrief, companyName: string, clipCount: number): { he
       };
     }
     if (brief.kind === 'handheld') {
-      return { head: 'This is a Handheld reel!', sub: `${clipCount} clips. Each one tells you what to say. Just record.`, cta: 'Open camera' };
+      return {
+        head: 'This is a Handheld reel!',
+        sub: `${clipCount} clips. Each one tells you what to say. Just record.${place === 'any' ? ` ${anywhere}` : ''}`,
+        cta: 'Open camera',
+      };
     }
     if (brief.kind === 'story') {
-      return { head: 'This is a Story reel!', sub: 'Record the hook we wrote, then tell it your way. The plug is the last clip.', cta: 'Open camera' };
+      return {
+        head: 'This is a Story reel!',
+        sub:
+          place === 'after_hook'
+            ? 'Record the hook we wrote, then the plug, then tell it your way.'
+            : place === 'end'
+              ? 'Record the hook we wrote, then tell it your way. The plug is the last clip.'
+              : `Record the hook we wrote, then tell it your way. ${anywhere}`,
+        cta: 'Open camera',
+      };
     }
     return { head: 'This is a Freestyle reel!', sub: `Record whatever you want. Make sure to mention ${companyName} in the video!`, cta: 'Open camera' };
   }
   if (brief.kind === 'handheld') {
-    return { head: 'This is a Handheld post!', sub: "Everything's ready, just add your pictures and send for approval!", cta: "Let's go" };
+    return {
+      head: 'This is a Handheld post!',
+      sub: place === 'any' ? `Everything's ready, just add your pictures. ${anywhere}` : "Everything's ready, just add your pictures and send for approval!",
+      cta: "Let's go",
+    };
   }
   if (brief.kind === 'story') {
     return {
       head: 'This is a Story post!',
-      sub: 'The cover and plug are set. The middle is yours: your photos, your words if you want them.',
+      sub:
+        place === 'after_hook'
+          ? 'The cover and plug are set, the plug right after the cover. The rest is yours: your photos, your words if you want them.'
+          : place === 'end'
+            ? 'The cover and plug are set. The middle is yours: your photos, your words if you want them.'
+            : `The cover and plug are set. The rest is yours: your photos, your words if you want them. ${anywhere}`,
       cta: "Let's go",
     };
   }

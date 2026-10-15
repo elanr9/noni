@@ -1,20 +1,23 @@
 // Full screen slide canvas, creator mode: the photo fills the frame and is
 // framed per platform (TikTok 9:16, Instagram 4:5), the manager's text and
-// the feature inset sit on top and can be moved, own slides can be typed on.
+// the feature inset sit on top and can be moved, own slides can be typed on,
+// and a plug the creator places moves earlier or later.
 // From SSCanvas.jsx CanvasEditor (creator) and SSCreator.jsx edit footers.
 // Mount with key={index}: platform, crop and typing state start fresh per slide.
 import { useState, type JSX, type ReactNode } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { TextSpan } from '../../../../lib/briefs-api';
 import type { LibraryFeature } from '../../../../lib/library-api';
+import { shiftSpans } from '../../../../lib/overlay-boxes';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { SlideStage } from '../../../SlideStage';
 import { centeredCrop } from '../../slides/photo-crop';
 import { Icon, type IconName } from '../../../ui/Icon';
 import { FeatureShot } from '../FeatureShot';
 import { SLIDE_RATIO } from '../MiniSlide';
-import { layoutOf, patchSlideBox, patchSlideInset, picUri, roleLabel, slideBoxes, type CreatorSlide, type SlidePlatform } from '../model';
+import { layoutOf, patchSlideBox, patchSlideInset, picPlacement, picUri, roleLabel, slideBoxes, type CreatorSlide, type SlidePlatform } from '../model';
 import { SlideDots } from './SlideDots';
 import { INSTAGRAM_ASPECT, TIKTOK_ASPECT } from './photo-picker';
 
@@ -43,6 +46,8 @@ export type EditStepProps = {
   onSelect: (index: number) => void;
   onAskAi: () => void;
   onAddPhotos: () => void;
+  /** A plug the creator places: move it one slide earlier or later (never before the cover). */
+  ctaMove?: { earlier: boolean; later: boolean; onMove: (dir: -1 | 1) => void };
 };
 
 function RoundButton({ icon, label, onPress, on = false, children }: { icon?: IconName; label: string; onPress: () => void; on?: boolean; children?: ReactNode }): JSX.Element {
@@ -56,7 +61,7 @@ function RoundButton({ icon, label, onPress, on = false, children }: { icon?: Ic
 export function EditStep(props: EditStepProps): JSX.Element {
   const {
     slides, index, feature, flexible, open, ownDetails, fromReview, autoCrop, minOwn,
-    onBack, onNext, onDone, onChangePhoto, onAddSlide, onRemoveSlide, onPatch, onSelect, onAskAi, onAddPhotos,
+    onBack, onNext, onDone, onChangePhoto, onAddSlide, onRemoveSlide, onPatch, onSelect, onAskAi, onAddPhotos, ctaMove,
   } = props;
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
@@ -133,13 +138,14 @@ export function EditStep(props: EditStepProps): JSX.Element {
             {(cur.pics ?? []).map((p) => {
               const uri = picUri(p.src);
               if (!uri) return null;
-              const pw = W * p.box.w;
+              const b = picPlacement(p.box, platform);
+              const pw = W * b.w;
               const ph = (pw * 4) / 3;
               return (
                 <Image
                   key={p.id}
                   source={{ uri }}
-                  style={[styles.pic, { left: p.box.x * W - pw / 2, top: p.box.y * stageH - ph / 2, width: pw, height: ph, borderRadius: pw * 0.03 }]}
+                  style={[styles.pic, { left: b.x * W - pw / 2, top: b.y * stageH - ph / 2, width: pw, height: ph, borderRadius: pw * 0.03 }]}
                   resizeMode="cover"
                 />
               );
@@ -199,6 +205,28 @@ export function EditStep(props: EditStepProps): JSX.Element {
               <View style={styles.kindLabel} pointerEvents="none">
                 <Text style={styles.kindLabelText}>{kindLabel}</Text>
               </View>
+              {ctaMove ? (
+                <View style={styles.move}>
+                  {([[-1, 'Earlier', 'chevron-left'], [1, 'Later', 'chevron-right']] as const).map(([dir, label, icon]) => {
+                    const ok = dir < 0 ? ctaMove.earlier : ctaMove.later;
+                    return (
+                      <Pressable
+                        key={label}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Move plug ${label.toLowerCase()}`}
+                        accessibilityState={{ disabled: !ok }}
+                        disabled={!ok}
+                        onPress={() => ctaMove.onMove(dir)}
+                        style={[styles.moveBtn, dir > 0 ? styles.moveBtnRight : null]}
+                      >
+                        {dir < 0 ? <Icon name={icon} size={15} color={ok ? color.white : color.whiteA28} /> : null}
+                        <Text style={[styles.moveText, { color: ok ? color.white : color.whiteA28 }]}>{label}</Text>
+                        {dir > 0 ? <Icon name={icon} size={15} color={ok ? color.white : color.whiteA28} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
               <View style={styles.tools}>
                 {cur.own ? (
                   <RoundButton label="Text" onPress={() => setTyping(true)} on={typing}>
@@ -218,7 +246,16 @@ export function EditStep(props: EditStepProps): JSX.Element {
                   autoFocus
                   multiline
                   value={cur.text}
-                  onChangeText={(text) => onPatch({ ...cur, text })}
+                  onChangeText={(text) => {
+                    // Keep the manager's per word colors on the right chars while the creator edits.
+                    const spans = (cur as CreatorSlide & { spans?: TextSpan[] }).spans;
+                    const next: CreatorSlide & { spans?: TextSpan[] } = { ...cur, text };
+                    if (spans?.length) {
+                      const shifted = shiftSpans(spans, cur.text, text);
+                      next.spans = shifted.length ? shifted : undefined;
+                    }
+                    onPatch(next);
+                  }}
                   placeholder={cur.role === 'cover' ? 'Your title' : 'Your words'}
                   placeholderTextColor={color.whiteA60}
                   style={styles.typeInput}
@@ -347,6 +384,10 @@ const styles = StyleSheet.create({
   platformText: { fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '700' },
   kindLabel: { position: 'absolute', left: 12, top: 63, height: 42, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 999, backgroundColor: color.inkA55 },
   kindLabelText: { fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '700', color: color.white },
+  move: { position: 'absolute', left: 12, top: 113, flexDirection: 'row', borderRadius: 999, backgroundColor: color.inkA55, overflow: 'hidden' },
+  moveBtn: { height: 40, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  moveBtnRight: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: color.whiteA28 },
+  moveText: { fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '700' },
   tools: { position: 'absolute', right: 12, top: 62, flexDirection: 'row', gap: 8 },
   cropLabelWrap: { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
   cropLabel: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: color.inkA55, color: color.white, fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '700', overflow: 'hidden' },

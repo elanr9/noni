@@ -23,14 +23,15 @@ import {
 } from './renderTimeline.ts';
 import { renderGreenScreenClip, awaitRender, startOverlayRender } from './renderAdapter.ts';
 import { removeBackground } from './backgroundRemoval.ts';
-import { buildOverlayGraph, buildShapeAss, overlayCommand, slideCommand } from './ffmpegOverlay.ts';
+import { buildOverlayGraph, buildShapeAss, overlayCommand, readFontMetrics, slideCommand, type FontMetrics } from './ffmpegOverlay.ts';
+import { measureOverlayLine, wrapOverlayLines, type OverlayFont } from './overlayTextMetrics.ts';
 import {
   buildDrawtextChain,
   needsCompositePass,
   textImageCommand,
   textVideoCommand,
 } from './ffmpegText.ts';
-import { fontUrl, isVideoSource, OVERLAY_TEXT_SPEC, SUBTITLE_Y } from './renderAdapter.ts';
+import { classicOutlineColor, fontUrl, isVideoSource, OVERLAY_TEXT_SPEC, overlayTextContrast, SUBTITLE_Y } from './renderAdapter.ts';
 import type { RenderTimeline, SegmentBox } from './renderTimeline.ts';
 import {
   placeCue,
@@ -516,6 +517,140 @@ export async function renderOverlaysWithFfmpeg(params: {
   return { path: outputPath, warning };
 }
 
+// ---- Per word colors on slide text ----
+//
+// A slide box with spans (chars [start, end) in their own color, Instagram
+// stories style) cannot be one drawtext per line: drawtext has one color.
+// Each wrapped line is laid out here with the same wrap and the same font
+// advance table the client uses (overlayTextMetrics), then every colored
+// run is its own drawtext at a measured x offset from the line's left edge.
+// Boxes without spans keep going through buildDrawtextChain unchanged.
+
+export type BoxSpan = { start: number; end: number; color: string };
+
+/** A slide text box as the bake takes it: a SegmentBox plus optional per word colors. */
+export type SlideTextBox = SegmentBox & { spans?: BoxSpan[] };
+
+/** Characters Upload-Post rejects anywhere in full_command (mirror of ffmpegText). */
+const SPAN_FORBIDDEN = /[;|&$`]/;
+
+const spanPx = (n: number): string => Number(n.toFixed(2)).toString();
+
+/** Mirror of ffmpegText drawtextColor. */
+function spanDrawtextColor(color: string): string {
+  const raw = color.replace('#', '').trim();
+  if (raw.length === 8) {
+    const alpha = parseInt(raw.slice(6, 8), 16) / 255;
+    return `0x${raw.slice(0, 6)}@${alpha.toFixed(3)}`;
+  }
+  return `0x${raw.slice(0, 6)}`;
+}
+
+/** Mirror of ffmpegText escapeDrawtextText (shell, graph and option escaping). */
+function spanEscape(line: string): string {
+  let out = '';
+  for (const ch of line) {
+    if (ch === '\\') out += '\\\\\\\\\\\\\\\\';
+    else if (ch === ':' || ch === "'") out += `\\\\\\\\\\${ch}`;
+    else if (ch === '"') out += '\\"';
+    else out += `\\${ch}`;
+  }
+  return out;
+}
+
+/**
+ * For each wrapped line, the index in text of each of its UTF16 units.
+ * Wrapping collapses whitespace runs into one space; a space maps to the
+ * first whitespace char it stands for. Mirror of lib/overlay-boxes.
+ */
+export function wrappedLineIndices(text: string, lines: readonly string[]): number[][] {
+  const space = (c: string | undefined): boolean => c !== undefined && /\s/.test(c);
+  let k = 0;
+  return lines.map((line) => {
+    const idx: number[] = [];
+    while (k < text.length && space(text[k])) k++;
+    for (let ci = 0; ci < line.length; ci++) {
+      const ch = line[ci];
+      if (space(ch)) {
+        idx.push(Math.min(k, text.length - 1));
+        while (k < text.length && space(text[k])) k++;
+        continue;
+      }
+      while (k < text.length && text[k] !== ch) k++;
+      idx.push(Math.min(k, text.length - 1));
+      k++;
+    }
+    return idx;
+  });
+}
+
+/**
+ * drawtext filters (and the text files they read) for slide boxes with
+ * spans. Placement matches buildDrawtextChain: same wrap widths, line pitch
+ * and baseline; each run sits at the line's measured left edge plus the
+ * measured width of the line before it.
+ */
+export function buildSpanDrawtext(params: {
+  boxes: SlideTextBox[];
+  frame: { width: number; height: number };
+  metrics: FontMetrics;
+  fontPlaceholder: string;
+  /** Placeholder for the i-th text file this call returns. */
+  textfilePlaceholder: (index: number) => string;
+}): { filters: string[]; textfiles: string[] } {
+  const { frame, metrics, fontPlaceholder, textfilePlaceholder } = params;
+  const filters: string[] = [];
+  const textfiles: string[] = [];
+  for (const box of params.boxes) {
+    if (!box.spans?.length) continue;
+    const font: OverlayFont = box.bg ? 'bubble' : 'condensed';
+    const fontPx = box.size * frame.width;
+    const centreX = box.x * frame.width;
+    const wrapWidth = box.width ?? OVERLAY_TEXT_SPEC.maxWidth;
+    const lines = box.bg
+      ? wrapOverlayLines(box.text, (wrapWidth - 2 * box.size * OVERLAY_TEXT_SPEC.bubble.padX) / box.size, 'bubble')
+      : wrapOverlayLines(box.text, wrapWidth / box.size, 'condensed');
+    const base = box.bg ? overlayTextContrast(box.color) : box.color;
+    const colorAt = (i: number): string => box.spans?.find((sp) => sp.start <= i && sp.end > i)?.color ?? base;
+    const indices = wrappedLineIndices(box.text, lines);
+    const pitch = fontPx * OVERLAY_TEXT_SPEC[font].lineHeight;
+    const firstY = box.y * frame.height - ((lines.length - 1) / 2) * pitch;
+    lines.forEach((line, li) => {
+      if (line.length === 0) return;
+      const left = centreX - (measureOverlayLine(line, font) * fontPx) / 2;
+      const centreY = firstY + li * pitch;
+      const baseline = centreY + ((metrics.hheaAscender + metrics.hheaDescender) / 2 / metrics.unitsPerEm) * fontPx;
+      // Runs of one color; a space joins the run before it.
+      const runs: { from: number; to: number; color: string }[] = [];
+      for (let ci = 0; ci < line.length; ci++) {
+        const last = runs[runs.length - 1];
+        const c = /\s/.test(line[ci]) && last ? last.color : colorAt(indices[li][ci] ?? 0);
+        if (last && last.color === c) last.to = ci + 1;
+        else runs.push({ from: ci, to: ci + 1, color: c });
+      }
+      for (const run of runs) {
+        const raw = line.slice(run.from, run.to);
+        const lead = raw.length - raw.trimStart().length;
+        const text = raw.trim();
+        if (!text) continue;
+        const x = left + measureOverlayLine(line.slice(0, run.from + lead), font) * fontPx;
+        const source = SPAN_FORBIDDEN.test(text)
+          ? `textfile=${textfilePlaceholder(textfiles.push(text) - 1)}`
+          : `text=${spanEscape(text)}`;
+        const stroke = box.bg
+          ? ''
+          : `:borderw=${Math.max(1, Math.round(fontPx * OVERLAY_TEXT_SPEC.condensed.strokeRatio))}:bordercolor=${spanDrawtextColor(classicOutlineColor(run.color))}`;
+        filters.push(
+          `drawtext=fontfile=${fontPlaceholder}:${source}:fontsize=${spanPx(fontPx)}` +
+            `:fontcolor=${spanDrawtextColor(run.color)}${stroke}` +
+            `:x=${spanPx(x)}:y=${spanPx(baseline)}-ascent:expansion=none`,
+        );
+      }
+    });
+  }
+  return { filters, textfiles };
+}
+
 // Bake one slideshow slide on Upload-Post ffmpeg: the photo conformed to the
 // frame, the admin's inset picture and text boxes burnt in, stored as a PNG.
 // A slide with an inset or a bubble runs the composite graph first (one job),
@@ -523,7 +658,8 @@ export async function renderOverlaysWithFfmpeg(params: {
 export async function renderSlideWithFfmpeg(params: {
   admin: AdminClient;
   photoPath: string;
-  boxes: SegmentBox[];
+  /** Text boxes; a box with spans bakes its words in their own colors. */
+  boxes: SlideTextBox[];
   inset?: { path: string; x: number; y: number; width: number };
   outputPath: string;
   label: string;
@@ -601,14 +737,24 @@ export async function renderSlideWithFfmpeg(params: {
       prefix = [];
     }
     const textfilePaths: string[] = [];
+    // Boxes with per word colors are drawn run by run (buildSpanDrawtext);
+    // the composite pass above still drew every box's bubble shape.
     const plan = buildDrawtextChain({
-      timeline,
+      timeline: { ...timeline, texts: timeline.texts.filter((_t, i) => !boxes[i].spans?.length) },
       font,
       fontPlaceholder: '{input2}',
       textfilePlaceholder: (i) => `{input${3 + i}}`,
       prefix,
     });
-    for (const [i, text] of plan.textfiles.entries()) {
+    const spanPlan = buildSpanDrawtext({
+      boxes,
+      frame,
+      metrics: readFontMetrics(font),
+      fontPlaceholder: '{input2}',
+      textfilePlaceholder: (i) => `{input${3 + plan.textfiles.length + i}}`,
+    });
+    const vf = [plan.vf, ...spanPlan.filters].filter((f) => f.length > 0).join(',');
+    for (const [i, text] of [...plan.textfiles, ...spanPlan.textfiles].entries()) {
       const path = `${outputPath}.text${i}`;
       await uploadTextToVideos(admin, path, text, `${label} text ${i}`);
       textfilePaths.push(path);
@@ -619,7 +765,7 @@ export async function renderSlideWithFfmpeg(params: {
       admin,
       apiKey,
       files: [anchorUrl, baseUrl, fontUrl(OVERLAY_TEXT_SPEC.condensed.file), ...textUrls],
-      fullCommand: textImageCommand({ vf: plan.vf }),
+      fullCommand: textImageCommand({ vf }),
       outputPath,
       outputExtension: 'png',
       label,

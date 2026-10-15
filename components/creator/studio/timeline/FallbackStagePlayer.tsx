@@ -1,8 +1,9 @@
 // Android (and any build without the native module): expo-video plays cell 0
 // of the block under the playhead at its speed; splits show one cell and
-// image blocks run on the JS clock. Preview only; the server render is exact.
+// image blocks run on the JS clock. A clip whose local file is gone plays
+// from its upload. Preview only; the server render is exact.
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useMemo, useRef, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { StyleSheet } from 'react-native';
 
 import {
@@ -13,7 +14,46 @@ import {
   type VideoDocument,
 } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
+import { resolveLocalUri } from '../../../../lib/studio-uploads';
+import { supabase } from '../../../../lib/supabase';
 import { useJsClock } from './useJsClock';
+
+const signedVideos = new Map<string, Promise<string>>();
+
+function signVideo(path: string): Promise<string> {
+  const hit = signedVideos.get(path);
+  if (hit) return hit;
+  const pending = supabase.storage
+    .from('videos')
+    .createSignedUrl(path, 3600)
+    .then(({ data, error }) => {
+      if (error || !data) throw error ?? new Error('could not sign');
+      return data.signedUrl;
+    });
+  pending.catch(() => signedVideos.delete(path));
+  signedVideos.set(path, pending);
+  return pending;
+}
+
+/** Local file when it is still there, else a signed URL for the upload. */
+function usePlayableUri(localUri: string | null, storagePath: string | null): string | null {
+  const local = useMemo(() => resolveLocalUri(localUri), [localUri]);
+  const remotePath = local ? null : storagePath;
+  const [signed, setSigned] = useState<{ path: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!remotePath) return;
+    let alive = true;
+    signVideo(remotePath)
+      .then((url) => {
+        if (alive) setSigned({ path: remotePath, url });
+      })
+      .catch((e: unknown) => console.warn('studio preview sign failed', e));
+    return () => {
+      alive = false;
+    };
+  }, [remotePath]);
+  return local ?? (remotePath && signed?.path === remotePath ? signed.url : null);
+}
 
 export function FallbackStagePlayer(props: { doc: VideoDocument }): JSX.Element | null {
   const { doc } = props;
@@ -25,7 +65,7 @@ export function FallbackStagePlayer(props: { doc: VideoDocument }): JSX.Element 
   const range = ranges.find((r) => r.block.id === blockId) ?? null;
   const cell = range?.block.cells[0] ?? null;
   const asset = cell ? assetById(doc, cell.assetId) : null;
-  const uri = asset?.kind === 'video' ? asset.localUri : null;
+  const uri = usePlayableUri(asset?.kind === 'video' ? asset.localUri : null, asset?.kind === 'video' ? asset.storagePath : null);
   const startMs = range?.startMs ?? 0;
   const endMs = range?.endMs ?? 0;
   const inMs = cell?.inMs ?? 0;

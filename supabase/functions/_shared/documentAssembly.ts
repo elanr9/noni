@@ -11,6 +11,7 @@ import {
   AUDIO_CODEC,
   AUDIO_CONFORM,
   CONFORM_1080x1920,
+  conformFilter,
   gainFilters,
   inputPlaceholder,
   instagramSlidePath,
@@ -25,6 +26,7 @@ import {
   renderOverlaysWithFfmpeg,
   renderSlideWithFfmpeg,
   runFfmpegJob,
+  signBriefAssets,
   signVideoUrls,
   slideFrame,
   stageJobId,
@@ -33,10 +35,12 @@ import {
   type AdminClient,
   type AssembleResult,
   type OverlayHandoff,
+  type SlideTextBox,
   type SubmissionRow,
 } from './assemble.ts';
 import {
   assetById,
+  DEFAULT_SUBTITLE_Y,
   blockDurationMs,
   documentDurationMs,
   MAX_CROP_SCALE,
@@ -46,7 +50,10 @@ import {
   type EditDocument,
   type MediaAsset,
   type OverlayBox,
+  type Slide,
   type SlideCrop,
+  type SlideImage,
+  type SlidePlacement,
   type SlideshowDocument,
   type VideoDocument,
 } from './editDocument.ts';
@@ -59,6 +66,8 @@ import {
   type TimelineImage,
   type TimelineText,
 } from './renderTimeline.ts';
+import { buildOverlayGraph, slideCommand } from './ffmpegOverlay.ts';
+import { fontUrl } from './renderAdapter.ts';
 import { subtitleLines, transcribeClip, type SubtitleLine, type TranscriptWord } from './cues.ts';
 
 export type DocumentAssemblyContext = {
@@ -368,6 +377,13 @@ function overlayBoxToSegmentBox(box: OverlayBox): SegmentBox {
   };
 }
 
+/** A slide's text box for the bake, keeping its per word colors. */
+export function slideBoxToBakeBox(box: OverlayBox): SlideTextBox {
+  const out: SlideTextBox = overlayBoxToSegmentBox(box);
+  if (box.spans?.length) out.spans = box.spans.map((sp) => ({ ...sp }));
+  return out;
+}
+
 /**
  * RenderTimeline for the overlay stages: one clip per block, every text and
  * picture overlay at the document's own absolute window (the drawtext chain
@@ -552,6 +568,169 @@ export function slideCropFilter(crop: SlideCrop | null): string | null {
   return `crop=${width}:${height}:${Math.max(0, Math.round(crop.x))}:${Math.max(0, Math.round(crop.y))}`;
 }
 
+/** Same anchor renderSlideWithFfmpeg puts first so a still bills one second. */
+const QUOTA_ANCHOR_FILE = 'quota-anchor.mp4';
+
+type PlacedImage = SlidePlacement & { path: string };
+
+/** Clip files the slide bake cannot lay on a still (the legacy path skips them with isVideoFile). */
+const VIDEO_PATH = /\.(mp4|mov|m4v|webm|m3u8)(\?|#|$)/i;
+
+/**
+ * Storage path the slide bake can sign. A storage path goes as it is (signed
+ * from brief-assets, or from videos for an asset path); an https URL (a
+ * library screenshot, a sticker) is copied once into the submission folder
+ * under an asset path so overlayImageBucket reads it from videos.
+ */
+async function bakeablePath(
+  admin: AdminClient,
+  src: string,
+  folder: string,
+  key: string,
+  cache: Map<string, Promise<string>>,
+): Promise<string> {
+  if (!/^https?:\/\//i.test(src)) return src;
+  const hit = cache.get(src);
+  if (hit) return hit;
+  const job = (async () => {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`could not fetch slide picture ${key}: ${res.status}`);
+    const type = res.headers.get('content-type') ?? 'image/png';
+    if (!/^image\//i.test(type)) throw new Error(`slide picture ${key} is ${type}, not a still image`);
+    const ext = /jpe?g/i.test(type) ? 'jpg' : /webp/i.test(type) ? 'webp' : 'png';
+    const path = `${folder}/asset-${key}.${ext}`;
+    const { error } = await admin.storage
+      .from('videos')
+      .upload(path, new Uint8Array(await res.arrayBuffer()), { contentType: type, upsert: true });
+    if (error) throw new Error(`could not store slide picture ${key}: ${error.message}`);
+    return path;
+  })();
+  cache.set(src, job);
+  return job;
+}
+
+/**
+ * One composite job laying every picture (stickers first, the inset on top)
+ * over the conformed photo, no text. renderSlideWithFfmpeg takes a single
+ * inset, so a slide with more pictures, or pictures and no text, goes here.
+ */
+async function compositeSlideImages(params: {
+  admin: AdminClient;
+  photoPath: string;
+  images: PlacedImage[];
+  outputPath: string;
+  label: string;
+  frame: { width: number; height: number };
+  preFilters?: string[];
+}): Promise<void> {
+  const { admin, photoPath, images, outputPath, label, frame } = params;
+  const timeline: RenderTimeline = {
+    width: frame.width,
+    height: frame.height,
+    text_overlay: DEFAULT_TEXT_OVERLAY,
+    subtitles: false,
+    subtitles_y: DEFAULT_SUBTITLE_Y,
+    clips: [],
+    texts: [],
+    images: images.map((img) => ({
+      screenshot_path: img.path,
+      start_ms: 0,
+      duration_ms: 1000,
+      x: img.x,
+      y: img.y,
+      width: img.width,
+    })),
+  };
+  const conform = [...(params.preFilters ?? []), conformFilter(frame.width, frame.height)].join(',');
+  const imageUrls = await signBriefAssets(admin, images.map((img) => img.path));
+  const [photoUrl] = await signVideoUrls(admin, [photoPath]);
+  await runFfmpegJob({
+    admin,
+    apiKey: uploadPostKey(),
+    files: [fontUrl(QUOTA_ANCHOR_FILE), photoUrl, ...imageUrls],
+    filterGraph: buildOverlayGraph({
+      timeline,
+      images: images.map((_img, i) => ({ index: 2 + i, isVideo: false })),
+      ass: '',
+      baseFilters: conform,
+      baseInput: 1,
+    }),
+    fullCommand: slideCommand({ inputCount: 2 + imageUrls.length }),
+    outputPath,
+    outputExtension: 'png',
+    label: `${label} pictures`,
+  });
+}
+
+/**
+ * Bake one document slide: text boxes, the feature inset and the manager's
+ * stickers. A lone inset with text goes through renderSlideWithFfmpeg the
+ * way the legacy path bakes it; anything else composites the pictures first
+ * and then burns the text onto that.
+ */
+async function bakeDocumentSlide(params: {
+  admin: AdminClient;
+  photoPath: string;
+  boxes: SlideTextBox[];
+  images: PlacedImage[];
+  outputPath: string;
+  label: string;
+  frame: { width: number; height: number };
+  preFilters?: string[];
+}): Promise<void> {
+  const { admin, photoPath, boxes, images, outputPath, label, frame } = params;
+  const pre = params.preFilters?.length ? { preFilters: params.preFilters } : {};
+  if (images.length === 0) {
+    await renderSlideWithFfmpeg({ admin, photoPath, boxes, outputPath, label, frame, ...pre });
+    return;
+  }
+  if (images.length === 1 && boxes.length > 0) {
+    await renderSlideWithFfmpeg({ admin, photoPath, boxes, inset: images[0], outputPath, label, frame, ...pre });
+    return;
+  }
+  if (boxes.length === 0) {
+    await compositeSlideImages({ admin, photoPath, images, outputPath, label, frame, ...pre });
+    return;
+  }
+  const composited = `${outputPath}.pictures.png`;
+  try {
+    await compositeSlideImages({ admin, photoPath, images, outputPath: composited, label, frame, ...pre });
+    await renderSlideWithFfmpeg({ admin, photoPath: composited, boxes, outputPath, label, frame });
+  } finally {
+    await admin.storage.from('videos').remove([composited]);
+  }
+}
+
+/** The slide's pictures for one copy, stickers under the inset, with bakeable paths. */
+async function slidePictures(
+  admin: AdminClient,
+  slide: Slide,
+  instagram: boolean,
+  folder: string,
+  cache: Map<string, Promise<string>>,
+): Promise<PlacedImage[]> {
+  const list: { img: SlideImage; key: string }[] = [
+    ...(slide.pics ?? []).map((img, k) => ({ img, key: `${slide.id}-pic${k}` })),
+    ...(slide.inset ? [{ img: slide.inset, key: `${slide.id}-inset` }] : []),
+  ];
+  const out: PlacedImage[] = [];
+  for (const { img, key } of list) {
+    const place = instagram && img.ig ? img.ig : { x: img.x, y: img.y, width: img.width };
+    // One dead screenshot or sticker must not fail the whole post: the slide
+    // bakes without that picture and the log says which one.
+    try {
+      if (VIDEO_PATH.test(img.path)) throw new Error('a video, not a still image');
+      const path = await bakeablePath(admin, img.path, folder, key, cache);
+      await signBriefAssets(admin, [path]);
+      out.push({ path, ...place });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`slide ${slide.id}: skipping picture ${key} (${img.path}): ${message}`);
+    }
+  }
+  return out;
+}
+
 export async function assembleDocumentSlideshow(
   ctx: DocumentAssemblyContext,
   submission: SubmissionRow,
@@ -562,18 +741,21 @@ export async function assembleDocumentSlideshow(
   const version = submission.version ?? 1;
   const frame = slideFrame(doc.aspect);
   const letterboxForInstagram = frame.height === 1920;
+  const folder = `${companyId}/${targetId}`;
+  const pictureCache = new Map<string, Promise<string>>();
 
   // Two at a time: each slide is up to two Upload-Post jobs plus its
   // Instagram copy, and the API rate limits creation, polling and downloads.
   const finalPaths = await mapWithConcurrency(doc.slides, 2, async (slide, i) => {
     const photoPath = storagePathOf(doc, slide.assetId);
-    const boxes = slide.boxes.map(overlayBoxToSegmentBox);
-    const outPath = `${companyId}/${targetId}/${version}-slide-${i + 1}-final.png`;
+    const boxes = slide.boxes.map(slideBoxToBakeBox);
+    const outPath = `${folder}/${version}-slide-${i + 1}-final.png`;
     const crop = slideCropFilter(slide.crop);
-    await renderSlideWithFfmpeg({
+    await bakeDocumentSlide({
       admin,
       photoPath,
       boxes,
+      images: await slidePictures(admin, slide, false, folder, pictureCache),
       outputPath: outPath,
       label: `slide ${i + 1}`,
       frame,
@@ -582,10 +764,14 @@ export async function assembleDocumentSlideshow(
     if (letterboxForInstagram) {
       const igCrop = slideCropFilter(slide.instagramCrop);
       if (igCrop) {
-        await renderSlideWithFfmpeg({
+        // The creator placed text for Instagram separately; the 9:16 spots
+        // would land under the 4:5 feed chrome.
+        const igBoxes = (slide.instagramBoxes ?? slide.boxes).map(slideBoxToBakeBox);
+        await bakeDocumentSlide({
           admin,
           photoPath,
-          boxes,
+          boxes: igBoxes,
+          images: await slidePictures(admin, slide, true, folder, pictureCache),
           outputPath: instagramSlidePath(outPath),
           label: `slide ${i + 1} instagram`,
           frame: slideFrame('4:5'),

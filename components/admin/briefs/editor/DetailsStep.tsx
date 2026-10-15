@@ -24,7 +24,10 @@ export function DetailsStep({
   search,
   setSearch,
   busy,
+  locked = false,
   onFill,
+  checking,
+  onCheck,
   onPreview,
   onReview,
 }: {
@@ -39,7 +42,11 @@ export function DetailsStep({
   search: string;
   setSearch: (v: string) => void;
   busy: boolean;
+  /** Any AI call is running; Fill and Check share one busy slot. */
+  locked?: boolean;
   onFill: () => void;
+  checking: boolean;
+  onCheck: () => void;
   onPreview: () => void;
   onReview: () => void;
 }) {
@@ -56,7 +63,7 @@ export function DetailsStep({
         }
       />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false}>
-        <Pressable accessibilityRole="button" disabled={busy} onPress={onFill} style={({ pressed }) => [styles.fillBtn, pressed ? styles.pressed : null]}>
+        <Pressable accessibilityRole="button" disabled={busy || locked} onPress={onFill} style={({ pressed }) => [styles.fillBtn, pressed ? styles.pressed : null]}>
           {busy ? <ActivityIndicator size="small" color={color.blue500} /> : <Icon name="sparkles" size={20} color={color.ink} />}
           <Text style={styles.fillText}>{busy ? 'Writing' : 'Fill with AI'}</Text>
         </Pressable>
@@ -77,6 +84,13 @@ export function DetailsStep({
             <TextInput value={search} onChangeText={setSearch} placeholder="What they type into TikTok" placeholderTextColor={color.slate400} style={styles.input} />
           </View>
         </View>
+        <Pressable accessibilityRole="button" disabled={checking || locked} onPress={onCheck} style={({ pressed }) => [styles.checkBtn, pressed ? styles.pressed : null]}>
+          {checking ? <ActivityIndicator size="small" color={color.blue500} /> : <Icon name="circle-check-big" size={20} color={color.blue500} />}
+          <View style={styles.checkText}>
+            <Text style={styles.checkTitle}>{checking ? 'Reading it like a viewer' : 'Check the post with AI'}</Text>
+            <Text style={styles.checkSub}>A strict second read with fixes you can apply in one tap</Text>
+          </View>
+        </Pressable>
       </ScrollView>
       <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 34) }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Preview as creator" onPress={onPreview} style={styles.eye}>
@@ -98,6 +112,10 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   fillText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 17, letterSpacing: -0.2, color: color.ink },
   section: { gap: 10 },
+  checkBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 18, borderRadius: radius.sm, backgroundColor: color.blue50 },
+  checkText: { flex: 1, gap: 2 },
+  checkTitle: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 16, color: color.ink },
+  checkSub: { fontFamily: typeToken.font.ui, fontWeight: '400', fontSize: 13, color: color.slate500 },
   field: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 13, paddingHorizontal: 16, borderRadius: radius.sm, backgroundColor: color.white, borderWidth: 1, borderColor: color.border },
   input: { flex: 1, padding: 0, fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 16, lineHeight: 16 * 1.45, color: color.ink },
   count: { fontFamily: typeToken.font.ui, fontWeight: '600', fontSize: 12.5, color: color.slate400 },

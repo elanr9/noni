@@ -1,17 +1,27 @@
 // Reel record route: the camera for one brief. Done goes to the editor;
-// Close returns to where the creator came from with the draft kept.
+// Close returns to where the creator came from with the draft kept. From
+// changes requested, `flags` carries the manager's per clip labels (Hook,
+// Point 2, CTA) and the camera opens on the first flagged clip.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import type { JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { flaggedItemIds } from '../../../../components/creator/briefs/reel/plan';
 import { RecordScreen } from '../../../../components/creator/briefs/reel/RecordScreen';
 import { useReelProject } from '../../../../components/creator/briefs/reel/useReelProject';
 import { color, space, type } from '../../../../theme/tokens';
 
 export default function RecordRoute(): JSX.Element {
-  const { id, item, from } = useLocalSearchParams<{ id: string; item?: string; from?: string }>();
+  const { id, item, from, flags } = useLocalSearchParams<{ id: string; item?: string; from?: string; flags?: string }>();
   const router = useRouter();
   const reel = useReelProject(id);
+  const ready = !reel.loading && reel.brief !== null;
+  // Mapped once the plan is in; RecordScreen reads it when it mounts.
+  const redoItemIds = useMemo(
+    () => (ready && flags ? flaggedItemIds(reel.items, flags.split('|')) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ready, flags],
+  );
 
   if (reel.loading || !reel.brief || !reel.document) {
     return (
@@ -35,6 +45,7 @@ export default function RecordRoute(): JSX.Element {
         features={reel.features}
         companyName={reel.companyName}
         startItemId={item ?? null}
+        redoItemIds={redoItemIds}
         onDone={toEditor}
         onClose={() => (from === 'edit' ? toEditor() : router.back())}
       />

@@ -8,7 +8,8 @@ import type { LibraryFeature } from '../../../../lib/library-api';
 import { color, radius, shadow, type as typeToken } from '../../../../theme/tokens';
 import { Icon } from '../../../ui/Icon';
 import { Sheet } from '../../shared';
-import { featureToneFor, Shot } from '../Shot';
+import { FeatureThumb } from '../media/FeatureMedia';
+import { featureToneFor } from '../Shot';
 
 export function FeatureSheet({
   visible,
@@ -70,9 +71,7 @@ export function FeatureSheet({
               }}
               style={({ pressed }) => [styles.row, on ? styles.rowOn : null, pressed ? styles.pressed : null]}
             >
-              <View style={[styles.thumb, { backgroundColor: featureToneFor(it.title).tone }]}>
-                <Shot feature={it} w={42} video={video} />
-              </View>
+              <FeatureThumb feature={it} video={video} tone={featureToneFor(it.title)} style={styles.thumb} />
               <View style={styles.body}>
                 <Text style={styles.name}>{it.title}</Text>
                 <Text numberOfLines={2} style={styles.desc}>
@@ -97,7 +96,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: color.border, backgroundColor: color.white, ...shadow.shadowCard },
   rowOn: { borderWidth: 2, borderColor: color.blue500, margin: -1 },
   pressed: { opacity: 0.85 },
-  thumb: { width: 56, height: 84, borderRadius: 10, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thumb: { width: 56, height: 96, borderRadius: 10 },
   body: { flex: 1, minWidth: 0, gap: 3 },
   name: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 16, letterSpacing: -0.2, color: color.ink },
   desc: { fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 13, lineHeight: 13 * 1.35, color: color.slate500 },

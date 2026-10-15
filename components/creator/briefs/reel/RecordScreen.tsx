@@ -1,7 +1,8 @@
 // TikTok style camera for a reel brief: the prompter card at the top with
 // the hook or the point's say line, flip, flash, timer and grid on the rail,
 // one take per point, playback right after each take with redo, extra or
-// next, and the plug as the last clip. From RLCreator.jsx RecordScreen.
+// next, and the plug as the last clip (right after the hook when the manager
+// locked the CTA there). From RLCreator.jsx RecordScreen.
 // Takes land in the studio document; the plan remembers which block is which.
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -25,8 +26,8 @@ import { useRecorder } from '../../studio/capture/useRecorder';
 import { Viewfinder } from '../../studio/capture/Viewfinder';
 import { FeatureShot } from '../FeatureShot';
 import { layoutOf } from '../model';
-import { freeClipItem, isGuided, planReady, plugItem, PLUG_SAY, prompterLabel, type ReelPlanItem } from './plan';
-import { addTake, removeBlocks } from './sync';
+import { freeClipItem, isGuided, planReady, plugFirst, plugItem, PLUG_SAY, prompterLabel, withFreeClip, withPlug, type ReelPlanItem } from './plan';
+import { addTake, deleteItemBlocks } from './sync';
 import { TakePlayback } from './TakePlayback';
 
 export type RecordScreenProps = {
@@ -38,6 +39,8 @@ export type RecordScreenProps = {
   companyName: string;
   /** Re-record this item (from the editor), else resume at the first open clip. */
   startItemId: string | null;
+  /** Items to record again (changes requested); their first new take replaces the old one. */
+  redoItemIds?: string[];
   onDone: () => void;
   onClose: () => void;
 };
@@ -49,7 +52,14 @@ function fmt(ms: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function firstOpen(items: ReelPlanItem[], guided: boolean): number {
+/**
+ * Index meaning "record a free clip": past the end of any plan, so the
+ * current item is null however many clips get added.
+ */
+const FREE = Number.MAX_SAFE_INTEGER;
+
+/** first: the plug comes right after the hook, before any free clip. */
+function firstOpen(items: ReelPlanItem[], guided: boolean, first = false): number {
   if (guided) {
     const k = items.findIndex((p) => p.blockIds.length === 0);
     return k >= 0 ? k : items.length;
@@ -58,22 +68,35 @@ function firstOpen(items: ReelPlanItem[], guided: boolean): number {
   if (cover >= 0 && items[cover].blockIds.length === 0) return cover;
   const plug = items.findIndex((p) => p.role === 'cta');
   const own = items.filter((p) => p.free && p.blockIds.length > 0).length;
-  if (plug >= 0 && items[plug].blockIds.length === 0 && own > 0) return plug;
-  return items.filter((p) => p.role !== 'cta').length;
+  if (plug >= 0 && items[plug].blockIds.length === 0 && (own > 0 || first)) return plug;
+  return FREE;
 }
 
 export function RecordScreen(props: RecordScreenProps): JSX.Element {
-  const { brief, document, items, setItems, features, companyName, startItemId, onDone, onClose } = props;
+  const { brief, document, items, setItems, features, companyName, startItemId, redoItemIds = [], onDone, onClose } = props;
   const insets = useSafeAreaInsets();
   const guided = isGuided(brief);
   const open = brief.kind === 'open';
+  // CTA locked right after the hook: hook, plug, then the rest.
+  const plugOpens = plugFirst(brief);
   const permissions = useCapturePermissions();
   const cameraRef = useRef<CameraView | null>(null);
 
   const [idx, setIdx] = useState(() => {
-    const at = startItemId ? items.findIndex((p) => p.id === startItemId) : -1;
-    return at >= 0 ? at : firstOpen(items, guided);
+    const first = startItemId ?? redoItemIds[0] ?? null;
+    const at = first ? items.findIndex((p) => p.id === first) : -1;
+    return at >= 0 ? at : firstOpen(items, guided, plugOpens);
   });
+  // Items whose next take replaces what they have (Redo clip, flagged clips).
+  const initialRedo = [...(startItemId ? [startItemId] : []), ...redoItemIds];
+  const replaceRef = useRef(new Set<string>(initialRedo));
+  // The same set for rendering: a free clip waiting to be replaced is recorded as itself.
+  const [pending, setPending] = useState<string[]>(initialRedo);
+  const redoing = startItemId !== null || redoItemIds.length > 0;
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [facing, setFacing] = useState<CameraType>('front');
   const [torch, setTorch] = useState(false);
   const [countdown, setCountdown] = useState<CountdownSeconds>(0);
@@ -89,40 +112,45 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
   const [liveMs, setLiveMs] = useState(0);
 
   const cur = items[idx] && !items[idx].free ? items[idx] : null;
-  const curRef = useRef(cur);
+  // Redo clip or a flagged clip on a free item: the next take replaces that item.
+  const redoFree = !cur && items[idx]?.free && pending.includes(items[idx].id) ? items[idx] : null;
+  const takeTarget = cur ?? redoFree;
+  const curRef = useRef(takeTarget);
   useEffect(() => {
-    curRef.current = cur;
-  }, [cur]);
+    curRef.current = takeTarget;
+  }, [takeTarget]);
 
   const handleAsset = useCallback(
     (asset: MediaAsset) => {
       const store = useStudioStore.getState();
+      const plan = itemsRef.current;
+      const target = curRef.current ? (plan.find((p) => p.id === curRef.current?.id) ?? curRef.current) : null;
+      const free = target ? null : freeClipItem();
+      const placed = free ? withFreeClip(plan, free, plugOpens) : plan;
+      const itemId = target?.id ?? free?.id ?? '';
+      const replace = target !== null && replaceRef.current.has(target.id);
       let blockId: string | null = null;
       store.commit(
         onVideo((d) => {
-          const r = addTake(d, asset);
+          const r = addTake(d, asset, placed, itemId, replace);
           blockId = r.blockId;
           return r.doc;
         }),
       );
       if (!blockId) return;
       const id = blockId;
-      const target = curRef.current;
       if (target) {
-        setItems((arr) => arr.map((p) => (p.id === target.id ? { ...p, blockIds: [...p.blockIds, id] } : p)));
-        setPlay({ item: { ...target, blockIds: [...target.blockIds, id] }, asset });
+        replaceRef.current.delete(target.id);
+        setPending([...replaceRef.current]);
+        const blockIds = replace ? [id] : [...target.blockIds, id];
+        setItems((arr) => arr.map((p) => (p.id === target.id ? { ...p, blockIds: replace ? [id] : [...p.blockIds, id] } : p)));
+        setPlay({ item: { ...target, blockIds }, asset });
         setTele(false);
         return;
       }
-      const item: ReelPlanItem = { ...freeClipItem(), blockIds: [id] };
-      setItems((arr) => {
-        const cta = arr.find((p) => p.role === 'cta');
-        const base = arr.filter((p) => p.role !== 'cta');
-        return cta ? [...base, item, cta] : [...base, item];
-      });
-      setIdx(items.filter((p) => p.role !== 'cta').length + 1);
+      if (free) setItems((arr) => withFreeClip(arr, { ...free, blockIds: [id] }, plugOpens));
     },
-    [setItems, items],
+    [setItems, plugOpens],
   );
 
   const recorder = useRecorder({ cameraRef, cameraReadyAt, frontFlash: torch && facing === 'front', onAsset: handleAsset });
@@ -139,11 +167,14 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
     };
   }, [recorder.startedAt]);
 
-  // Long text: stop at the target length.
+  // Long text: stop at the target length, on a timer rather than the display tick.
+  const stopRecording = recorder.stop;
+  const targetMs = cur?.targetMs ?? 0;
   useEffect(() => {
-    if (!recording || !cur?.targetMs || liveMs < cur.targetMs) return;
-    recorder.stop();
-  }, [recording, cur?.targetMs, liveMs, recorder]);
+    if (recorder.startedAt === null || targetMs <= 0) return;
+    const t = setTimeout(stopRecording, Math.max(0, targetMs - (Date.now() - recorder.startedAt)));
+    return () => clearTimeout(t);
+  }, [recorder.startedAt, targetMs, stopRecording]);
 
   const beginRecording = () => {
     if (!cameraReady) return;
@@ -179,7 +210,7 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
   const anyClip = items.some((p) => p.blockIds.length > 0);
 
   const dropBlocks = (blockIds: string[]) => {
-    useStudioStore.getState().commit(onVideo((d) => removeBlocks(d, blockIds)));
+    useStudioStore.getState().commit(onVideo((d) => deleteItemBlocks(d, items, blockIds)));
   };
   const redoLast = () => {
     if (cur) {
@@ -193,7 +224,6 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
       if (!lastFree) return;
       dropBlocks(lastFree.blockIds);
       setItems((arr) => arr.filter((p) => p.id !== lastFree.id));
-      setIdx((k) => Math.max(0, k - 1));
     }
     setPlay(null);
   };
@@ -210,19 +240,32 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
   const advance = () => {
     setPlay(null);
     setTele(true);
+    if (redoing) {
+      const nextRedo = items.findIndex((p) => replaceRef.current.has(p.id) && p.id !== cur?.id);
+      if (nextRedo >= 0) setIdx(nextRedo);
+      else onDone();
+      return;
+    }
     if (guided) {
       const next = items.findIndex((p) => p.blockIds.length === 0);
       if (next >= 0) setIdx(next);
       else onDone();
       return;
     }
-    if (cur?.role === 'cta') {
+    if (cur?.role === 'cta' && (!plugOpens || own > 0)) {
       onDone();
       return;
     }
-    setIdx(items.filter((p) => p.role !== 'cta').length);
+    setIdx(FREE);
   };
   const finish = () => {
+    if (redoing) {
+      const nextRedo = items.findIndex((p) => replaceRef.current.has(p.id));
+      if (nextRedo >= 0) {
+        setIdx(nextRedo);
+        return;
+      }
+    }
     if (ready) {
       onDone();
       return;
@@ -238,28 +281,37 @@ export function RecordScreen(props: RecordScreenProps): JSX.Element {
     const feat = pickFeature(features, brief.cta.featureId);
     const text = brief.cta.text || feat?.cta || `${companyName} makes it easier. Link in bio.`;
     const item = plugItem(text, feat?.id ?? brief.cta.featureId, PLUG_SAY);
-    setItems((arr) => [...arr.filter((p) => p.role !== 'cta'), item]);
+    const placed = withPlug(items, item, plugOpens);
+    setItems((arr) => withPlug(arr, item, plugOpens));
     setPlugCard(false);
-    setIdx(items.filter((p) => p.role !== 'cta').length);
+    setIdx(placed.indexOf(item));
     setTele(true);
   };
   const goBack = () => {
     if (recording) return;
+    // Back from the free clips goes to the plug when it came right after the hook.
+    const plugAt = items.findIndex((p) => p.role === 'cta');
+    if (!cur && own === 0 && plugOpens && plugAt > 0) {
+      setIdx(plugAt);
+      setPlay(null);
+      setTele(true);
+      return;
+    }
     if (idx === 0 || (!cur && own === 0)) {
       setCloseAsk(true);
       return;
     }
-    setIdx(Math.max(0, cur ? idx - 1 : items.filter((p) => p.role !== 'cta').length - 1));
+    setIdx(cur ? Math.max(0, idx - 1) : FREE);
     setPlay(null);
     setTele(true);
   };
 
   const segments = guided ? items : [...items.filter((p) => p.blockIds.length > 0), ...(recording && !cur ? [null] : [])];
-  const label = cur ? prompterLabel(cur, guided) : '';
+  const label = cur ? prompterLabel(cur, guided, plugOpens && !guided) : '';
   const feature = cur?.insetFeatureId ? pickFeature(features, cur.insetFeatureId) : null;
   const L = cur ? layoutOf({ box: cur.box, insetBox: cur.insetBox, insetFeatureId: cur.insetFeatureId }) : null;
   const nextLabel = cur
-    ? (cur.role === 'cta' && !guided) || (guided && !items.some((p, k) => k > idx && p.blockIds.length === 0))
+    ? (cur.role === 'cta' && !guided && (!plugOpens || own > 0)) || (guided && !items.some((p, k) => k > idx && p.blockIds.length === 0))
       ? 'Done'
       : 'Next clip'
     : ready

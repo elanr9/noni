@@ -8,25 +8,41 @@ import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientF
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeInUp, runOnJS } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInUp, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { SlideBox } from '../../../../lib/briefs-api';
+import { applySpanColor, shiftSpans } from '../../../../lib/overlay-boxes';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { pickFeature, type LibraryFeature } from '../../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { Icon, type IconName } from '../../../ui/Icon';
 import type { EditorSlide } from '../editor/types';
+import { EMPTY_ASPECT, insetFrame } from '../media/geometry';
+import { hasFeatureMedia, useFeatureVisual } from '../media/FeatureMedia';
 import { Shot } from '../Shot';
 import { CenteredAt } from '../SlideCard';
-import { SlideText, slideTextStyle, textInkFor } from '../SlideText';
-import { blockedFor, clamp, fontSizeFor, insetRect, layoutOf, overlaps, resolveTextStyle, SLIDE_RATIO, textRect, zoneName, type Ghost, type Platform, type ResolvedTextStyle } from './layout';
+import { SlideText, slideInputInk, slideTextStyle } from '../SlideText';
+import { blockedFor, clamp, fontSizeFor, insetRect, layoutOf, overlaps, resolveTextStyle, serializeTextStyle, SLIDE_RATIO, textRect, zoneName, type Ghost, type Platform, type ResolvedTextStyle } from './layout';
 import { PlatformGhost } from './PlatformGhost';
-import { Sticker } from './Sticker';
+import { Sticker, type Guides } from './Sticker';
 import { TextToolbar, WidthSlider, type ToolPanel } from './TextToolbar';
 import { BusyOverlay } from './BusyOverlay';
 
-const FOOTER_H = 112;
+/** Footer content height (count row, step strip and Next); the home indicator inset is added on top. */
+const FOOTER_H = 96;
+/** Gutter between the frame edge and anything drawn on it. */
+const PAD = 12;
+// Bottom stack metrics: Generate button, Different feature pill, warning chip.
+const GEN_H = 44;
+const SEC_H = 36;
+const WARN_H = 30;
+const STACK_GAP = 10;
+const STACK_BOTTOM = PAD;
+/** Ghost opacity at rest; it comes up to GHOST_DRAG while a box is dragged. */
+const GHOST_REST = 0.35;
+const GHOST_DRAG = 0.9;
+const FADE = { duration: 180 };
 
 export interface CanvasEditorProps {
   slides: EditorSlide[];
@@ -41,11 +57,13 @@ export interface CanvasEditorProps {
   footer: ReactNode;
   /** True when the CTA slide is empty and a feature can be picked for it. */
   ctaPick: boolean;
+  /** Bumped to open the keyboard on the current slide, e.g. Write it myself. */
+  editNonce?: number;
   onGenerate: (() => void) | null;
   generateLabel: string;
   onSecondary: (() => void) | null;
   secondaryLabel: string;
-  /** Reel hook: Draft with AI. */
+  /** Reel hook: AI writes the spoken hook. */
   onWriteNote: (() => void) | null;
   onRevise: (() => void) | null;
   /** Show the note tool and the shot pill. */
@@ -54,10 +72,10 @@ export interface CanvasEditorProps {
 }
 
 export function CanvasEditor(props: CanvasEditorProps) {
-  const { slides, sel, setSel, patchAt, onBack, features, reel, busy, kindLabel, footer, ctaPick, onGenerate, generateLabel, onSecondary, secondaryLabel, onWriteNote, onRevise, notes, onOpenMedia } = props;
+  const { slides, sel, setSel, patchAt, onBack, features, reel, busy, kindLabel, footer, ctaPick, editNonce = 0, onGenerate, generateLabel, onSecondary, secondaryLabel, onWriteNote, onRevise, notes, onOpenMedia } = props;
   const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const available = winH - insets.top - FOOTER_H;
+  const available = winH - insets.top - insets.bottom - FOOTER_H;
   const W = Math.min(winW, Math.floor(available / SLIDE_RATIO));
   const H = Math.round(W * SLIDE_RATIO);
   const keyboard = useKeyboardHeight();
@@ -66,9 +84,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
 
   const cur = slides[sel] ?? slides[0];
   const [ghost, setGhost] = useState<Ghost>('tiktok');
+  const guideX = useSharedValue(-1);
+  const guideY = useSharedValue(-1);
+  // 1 while a box is dragged or pinched: the platform chrome comes up to show the safe zones.
+  const dragOn = useSharedValue(0);
+  const guides: Guides = { x: guideX, y: guideY, active: dragOn };
+  const guideXStyle = useAnimatedStyle(() => ({ opacity: guideX.get() < 0 ? 0 : 1, left: guideX.get() * W - 0.75 }));
+  const guideYStyle = useAnimatedStyle(() => ({ opacity: guideY.get() < 0 ? 0 : 1, top: guideY.get() * H - 0.75 }));
   const [editing, setEditing] = useState(() => !cur.text && !ctaPick);
   const [panel, setPanel] = useState<ToolPanel>(null);
   const [shotOpen, setShotOpen] = useState(false);
+  // The chars selected in the text input; a swatch colors only these.
+  const [selRange, setSelRange] = useState<{ start: number; end: number } | null>(null);
   const firstRun = useRef(true);
   const prevSel = useRef(sel);
 
@@ -85,23 +112,49 @@ export function CanvasEditor(props: CanvasEditorProps) {
     setEditing(empty);
     setPanel(null);
     setShotOpen(false);
+    setSelRange(null);
   }, [sel, slides, onSecondary]);
+
+  const seenNonce = useRef(editNonce);
+  useEffect(() => {
+    if (seenNonce.current === editNonce) return;
+    seenNonce.current = editNonce;
+    setEditing(true);
+  }, [editNonce]);
 
   const plat: Platform = ghost === 'instagram' ? 'instagram' : 'tiktok';
   const bk = plat === 'instagram' ? 'box_ig' : 'box';
   const ik = plat === 'instagram' ? 'inset_box_ig' : 'inset_box';
   const L = layoutOf(cur, plat);
   const lib = cur.inset_feature_id ? pickFeature(features, cur.inset_feature_id) : null;
+  // The inset's drawn size: the media's own aspect inside the box width.
+  const insetVisual = useFeatureVisual(lib, reel);
+  const insetAspect = hasFeatureMedia(lib, reel) ? insetVisual.aspect : EMPTY_ASPECT;
+  const insetW = insetFrame(W * L.inset.w, insetAspect).width;
   const ts = resolveTextStyle(cur.tstyle);
   const fs = fontSizeFor(W, ts.size);
   const patch = (p: Partial<EditorSlide>) => patchAt(sel, p);
-  const setTs = (p: Partial<ResolvedTextStyle>) => patch({ tstyle: { ...ts, ...p } });
+  const setTs = (p: Partial<ResolvedTextStyle>) => patch({ tstyle: serializeTextStyle({ ...ts, ...p }) });
+  // Letter color: with words selected only they change (Instagram stories
+  // style); with none the whole box changes as before.
+  const pickTextColor = (c: string) => {
+    const r = selRange;
+    if (editing && r && r.end > r.start && r.end <= cur.text.length) {
+      patch({ spans: applySpanColor(cur.spans, cur.text.length, r.start, r.end, c) });
+      return;
+    }
+    setTs({ color: c });
+  };
+  const setText = (t: string) => {
+    const spans = shiftSpans(cur.spans, cur.text, t);
+    patch({ text: t, spans: spans.length ? spans : undefined });
+  };
   const setBox = (box: SlideBox) => patch({ [bk]: box });
   const setInsetBox = (box: SlideBox) => patch({ [ik]: box });
 
   const blocked = blockedFor(ghost, reel);
   const textHit = cur.text ? blocked.find((z) => overlaps(textRect(cur.text, L.text, ts, W, H), z)) : undefined;
-  const insetHit = lib ? blocked.find((z) => overlaps(insetRect(L.inset, W, H), z)) : undefined;
+  const insetHit = lib ? blocked.find((z) => overlaps(insetRect(L.inset, W, H, insetAspect), z)) : undefined;
   const warn = zoneName(textHit, ghost) ?? zoneName(insetHit, ghost);
   const hitIds = new Set([textHit, insetHit].filter((z): z is NonNullable<typeof z> => Boolean(z)).map((z) => z.id));
   const isCover = cur.role === 'cover';
@@ -117,6 +170,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const finish = () => {
     setEditing(false);
     setPanel(null);
+    setSelRange(null);
   };
 
   // autoFocus is unreliable inside animated mounts, so focus by ref as well.
@@ -191,12 +245,29 @@ export function CanvasEditor(props: CanvasEditorProps) {
         </Pressable>
       </Animated.View>
     ) : null;
-  const bottomOffset = genBtn && secBtn ? 124 : genBtn || secBtn ? 84 : warn ? 52 : 12;
+  // The warning chip and the Generate / Different feature buttons share one
+  // bottom stack (buttons above, chip below) so they never overlap; the
+  // shot pill sits above whatever that stack holds.
+  const stackButtons = !ctaPick && Boolean(genBtn || secBtn);
+  const stackH = (stackButtons ? (genBtn ? GEN_H : 0) + (secBtn ? SEC_H : 0) + (genBtn && secBtn ? STACK_GAP : 0) : 0) + (warn ? WARN_H : 0) + (stackButtons && warn ? STACK_GAP : 0);
+  const bottomOffset = stackH > 0 ? STACK_BOTTOM + stackH + STACK_GAP : STACK_BOTTOM;
 
   const showShot = !editing && !shotOpen && !ctaPick && (reel ? notes : notes && Boolean(cur.shot));
+  // The note card sits in the caption zone, clear of the right rail.
+  const noteRight = Math.round(W * 0.16) + 4;
+  const noteLabel = reel ? (isCover ? 'Hook \u00b7 said word for word' : 'Creator says') : 'Photo';
+  // Header controls share one size and shrink together on narrow frames.
+  const ctl = W < 340 ? 34 : 38;
+  const compactToggle = W < 360;
+  // Anything drawn over the caption zone hides the ghost caption, so nothing
+  // shows through around it; dragging brings it back to show the safe zone.
+  const captionCovered = editing || showShot || stackButtons;
+  const ghostStyle = useAnimatedStyle(() => ({ opacity: withTiming(dragOn.get() ? GHOST_DRAG : GHOST_REST, FADE) }));
+  const captionGhostStyle = useAnimatedStyle(() => ({ opacity: withTiming(dragOn.get() || !captionCovered ? 1 : 0, FADE) }));
+  const overlayStyle = useAnimatedStyle(() => ({ opacity: withTiming(dragOn.get() ? 0 : 1, FADE) }));
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingBottom: insets.bottom }]}>
       <View style={{ height: insets.top }} />
       <GestureDetector gesture={canvasGesture}>
         <View style={[styles.frame, { width: W, height: H }]}>
@@ -210,9 +281,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
               </View>
             ) : null}
             {ghost !== 'off' ? (
-              <View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: 0.55 }]}>
-                <PlatformGhost platform={plat} w={W} h={H} reel={reel} />
-              </View>
+              <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, ghostStyle]}>
+                <PlatformGhost platform={plat} w={W} h={H} reel={reel} captionStyle={captionGhostStyle} />
+              </Animated.View>
             ) : null}
             {!editing
               ? blocked
@@ -230,15 +301,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
               <Sticker
                 x={L.inset.x}
                 y={L.inset.y}
-                width={W * L.inset.w}
+                width={insetW}
                 W={W}
                 H={H}
                 hit={Boolean(insetHit)}
+                snapX={cur.text ? [0.5, L.text.x] : undefined}
+                snapY={cur.text ? [0.5, L.text.y] : undefined}
+                guides={guides}
                 onMove={(dx, dy) => setInsetBox({ ...L.inset, x: clamp(L.inset.x + dx, 0.1, 0.9), y: clamp(L.inset.y + dy, 0.08, 0.95) })}
                 onScale={(r) => setInsetBox({ ...L.inset, w: clamp(L.inset.w * r, 0.25, 0.9) })}
               >
                 <Animated.View entering={pop ? FadeInUp.duration(520).delay(260) : undefined}>
-                  <Shot feature={lib} w={W * L.inset.w} video={reel} />
+                  <Shot feature={lib} w={W * L.inset.w} video={reel} live={reel} />
                 </Animated.View>
               </Sticker>
             ) : null}
@@ -252,33 +326,52 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 align={ts.align}
                 hit={Boolean(textHit)}
                 onTap={() => setEditing(true)}
+                snapX={lib ? [0.5, L.inset.x] : undefined}
+                snapY={lib ? [0.5, L.inset.y] : undefined}
+                guides={guides}
                 onMove={(dx, dy) => setBox({ ...L.text, x: clamp(L.text.x + dx, 0.1, 0.9), y: clamp(L.text.y + dy, 0.06, 0.94) })}
                 onScale={(r) => setTs({ size: clamp(ts.size * r, 0.5, 2.4) })}
               >
                 <Animated.View entering={pop ? FadeInUp.duration(520).delay(260) : undefined}>
-                  <SlideText text={cur.text} ts={ts} fs={fs} />
+                  <SlideText text={cur.text} ts={ts} fs={fs} maxWidth={W * L.text.w} spans={cur.spans} />
                 </Animated.View>
               </Sticker>
             ) : null}
+            <Animated.View pointerEvents="none" style={[styles.guideX, guideXStyle]} />
+            <Animated.View pointerEvents="none" style={[styles.guideY, guideYStyle]} />
             {editing ? (
               <>
                 <CenteredAt x={L.text.x * W} y={L.text.y * H} width={W * L.text.w} align={ts.align}>
                   <Pressable accessibilityLabel="Slide text" onPress={() => textRef.current?.focus()}>
-                  <SlideText text={cur.text} ts={ts} fs={fs}>
+                  <SlideText text={cur.text} ts={ts} fs={fs} maxWidth={W * L.text.w} spans={cur.spans}>
                     <TextInput
                       ref={textRef}
                       autoFocus
                       multiline
                       value={cur.text}
-                      onChangeText={(t) => patch({ text: t })}
+                      onChangeText={setText}
+                      onSelectionChange={(e) => {
+                        const { start, end } = e.nativeEvent.selection;
+                        setSelRange(end > start ? { start, end } : null);
+                      }}
                       selectionColor={color.blue500}
-                      style={[slideTextStyle(ts, fs), styles.input, { color: textInkFor(ts), minWidth: W * L.text.w * 0.5, maxWidth: W * L.text.w }]}
+                      cursorColor={color.blue500}
+                      style={[slideTextStyle(ts, fs), styles.input, { color: slideInputInk(ts, cur.spans), minWidth: W * L.text.w * 0.5, maxWidth: W * L.text.w }]}
                     />
                   </SlideText>
                   </Pressable>
                 </CenteredAt>
                 <WidthSlider value={L.text.w} H={H} onChange={(w) => setBox({ ...L.text, w })} />
-                <TextToolbar ts={ts} panel={panel} setPanel={setPanel} onChange={setTs} bottomInset={keyboardInset} onDelete={cur.text ? () => { patch({ text: '' }); finish(); } : undefined}>
+                <TextToolbar
+                  ts={ts}
+                  panel={panel}
+                  setPanel={setPanel}
+                  onChange={setTs}
+                  onTextColor={pickTextColor}
+                  selection={Boolean(selRange && selRange.end > selRange.start)}
+                  bottomInset={keyboardInset}
+                  onDelete={cur.text ? () => { patch({ text: '', spans: undefined }); finish(); } : undefined}
+                >
                   {genBtn || secBtn ? (
                     <>
                       {genBtn}
@@ -288,93 +381,119 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 </TextToolbar>
               </>
             ) : null}
-            {!editing && !picking ? (
-              <Animated.View entering={FadeIn.duration(200)} style={styles.tools}>
-                <Round label="Text" onPress={() => setEditing(true)}>
-                  <Text style={styles.aa}>Aa</Text>
-                </Round>
-                <Round icon="image-plus" label="Add media" onPress={onOpenMedia} on={Boolean(lib)} />
-                {notes && !reel ? <Round icon="message-circle" label="Note for the creator" onPress={() => setShotOpen(!shotOpen)} on={Boolean(cur.shot) || shotOpen} /> : null}
-                {onRevise && cur.text.trim() ? <Round icon="sparkles" label="Revise with AI" onPress={onRevise} /> : null}
+            {showShot ? (
+              <Animated.View style={[styles.note, { left: PAD, right: noteRight, bottom: bottomOffset }, overlayStyle]}>
+                {cur.shot ? (
+                  <Pressable accessibilityRole="button" accessibilityLabel={`${noteLabel}, tap to edit`} onPress={() => setShotOpen(true)} style={({ pressed }) => [styles.noteRow, pressed ? styles.pressed : null]}>
+                    <View style={styles.noteBody}>
+                      <Text style={styles.noteLabel} numberOfLines={1}>
+                        {noteLabel}
+                      </Text>
+                      <Text style={styles.noteText} numberOfLines={3} ellipsizeMode="tail">
+                        {cur.shot}
+                      </Text>
+                    </View>
+                    <View style={styles.noteEdit}>
+                      <Icon name="pencil" size={13} color={color.whiteA45} />
+                    </View>
+                  </Pressable>
+                ) : (
+                  <View style={styles.noteEmpty}>
+                    <Text style={styles.noteLabel} numberOfLines={1}>
+                      {noteLabel}
+                    </Text>
+                    <View style={styles.noteActions}>
+                      <Pressable accessibilityRole="button" onPress={() => setShotOpen(true)} style={({ pressed }) => [styles.noteBtn, styles.writeBtn, pressed ? styles.pressed : null]}>
+                        <Icon name="pencil" size={14} color={color.ink} />
+                        <Text style={[styles.noteBtnText, { color: color.ink }]} numberOfLines={1}>
+                          {isCover ? 'Write the hook' : 'Write the line'}
+                        </Text>
+                      </Pressable>
+                      {onWriteNote && !busy ? (
+                        <Pressable accessibilityRole="button" onPress={onWriteNote} style={({ pressed }) => [styles.noteBtn, styles.draftBtn, pressed ? styles.pressed : null]}>
+                          <Icon name="sparkles" size={14} color={color.white} />
+                          <Text style={[styles.noteBtnText, { color: color.white }]} numberOfLines={1}>
+                            AI writes it
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                )}
               </Animated.View>
             ) : null}
-            {showShot ? (
-              cur.shot ? (
-                <Pressable accessibilityRole="button" onPress={() => setShotOpen(true)} style={[styles.shotPill, { bottom: bottomOffset }]}>
-                  <Icon name={reel ? 'mic' : 'message-circle'} size={15} color={color.whiteA60} />
-                  <View style={styles.shotBody}>
-                    {reel ? <Text style={styles.shotLabel}>{isCover ? 'Hook script \u00b7 word for word' : 'Creator says'}</Text> : null}
-                    <Text style={styles.shotText}>{cur.shot}</Text>
+            {!editing && (warn || stackButtons) ? (
+              <View style={styles.bottomStack} pointerEvents="box-none">
+                {stackButtons ? (
+                  <Animated.View style={[styles.genStack, overlayStyle]} pointerEvents="box-none">
+                    {genBtn}
+                    {secBtn}
+                  </Animated.View>
+                ) : null}
+                {warn ? (
+                  <View style={styles.warnWrap} pointerEvents="none">
+                    <View style={styles.warn}>
+                      <Icon name="circle-alert" size={14} color={color.white} />
+                      <Text style={styles.warnText} numberOfLines={1}>{warn}</Text>
+                    </View>
                   </View>
-                  <Icon name="pencil" size={14} color={color.whiteA60} />
-                </Pressable>
-              ) : (
-                <View style={[styles.shotEmpty, { bottom: bottomOffset }]}>
-                  <View style={styles.shotEmptyLabelRow}>
-                    <Icon name="mic" size={13} color={color.whiteA75} />
-                    <Text style={styles.shotEmptyLabel}>{isCover ? 'Hook script, word for word' : 'What the creator says'}</Text>
-                  </View>
-                  <View style={styles.shotEmptyRow}>
-                    <Pressable accessibilityRole="button" onPress={() => setShotOpen(true)} style={styles.writeBtn}>
-                      <Icon name="pencil" size={15} color={color.ink} />
-                      <Text style={styles.writeText}>{isCover ? 'Write the hook' : 'Write the line'}</Text>
-                    </Pressable>
-                    {onWriteNote && !busy ? (
-                      <Pressable accessibilityRole="button" onPress={onWriteNote} style={styles.draftBtn}>
-                        <Icon name="sparkles" size={15} color={color.white} />
-                        <Text style={styles.draftText}>Draft with AI</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </View>
-              )
-            ) : null}
-            {!editing && warn ? (
-              <View style={styles.warnWrap}>
-                <View style={styles.warn}>
-                  <Icon name="circle-alert" size={14} color={color.white} />
-                  <Text style={styles.warnText}>{warn}</Text>
-                </View>
-              </View>
-            ) : null}
-            {!editing && !ctaPick && (genBtn || secBtn) ? (
-              <View style={styles.genStack}>
-                {genBtn}
-                {secBtn}
+                ) : null}
               </View>
             ) : null}
           </Animated.View>
-          <View style={styles.topRow}>
-            {editing ? <View style={styles.grow} /> : <Round icon="chevron-left" label="Back" onPress={onBack} />}
+          <View style={[styles.topRow, { height: ctl }]} pointerEvents="box-none">
+            {editing ? <View style={styles.grow} /> : <Round icon="chevron-left" label="Back" onPress={onBack} size={ctl} />}
+            {!editing && !picking ? (
+              <View style={[styles.ghostToggle, { height: ctl }]}>
+                {(
+                  [
+                    ['tiktok', 'music-2', 'TikTok'],
+                    ['instagram', 'instagram', 'Instagram'],
+                  ] as [Platform, IconName, string][]
+                ).map(([k, ic, l]) => {
+                  const on = ghost === k;
+                  const showLabel = on && !compactToggle;
+                  return (
+                    <Pressable
+                      key={k}
+                      accessibilityRole="button"
+                      accessibilityLabel={l}
+                      accessibilityState={{ selected: on }}
+                      onPress={() => setGhost(on ? 'off' : k)}
+                      hitSlop={4}
+                      style={[
+                        styles.ghostPill,
+                        { height: ctl - 6, minWidth: ctl - 6, paddingHorizontal: showLabel ? 11 : 0, backgroundColor: on ? color.white : 'transparent' },
+                      ]}
+                    >
+                      <Icon name={ic} size={14} color={on ? color.ink : color.whiteA75} />
+                      {showLabel ? <Text style={styles.ghostText}>{l}</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             <View style={styles.grow} />
+            {!editing && !picking ? (
+              <Animated.View entering={FadeIn.duration(200)} style={styles.tools}>
+                <Round label="Text" onPress={() => setEditing(true)} size={ctl}>
+                  <Text style={styles.aa}>Aa</Text>
+                </Round>
+                <Round icon="image-plus" label="Add media" onPress={onOpenMedia} on={Boolean(lib)} size={ctl} />
+                {notes && !reel ? <Round icon="message-circle" label="Note for the creator" onPress={() => setShotOpen(!shotOpen)} on={Boolean(cur.shot) || shotOpen} size={ctl} /> : null}
+                {onRevise && cur.text.trim() ? <Round icon="sparkles" label="Revise with AI" onPress={onRevise} size={ctl} /> : null}
+              </Animated.View>
+            ) : null}
             {editing ? (
               <Pressable accessibilityRole="button" onPress={finish} style={styles.done}>
                 <Text style={styles.doneText}>Done</Text>
               </Pressable>
             ) : null}
           </View>
-          {!editing && !picking ? (
-            <View style={styles.ghostToggle}>
-              {(
-                [
-                  ['tiktok', 'music-2', 'TikTok'],
-                  ['instagram', 'instagram', 'Instagram'],
-                ] as [Platform, IconName, string][]
-              ).map(([k, ic, l]) => {
-                const on = ghost === k;
-                return (
-                  <Pressable key={k} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => setGhost(on ? 'off' : k)} style={[styles.ghostPill, { backgroundColor: on ? color.white : 'transparent' }]}>
-                    <Icon name={ic} size={13} color={on ? color.ink : color.whiteA90} />
-                    <Text style={[styles.ghostText, { color: on ? color.ink : color.whiteA90 }]}>{l}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
           {!editing && !picking && kindLabel ? (
-            <View style={styles.kindLabel}>
-              <Text style={styles.kindLabelText}>{kindLabel}</Text>
-            </View>
+            <Text pointerEvents="none" numberOfLines={1} style={[styles.kindLabel, { top: PAD + ctl + 8 }]}>
+              {kindLabel}
+            </Text>
           ) : null}
           {picking ? (
             <Animated.View entering={FadeIn.duration(220)} style={styles.pickScrim}>
@@ -399,14 +518,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
             </Animated.View>
           ) : null}
           {shotOpen ? (
-            <Animated.View entering={FadeIn.duration(180)} style={[styles.shotScrim, { paddingBottom: 14 + keyboardInset }]}>
+            <Animated.View entering={FadeIn.duration(180)} style={[styles.shotScrim, { paddingBottom: PAD + keyboardInset }]}>
               <Animated.View entering={FadeInUp.duration(240)} style={styles.shotCard}>
-                <View style={styles.shotCardLabelRow}>
-                  <Icon name={reel ? 'mic' : 'message-circle'} size={14} color={color.whiteA75} />
-                  <Text style={styles.shotCardLabel}>
-                    {reel ? (isCover ? 'Hook script \u00b7 word for word' : 'What the creator says') : 'Note for the creator'}
-                  </Text>
-                </View>
+                <Text style={styles.noteLabel}>{noteLabel}</Text>
                 <TextInput
                   ref={shotRef}
                   autoFocus
@@ -439,72 +553,77 @@ export function CanvasEditor(props: CanvasEditorProps) {
   );
 }
 
-export function Round({ icon, label, onPress, on = false, children, size = 42 }: { icon?: IconName; label: string; onPress: () => void; on?: boolean; children?: ReactNode; size?: number }) {
+export function Round({ icon, label, onPress, on = false, children, size = 38 }: { icon?: IconName; label: string; onPress: () => void; on?: boolean; children?: ReactNode; size?: number }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      hitSlop={2}
-      style={[styles.round, { width: size, height: size, backgroundColor: on ? color.white : color.inkA55 }]}
+      hitSlop={Math.max(3, Math.ceil((44 - size) / 2))}
+      style={({ pressed }) => [styles.round, { width: size, height: size, backgroundColor: on ? color.white : color.inkA55 }, pressed ? styles.pressed : null]}
     >
-      {children ?? (icon ? <Icon name={icon} size={Math.round(size * 0.48)} color={on ? color.ink : color.white} /> : null)}
+      {children ?? (icon ? <Icon name={icon} size={Math.round(size * 0.47)} color={on ? color.ink : color.white} /> : null)}
     </Pressable>
   );
 }
 
+// One type scale for the canvas: 15 for actions and the note line, 13 for
+// secondary actions, 12 for labels. Surfaces are the canvas chrome, opaque.
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.ink900, alignItems: 'center' },
   frame: { borderRadius: 22, overflow: 'hidden', backgroundColor: briefTone.canvas.bg },
   grow: { flex: 1 },
+  pressed: { opacity: 0.8 },
   emptyHint: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  emptyHintText: { fontFamily: typeToken.font.ui, fontWeight: '600', fontSize: 13, color: color.whiteA28 },
+  emptyHintText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.chip, color: color.whiteA28 },
   zone: { position: 'absolute', backgroundColor: color.dangerSoft, opacity: 0.35, borderWidth: 1.5, borderStyle: 'dashed', borderColor: color.danger },
   input: { padding: 0, margin: 0, textAlignVertical: 'top' },
-  tools: { position: 'absolute', right: 12, top: 56, flexDirection: 'row', gap: 8 },
+  guideX: { position: 'absolute', top: 0, bottom: 0, width: 1.5, backgroundColor: color.blue500, shadowColor: color.white, shadowOpacity: 0.6, shadowRadius: 0.5, shadowOffset: { width: 0, height: 0 } },
+  guideY: { position: 'absolute', left: 0, right: 0, height: 1.5, backgroundColor: color.blue500, shadowColor: color.white, shadowOpacity: 0.6, shadowRadius: 0.5, shadowOffset: { width: 0, height: 0 } },
+  // Header: back, platform toggle, tools, all one height in one row.
+  topRow: { position: 'absolute', top: PAD, left: PAD, right: PAD, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tools: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   round: { borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  aa: { fontFamily: typeToken.font.display, fontWeight: '800', fontSize: 16, color: color.white },
-  topRow: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  aa: { fontFamily: typeToken.font.display, fontWeight: typeToken.weight.heavy, fontSize: typeToken.size.bodySm, color: color.white },
   done: { height: 44, paddingHorizontal: 14, justifyContent: 'center' },
-  doneText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 16, color: color.white, textShadowColor: color.scrimStrong, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
-  ghostToggle: { position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', gap: 2, padding: 3, borderRadius: 999, backgroundColor: color.scrimStrong },
-  ghostPill: { height: 30, paddingHorizontal: 12, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ghostText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 12.5 },
-  kindLabel: { position: 'absolute', left: 12, top: 63, height: 42, paddingHorizontal: 12, borderRadius: 999, backgroundColor: color.inkA55, justifyContent: 'center' },
-  kindLabelText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 12.5, color: color.white },
-  genBtn: { height: 46, paddingLeft: 16, paddingRight: 20, borderRadius: 999, backgroundColor: color.white, flexDirection: 'row', alignItems: 'center', gap: 8, ...{ shadowColor: color.ink900, shadowOffset: { width: 0, height: 6 }, shadowRadius: 12, shadowOpacity: 0.35 } },
-  genText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15, color: color.ink },
-  secBtn: { height: 36, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: color.whiteA45, backgroundColor: color.inkA55, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  secText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 13, color: color.white },
-  genStack: { position: 'absolute', left: 0, right: 0, bottom: 20, alignItems: 'center', gap: 10 },
-  shotPill: { position: 'absolute', left: 12, right: 64, flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 11, paddingHorizontal: 13, borderRadius: 16, backgroundColor: color.inkA55 },
-  shotBody: { flex: 1, minWidth: 0, gap: 3 },
-  shotLabel: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 10.5, letterSpacing: 0.4, textTransform: 'uppercase', color: color.whiteA60 },
-  shotText: { fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 13.5, lineHeight: 13.5 * 1.4, color: color.white },
-  shotEmpty: { position: 'absolute', left: 12, right: 12, gap: 8 },
-  shotEmptyLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  shotEmptyLabel: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: color.whiteA75 },
-  shotEmptyRow: { flexDirection: 'row', gap: 8 },
-  writeBtn: { flex: 1, height: 46, borderRadius: 999, backgroundColor: color.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  writeText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 14, color: color.ink },
-  draftBtn: { flex: 1, height: 46, borderRadius: 999, borderWidth: 1, borderColor: color.whiteA45, backgroundColor: color.inkA55, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  draftText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 14, color: color.white },
-  warnWrap: { position: 'absolute', left: 12, bottom: 12, right: 64, flexDirection: 'row' },
-  warn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 11, borderRadius: 999, backgroundColor: color.danger },
-  warnText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 12.5, color: color.white },
+  doneText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.body, color: color.white, textShadowColor: color.scrimStrong, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  ghostToggle: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 3, borderRadius: 999, backgroundColor: color.inkA55 },
+  ghostPill: { borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  ghostText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.label, color: color.ink },
+  kindLabel: { position: 'absolute', left: PAD + 2, right: PAD, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.label, color: color.whiteA60, textShadowColor: color.scrimStrong, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  genBtn: { height: GEN_H, paddingLeft: 16, paddingRight: 20, borderRadius: 999, backgroundColor: color.white, flexDirection: 'row', alignItems: 'center', gap: 8, ...{ shadowColor: color.ink900, shadowOffset: { width: 0, height: 6 }, shadowRadius: 12, shadowOpacity: 0.35 } },
+  genText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.bodySm, color: color.ink },
+  secBtn: { height: SEC_H, paddingHorizontal: 14, borderRadius: 999, backgroundColor: briefTone.canvas.chrome, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  secText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.chip, color: color.white },
+  bottomStack: { position: 'absolute', left: PAD, right: PAD, bottom: STACK_BOTTOM, gap: STACK_GAP },
+  genStack: { alignItems: 'center', gap: STACK_GAP },
+  // Note card (hook script, creator says, photo): opaque, in the caption zone, clear of the rail.
+  note: { position: 'absolute', borderRadius: 16, backgroundColor: briefTone.canvas.chrome, borderWidth: 1, borderColor: color.whiteA16, overflow: 'hidden' },
+  noteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: PAD, paddingLeft: 14, paddingRight: PAD },
+  noteBody: { flex: 1, minWidth: 0, gap: 4 },
+  noteLabel: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.medium, fontSize: typeToken.size.label, color: color.whiteA60 },
+  noteText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.bodySm, lineHeight: 20, color: color.white },
+  noteEdit: { width: 22, height: 22, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  noteEmpty: { gap: 10, paddingVertical: PAD, paddingHorizontal: 14 },
+  noteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  noteBtn: { flexGrow: 1, flexBasis: 112, height: 40, paddingHorizontal: 12, borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  noteBtnText: { flexShrink: 1, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.chip },
+  writeBtn: { backgroundColor: color.white },
+  draftBtn: { backgroundColor: color.whiteA16 },
+  warnWrap: { flexDirection: 'row', marginRight: 52 },
+  warn: { height: WARN_H, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 11, borderRadius: 999, backgroundColor: color.danger },
+  warnText: { flexShrink: 1, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.label, color: color.white },
   pickScrim: { ...StyleSheet.absoluteFill, backgroundColor: color.scrimStrong, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
   pickCard: { width: '100%', gap: 10, paddingTop: 22, paddingHorizontal: 18, paddingBottom: 18, borderRadius: 24, backgroundColor: briefTone.canvas.bg, borderWidth: 1, borderColor: color.whiteA16 },
   pickZap: { width: 44, height: 44, borderRadius: 999, alignSelf: 'center', backgroundColor: color.blue500, alignItems: 'center', justifyContent: 'center' },
-  pickTitle: { textAlign: 'center', fontFamily: typeToken.font.display, fontWeight: '700', fontSize: 19, letterSpacing: -0.3, color: color.white, marginBottom: 8 },
-  pickBtn: { height: 50, borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  pickBtnText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15 },
-  shotScrim: { ...StyleSheet.absoluteFill, backgroundColor: color.scrimStrong, justifyContent: 'flex-end', padding: 14 },
-  shotCard: { gap: 10, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 18, backgroundColor: briefTone.canvas.bg },
-  shotCardLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  shotCardLabel: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: color.whiteA60 },
-  shotInput: { minHeight: 48, maxHeight: 260, fontFamily: typeToken.font.ui, fontWeight: '600', fontSize: 17, lineHeight: 17 * 1.4, color: color.white, padding: 0 },
-  shotFooter: { flex: 1, minHeight: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 6 },
-  shotFooterText: { flex: 1, fontFamily: typeToken.font.ui, fontWeight: '600', fontSize: 13, color: color.whiteA60 },
-  shotDone: { height: 44, paddingHorizontal: 16, borderRadius: 999, backgroundColor: color.white, justifyContent: 'center' },
-  shotDoneText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15, color: color.ink },
+  pickTitle: { textAlign: 'center', fontFamily: typeToken.font.display, fontWeight: typeToken.weight.bold, fontSize: 19, letterSpacing: -0.3, color: color.white, marginBottom: 8 },
+  pickBtn: { height: 48, borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  pickBtnText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.bodySm },
+  shotScrim: { ...StyleSheet.absoluteFill, backgroundColor: color.scrimStrong, justifyContent: 'flex-end', padding: PAD },
+  shotCard: { gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: briefTone.canvas.chrome, borderWidth: 1, borderColor: color.whiteA16 },
+  shotInput: { minHeight: 48, maxHeight: 260, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.action, lineHeight: 24, color: color.white, padding: 0 },
+  shotFooter: { flex: 1, minHeight: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 4 },
+  shotFooterText: { flex: 1, fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.chip, color: color.whiteA60 },
+  shotDone: { height: 44, paddingHorizontal: 18, borderRadius: 999, backgroundColor: color.white, justifyContent: 'center' },
+  shotDoneText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.bodySm, color: color.ink },
 });

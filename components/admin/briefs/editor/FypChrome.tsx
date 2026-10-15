@@ -14,7 +14,7 @@ const TABS: IconName[] = ['house', 'users', 'plus', 'inbox', 'circle-user-round'
 function R({ icon, n }: { icon: IconName; n: string }) {
   return (
     <View style={styles.railItem}>
-      <Icon name={icon} size={30} color={color.white} />
+      <Icon name={icon} size={28} color={color.white} />
       <Text style={styles.railText}>{n}</Text>
     </View>
   );
@@ -91,7 +91,7 @@ export function FypChrome({
       </View>
       <View style={{ position: 'absolute', left: 14, right: 78, bottom: 18, gap: 6 }}>
         <Text style={styles.handle}>{handle}</Text>
-        <Text style={styles.captionReel}>
+        <Text numberOfLines={3} style={styles.captionReel}>
           {caption || 'Caption'} <Text style={styles.tags}>{tagLine}</Text>
         </Text>
         <View style={styles.sound}>
@@ -108,9 +108,9 @@ const styles = StyleSheet.create({
   band: { position: 'absolute', left: 0, right: 0, backgroundColor: color.ink900 },
   tab: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15 },
   tabOn: { color: color.white, borderBottomWidth: 2, borderBottomColor: color.white, paddingBottom: 4 },
-  railItem: { alignItems: 'center', gap: 3 },
-  railText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 12, color: color.white },
-  avatar: { width: 44, height: 44, borderRadius: 999, overflow: 'hidden', borderWidth: 2, borderColor: color.white },
+  railItem: { alignItems: 'center', gap: 2 },
+  railText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.semibold, fontSize: typeToken.size.micro11, color: color.whiteA90 },
+  avatar: { width: 42, height: 42, borderRadius: 999, overflow: 'hidden', borderWidth: 2, borderColor: color.white },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 4, marginBottom: 2 },
   dot: { width: 5, height: 5, borderRadius: 99 },
   handle: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15, color: color.white },

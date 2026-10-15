@@ -16,6 +16,8 @@ export type Brief = Database['public']['Tables']['briefs']['Row'];
 
 export type AssignmentWithBrief = Assignment & { briefs: Brief };
 
+type AssignmentUpdate = Database['public']['Tables']['assignments']['Update'];
+
 const STREAK_COUNT_STATUSES = new Set<TaskStatus>([
   'submitted',
   'approved',
@@ -121,7 +123,11 @@ export async function swapAssignmentBrief(
 ): Promise<AssignmentWithBrief> {
   const { data, error } = await supabase
     .from('assignments')
-    .update({ brief_id: briefId, caption: null })
+    // slides_variant was written for the old brief; applySlidesVariant only
+    // checks the length, so a same length brief would show the old text.
+    // vary-copy writes the new brief's variant when it has one.
+    // slides_variant (migration 118) is not in the generated types yet.
+    .update({ brief_id: briefId, caption: null, slides_variant: null } as unknown as AssignmentUpdate)
     .eq('id', assignmentId)
     .eq('status', 'assigned')
     .select(ASSIGNMENT_SELECT)

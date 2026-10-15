@@ -28,6 +28,38 @@ type Body = {
 
 const MAX_HOPS = 5;
 
+function serviceClient() {
+  return createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+}
+
+/** publish-due's attempt cap: a row at it stays claimed until released here. */
+const MAX_PUBLISH_ATTEMPTS = 3;
+
+/**
+ * A post whose publish attempts ran out on the render gate stays claimed with
+ * publish_error. A restarted or finished render releases it so publish-due
+ * picks it up again. Only exhausted rows are touched: nothing is mid post on
+ * them, and post-approved re-checks render_status under the next claim, so
+ * nothing can post twice.
+ */
+async function releaseStuckPublish(
+  admin: ReturnType<typeof serviceClient>,
+  assignmentId: string | null,
+): Promise<void> {
+  if (!assignmentId) return;
+  const { error } = await admin
+    .from('assignments')
+    .update({ publish_claimed_at: null, publish_attempts: 0, publish_error: null })
+    .eq('id', assignmentId)
+    .eq('status', 'approved')
+    .not('publish_claimed_at', 'is', null)
+    .gte('publish_attempts', MAX_PUBLISH_ATTEMPTS);
+  if (error) console.error('render-submission publish release error:', assignmentId, error.message);
+}
+
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
   if (preflight) return preflight;
@@ -37,10 +69,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'expected { submission_id }' }, 400);
     }
 
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
+    const admin = serviceClient();
 
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const authHeader = req.headers.get('Authorization') ?? '';
@@ -129,12 +158,13 @@ Deno.serve(async (req) => {
       : rerender
         ? ['queued', 'failed', 'rendering', 'ready']
         : ['queued', 'failed', 'rendering'];
+    const claimedAt = new Date().toISOString();
     const { data: claimed } = await admin
       .from('submissions')
       .update({
         render_status: 'rendering',
         render_error: null,
-        render_claimed_at: new Date().toISOString(),
+        render_claimed_at: claimedAt,
       })
       .eq('id', submission.id)
       .in('render_status', claimable)
@@ -143,6 +173,10 @@ Deno.serve(async (req) => {
     if (!claimed) {
       return jsonResponse({ status: submission.render_status as string });
     }
+    const assignmentId = (submission.assignment_id ?? null) as string | null;
+    // A restart (Retry render, or publish-due restarting a failed job) frees
+    // a post that gave up waiting on this render.
+    if (!rerender && !body.resume) await releaseStuckPublish(admin, assignmentId);
 
     // A manager re-render starts from the stored stitched cut so only the
     // overlay pass runs again; slides go back to the originals inside the
@@ -189,25 +223,59 @@ Deno.serve(async (req) => {
     // Studio submissions carry the creator's edit document; it drives the
     // whole render. Legacy submissions (null) keep the brief_segments path.
     const row = submission as unknown as SubmissionRow;
-    const editDocument = row.edit_document != null ? parseEditDocument(row.edit_document) : null;
-    const job = (
-      editDocument
-        ? assembleDocumentSubmission({ admin, targetId, companyId, handoff }, row, editDocument)
-        : assembleSubmission({
-            admin,
-            submission: row,
-            targetId,
-            companyId,
-            briefId,
-            handoff,
-          })
-    )
-      .then((result) => {
+    // The job is claimed: any throw from here on must land as 'failed' so the
+    // manager sees Retry, never a row stuck in 'rendering'. A submission with
+    // an edit document never falls back to the brief_segments path, which
+    // would render the untrimmed source files with no text.
+    const markFailed = async (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('render-submission failed', submission.id, message);
+      await admin
+        .from('submissions')
+        .update({ render_status: 'failed', render_error: message })
+        .eq('id', submission.id)
+        .eq('render_status', 'rendering')
+        // Only this invocation's claim: a newer job a manager restarted (or
+        // a resume hop) re-stamps render_claimed_at and must not be failed.
+        .eq('render_claimed_at', claimedAt);
+    };
+    let start: () => ReturnType<typeof assembleSubmission>;
+    try {
+      const editDocument = row.edit_document != null ? parseEditDocument(row.edit_document) : null;
+      if (row.edit_document != null && !editDocument) {
+        throw new Error('edit document could not be read');
+      }
+      start = editDocument
+        ? () => assembleDocumentSubmission({ admin, targetId, companyId, handoff }, row, editDocument)
+        : () =>
+            assembleSubmission({
+              admin,
+              submission: row,
+              targetId,
+              companyId,
+              briefId,
+              handoff,
+            });
+    } catch (error) {
+      await markFailed(error);
+      const message = error instanceof Error ? error.message : String(error);
+      return jsonResponse({ status: 'failed', error: message }, 422);
+    }
+    const job = Promise.resolve()
+      .then(start)
+      .then(async (result) => {
         if (result.overlayWarning) console.warn(`render-submission: ${result.overlayWarning}`);
+        if (result.deferred) return;
+        const { data: fresh } = await admin
+          .from('submissions')
+          .select('render_status')
+          .eq('id', submission.id)
+          .maybeSingle();
+        if (fresh?.render_status === 'ready') await releaseStuckPublish(admin, assignmentId);
       })
-      .catch((error) => {
-      console.error('render-submission failed', error);
-    });
+      // The assemblers record their own failures; this catches anything that
+      // escaped them before the status was written.
+      .catch(markFailed);
 
     if (typeof EdgeRuntime !== 'undefined') {
       EdgeRuntime.waitUntil(job);

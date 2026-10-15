@@ -13,7 +13,8 @@ export type SourcePost = {
   format: 'video' | 'photo_carousel';
 };
 
-const MAX_OCR_SLIDES = 6;
+// Ten covers almost every slideshow, so a remix can keep the slide count.
+const MAX_OCR_SLIDES = 10;
 
 async function apifyRun(actor: string, input: Record<string, unknown>): Promise<unknown[]> {
   const token = Deno.env.get('APIFY_API_TOKEN');
@@ -230,12 +231,23 @@ export type ReadPost = {
   slideTexts: string[] | null;
 };
 
-/** Scrape, then transcribe a video or OCR a slideshow. Null when the post cannot be read. */
-export async function readSocialPost(url: string): Promise<ReadPost | null> {
+/** What a read is doing now, for the Library's live steps. */
+export type ReadPhase = 'transcribing' | 'reading_slides';
+
+/**
+ * Scrape, then transcribe a video or OCR a slideshow. Null when the post
+ * cannot be read. onPhase hears when the scrape is done and the second half
+ * starts.
+ */
+export async function readSocialPost(
+  url: string,
+  onPhase?: (phase: ReadPhase) => Promise<void> | void,
+): Promise<ReadPost | null> {
   const host = socialHost(url);
   if (!host) return null;
   const post = host === 'tiktok' ? await scrapeTikTok(url) : await scrapeInstagram(url);
   if (!post) return null;
+  await Promise.resolve(onPhase?.(post.format === 'video' ? 'transcribing' : 'reading_slides')).catch(() => undefined);
   let transcript: string | null = null;
   let slideTexts: string[] | null = null;
   if (post.format === 'video') {

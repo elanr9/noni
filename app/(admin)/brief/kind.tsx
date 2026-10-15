@@ -1,7 +1,7 @@
 // Pick a kind for an empty slot (SSManager.jsx KindScreen): Handheld, Story
 // or Freestyle, then the post type for that format. Freestyle saves at once.
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,6 +9,7 @@ import { MiniDeck } from '../../../components/admin/briefs/MiniDeck';
 import { PostTypePeekSheet } from '../../../components/admin/briefs/PostTypePeekSheet';
 import {
   editorHref,
+  ideasHref,
   parseFormat,
   parseSlot,
   weekHref,
@@ -64,6 +65,8 @@ export default function KindScreen() {
         creatorNote: null,
       });
       router.dismissTo(weekHref(campaignId, slotLabel(slot), format));
+    } catch (e) {
+      Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again.');
     } finally {
       setSaving(false);
     }
@@ -84,7 +87,8 @@ export default function KindScreen() {
   }
 
   if (kind) {
-    const types = postTypesFor(format);
+    // Story has its own steps; Long text would turn it into a hybrid post.
+    const types = postTypesFor(format).filter((t) => !(kind === 'story' && t.id === 'longtext'));
     const icons = reel ? REEL_ICONS : SLIDESHOW_ICONS;
     return (
       <SafeAreaView edges={['top']} style={styles.safe}>
@@ -147,6 +151,24 @@ export default function KindScreen() {
             <Icon name="chevron-right" size={18} color={color.slate300} />
           </Pressable>
         ))}
+        {campaignId && briefId ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Brainstorm with AI"
+            disabled={saving}
+            onPress={() => router.push(ideasHref({ campaignId, briefId, format, week: params.week }))}
+            style={({ pressed }) => [styles.ai, pressed ? styles.pressed : null]}
+          >
+            <View style={styles.aiIcon}>
+              <Icon name="sparkles" size={20} color={color.white} />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={styles.aiName}>Brainstorm with AI</Text>
+              <Text style={styles.aiLine}>{`Stuck? Chat through ideas and AI writes the winner into slot ${slotLabel(slot)}.`}</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={color.blue300} />
+          </Pressable>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -178,6 +200,20 @@ const styles = StyleSheet.create({
     ...shadow.shadowCard,
   },
   pressed: { opacity: 0.85 },
+  ai: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 6,
+    padding: 18,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.blue200,
+    backgroundColor: color.blue50,
+  },
+  aiIcon: { width: 44, height: 44, borderRadius: 999, backgroundColor: color.blue500, alignItems: 'center', justifyContent: 'center', ...shadow.shadowAccent },
+  aiName: { fontFamily: typeToken.font.display, fontWeight: '700', fontSize: 18, letterSpacing: -0.3, color: color.blue700 },
+  aiLine: { fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 14, lineHeight: 14 * 1.4, color: color.slate500 },
   rowBody: { flex: 1, minWidth: 0, gap: 5 },
   rowName: { fontFamily: typeToken.font.display, fontWeight: '700', fontSize: 18, letterSpacing: -0.3, color: color.ink },
   rowLine: { fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 14, lineHeight: 14 * 1.4, color: color.slate500 },

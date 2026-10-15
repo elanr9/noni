@@ -1,13 +1,15 @@
 // Media sheet (SSCanvas.jsx MediaSheet): the Library's screenshots for
 // slideshows, screen recordings for reels. A pick lands on the slide as the
-// movable inset, never as the background.
+// movable inset, never as the background. Tiles show the real media at its
+// own aspect; features with nothing in the Library sit after the rest.
 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { LibraryFeature } from '../../../../lib/library-api';
 import { color, type as typeToken } from '../../../../theme/tokens';
 import { Sheet } from '../../shared';
-import { featureToneFor, Shot } from '../Shot';
+import { FeatureThumb, hasFeatureMedia } from '../media/FeatureMedia';
+import { featureToneFor } from '../Shot';
 
 export function MediaSheet({
   visible,
@@ -24,6 +26,8 @@ export function MediaSheet({
   onPick: (feature: LibraryFeature) => void;
   onClose: () => void;
 }) {
+  const withMedia = features.filter((f) => hasFeatureMedia(f, video));
+  const ordered = [...withMedia, ...features.filter((f) => !hasFeatureMedia(f, video))];
   return (
     <Sheet
       visible={visible}
@@ -37,14 +41,15 @@ export function MediaSheet({
         </View>
       }
     >
+      {withMedia.length === 0 ? (
+        <Text style={styles.empty}>{video ? 'No screen recordings yet. Add them in Library and they show up here.' : 'No screenshots yet. Add them in Library and they show up here.'}</Text>
+      ) : null}
       <View style={styles.grid}>
-        {features.map((it) => {
+        {ordered.map((it) => {
           const on = current === it.id;
           return (
             <Pressable key={it.id} accessibilityRole="button" accessibilityLabel={it.title} onPress={() => onPick(it)} style={styles.cell}>
-              <View style={[styles.thumb, { backgroundColor: featureToneFor(it.title).tone }, on ? styles.thumbOn : null]}>
-                <Shot feature={it} w={60} video={video} />
-              </View>
+              <FeatureThumb feature={it} video={video} tone={featureToneFor(it.title)} style={[styles.thumb, on ? styles.thumbOn : null]} />
               <Text numberOfLines={1} style={styles.title}>
                 {it.title}
               </Text>
@@ -62,7 +67,8 @@ const styles = StyleSheet.create({
   tabOnText: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 13, color: color.white },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   cell: { width: '30%', flexGrow: 1, gap: 6 },
-  thumb: { aspectRatio: 3 / 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  thumb: { aspectRatio: 9 / 16, borderRadius: 12 },
   thumbOn: { borderWidth: 3, borderColor: color.blue500 },
+  empty: { fontFamily: typeToken.font.ui, fontWeight: '500', fontSize: 14, lineHeight: 20, color: color.slate500, paddingBottom: 12 },
   title: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 13, color: color.ink },
 });

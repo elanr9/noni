@@ -38,8 +38,13 @@ const LANE_GAP_TOP = 6;
 
 type TrimState = TrimStartInfo & { offset0: number; endX0: number };
 
-export function TimelineStrip(props: { doc: VideoDocument; overlayLane?: ReactNode }): JSX.Element {
-  const { doc, overlayLane } = props;
+export function TimelineStrip(props: {
+  doc: VideoDocument;
+  overlayLane?: ReactNode;
+  /** Hold to reorder lands here instead of a plain move (a reel keeps a locked plug in place). */
+  onReorder?: (blockId: string, toIndex: number) => void;
+}): JSX.Element {
+  const { doc, overlayLane, onReorder } = props;
   const msPerPx = useTimelineScale((s) => s.msPerPx);
   const setMsPerPx = useTimelineScale((s) => s.setMsPerPx);
   const setScrollOffsetMs = useTimelineScale((s) => s.setScrollOffsetMs);
@@ -158,10 +163,11 @@ export function TimelineStrip(props: { doc: VideoDocument; overlayLane?: ReactNo
       const list = latest.current.items;
       const hit = list.findIndex((i) => centerX >= i.x && centerX < i.x + i.width);
       const to = hit >= 0 ? hit : centerX < 0 ? 0 : list.length - 1;
-      useStudioStore.getState().commit(onVideo((d) => moveBlock(d, blockId, to)));
+      if (onReorder) onReorder(blockId, to);
+      else useStudioStore.getState().commit(onVideo((d) => moveBlock(d, blockId, to)));
       endEdit();
     },
-    [endEdit],
+    [endEdit, onReorder],
   );
 
   const onPinchStart = useEvent(() => {

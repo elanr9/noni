@@ -132,6 +132,29 @@ async function callerManages(
   return isManagerOf(admin, caller.userId, companyId, caller.platformAdmin);
 }
 
+/** A job still 'queued' this long after submit never started. */
+const QUEUED_STALE_MS = 2 * 60 * 1000;
+/** A job still 'rendering' this long after its claim died mid flight. */
+const RENDERING_STALE_MS = 20 * 60 * 1000;
+
+function olderThan(iso: string | null, ms: number): boolean {
+  if (!iso) return false;
+  const at = new Date(iso).getTime();
+  return Number.isFinite(at) && Date.now() - at > ms;
+}
+
+function renderStale(row: {
+  render_status: string | null;
+  created_at: string | null;
+  render_claimed_at: string | null;
+}): boolean {
+  if (row.render_status === 'queued') return olderThan(row.created_at, QUEUED_STALE_MS);
+  if (row.render_status === 'rendering') {
+    return olderThan(row.render_claimed_at, RENDERING_STALE_MS);
+  }
+  return false;
+}
+
 const NO_DISTINCT_CAPTION = 'No distinct caption could be written for this creator';
 
 /**
@@ -307,6 +330,9 @@ async function resolveSubmission(
   version: number | null;
   render_status: string | null;
   slide_aspect: string | null;
+  edit_document: unknown;
+  created_at: string | null;
+  render_claimed_at: string | null;
 } | null> {
   type Row = {
     id: string;
@@ -315,6 +341,10 @@ async function resolveSubmission(
     version: number | null;
     render_status: string | null;
     slide_aspect: string | null;
+    /** Studio submissions: the render builds from this, never from brief_segments. */
+    edit_document: unknown;
+    created_at: string | null;
+    render_claimed_at: string | null;
   };
   if (target.assignmentId) {
     const { data: assignment } = await admin
@@ -326,7 +356,7 @@ async function resolveSubmission(
     if (assignment?.submission_id) {
       const { data } = await admin
         .from('submissions')
-        .select('id, video_path, segment_paths, version, render_status, slide_aspect')
+        .select('id, video_path, segment_paths, version, render_status, slide_aspect, edit_document, created_at, render_claimed_at')
         .eq('id', assignment.submission_id)
         .maybeSingle();
       if (data) return data as Row;
@@ -334,7 +364,7 @@ async function resolveSubmission(
     const { data } = await admin
       .from('submissions')
       .select(
-        'id, video_path, segment_paths, version, render_status, slide_aspect, assignments!inner(company_id)',
+        'id, video_path, segment_paths, version, render_status, slide_aspect, edit_document, created_at, render_claimed_at, assignments!inner(company_id)',
       )
       .eq('assignment_id', target.assignmentId)
       .eq('assignments.company_id', target.companyId)
@@ -346,7 +376,7 @@ async function resolveSubmission(
   if (target.taskId) {
     const { data } = await admin
       .from('submissions')
-      .select('id, video_path, segment_paths, version, render_status, slide_aspect')
+      .select('id, video_path, segment_paths, version, render_status, slide_aspect, edit_document, created_at, render_claimed_at')
       .eq('task_id', target.taskId)
       .order('version', { ascending: false })
       .limit(1)
@@ -455,10 +485,41 @@ Deno.serve(async (req) => {
     let overlayWarning: string | null = null;
     let uploadUrl = 'https://api.upload-post.com/api/upload';
 
+    // Studio submissions carry an edit document, and only the render reads
+    // it: segment_paths hold the untrimmed source files and brief_segments
+    // are empty, so the legacy assembly below would post raw media with no
+    // text. Until the render is ready nothing posts; publish-due retries.
+    if (submission.edit_document != null && submission.render_status !== 'ready') {
+      const failed = submission.render_status === 'failed';
+      return jsonResponse(
+        {
+          error: failed
+            ? 'render failed, retry the render from review before posting'
+            : 'render not ready',
+          code: failed ? 'render_failed' : 'render_not_ready',
+          render_status: submission.render_status,
+          submission_id: submission.id,
+          // A queued job whose kick never landed, or a claim that died
+          // without writing a status: publish-due restarts these.
+          render_stale: !failed && renderStale(submission),
+        },
+        409,
+      );
+    }
+
     // An edit still in flight must not be assembled a second time here: that
     // double bills every render step and races the running invocation.
     if (submission.render_status === 'rendering') {
-      return jsonResponse({ error: 'edit still in progress, approve once it is ready' }, 409);
+      return jsonResponse(
+        {
+          error: 'edit still in progress, approve once it is ready',
+          code: 'render_not_ready',
+          render_status: submission.render_status,
+          submission_id: submission.id,
+          render_stale: renderStale(submission),
+        },
+        409,
+      );
     }
 
     if (target.isSlideshow) {
@@ -466,7 +527,8 @@ Deno.serve(async (req) => {
       // (TikTok photo post + Instagram carousel). Trending music is layered
       // on afterwards through the existing music approval loop. The bake
       // (text boxes + inset pictures onto each slide) runs at submit time;
-      // assemble here only as a fallback for submissions never rendered.
+      // assemble here only as a fallback for legacy submissions (no edit
+      // document) that were never rendered.
       uploadUrl = 'https://api.upload-post.com/api/upload_photos';
       let slidePaths = (submission.segment_paths ?? []) as string[];
       if (submission.render_status !== 'ready') {

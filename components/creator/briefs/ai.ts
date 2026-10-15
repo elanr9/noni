@@ -1,91 +1,84 @@
-// Creator side AI asks, all through brief-assist regenerate_field. The
-// creator's current slides or clips go up as the draft so the answer fits
-// what they already made. Nothing is saved by these calls.
-import {
-  assistRegenerateField,
-  toBriefFormat,
-  type RegenDraftPayload,
-  type TalkingPoint,
-  type WeekBrief,
-} from '../../../lib/briefs-api';
+// Creator side AI asks, all through write-deck. The manager's slides go up
+// locked, the creator's own lines go up as theirs, and only the creator's
+// lines come back, so every answer fits the post they are making and the
+// brief they were given. Nothing is saved by these calls.
+import { postTypeByKey } from '../../../lib/brief-copy';
+import type { WeekBrief } from '../../../lib/briefs-api';
+import { creatorDeck, type CreatorDeckSlide } from '../../../lib/deck-ai';
 
 export type AiLine = { text: string };
 
-function draftFrom(brief: WeekBrief, lines: string[], hook: string | null): RegenDraftPayload {
-  const points: TalkingPoint[] = lines.map((text, i) => ({
-    id: `p${i}`,
-    text,
-    is_product: false,
-    edited_by_admin: false,
-  }));
-  return {
-    title: brief.title || lines[0] || 'Freestyle',
-    search_phrase: brief.searchTerm || null,
-    format: toBriefFormat(brief.format),
-    point_count: Math.max(1, points.length),
-    target_words: brief.format === 'reel' ? 120 : 60,
-    hook,
-    hook_options: hook ? [hook] : [],
-    talking_points: points,
-    cta: brief.cta.text || null,
-    caption: brief.caption,
-    hashtags: brief.hashtags,
-    why_it_works: '',
-    script: null,
-  };
+/**
+ * The post as the creator sees it. Reels: lines[0] is the hook clip. Slides:
+ * lines[0] is the cover only on Freestyle, where every slide is the creator's.
+ * The manager's cover, points and CTA go up locked so the model writes around
+ * them; the creator's lines go up as theirs.
+ */
+function deckFor(brief: WeekBrief, lines: string[]): { slides: CreatorDeckSlide[]; own: number[] } {
+  const reel = brief.format === 'reel';
+  const mgr: CreatorDeckSlide[] = brief.slides.map((s) => ({ ...s, own: false }));
+  const ownSlide = (text: string, role: CreatorDeckSlide['role']): CreatorDeckSlide => ({ role, text, shot: '', inset_feature_id: null, own: true });
+  const coverOwn = reel || mgr.length === 0;
+  const body = coverOwn ? lines.slice(1) : lines;
+  const cover = coverOwn ? ownSlide(lines[0] ?? '', 'cover') : (mgr.find((s) => s.role === 'cover') ?? ownSlide('', 'cover'));
+  const points = mgr.filter((s) => s.role === 'point');
+  const cta = mgr.find((s) => s.role === 'cta') ?? null;
+  const slides: CreatorDeckSlide[] = [cover, ...points, ...body.map((t) => ownSlide(t, 'point')), ...(cta ? [cta] : [])];
+  const own = slides.map((s, i) => (s.own ? i : -1)).filter((i) => i >= 0);
+  return { slides, own };
 }
 
+function base(brief: WeekBrief) {
+  return { briefId: brief.id, format: brief.format, kind: brief.kind, postType: postTypeByKey(brief.postTypeKey) };
+}
+
+/** Cover or hook options that fit the post so far. */
 export async function suggestHooks(brief: WeekBrief, lines: string[]): Promise<string[]> {
-  const result = await assistRegenerateField({
-    field: 'hook',
-    draft: draftFrom(brief, lines, null),
-    postTypeKey: brief.postTypeKey ?? undefined,
-  });
-  if (result.kind === 'kill') throw new Error(result.kill_reason);
-  return result.kind === 'hook' ? result.hook_options : [];
+  const { slides } = deckFor(brief, lines);
+  const { ideas } = await creatorDeck({ ...base(brief), mode: 'ideas', slides });
+  // The hook lands on the on screen text (the cover overlay), so it is the
+  // cover line for reels too, never the spoken say line.
+  return ideas.map((d) => d.cover || d.say).filter((t): t is string => Boolean(t && t.trim()));
 }
 
-/** Fresh text for every own slide, in order. */
-export async function suggestAllLines(brief: WeekBrief, lines: string[], hook: string | null): Promise<string[]> {
-  const result = await assistRegenerateField({
-    field: 'talking_points',
-    draft: draftFrom(brief, lines, hook),
-    postTypeKey: brief.postTypeKey ?? undefined,
-  });
-  if (result.kind === 'kill') throw new Error(result.kill_reason);
-  if (result.kind !== 'talking_points') return [];
-  return result.talking_points.map((p) => p.text ?? '').filter(Boolean);
+/** Fresh text for every own line, in order. */
+export async function suggestAllLines(brief: WeekBrief, lines: string[], _hook: string | null): Promise<string[]> {
+  const { slides, own } = deckFor(brief, lines.map(() => ''));
+  const { result } = await creatorDeck({ ...base(brief), mode: 'all', slides, only: own });
+  return result ? own.map((i) => result.slides[i]?.text ?? '') : [];
 }
 
-/** One rewrite of the line at index. */
-export async function suggestLine(brief: WeekBrief, lines: string[], hook: string | null, index: number): Promise<string[]> {
-  const result = await assistRegenerateField({
-    field: 'talking_point',
-    draft: draftFrom(brief, lines, hook),
-    postTypeKey: brief.postTypeKey ?? undefined,
-    index,
-  });
-  if (result.kind === 'kill') throw new Error(result.kill_reason);
-  if (result.kind !== 'talking_point') return [];
-  return result.talking_point.text ? [result.talking_point.text] : [];
+/** One rewrite of the own line at index. */
+export async function suggestLine(brief: WeekBrief, lines: string[], _hook: string | null, index: number): Promise<string[]> {
+  const { slides, own } = deckFor(brief, lines);
+  const at = own[index];
+  if (at === undefined) return [];
+  const blanked = slides.map((s, i) => (i === at ? { ...s, text: '' } : s));
+  const { result } = await creatorDeck({ ...base(brief), mode: 'all', slides: blanked, only: [at] });
+  const text = result?.slides[at]?.text ?? '';
+  return text ? [text] : [];
 }
 
-export async function fillCaption(brief: WeekBrief, lines: string[], hook: string | null): Promise<{ caption: string; hashtags: string[] }> {
-  const result = await assistRegenerateField({
-    field: 'caption',
-    draft: draftFrom(brief, lines, hook),
-    postTypeKey: brief.postTypeKey ?? undefined,
-  });
-  if (result.kind === 'kill') throw new Error(result.kill_reason);
-  return result.kind === 'caption' ? { caption: result.caption, hashtags: result.hashtags } : { caption: '', hashtags: [] };
+// Caption and search phrase come from one call; the details step asks for
+// both at once.
+const pending = new Map<string, ReturnType<typeof creatorDeck>>();
+function details(brief: WeekBrief, lines: string[]) {
+  const key = `${brief.id}:${lines.join('|')}`;
+  const hit = pending.get(key);
+  if (hit) return hit;
+  const { slides } = deckFor(brief, lines);
+  const p = creatorDeck({ ...base(brief), mode: 'details', slides, caption: brief.caption, hashtags: brief.hashtags, searchPhrase: brief.searchTerm });
+  pending.set(key, p);
+  void p.finally(() => setTimeout(() => pending.delete(key), 5000));
+  return p;
 }
 
-export async function fillSearchPhrase(brief: WeekBrief, lines: string[], hook: string | null): Promise<string> {
-  const result = await assistRegenerateField({
-    field: 'search_phrase',
-    draft: draftFrom(brief, lines, hook),
-    postTypeKey: brief.postTypeKey ?? undefined,
-  });
-  if (result.kind === 'kill') throw new Error(result.kill_reason);
-  return result.kind === 'search_phrase' ? (result.search_phrase ?? '') : '';
+export async function fillCaption(brief: WeekBrief, lines: string[], _hook: string | null): Promise<{ caption: string; hashtags: string[] }> {
+  const { result } = await details(brief, lines);
+  return { caption: result?.caption ?? '', hashtags: result?.hashtags ?? [] };
+}
+
+export async function fillSearchPhrase(brief: WeekBrief, lines: string[], _hook: string | null): Promise<string> {
+  const { result } = await details(brief, lines);
+  return result?.searchPhrase ?? '';
 }

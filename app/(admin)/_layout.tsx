@@ -73,6 +73,7 @@ export default function AdminLayout() {
       <Stack.Screen name="post/[id]" options={{ title: 'Post', headerShown: false }} />
       <Stack.Screen name="brief/kind" options={{ title: 'Kind of post', headerShown: false }} />
       <Stack.Screen name="brief/[id]" options={{ title: 'Brief', headerShown: false }} />
+      <Stack.Screen name="ideas/[campaignId]" options={{ title: 'Ideas', headerShown: false }} />
     </Stack>
   );
 }

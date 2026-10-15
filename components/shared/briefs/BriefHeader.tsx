@@ -48,7 +48,7 @@ export function HeaderIconButton({
   onPress,
   dark = false,
 }: {
-  icon: 'message-circle' | 'bell' | 'x' | 'eye';
+  icon: 'message-circle' | 'bell' | 'x' | 'eye' | 'sparkles';
   label: string;
   onPress: () => void;
   dark?: boolean;

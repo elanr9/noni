@@ -108,14 +108,28 @@ async function insertSubmissionSegments(params: {
 
 /**
  * Kick the edit pass (stitch + overlays) for a freshly submitted video so the
- * finished file is ready by the time the admin reviews it. Fire and forget:
- * the function claims the job and keeps working after it responds, and the
- * admin review screen can restart a job that never landed.
+ * finished file is ready by the time the admin reviews it. The submit never
+ * waits on it: the function claims the job and keeps working after it
+ * responds. A failed kick is retried once and logged; the creator cannot
+ * write render_status, so a job that still never lands stays 'queued' and the
+ * review screen treats a stale 'queued' row as stalled and offers Retry.
  */
 function startRender(submissionId: string): void {
-  void supabase.functions
-    .invoke('render-submission', { body: { submission_id: submissionId } })
-    .catch(() => undefined);
+  const kick = async (): Promise<void> => {
+    const { error } = await supabase.functions.invoke('render-submission', {
+      body: { submission_id: submissionId },
+    });
+    if (error) throw error;
+  };
+  void kick()
+    .catch(async (first: unknown) => {
+      console.warn('startRender failed, retrying', submissionId, first);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await kick();
+    })
+    .catch((error: unknown) => {
+      console.error('startRender failed', submissionId, error);
+    });
 }
 
 export async function uploadClip(localUri: string, path: string): Promise<void> {
@@ -560,7 +574,9 @@ export async function getFinalMedia(
   assignment: Assignment,
   isSlideshow: boolean,
 ): Promise<FinalMedia | null> {
-  const columns = 'video_path, segment_paths';
+  // Studio submissions keep the untrimmed source files in segment_paths
+  // until the render lands, so nothing is handed out before it is ready.
+  const columns = 'video_path, segment_paths, render_status, edit_document';
   const { data, error } = assignment.submission_id
     ? await supabase.from('submissions').select(columns).eq('id', assignment.submission_id).maybeSingle()
     : await supabase
@@ -572,6 +588,7 @@ export async function getFinalMedia(
         .maybeSingle();
   if (error) throw error;
   if (!data) return null;
+  if (data.edit_document !== null && data.render_status !== 'ready') return null;
   if (isSlideshow) {
     const slides = (data.segment_paths ?? []).filter((p): p is string => typeof p === 'string');
     return slides.length > 0 ? { kind: 'slides', paths: slides } : null;

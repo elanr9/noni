@@ -1,9 +1,11 @@
 // Camera roll and camera picks as PickedPhoto, with the TikTok 9:16 and
-// Instagram 4:5 crops centred to start.
+// Instagram 4:5 crops centred to start. Every pick is copied out of the
+// picker cache into the documents directory so a draft keeps its photos.
 import * as ImagePicker from 'expo-image-picker';
 
 import type { PickedPhoto } from '../../../../lib/submissions';
 import { centeredCrop } from '../../slides/photo-crop';
+import { persistPick } from '../drafts';
 
 export const TIKTOK_ASPECT = 9 / 16;
 export const INSTAGRAM_ASPECT = 4 / 5;
@@ -32,7 +34,7 @@ export async function pickFromLibrary(limit = 1): Promise<PickedPhoto[]> {
     orderedSelection: true,
   });
   if (result.canceled) return [];
-  return result.assets.map(pickedPhotoFromAsset);
+  return Promise.all(result.assets.map((a) => persistPick(pickedPhotoFromAsset(a))));
 }
 
 export async function takePhoto(): Promise<PickedPhoto | null> {
@@ -40,5 +42,5 @@ export async function takePhoto(): Promise<PickedPhoto | null> {
   if (!permission.granted) return null;
   const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, exif: false });
   if (result.canceled || !result.assets[0]) return null;
-  return pickedPhotoFromAsset(result.assets[0]);
+  return persistPick(pickedPhotoFromAsset(result.assets[0]));
 }

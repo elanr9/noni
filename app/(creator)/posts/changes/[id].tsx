@@ -17,6 +17,8 @@ import {
   VoiceNote,
 } from '../../../../components/creator/ChatKit';
 import { FormatTag, TypeTag } from '../../../../components/creator/Chips';
+import { makeHref } from '../../../../components/creator/briefs/reel/routes';
+import { parseChangesNote } from '../../../../components/ReviewThread';
 import { Screen } from '../../../../components/layout/Screen';
 import { DetailSkeleton } from '../../../../components/states';
 import { Button } from '../../../../components/ui/Button';
@@ -30,6 +32,7 @@ import {
   signedChatMediaUrl,
 } from '../../../../lib/messages-api';
 import {
+  latestChangesNote,
   listAssignmentReviewEvents,
 } from '../../../../lib/review-events';
 import {
@@ -62,6 +65,7 @@ export default function ChangesDetailScreen() {
   const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
   const [briefWithType, setBriefWithType] = useState<BriefWithType | null>(null);
   const [items, setItems] = useState<ThreadItem[]>([]);
+  const [flagLabels, setFlagLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -81,6 +85,14 @@ export default function ChangesDetailScreen() {
         listThread(row.company_id, profile.id),
       ]);
       setBriefWithType(typed);
+      const note = latestChangesNote(events);
+      setFlagLabels(
+        note !== null
+          ? parseChangesNote(note)
+              .map((s) => s.label)
+              .filter((l): l is string => l !== null)
+          : [],
+      );
 
       const collected: ThreadItem[] = [];
 
@@ -148,6 +160,14 @@ export default function ChangesDetailScreen() {
 
   const onRecordChanges = () => {
     if (assignment === null) return;
+    const make = makeHref(briefWithType ?? assignment.briefs, assignment.id, {
+      changes: true,
+      flags: flagLabels,
+    });
+    if (make !== null) {
+      router.push(make);
+      return;
+    }
     const usesUpload =
       assignment.briefs.format === 'photo_carousel' &&
       assignment.briefs.post_type_id !== null;

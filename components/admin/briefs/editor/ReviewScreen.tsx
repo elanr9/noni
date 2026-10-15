@@ -7,6 +7,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeIn, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { CtaPlacement } from '../../../../lib/briefs-api';
 import { pickFeature, type LibraryFeature } from '../../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { StepStrip, type BriefStep } from '../../../shared/briefs';
@@ -39,6 +40,8 @@ export function ReviewScreen({
   onSave,
   saving = false,
   popup = false,
+  ctaPlace = 'any',
+  saveLabel = 'Add to week',
 }: {
   slides: EditorSlide[];
   caption: string;
@@ -56,6 +59,10 @@ export function ReviewScreen({
   saving?: boolean;
   /** Preview from Details: a close button and a "Preview" footer. */
   popup?: boolean;
+  /** Where every creator's CTA goes; Story puts it right after the hook or after the creator's part. */
+  ctaPlace?: CtaPlacement;
+  /** The save button; a Library post outside any week says Save. */
+  saveLabel?: string;
 }) {
   const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -72,8 +79,9 @@ export function ReviewScreen({
       who: 'creator',
       label: openCount ? "Creator's clip" : `Creator's clip ${i + 1}`,
     }));
-    return [slides[0], ...mid, slides[slides.length - 1]];
-  }, [slides, story, gap.min, openCount]);
+    const cta = slides[slides.length - 1];
+    return ctaPlace === 'after_hook' ? [slides[0], cta, ...mid] : [slides[0], ...mid, cta];
+  }, [slides, story, gap.min, openCount, ctaPlace]);
 
   const [tab, setTab] = useState<'watch' | 'script'>('watch');
   const [i, setI] = useState(0);
@@ -157,7 +165,7 @@ export function ReviewScreen({
                   </View>
                   <View style={styles.scriptBody}>
                     <Text style={[styles.scriptLabel, { color: c ? color.blue300 : color.whiteA60 }]}>
-                      {c ? 'CTA \u00b7 lands anywhere per creator' : cov ? 'Hook \u00b7 script below, word for word' : cr ? 'Creator records' : story ? `Beat ${k}` : 'Point \u00b7 order shuffled per creator'}
+                      {c ? (ctaPlace === 'after_hook' ? 'CTA \u00b7 right after the hook' : ctaPlace === 'end' ? 'CTA \u00b7 at the very end' : 'CTA \u00b7 the creator places it') : cov ? 'Hook \u00b7 script below, word for word' : cr ? 'Creator records' : story ? `Beat ${k}` : 'Point \u00b7 order shuffled per creator'}
                     </Text>
                     <Text style={[styles.scriptText, { fontWeight: cov ? '700' : '600', color: cr ? color.whiteA60 : color.white }]}>{s.text || s.label || ''}</Text>
                     {s.shot ? <Text style={styles.scriptNote}>{s.shot}</Text> : null}
@@ -194,6 +202,7 @@ export function ReviewScreen({
                     box={s.box}
                     insetBox={s.inset_box}
                     tstyle={s.tstyle}
+                    spans={s.spans}
                     who={s.who ?? 'mixed'}
                     label={s.label}
                     video={reel}
@@ -257,7 +266,7 @@ export function ReviewScreen({
           <View style={styles.strip}>
             <StepStrip steps={steps} current={current} dark onJump={onJump} />
           </View>
-          <NextButton label="Add to week" ok={!saving} onPress={() => onSave?.()} icon="check" />
+          <NextButton label={saveLabel} ok={!saving} onPress={() => onSave?.()} icon="check" />
         </View>
       )}
     </Animated.View>

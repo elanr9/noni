@@ -97,12 +97,27 @@ export type VideoDocument = {
   /** Post level multiplier applied after loudness normalization. */
   gain: number;
   subtitles: SubtitleSettings;
+  /** Reel plan (which block is which point) saved with the document so it
+   * survives a reinstall or another phone. Opaque here; the reel flow
+   * validates it. The render ignores it. */
+  reelPlan?: Json;
+  /** Raw takes and their words from Edit my video (lib/auto-edit.ts).
+   * Opaque here; the render ignores it. */
+  autoEdit?: Json;
 };
 
 export type SlideAspect = '9:16' | '4:5' | '1:1';
 
 /** Source rectangle in source pixels; same shape as slides/photo-crop. */
 export type SlideCrop = { x: number; y: number; width: number; height: number };
+
+/** Where a picture sits on a frame: centre x, centre y and width as fractions. */
+export type SlidePlacement = { x: number; y: number; width: number };
+
+/** A picture baked onto a slide: a storage path (brief-assets, or a videos
+ * asset path) or an https URL, placed on the 9:16 frame and, when the
+ * Instagram copy differs, on the 4:5 frame. */
+export type SlideImage = SlidePlacement & { path: string; ig?: SlidePlacement };
 
 export type Slide = {
   id: string;
@@ -111,7 +126,15 @@ export type Slide = {
   /** 4:5 crop for the Instagram copy of a 9:16 slideshow. */
   instagramCrop: SlideCrop | null;
   boxes: OverlayBox[];
+  /** Text placed for the 4:5 Instagram copy; boxes when absent. */
+  instagramBoxes?: OverlayBox[];
+  /** The library feature screenshot on the slide (usually the plug). */
+  inset?: SlideImage;
+  /** The manager's photo stickers, under the text like the inset. */
+  pics?: SlideImage[];
 };
+
+export const MAX_SLIDE_PICS = 6;
 
 export type SlideshowDocument = {
   version: typeof EDIT_DOCUMENT_VERSION;
@@ -636,6 +659,40 @@ function parseBox(raw: unknown): OverlayBox | null {
   };
 }
 
+const HEX6 = /^#[0-9A-Fa-f]{6}$/;
+
+/** Per word color spans on a slide box: in range, hex colored, sorted, non overlapping. */
+function parseBoxSpans(raw: unknown, length: number): { start: number; end: number; color: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const per: (string | undefined)[] = new Array(length).fill(undefined);
+  for (const sp of raw) {
+    if (!isRec(sp) || typeof sp.start !== 'number' || typeof sp.end !== 'number') continue;
+    const c = str(sp.color);
+    if (!c || !HEX6.test(c)) continue;
+    const a = Math.max(0, Math.floor(sp.start));
+    const b = Math.min(length, Math.floor(sp.end));
+    for (let i = a; i < b; i++) per[i] = c.toUpperCase();
+  }
+  const out: { start: number; end: number; color: string }[] = [];
+  let i = 0;
+  while (i < length) {
+    const c = per[i];
+    let j = i + 1;
+    while (j < length && per[j] === c) j++;
+    if (c) out.push({ start: i, end: j, color: c });
+    i = j;
+  }
+  return out;
+}
+
+/** A slideshow slide's text box: an overlay box plus its optional per word colors. */
+function parseSlideBox(raw: unknown): OverlayBox | null {
+  const box = parseBox(raw);
+  if (!box || !isRec(raw)) return box;
+  const spans = parseBoxSpans(raw.spans, box.text.length);
+  return spans.length ? { ...box, spans } : box;
+}
+
 function parseOverlay(raw: unknown, assets: Map<string, MediaAsset>): Overlay | null {
   if (!isRec(raw)) return null;
   const startMs = num(raw.startMs, 0);
@@ -673,9 +730,39 @@ function parseSlide(raw: unknown, assets: Map<string, MediaAsset>): Slide | null
   const assetId = str(raw.assetId);
   if (!id || !assetId || !assets.has(assetId)) return null;
   const boxes = Array.isArray(raw.boxes)
-    ? raw.boxes.map(parseBox).filter((b): b is OverlayBox => b !== null)
+    ? raw.boxes.map(parseSlideBox).filter((b): b is OverlayBox => b !== null)
     : [];
-  return { id, assetId, crop: parseSlideCrop(raw.crop), instagramCrop: parseSlideCrop(raw.instagramCrop), boxes };
+  const slide: Slide = { id, assetId, crop: parseSlideCrop(raw.crop), instagramCrop: parseSlideCrop(raw.instagramCrop), boxes };
+  if (Array.isArray(raw.instagramBoxes)) {
+    slide.instagramBoxes = raw.instagramBoxes.map(parseSlideBox).filter((b): b is OverlayBox => b !== null);
+  }
+  const inset = parseSlideImage(raw.inset);
+  if (inset) slide.inset = inset;
+  if (Array.isArray(raw.pics)) {
+    const pics = raw.pics.map(parseSlideImage).filter((p): p is SlideImage => p !== null).slice(0, MAX_SLIDE_PICS);
+    if (pics.length) slide.pics = pics;
+  }
+  return slide;
+}
+
+function parsePlacement(raw: unknown): SlidePlacement | null {
+  if (!isRec(raw)) return null;
+  const width = num(raw.width, 0);
+  if (width <= 0) return null;
+  return {
+    x: Math.max(0, Math.min(1, num(raw.x, 0.5))),
+    y: Math.max(0, Math.min(1, num(raw.y, 0.5))),
+    width: Math.min(1, width),
+  };
+}
+
+function parseSlideImage(raw: unknown): SlideImage | null {
+  if (!isRec(raw)) return null;
+  const path = str(raw.path);
+  const place = parsePlacement(raw);
+  if (!path || !place) return null;
+  const ig = parsePlacement(raw.ig);
+  return { path, ...place, ...(ig ? { ig } : {}) };
 }
 
 function parseSlideAspect(raw: unknown): SlideAspect {
@@ -718,6 +805,8 @@ export function parseEditDocument(value: Json | null | undefined): EditDocument 
     subtitles: isRec(value.subtitles)
       ? { enabled: bool(value.subtitles.enabled, true), y: num(value.subtitles.y, DEFAULT_SUBTITLE_Y) }
       : { enabled: true, y: DEFAULT_SUBTITLE_Y },
+    ...(isRec(value.reelPlan) ? { reelPlan: value.reelPlan as Json } : {}),
+    ...(isRec(value.autoEdit) ? { autoEdit: value.autoEdit as Json } : {}),
   };
   const total = documentDurationMs(doc);
   const overlays = Array.isArray(value.overlays)

@@ -60,6 +60,7 @@ import {
   type Brief,
   type BriefSegment,
 } from '../../../lib/briefs-api';
+import { parseEditDocument, type SlideshowDocument } from '../../../lib/edit-document';
 import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
 import { parseNotes } from '../../../lib/post-event-labels';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
@@ -67,6 +68,7 @@ import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
 import { asSlideAspect, probeDurationMs } from '../../../lib/submissions';
 import type { Json } from '../../../lib/types';
+import type { PhotoCrop } from '../../../components/creator/slides/photo-crop';
 import { isVideoEditorAvailable } from '../../../modules/video-editor';
 import { borderWidth, color, type } from '../../../theme/tokens';
 
@@ -96,6 +98,56 @@ function timelineSourceDurationsMs(timeline: Json | null): number[] {
 }
 
 const FALLBACK_CLIP_MS = 8000;
+
+/** A job still 'queued' this long after submit never started: the kick was lost. */
+const QUEUED_STALL_MS = 2 * 60 * 1000;
+/** A job still 'rendering' this long after its claim died without writing a status. */
+const RENDERING_STALL_MS = 20 * 60 * 1000;
+
+function olderThan(iso: string | null | undefined, ms: number): boolean {
+  if (!iso) return false;
+  const at = new Date(iso).getTime();
+  return Number.isFinite(at) && Date.now() - at > ms;
+}
+
+/** The render job never landed or died mid flight; Retry restarts it. */
+function renderStalled(submission: Submission): boolean {
+  if (submission.render_status === 'queued') {
+    return olderThan(submission.created_at, QUEUED_STALL_MS);
+  }
+  if (submission.render_status === 'rendering') {
+    return olderThan(submission.render_claimed_at, RENDERING_STALL_MS);
+  }
+  return false;
+}
+
+/** The studio slideshow document a submission was built from, if any. */
+function slideshowDocumentOf(submission: Submission | null | undefined): SlideshowDocument | null {
+  if (!submission || submission.edit_document === null) return null;
+  const doc = parseEditDocument(submission.edit_document);
+  return doc?.format === 'slideshow' ? doc : null;
+}
+
+/** Storage path of each document slide's source photo, slide order; '' when not uploaded. */
+function documentSlidePaths(doc: SlideshowDocument): string[] {
+  return doc.slides.map(
+    (slide) => doc.assets.find((a) => a.id === slide.assetId)?.storagePath ?? '',
+  );
+}
+
+/** A document crop is in source pixels; the stage wants fractions of the source. */
+function documentSlideCrop(doc: SlideshowDocument, index: number): PhotoCrop | undefined {
+  const slide = doc.slides[index];
+  if (!slide?.crop) return undefined;
+  const asset = doc.assets.find((a) => a.id === slide.assetId);
+  if (!asset?.width || !asset.height) return undefined;
+  return {
+    x: slide.crop.x / asset.width,
+    y: slide.crop.y / asset.height,
+    width: slide.crop.width / asset.width,
+    height: slide.crop.height / asset.height,
+  };
+}
 /** The creator's editor is a native iOS module; elsewhere the reduced edit mode stays. */
 const FULL_EDITOR = Platform.OS === 'ios' && isVideoEditorAvailable();
 
@@ -290,10 +342,13 @@ export default function ReviewScreen() {
   const current = queue[index] as ReviewItem | undefined;
   const currentId = current?.assignment.id;
   const submissionId = current?.submission?.id;
-  // Reels always wait on the edit job. Slideshows only do once the manager
-  // asked for a re-bake from edit mode.
+  // Reels and every studio submission (edit document, slideshows included)
+  // wait on the render: until it is ready the stored media is the untrimmed
+  // source with no text. Legacy slideshows only wait once the manager asked
+  // for a re-bake from edit mode.
   const trackRender =
     current?.row.format === 'video' ||
+    (current?.submission?.edit_document ?? null) !== null ||
     (submissionId !== undefined && rerenderPending === submissionId);
   const renderStatus = trackRender ? current?.submission?.render_status ?? 'ready' : 'ready';
 
@@ -333,6 +388,7 @@ export default function ReviewScreen() {
                   ...it.submission,
                   render_status: 'rendering',
                   render_error: null,
+                  render_claimed_at: new Date().toISOString(),
                 },
               }
             : it,
@@ -357,6 +413,7 @@ export default function ReviewScreen() {
       setSlideIndex(0);
       setBriefSegments([]);
       setSlidePhotos([]);
+      setSlideOriginals([]);
       setClipUris([]);
       setClipDurationsMs([]);
       setSlideInsetUrls({});
@@ -401,11 +458,23 @@ export default function ReviewScreen() {
           );
           if (!cancelled) setClipDurationsMs(durations);
         } else {
-          setSlidePhotos(segmentUrls);
-          const originals = await Promise.all(
-            paths.map((p) => signedOriginalSlideUrl(p).catch(() => '')),
-          );
-          if (!cancelled) setSlideOriginals(originals);
+          // Studio slideshows: until the bake lands, segment_paths are the
+          // raw uploads, so the surface draws the document's own photos.
+          const doc = slideshowDocumentOf(current.submission);
+          if (doc && current.submission?.render_status !== 'ready') {
+            const originals = await Promise.all(
+              documentSlidePaths(doc).map((p) => (p ? signedVideoUrl(p).catch(() => '') : '')),
+            );
+            if (cancelled) return;
+            setSlidePhotos([]);
+            setSlideOriginals(originals);
+          } else {
+            setSlidePhotos(segmentUrls);
+            const originals = await Promise.all(
+              paths.map((p) => signedOriginalSlideUrl(p).catch(() => '')),
+            );
+            if (!cancelled) setSlideOriginals(originals);
+          }
         }
         // Inset pictures: composited on slides while the bake runs, and
         // placed on either format in edit mode.
@@ -476,7 +545,9 @@ export default function ReviewScreen() {
   const isReel = row.format === 'video';
   const slideAspect = asSlideAspect(submission?.slide_aspect);
   const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
+  const editStalled = editPending && submission !== null && renderStalled(submission);
   const editFailed = trackRender && submission?.render_status === 'failed';
+  const slideDoc = isReel ? null : slideshowDocumentOf(submission);
   const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
   const caption = assignment.caption ?? briefRow.caption ?? '';
   const captionPending = assignment.caption === null;
@@ -500,7 +571,20 @@ export default function ReviewScreen() {
     (slidePaths.length > 0 && slidePaths.every((p) => /-final\.(?:png|jpg)$/i.test(p)));
   const surfaceSlides = isReel
     ? []
-    : slideSegs.length > 0
+    : slideDoc
+      ? slideDoc.slides.map((slide, i) => {
+          // Ready: the baked files already carry the text. Before that the
+          // creator's boxes are drawn over the original photo, cropped as framed.
+          const ready = submission?.render_status === 'ready';
+          return {
+            photoUri: (ready ? slidePhotos[i] : slideOriginals[i]) || undefined,
+            crop: ready ? undefined : documentSlideCrop(slideDoc, i),
+            boxes: ready ? ([] as OverlayBox[]) : slide.boxes,
+            inset: undefined,
+            text: slide.boxes.map((b) => b.text.trim()).filter(Boolean).join('\n'),
+          };
+        })
+      : slideSegs.length > 0
       ? slideSegs.map((s, i) => {
           const boxes = parseOverlayBoxes(s.overlay_style, {
             text: s.overlay_text,
@@ -648,7 +732,12 @@ export default function ReviewScreen() {
         it.submission && it.submission.id === submissionId
           ? {
               ...it,
-              submission: { ...it.submission, render_status: 'rendering', render_error: null },
+              submission: {
+                ...it.submission,
+                render_status: 'rendering',
+                render_error: null,
+                render_claimed_at: new Date().toISOString(),
+              },
             }
           : it,
       ),
@@ -697,9 +786,12 @@ export default function ReviewScreen() {
       return false;
     }
     if (action === 'approved' && editPending) {
+      const what = current.row.format === 'video' ? 'video' : 'slides';
       Alert.alert(
-        'Still editing',
-        'The final video is not ready yet. Wait for the edit to finish before you approve.',
+        editFailed || editStalled ? 'Render needs a retry' : 'Still rendering',
+        editFailed || editStalled
+          ? `The final ${what} did not render. Tap Retry render, then approve once it is ready.`
+          : `The final ${what} is not ready yet. Approve once the render finishes.`,
       );
       return false;
     }
@@ -787,34 +879,32 @@ export default function ReviewScreen() {
 
         {editPending && (
           <View style={styles.editPillRow} pointerEvents="box-none">
-            {editFailed ? (
+            {editFailed || editStalled ? (
               <View style={styles.editFailedStack}>
                 <Pressable
                   onPress={() => void restartEdit()}
                   style={[styles.editPill, styles.editPillFailed]}
                   accessibilityRole="button"
+                  accessibilityLabel="Retry render"
                 >
-                  <Text style={styles.editPillText}>Edit failed</Text>
-                  <Text style={styles.editPillAction}>Retry</Text>
+                  <Text style={styles.editPillText}>
+                    {editFailed ? 'Render failed' : 'Render stalled'}
+                  </Text>
+                  <Text style={styles.editPillAction}>Retry render</Text>
                 </Pressable>
-                {submission?.render_error ? (
+                {editFailed && submission?.render_error ? (
                   <Text style={styles.editErrorDetail} numberOfLines={3}>
                     {submission.render_error}
                   </Text>
                 ) : null}
               </View>
             ) : (
-              <Pressable
-                onPress={
-                  submission?.render_status === 'queued' ? () => void restartEdit() : undefined
-                }
-                style={styles.editPill}
-              >
+              <View style={styles.editPill} accessibilityRole="progressbar">
                 <ActivityIndicator size="small" color={color.white} />
                 <Text style={styles.editPillText}>
-                  {isReel ? 'Editing final video' : 'Editing final slides'}
+                  {isReel ? 'Rendering final video' : 'Rendering final slides'}
                 </Text>
-              </Pressable>
+              </View>
             )}
           </View>
         )}

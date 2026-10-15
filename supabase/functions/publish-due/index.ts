@@ -92,7 +92,15 @@ async function deferIfBriefRecentlyPosted(admin: Admin, row: DueRow): Promise<bo
 
 type PublishOutcome =
   | { ok: true }
-  | { ok: false; status: number; message: string };
+  | {
+      ok: false;
+      status: number;
+      message: string;
+      /** post-approved's reason code; render_* means the render gate refused it. */
+      code: string | null;
+      submissionId: string | null;
+      renderStale: boolean;
+    };
 
 async function publish(assignmentId: string): Promise<PublishOutcome> {
   const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/post-approved`, {
@@ -103,12 +111,20 @@ async function publish(assignmentId: string): Promise<PublishOutcome> {
     },
     body: JSON.stringify({ assignment_id: assignmentId }),
   });
-  const json = (await res.json().catch(() => null)) as { error?: string } | null;
+  const json = (await res.json().catch(() => null)) as {
+    error?: string;
+    code?: string;
+    submission_id?: string;
+    render_stale?: boolean;
+  } | null;
   if (!res.ok || json?.error) {
     return {
       ok: false,
       status: res.status,
       message: json?.error ?? `post-approved returned ${res.status}`,
+      code: typeof json?.code === 'string' ? json.code : null,
+      submissionId: typeof json?.submission_id === 'string' ? json.submission_id : null,
+      renderStale: json?.render_stale === true,
     };
   }
   return { ok: true };
@@ -133,6 +149,61 @@ async function recordFailure(admin: Admin, row: DueRow, outcome: PublishOutcome)
     .eq('id', row.id)
     .eq('company_id', row.company_id);
   if (error) console.error('publish-due mark error:', row.id, error.message);
+}
+
+/** Restarts a submission's render job (service role counts as a manager). */
+async function kickRender(submissionId: string): Promise<void> {
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  try {
+    const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/render-submission`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ submission_id: submissionId }),
+    });
+    await res.body?.cancel();
+  } catch (e) {
+    console.error('publish-due render kick error:', submissionId, e);
+  }
+}
+
+/**
+ * post-approved refused because the render is not ready. Nothing was
+ * posted, so the claim is released by re-slotting the row; post-approved
+ * re-checks the render under a fresh claim, so nothing can post twice.
+ * - render_not_ready: the render is still coming. No attempt is spent; a
+ *   stale job (lost kick, dead claim) is restarted.
+ * - render_failed: the render is restarted and the attempt counts, so a
+ *   render that keeps failing stops re-rendering at the cap and stays
+ *   claimed with the error. render-submission releases that claim once a
+ *   render (a manager's Retry render included) lands as ready.
+ */
+async function handleRenderGate(
+  admin: Admin,
+  row: DueRow,
+  outcome: Extract<PublishOutcome, { ok: false }>,
+): Promise<void> {
+  if (outcome.code === 'render_failed') {
+    const atCap = row.publish_attempts + 1 >= MAX_PUBLISH_ATTEMPTS;
+    if (!atCap && outcome.submissionId) await kickRender(outcome.submissionId);
+    await recordFailure(admin, row, outcome);
+    return;
+  }
+  if (outcome.renderStale && outcome.submissionId) await kickRender(outcome.submissionId);
+  await defer(admin, row);
+  const { error } = await admin
+    .from('assignments')
+    .update({
+      publish_error: 'Waiting for the render to finish',
+      // Undo the claim's increment: waiting on a render is not a failed post.
+      publish_attempts: row.publish_attempts,
+    })
+    .eq('id', row.id)
+    .eq('company_id', row.company_id)
+    .eq('status', 'approved');
+  if (error) console.error('publish-due render wait mark error:', row.id, error.message);
 }
 
 type PendingPost = {
@@ -327,6 +398,10 @@ Deno.serve(async (req) => {
             return;
           }
           console.error('publish-due post-approved error:', row.id, outcome.status, outcome.message);
+          if (!outcome.ok && outcome.code?.startsWith('render_')) {
+            await handleRenderGate(admin, row, outcome);
+            return;
+          }
           await recordFailure(admin, row, outcome);
         }),
       ),

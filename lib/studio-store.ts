@@ -15,6 +15,9 @@ export type StudioSelection =
 
 type StudioState = {
   document: EditDocument | null;
+  /** Who loaded the document (an assignment id), so a screen can tell
+   * whether the store holds its own document or another screen's. */
+  ownerId: string | null;
   past: EditDocument[];
   future: EditDocument[];
   /** Document as it was when the current gesture started; null when idle. */
@@ -25,9 +28,13 @@ type StudioState = {
   playheadMs: number;
   playing: boolean;
 
-  load(document: EditDocument): void;
+  load(document: EditDocument, ownerId?: string | null): void;
   /** Apply an edit and record it for undo. No-op when nothing changed. */
   commit(update: (doc: EditDocument) => EditDocument): void;
+  /** Fold a derived change (synced text windows, bookkeeping) into the
+   * current document without a new undo step. No-op when nothing changed
+   * or while a gesture is live. */
+  amend(update: (doc: EditDocument) => EditDocument): void;
   /** Live edits during a drag: update without history until gestureEnd. */
   gestureBegin(): void;
   gestureUpdate(update: (doc: EditDocument) => EditDocument): void;
@@ -44,6 +51,7 @@ const HISTORY_LIMIT = 100;
 
 export const useStudioStore = create<StudioState>((set, get) => ({
   document: null,
+  ownerId: null,
   past: [],
   future: [],
   gestureBase: null,
@@ -52,8 +60,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   playheadMs: 0,
   playing: false,
 
-  load(document) {
-    set({ document, past: [], future: [], gestureBase: null, dirty: false, selection: null, playheadMs: 0, playing: false });
+  load(document, ownerId = null) {
+    set({ document, ownerId, past: [], future: [], gestureBase: null, dirty: false, selection: null, playheadMs: 0, playing: false });
   },
 
   commit(update) {
@@ -62,6 +70,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const next = update(document);
     if (next === document) return;
     set({ document: next, past: [...past, document].slice(-HISTORY_LIMIT), future: [], dirty: true });
+  },
+
+  amend(update) {
+    const { document, gestureBase } = get();
+    if (!document || gestureBase) return;
+    const next = update(document);
+    if (next === document) return;
+    set({ document: next, dirty: true });
   },
 
   gestureBegin() {
@@ -148,10 +164,13 @@ export function useProjectAutosave(params: { companyId: string; creatorId: strin
   const dirty = useStudioStore((s) => s.dirty);
   const gestureBase = useStudioStore((s) => s.gestureBase);
   const markSaved = useStudioStore((s) => s.markSaved);
+  const ownerId = useStudioStore((s) => s.ownerId);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!params || !document || !dirty || gestureBase) return;
+    // Another screen's document (a different assignment) is never saved here.
+    if (ownerId !== null && ownerId !== params.assignmentId) return;
     if (timer.current) clearTimeout(timer.current);
     const snapshot = document;
     timer.current = setTimeout(() => {
@@ -162,5 +181,5 @@ export function useProjectAutosave(params: { companyId: string; creatorId: strin
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [params, document, dirty, gestureBase, markSaved]);
+  }, [params, document, dirty, gestureBase, markSaved, ownerId]);
 }

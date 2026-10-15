@@ -5,6 +5,7 @@
 
 import type { BriefSlide, SlideBox, SlideTextStyle } from '../../../../lib/briefs-api';
 import { briefTone, color } from '../../../../theme/tokens';
+import { insetFrame } from '../media/geometry';
 
 export const SLIDE_RATIO = 16 / 9;
 
@@ -54,79 +55,97 @@ type LayoutInput = Pick<BriefSlide, 'box' | 'inset_box' | 'box_ig' | 'inset_box_
   text?: string;
 };
 
-/** Where the text box and the inset sit, per platform, with the prototype defaults. */
+/**
+ * Default spots, as frame fractions. Text starts in the upper third: TikTok
+ * at y 0.30, Instagram at the same height inside its 4:5 crop (the crop runs
+ * from IG_BAR to 1 minus IG_BAR, so 0.30 of it is y 0.36). With an inset the
+ * text goes above it and the media sits below, clear of the caption. Only
+ * unset boxes use these; a box the manager moved keeps its spot.
+ */
+export const DEFAULT_BOXES = {
+  tiktok: {
+    text: { x: 0.5, y: 0.3, w: 0.66 },
+    textWithInset: { x: 0.5, y: 0.22, w: 0.66 },
+    inset: { x: 0.5, y: 0.52, w: 0.42 },
+  },
+  instagram: {
+    text: { x: 0.5, y: 0.36, w: 0.66 },
+    textWithInset: { x: 0.5, y: 0.3, w: 0.66 },
+    inset: { x: 0.5, y: 0.6, w: 0.42 },
+  },
+} as const;
+
+/** Where the text box and the inset sit, per platform, with the defaults above. */
 export function layoutOf(s: LayoutInput, platform: Platform = 'tiktok'): { text: SlideBox; inset: SlideBox } {
   const hasInset = Boolean(s.inset_feature_id);
   if (platform === 'instagram') {
+    const d = DEFAULT_BOXES.instagram;
     const inset =
       s.inset_box_ig ??
-      (s.inset_box ? { ...s.inset_box, y: clamp(s.inset_box.y, 0.26, 0.74) } : { x: 0.5, y: 0.4, w: 0.56 });
+      (s.inset_box ? { ...s.inset_box, y: clamp(s.inset_box.y, 0.26, 0.74) } : { ...d.inset });
     const text =
       s.box_ig ??
-      (s.box
-        ? { ...s.box, y: clamp(s.box.y, 0.22, 0.78) }
-        : hasInset
-          ? { x: 0.5, y: 0.66, w: 0.66 }
-          : { x: 0.5, y: 0.5, w: 0.66 });
+      (s.box ? { ...s.box, y: clamp(s.box.y, 0.22, 0.78) } : hasInset ? { ...d.textWithInset } : { ...d.text });
     return { text, inset };
   }
-  const inset = s.inset_box ?? { x: 0.5, y: 0.32, w: 0.56 };
-  const text = s.box ?? (hasInset ? { x: 0.5, y: 0.6, w: 0.66 } : { x: 0.5, y: 0.45, w: 0.66 });
+  const d = DEFAULT_BOXES.tiktok;
+  const inset = s.inset_box ?? { ...d.inset };
+  const text = s.box ?? (hasInset ? { ...d.textWithInset } : { ...d.text });
   return { text, inset };
 }
 
-/** Prototype layout for a generated CTA slide (SSManager generateCta). */
+/**
+ * Layout stored on a generated CTA slide: the plug line on top, the feature's
+ * media under it. Kept left of TikTok's like rail and above the caption; on
+ * Instagram inside the 4:5 crop.
+ */
 export const CTA_BOXES = {
-  box: { x: 0.44, y: 0.56, w: 0.66 },
-  inset_box: { x: 0.44, y: 0.27, w: 0.42 },
-  box_ig: { x: 0.5, y: 0.64, w: 0.72 },
-  inset_box_ig: { x: 0.5, y: 0.38, w: 0.42 },
+  box: { x: 0.44, y: 0.22, w: 0.66 },
+  inset_box: { x: 0.44, y: 0.52, w: 0.42 },
+  box_ig: { x: 0.5, y: 0.3, w: 0.72 },
+  inset_box_ig: { x: 0.5, y: 0.6, w: 0.42 },
 } as const;
 
 /** Long text post type: small left aligned text, no background, wide box. */
 export const LONGTEXT_TSTYLE: SlideTextStyle = { size: 0.62, align: 'left', bg: 'none' };
-export const LONGTEXT_BOX: SlideBox = { x: 0.5, y: 0.42, w: 0.86 };
+export const LONGTEXT_BOX: SlideBox = { x: 0.5, y: 0.34, w: 0.86 };
 
-// Text styling, Instagram Stories style (SSCanvas SWATCHES, FONTS, DEFAULT_TSTYLE).
+// Text styling: TikTok's text tool, one font, letter color plus box color.
 export const SWATCHES: readonly string[] = briefTone.textSwatches;
 
-export type FontKey = 'modern' | 'classic' | 'typewriter' | 'signature';
-export const FONTS: Record<FontKey, { label: string; family: string; weight: '500' | '700' | '800'; scale: number; italic: boolean; letterSpacing: number }> = {
-  modern: { label: 'Modern', family: 'System', weight: '800', scale: 1, italic: false, letterSpacing: -0.3 },
-  classic: { label: 'Classic', family: 'System', weight: '800', scale: 1, italic: false, letterSpacing: 0 },
-  typewriter: { label: 'Typewriter', family: 'Courier New', weight: '700', scale: 0.92, italic: false, letterSpacing: 0 },
-  signature: { label: 'Signature', family: 'Snell Roundhand', weight: '500', scale: 1.15, italic: true, letterSpacing: 0 },
-};
-
-export type TextBg = NonNullable<SlideTextStyle['bg']>;
+export type TextBg = 'outline' | 'box' | 'none';
 export type ResolvedTextStyle = {
-  font: FontKey;
+  /** Letter color. */
   color: string;
+  /** Box fill when bg is box. */
+  boxColor: string;
   bg: TextBg;
   align: 'left' | 'center' | 'right';
   size: number;
 };
 
 export const DEFAULT_TSTYLE: ResolvedTextStyle = {
-  font: 'modern',
   color: color.white,
+  boxColor: color.white,
   bg: 'outline',
   align: 'center',
   size: 1,
 };
 
-export function fontKeyOf(value: string | undefined): FontKey {
-  return value === 'classic' || value === 'typewriter' || value === 'signature' ? value : 'modern';
-}
-
 export function resolveTextStyle(tstyle: SlideTextStyle | undefined): ResolvedTextStyle {
+  const bg: TextBg = tstyle?.bg === 'box' || tstyle?.bg === 'soft' ? 'box' : tstyle?.bg === 'none' ? 'none' : 'outline';
   return {
-    font: fontKeyOf(tstyle?.font),
     color: tstyle?.color ?? DEFAULT_TSTYLE.color,
-    bg: tstyle?.bg ?? DEFAULT_TSTYLE.bg,
+    boxColor: tstyle?.bgColor ?? DEFAULT_TSTYLE.boxColor,
+    bg,
     align: tstyle?.align ?? DEFAULT_TSTYLE.align,
     size: tstyle?.size ?? DEFAULT_TSTYLE.size,
   };
+}
+
+/** The stored shape for a resolved style; drops nothing the creator side reads. */
+export function serializeTextStyle(ts: ResolvedTextStyle): SlideTextStyle {
+  return { color: ts.color, bgColor: ts.boxColor, bg: ts.bg, align: ts.align, size: ts.size };
 }
 
 /** Luma over 150 reads as a light color (SSCanvas light()). */
@@ -155,9 +174,16 @@ export function textRect(text: string, box: SlideBox, ts: ResolvedTextStyle, W: 
   return { id: 'text', x: box.x - box.w / 2, y: box.y - th / 2, w: box.w, h: th };
 }
 
-export function insetRect(box: SlideBox, W: number, H: number): Rect {
-  const ih = (box.w * W * 0.62) / H;
-  return { id: 'inset', x: box.x - box.w / 2, y: box.y - ih / 2, w: box.w, h: ih };
+/** The inset's footprint; with the media's aspect it matches what Shot draws (tall recordings capped). */
+export function insetRect(box: SlideBox, W: number, H: number, aspect?: number): Rect {
+  if (aspect === undefined) {
+    const ih = (box.w * W * 0.62) / H;
+    return { id: 'inset', x: box.x - box.w / 2, y: box.y - ih / 2, w: box.w, h: ih };
+  }
+  const f = insetFrame(box.w * W, aspect);
+  const iw = f.width / W;
+  const ih = f.height / H;
+  return { id: 'inset', x: box.x - iw / 2, y: box.y - ih / 2, w: iw, h: ih };
 }
 
 export function zoneName(zone: Zone | undefined, ghost: Ghost): string | null {

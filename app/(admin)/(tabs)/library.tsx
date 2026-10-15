@@ -14,27 +14,17 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useShareIntentContext } from 'expo-share-intent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { editorHref, weekHref } from '../../../components/admin/briefs/routes';
 import { LibSearch } from '../../../components/admin/library/LibSearch';
 import { LibraryListSkeleton } from '../../../components/admin/library/LibraryListSkeleton';
-import {
-  AUTO_KIND,
-  FAMILIES_FOR,
-  MakeFormatSheet,
-  type FormatChoice,
-} from '../../../components/admin/library/MakeFormatSheet';
-import { MakePostSheet, type MakeTarget } from '../../../components/admin/library/MakePostSheet';
+import { MakeComposer, type FormatPick } from '../../../components/admin/library/MakeComposer';
 import { MediaLane } from '../../../components/admin/library/MediaLane';
 import { OUR_POST_ROW_HEIGHT, OurPostRow } from '../../../components/admin/library/OurPostCard';
 import { OurPostsFilterSheet } from '../../../components/admin/library/OurPostsFilterSheet';
-import { QuickCapture } from '../../../components/admin/library/QuickCapture';
-import { ReadyPostCard } from '../../../components/admin/library/ReadyPostCard';
-import {
-  AiWorkingCard,
-  SLIDESHOW_FILL_STEPS,
-  VIDEO_FILL_STEPS,
-} from '../../../components/admin/AiWorkingCard';
+import { ReadyPostCard, type MakeJob } from '../../../components/admin/library/ReadyPostCard';
 import { SourceChips, type LibraryLane } from '../../../components/admin/library/SourceChips';
 import { SubTabs } from '../../../components/admin/library/SubTabs';
+import { WeekPickSheet } from '../../../components/admin/library/WeekPickSheet';
 import { AdminHeader, AdminScreen } from '../../../components/admin/shared';
 import { ContextRow } from '../../../components/shared';
 import { SoftToast } from '../../../components/states/SoftToast';
@@ -42,56 +32,51 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon, type IconName } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { useAuth } from '../../../lib/auth';
-import { listPostTypes, type BriefFormat, type PostType } from '../../../lib/briefs-api';
+import { FORMAT_LABEL, slotLabel } from '../../../lib/brief-copy';
 import {
-  makeLibraryPosts,
-  makeOtherFormat,
-  type LibraryMakeSource,
-} from '../../../lib/library-make';
-import { fillPostSlot, type FillSource } from '../../../lib/post-fill';
+  listPostTypes,
+  toMediaFormat,
+  type BriefFormat,
+  type BriefKind,
+  type BriefMediaFormat,
+  type PostType,
+} from '../../../lib/briefs-api';
 import {
-  copyBriefInto,
   countLibraryFamilies,
   countLibraryItems,
   deleteLibraryItem,
   enrichOurPostThumbnail,
-  isCaptureUrl,
+  getLibraryItemWithBriefs,
   listCreatorOptions,
   listLibraryItems,
   listOurPosts,
-  markLibraryItemUsed,
-  markOurPostUsed,
-  readyBriefFor,
   type LibraryItem,
   type LibraryItemWithBriefs,
   type OurPost,
   type OurPostsSort,
+  type ReadyBrief,
 } from '../../../lib/library-api';
+import {
+  addMadeToSlot,
+  createLibraryItem,
+  isNewFormat,
+  listTargetSlots,
+  madeBriefOf,
+  makeForItem,
+  pickTargetSlot,
+  previewOf,
+  type TargetSlot,
+} from '../../../lib/library-make';
 import { borderWidth, color, radiusAdmin, space, type } from '../../../theme/tokens';
 
 const PAGE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 const TOAST_MS = 1800;
-const SOCIAL_LINK = /(tiktok\.com|instagram\.com)\//i;
+const SOCIAL_LINK = /^https?:\/\/(www\.|vm\.|vt\.|m\.)?(tiktok\.com|instagram\.com)\/\S+$/i;
 
 type Row =
   | { kind: 'item'; item: LibraryItemWithBriefs }
   | { kind: 'our_post'; post: OurPost };
-
-/** Progress while captured ideas turn into posts, shown above the list. */
-type Making = { done: number; total: number; label: string };
-
-function makeSourceLabel(sources: LibraryMakeSource[]): string {
-  if (sources.length > 1) return `${sources.length} ideas`;
-  const [one] = sources;
-  if (!one) return '';
-  if (one.kind === 'reference') {
-    const handle = one.url.match(/@([A-Za-z0-9._]+)/)?.[1];
-    const platform = /tiktok/i.test(one.url) ? 'TikTok' : /instagram/i.test(one.url) ? 'Instagram' : null;
-    return [handle ? `@${handle}` : 'this link', platform].filter(Boolean).join(' · ');
-  }
-  return `“${one.text.length > 80 ? `${one.text.slice(0, 77)}…` : one.text}”`;
-}
 
 type UsedTab = 'unused' | 'used';
 type ItemLane = 'idea' | 'reference';
@@ -101,24 +86,24 @@ const EMPTY: Record<ItemLane, Record<UsedTab, { icon: IconName; title: string; b
     unused: {
       icon: 'zap',
       title: 'No ideas yet',
-      body: 'Type one line above and the whole post is written and saved here.',
+      body: 'Type a post idea above and tap Make. The whole post is written and saved here, ready to edit or add to a week.',
     },
     used: {
       icon: 'zap',
       title: 'Nothing in a week yet',
-      body: 'Ideas move here the moment one of their posts lands in a week.',
+      body: 'Ideas move here the moment their post lands in a week.',
     },
   },
   reference: {
     unused: {
       icon: 'link',
       title: 'No references yet',
-      body: 'Copy a TikTok or Instagram link, come back, tap Paste. The post is written from it and saved here ready.',
+      body: 'Paste a TikTok or Instagram post that did well, say what ours should be about, and tap Make. We keep its structure and write ours.',
     },
     used: {
       icon: 'link',
       title: 'Nothing in a week yet',
-      body: 'References move here the moment one of their posts lands in a week.',
+      body: 'References move here the moment their post lands in a week.',
     },
   },
 };
@@ -126,6 +111,18 @@ const EMPTY: Record<ItemLane, Record<UsedTab, { icon: IconName; title: string; b
 function rowKey(row: Row): string {
   return row.kind === 'item' ? row.item.id : row.post.post_id;
 }
+
+function toFamily(format: BriefMediaFormat): BriefFormat {
+  return format === 'slideshow' ? 'photo_carousel' : 'video';
+}
+
+/** The first TikTok or Instagram link in pasted text, or null. */
+function socialLinkIn(text: string): string | null {
+  const url = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[)\].,]+$/, '') ?? null;
+  return url && SOCIAL_LINK.test(url) ? url : null;
+}
+
+const asItem = (item: LibraryItem): LibraryItemWithBriefs => ({ ...item, video_brief: null, carousel_brief: null });
 
 export default function LibraryScreen() {
   const { profile } = useAuth();
@@ -142,26 +139,21 @@ export default function LibraryScreen() {
   const [postTypeId, setPostTypeId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const [capture, setCapture] = useState('');
-  const [pasting, setPasting] = useState(false);
+  const [idea, setIdea] = useState('');
+  const [ideaFormat, setIdeaFormat] = useState<FormatPick>(null);
+  const [link, setLink] = useState('');
+  const [direction, setDirection] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
-  /** Captured, waiting on the video / slideshow / both choice. */
-  const [pendingMake, setPendingMake] = useState<LibraryMakeSource[] | null>(null);
-  const [makeNotes, setMakeNotes] = useState('');
-  const [makeKind, setMakeKind] = useState(AUTO_KIND);
-  const [making, setMaking] = useState<Making | null>(null);
-  const [makingFamilies, setMakingFamilies] = useState<BriefFormat[]>([]);
+  /** Makes running (or failed) on this device, by library row. */
+  const [jobs, setJobs] = useState<Record<string, MakeJob>>({});
 
   const [rows, setRows] = useState<Row[]>([]);
   const [counts, setCounts] = useState<Record<ItemLane, { unused: number; used: number } | null>>({
     idea: null,
     reference: null,
   });
-  const [familyCounts, setFamilyCounts] = useState<{
-    video: number;
-    photo_carousel: number;
-  } | null>(null);
+  const [familyCounts, setFamilyCounts] = useState<{ video: number; photo_carousel: number; none: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [endReached, setEndReached] = useState(false);
@@ -169,32 +161,43 @@ export default function LibraryScreen() {
   const [creators, setCreators] = useState<{ id: string; full_name: string | null }[]>([]);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
 
-  /** The row waiting on a slot before it becomes a post. */
-  const [makeFrom, setMakeFrom] = useState<Row | null>(null);
-  const [makeBusyKey, setMakeBusyKey] = useState<string | null>(null);
-  /** The library item whose other format is being written right now. */
-  const [creatingOtherId, setCreatingOtherId] = useState<string | null>(null);
+  /** Add to week: the row being added, and the weeks to pick from when there are several. */
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [weekPick, setWeekPick] = useState<{ item: LibraryItemWithBriefs; brief: ReadyBrief; targets: TargetSlot[] } | null>(null);
+  const [weekBusyId, setWeekBusyId] = useState<string | null>(null);
 
   // One counter guards every list write: filter changes mid flight discard
   // the stale response instead of racing it.
   const queryVersion = useRef(0);
   const enriching = useRef(new Set<string>());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  // Read at call time, so counts refreshed from a finished make use the tab shown now.
+  const subRef = useRef(sub);
+  const familyRef = useRef(family);
+  useEffect(() => {
+    subRef.current = sub;
+    familyRef.current = family;
+  }, [sub, family]);
 
-  const refreshCounts = useCallback(
-    async (which: ItemLane) => {
-      try {
-        const [next, families] = await Promise.all([
-          countLibraryItems(which),
-          countLibraryFamilies(which, sub === 'unused' ? 'new' : 'made'),
-        ]);
-        setCounts((prev) => ({ ...prev, [which]: next }));
-        setFamilyCounts(families);
-      } catch {
-        // Counts are decoration; the list itself reports load errors.
-      }
-    },
-    [sub],
-  );
+  const refreshCounts = useCallback(async (which: ItemLane) => {
+    try {
+      const [next, families] = await Promise.all([
+        countLibraryItems(which),
+        countLibraryFamilies(which, subRef.current === 'unused' ? 'new' : 'made'),
+      ]);
+      if (!mounted.current) return;
+      setCounts((prev) => ({ ...prev, [which]: next }));
+      setFamilyCounts(families);
+    } catch {
+      // Counts are decoration; the list itself reports load errors.
+    }
+  }, []);
 
   const loadPage = useCallback(
     async (offset: number) => {
@@ -203,31 +206,35 @@ export default function LibraryScreen() {
       if (offset === 0) setLoading(true);
       else setLoadingMore(true);
       try {
-        const next: Row[] =
-          lane === 'our_post'
-            ? (
-                await listOurPosts({
-                  days: sort === 'top' ? 60 : null,
-                  creatorId: creatorId ?? undefined,
-                  postTypeId: postTypeId ?? undefined,
-                  search,
-                  sort,
-                  limit: PAGE,
-                  offset,
-                })
-              ).map((post): Row => ({ kind: 'our_post', post }))
-            : (
-                await listLibraryItems({
-                  source: lane,
-                  search,
-                  used: sub === 'unused' ? 'new' : 'made',
-                  family,
-                  limit: PAGE,
-                  offset,
-                })
-              ).map((item): Row => ({ kind: 'item', item }));
+        let next: Row[];
+        let full: boolean;
+        if (lane === 'our_post') {
+          const posts = await listOurPosts({
+            days: sort === 'top' ? 60 : null,
+            creatorId: creatorId ?? undefined,
+            postTypeId: postTypeId ?? undefined,
+            search,
+            sort,
+            limit: PAGE,
+            offset,
+          });
+          next = posts.map((post): Row => ({ kind: 'our_post', post }));
+          full = posts.length === PAGE;
+        } else {
+          const used = sub === 'unused' ? 'new' : 'made';
+          // Rows whose post never got made show in every tab, first, with Retry.
+          const [made, unmade] = await Promise.all([
+            listLibraryItems({ source: lane, search, used, family, limit: PAGE, offset }),
+            offset === 0 ? listLibraryItems({ source: lane, search, used, family: 'none', limit: PAGE }) : Promise.resolve([]),
+          ]);
+          const seen = new Set<string>();
+          next = [...unmade, ...made]
+            .filter((item) => (seen.has(item.id) ? false : (seen.add(item.id), true)))
+            .map((item): Row => ({ kind: 'item', item }));
+          full = made.length === PAGE;
+        }
         if (version !== queryVersion.current) return;
-        setEndReached(next.length < PAGE);
+        setEndReached(!full);
         setRows((prev) => (offset === 0 ? next : [...prev, ...next]));
         if (offset === 0 && lane !== 'our_post') void refreshCounts(lane);
       } catch (e) {
@@ -268,7 +275,7 @@ export default function LibraryScreen() {
     void listCreatorOptions(companyId).then(setCreators).catch(() => undefined);
     void listPostTypes().then(setPostTypes).catch(() => undefined);
     void Promise.all([countLibraryItems('idea'), countLibraryItems('reference')])
-      .then(([idea, reference]) => setCounts({ idea, reference }))
+      .then(([ideaCounts, reference]) => setCounts({ idea: ideaCounts, reference }))
       .catch(() => undefined);
   }, [companyId]);
 
@@ -302,77 +309,66 @@ export default function LibraryScreen() {
     setFamily(next);
   }
 
-  /** Typed ideas, one per line. A pasted link on its own line becomes a reference. */
-  function onSaveIdeas() {
-    const lines = capture
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    if (!profile || lines.length === 0 || making !== null) return;
-    setMakeKind(AUTO_KIND);
-    setPendingMake(
-      lines.map((line): LibraryMakeSource =>
-        isCaptureUrl(line) ? { kind: 'reference', url: line } : { kind: 'idea', text: line },
-      ),
-    );
+  function setJob(id: string, job: MakeJob | null) {
+    if (!mounted.current) return;
+    setJobs((prev) => {
+      const out = { ...prev };
+      if (job) out[id] = job;
+      else delete out[id];
+      return out;
+    });
+  }
+
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+  const rowsHave = (id: string) => rowsRef.current.some((r) => r.kind === 'item' && r.item.id === id);
+
+  function patchItem(id: string, item: LibraryItemWithBriefs) {
+    setRows((prev) => prev.map((row) => (row.kind === 'item' && row.item.id === id ? { kind: 'item', item } : row)));
   }
 
   /**
-   * A link shared to Noni from the TikTok or Instagram share sheet lands here
-   * and opens the Make it into sheet exactly like a pasted link does.
+   * Makes the post for a row with real steps: the reference read (polled),
+   * then the writing call, then the save. Redo writes over the same post.
    */
-  useFocusEffect(
-    useCallback(() => {
-      if (!hasShareIntent || !profile || making !== null) return;
-      const url = shareIntent.webUrl ?? shareIntent.text?.match(/https?:\/\/\S+/i)?.[0] ?? null;
-      resetShareIntent();
-      if (!url || !SOCIAL_LINK.test(url)) {
-        flash('Share a TikTok or Instagram link');
-        return;
-      }
-      setMakeNotes('');
-      setMakeKind(AUTO_KIND);
-      setPendingMake([{ kind: 'reference', url }]);
-    }, [hasShareIntent, shareIntent, profile, making, resetShareIntent]),
-  );
-
-  async function onPasteLink() {
-    if (!profile || pasting || making !== null) return;
-    setPasting(true);
+  async function runMake(item: LibraryItem, opts: { format: BriefMediaFormat | null; replace?: { briefId: string; format: BriefMediaFormat; cover: string } }) {
+    if (!profile || jobs[item.id]?.error === null) return;
+    setJob(item.id, { phase: item.source === 'reference' ? 'reading' : 'writing', error: null });
     try {
-      const text = (await Clipboard.getStringAsync()).trim();
-      if (!SOCIAL_LINK.test(text) || !/^https?:\/\/\S+$/i.test(text)) {
-        flash('Copy a TikTok or Instagram link first');
-        return;
+      const made = await makeForItem({
+        companyId: profile.active_company_id,
+        userId: profile.id,
+        item,
+        format: opts.format,
+        replace: opts.replace ?? null,
+        onPhase: (phase) => setJob(item.id, { phase, error: null }),
+        isCancelled: () => !mounted.current,
+      });
+      if (!mounted.current) return;
+      setJob(item.id, null);
+      const target = toFamily(made.format);
+      if (subRef.current === 'unused' && target !== familyRef.current) {
+        // The post lives in its format's tab now; go there.
+        setRows([]);
+        setFamily(target);
+      } else {
+        const fresh = await getLibraryItemWithBriefs(item.id).catch(() => null);
+        if (fresh && rowsHave(item.id)) patchItem(item.id, fresh);
+        else void loadPageRef.current(0);
       }
-      setMakeNotes('');
-      setMakeKind(AUTO_KIND);
-      setPendingMake([{ kind: 'reference', url: text }]);
-    } finally {
-      setPasting(false);
+      void refreshCounts(item.source === 'reference' ? 'reference' : 'idea');
+      flash(opts.replace ? 'Fresh take ready' : `${FORMAT_LABEL[made.format]} ready`);
+    } catch (e) {
+      setJob(item.id, { phase: null, error: e instanceof Error ? e.message : 'Could not make the post. Try again.' });
     }
   }
 
-  /**
-   * The whole post is written now, one lane at a time per idea, with the same
-   * fill an empty slot gets. The card appears the moment its posts exist.
-   */
-  async function onPickFormat(choice: FormatChoice) {
-    const notes = makeNotes.trim() || null;
-    const postTypeKey = makeKind;
-    const sources: LibraryMakeSource[] = (pendingMake ?? []).map((s) =>
-      s.kind === 'reference' ? { ...s, notes } : s,
-    );
-    if (!profile || sources.length === 0) return;
-    const families = FAMILIES_FOR[choice];
-    const targetLane: ItemLane = sources.every((s) => s.kind === 'reference')
-      ? 'reference'
-      : 'idea';
-    setPendingMake(null);
-    setCapture('');
-    setMakeNotes('');
-    setMakingFamilies(families);
-    setMaking({ done: 0, total: sources.length, label: makeSourceLabel(sources.slice(0, 1)) });
+  /** A new row first, shown at once with its live steps, then the make. */
+  async function startMake(source: { kind: 'idea'; text: string; format: FormatPick } | { kind: 'reference'; url: string; direction: string }) {
+    if (!profile) return;
+    const targetLane: ItemLane = source.kind;
     if (lane !== targetLane) {
       setRows([]);
       setSearch('');
@@ -382,185 +378,144 @@ export default function LibraryScreen() {
       setRows([]);
       setSub('unused');
     }
-    if (!families.includes(family) && families[0]) {
-      setRows([]);
-      setFamily(families[0]);
-    }
-
-    let madeCount = 0;
-    const refusals: string[] = [];
     try {
-      for (const [i, source] of sources.entries()) {
-        setMaking({ done: i, total: sources.length, label: makeSourceLabel([source]) });
-        const outcome = await makeLibraryPosts({
-          companyId: profile.active_company_id,
-          userId: profile.id,
-          source,
-          families,
-          postTypes,
-          postTypeKey,
-        });
-        madeCount += outcome.made.length;
-        refusals.push(...outcome.killed.map((k) => k.reason));
-        void loadPageRef.current(0);
-      }
+      const item = await createLibraryItem({
+        companyId: profile.active_company_id,
+        userId: profile.id,
+        source: source.kind === 'idea' ? { kind: 'idea', text: source.text } : { kind: 'reference', url: source.url, direction: source.direction },
+      });
+      setRows((prev) => [{ kind: 'item', item: asItem(item) }, ...prev.filter((r) => rowKey(r) !== item.id)]);
+      void refreshCounts(targetLane);
+      void runMake(item, { format: source.kind === 'idea' ? source.format : null });
     } catch (e) {
-      Alert.alert('Could not make the post', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setMaking(null);
-      void refreshCounts('idea');
-      void refreshCounts('reference');
-    }
-
-    if (madeCount > 0) {
-      flash(madeCount === 1 ? 'Post ready' : `${madeCount} posts ready`);
-    }
-    if (refusals.length > 0) {
-      Alert.alert(
-        refusals.length === 1 ? 'One post was not made' : `${refusals.length} posts were not made`,
-        refusals.join('\n\n'),
-      );
+      Alert.alert('Could not save it', e instanceof Error ? e.message : 'Try again');
     }
   }
+
+  function onMakeIdea() {
+    const text = idea.replace(/\s*\n+\s*/g, ' ').trim();
+    if (!text) return;
+    setIdea('');
+    void startMake({ kind: 'idea', text, format: ideaFormat });
+  }
+
+  function onMakeLink() {
+    const url = socialLinkIn(link);
+    if (!url) {
+      flash('Paste a TikTok or Instagram link');
+      return;
+    }
+    const about = direction.trim();
+    setLink('');
+    setDirection('');
+    void startMake({ kind: 'reference', url, direction: about });
+  }
+
+  async function onPasteLink() {
+    const url = socialLinkIn(await Clipboard.getStringAsync().catch(() => ''));
+    if (!url) {
+      flash('Copy a TikTok or Instagram link first');
+      return;
+    }
+    setLink(url);
+  }
+
+  /**
+   * A link shared to Noni from the TikTok or Instagram share sheet lands in
+   * the References field, ready for what ours should be about.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasShareIntent) return;
+      const url = socialLinkIn(shareIntent.webUrl ?? shareIntent.text ?? '');
+      resetShareIntent();
+      if (!url) {
+        flash('Share a TikTok or Instagram link');
+        return;
+      }
+      setRows([]);
+      setSearch('');
+      setSub('unused');
+      setLane('reference');
+      setLink(url);
+    }, [hasShareIntent, shareIntent, resetShareIntent]),
+  );
 
   function openUrl(url: string | null) {
     if (url) void Linking.openURL(url);
   }
 
-  function openBrief(briefId: string) {
-    router.push(`/(admin)/post/${briefId}`);
-  }
-
-  /**
-   * One of ours ports from its brief. A library row with a ready post in the
-   * other lane ports that; a legacy row without ready posts generates fresh.
-   */
-  function fillSourceFor(row: Row, family?: BriefFormat): FillSource | null {
-    if (row.kind === 'our_post') {
-      if (row.post.brief_id) return { kind: 'port', sourceBriefId: row.post.brief_id };
-      return row.post.post_url ? { kind: 'example', url: row.post.post_url } : null;
+  /** New format posts open in the brief editor, saving back to the same brief; old ones in the old editor. */
+  function openPost(brief: ReadyBrief) {
+    if (!isNewFormat(brief)) {
+      router.push(`/(admin)/post/${brief.id}`);
+      return;
     }
-    const other = family
-      ? readyBriefFor(row.item, family === 'video' ? 'photo_carousel' : 'video')
-      : (row.item.video_brief ?? row.item.carousel_brief);
-    if (other) return { kind: 'port', sourceBriefId: other.id };
-    if (row.item.url) return { kind: 'example', url: row.item.url };
-    return row.item.text ? { kind: 'idea', text: row.item.text } : null;
-  }
-
-  function sourceLabelFor(row: Row): string {
-    if (row.kind === 'our_post') return `“${row.post.title ?? row.post.hook ?? 'this post'}”`;
-    if (row.item.source === 'reference') {
-      const handle = row.item.url?.match(/@([A-Za-z0-9._]+)/)?.[1];
-      const platform = /tiktok/i.test(row.item.url ?? '')
-        ? 'TikTok'
-        : /instagram/i.test(row.item.url ?? '')
-          ? 'Instagram'
-          : null;
-      return [handle ? `@${handle}` : row.item.text ?? 'this reference', platform]
-        .filter(Boolean)
-        .join(' · ');
-    }
-    const text = row.item.text ?? '';
-    return `“${text.length > 80 ? `${text.slice(0, 77)}…` : text}”`;
-  }
-
-  function preferredFamilyFor(row: Row): BriefFormat | null {
-    if (row.kind !== 'our_post') {
-      if (row.item.video_brief) return 'video';
-      return row.item.carousel_brief ? 'photo_carousel' : null;
-    }
-    return row.post.family === 'photo_carousel' ? 'photo_carousel' : 'video';
-  }
-
-  function patchItem(id: string, patch: Partial<LibraryItemWithBriefs>) {
-    setRows((prev) =>
-      prev.map((row) =>
-        row.kind === 'item' && row.item.id === id
-          ? { kind: 'item', item: { ...row.item, ...patch } }
-          : row,
-      ),
+    router.push(
+      editorHref({
+        briefId: brief.id,
+        campaignId: '',
+        slot: '0',
+        format: toMediaFormat(brief.format),
+        kind: (brief.kind ?? 'handheld') as BriefKind,
+        postTypeKey: brief.post_types?.key,
+      }),
     );
   }
 
-  function patchPost(postId: string, patch: Partial<OurPost>) {
-    setRows((prev) =>
-      prev.map((row) =>
-        row.kind === 'our_post' && row.post.post_id === postId
-          ? { kind: 'our_post', post: { ...row.post, ...patch } }
-          : row,
-      ),
-    );
+  function redo(item: LibraryItemWithBriefs, brief: ReadyBrief | null) {
+    if (!brief) {
+      void runMake(item, { format: null });
+      return;
+    }
+    const format = toMediaFormat(brief.format);
+    void runMake(item, { format, replace: { briefId: brief.id, format, cover: previewOf(brief).cover } });
   }
 
-  /**
-   * A ready post in the slot's lane is cloned in, instantly. Otherwise the
-   * slot is generated: draft, slides, text boxes, screenshots. Then the
-   * editor opens on it, ready to review.
-   */
-  async function buildPost(row: Row, target: MakeTarget) {
-    const { slot, postType } = target;
-    const ready = row.kind === 'item' ? readyBriefFor(row.item, slot.family) : null;
-    const source = ready ? null : fillSourceFor(row, slot.family);
-    if (!profile || (!ready && !source)) return;
-    setMakeBusyKey(rowKey(row));
+  async function addTo(item: LibraryItemWithBriefs, brief: ReadyBrief, target: TargetSlot) {
+    setWeekBusyId(target.slot.briefId);
     try {
-      if (ready && row.kind === 'item') {
-        await copyBriefInto({
-          sourceBriefId: ready.id,
-          targetBriefId: slot.briefId,
-          sourceKind: row.item.source === 'reference' ? 'example' : 'idea',
-        });
-      } else if (source) {
-        const result = await fillPostSlot({
-          briefId: slot.briefId,
-          postTypeId: postType.id,
-          postTypeKey: postType.key,
-          family: slot.family,
-          source,
-          companyId: profile.active_company_id,
-        });
-        if (result.kind === 'kill') {
-          setMakeFrom(null);
-          Alert.alert('Not made', result.kill_reason);
-          return;
-        }
-      }
-      const now = new Date().toISOString();
-      if (row.kind === 'item') {
-        markLibraryItemUsed(row.item, slot.briefId).catch(() => undefined);
-        if (sub === 'unused') {
-          setRows((prev) => prev.filter((r) => rowKey(r) !== row.item.id));
-        } else {
-          patchItem(row.item.id, {
-            used_count: row.item.used_count + 1,
-            last_used_at: now,
-            last_brief_id: slot.briefId,
-          });
-        }
-        void refreshCounts(row.item.source === 'reference' ? 'reference' : 'idea');
-      } else {
-        markOurPostUsed(profile.active_company_id, profile.id, row.post, slot.briefId).catch(
-          () => undefined,
-        );
-        patchPost(row.post.post_id, { used_count: (row.post.used_count ?? 0) + 1 });
-      }
-      setMakeFrom(null);
-      flash(
-        `${ready ? 'Added to' : 'Made into'} ${slot.family === 'photo_carousel' ? 'Slideshow' : 'Reel'} ${String(slot.laneIndex).padStart(2, '0')}`,
-      );
-      openBrief(slot.briefId);
+      await addMadeToSlot({ item, madeBriefId: brief.id, slotBriefId: target.slot.briefId });
+      setWeekPick(null);
+      if (sub === 'unused') setRows((prev) => prev.filter((r) => rowKey(r) !== item.id));
+      else patchItem(item.id, { ...item, used_count: item.used_count + 1, last_brief_id: target.slot.briefId });
+      void refreshCounts(item.source === 'reference' ? 'reference' : 'idea');
+      router.push(weekHref(target.campaign.id, slotLabel(target.slot.index), target.slot.format));
     } catch (e) {
-      Alert.alert('Could not make the post', e instanceof Error ? e.message : 'Try again');
+      Alert.alert('Could not add it', e instanceof Error ? e.message : 'Try again');
     } finally {
-      setMakeBusyKey(null);
+      setWeekBusyId(null);
+    }
+  }
+
+  /** The first empty slot of the post's format: straight in when one week has room, else pick the week. */
+  async function onAdd(item: LibraryItemWithBriefs, brief: ReadyBrief) {
+    if (addingId) return;
+    const format = toMediaFormat(brief.format);
+    setAddingId(item.id);
+    try {
+      const pick = pickTargetSlot(await listTargetSlots(format));
+      if (pick.kind === 'none') {
+        Alert.alert(
+          `No empty ${FORMAT_LABEL[format].toLowerCase()} slot`,
+          `Every open week is full for ${format === 'slideshow' ? 'slideshows' : 'reels'}. Add a slot or start a week in Briefs, then add it.`,
+        );
+      } else if (pick.kind === 'one') {
+        await addTo(item, brief, pick.target);
+      } else {
+        setWeekPick({ item, brief, targets: pick.targets });
+      }
+    } catch (e) {
+      Alert.alert('Could not find a slot', e instanceof Error ? e.message : 'Try again');
+    } finally {
+      setAddingId(null);
     }
   }
 
   function confirmDelete(item: LibraryItem) {
     Alert.alert(
       item.source === 'reference' ? 'Delete this reference?' : 'Delete this idea?',
-      'Its ready posts go with it. Posts already in a week are not affected.',
+      'Its post goes with it. Posts already in a week are not affected.',
       [
         { text: 'Keep', style: 'cancel' },
         {
@@ -568,6 +523,7 @@ export default function LibraryScreen() {
           style: 'destructive',
           onPress: () => {
             setRows((prev) => prev.filter((row) => rowKey(row) !== item.id));
+            setJob(item.id, null);
             deleteLibraryItem(item.id)
               .then(() => refreshCounts(item.source === 'reference' ? 'reference' : 'idea'))
               .catch((e: unknown) => {
@@ -585,79 +541,52 @@ export default function LibraryScreen() {
     enriching.current.add(post.post_id);
     enrichOurPostThumbnail(profile.active_company_id, profile.id, post)
       .then((url) => {
-        if (url) patchPost(post.post_id, { thumbnail_url: url });
+        if (url) {
+          setRows((prev) =>
+            prev.map((row) =>
+              row.kind === 'our_post' && row.post.post_id === post.post_id ? { kind: 'our_post', post: { ...row.post, thumbnail_url: url } } : row,
+            ),
+          );
+        }
       })
       .catch(() => undefined)
       .finally(() => enriching.current.delete(post.post_id));
-  }
-
-  function makeFor(row: Row) {
-    const ready = row.kind === 'item' ? readyBriefFor(row.item, family) : null;
-    if (ready === null && fillSourceFor(row) === null) return undefined;
-    return {
-      busy: makeBusyKey === rowKey(row),
-      disabled: makeBusyKey !== null || making !== null,
-      onPress: () => setMakeFrom(row),
-    };
-  }
-
-  /** The other lane's post, ported from this one, saved on the same library row. */
-  async function createOtherFormat(item: LibraryItemWithBriefs) {
-    if (!profile || creatingOtherId !== null) return;
-    const target: BriefFormat = family === 'video' ? 'photo_carousel' : 'video';
-    setCreatingOtherId(item.id);
-    try {
-      const outcome = await makeOtherFormat({
-        companyId: profile.active_company_id,
-        userId: profile.id,
-        item,
-        family: target,
-        postTypes,
-      });
-      if ('kill' in outcome) {
-        Alert.alert('Not made', outcome.kill);
-        return;
-      }
-      patchItem(item.id, outcome.item);
-      void refreshCounts(item.source === 'reference' ? 'reference' : 'idea');
-      flash(target === 'photo_carousel' ? 'Slideshow ready' : 'Reel ready');
-    } catch (e) {
-      Alert.alert('Could not make the post', e instanceof Error ? e.message : 'Try again');
-    } finally {
-      setCreatingOtherId(null);
-    }
   }
 
   function renderRow(row: Row, index: number) {
     const first = index === 0;
     const last = index === rows.length - 1;
     if (row.kind === 'our_post') {
+      const url = row.post.post_url;
       return (
         <View style={[styles.cardRow, first && styles.cardRowFirst, last && styles.cardRowLast]}>
           <OurPostRow
             post={row.post}
             last={last}
             onNeedThumbnail={onNeedThumbnail}
-            onPress={() => openUrl(row.post.post_url)}
-            make={makeFor(row)}
+            onPress={() => openUrl(url)}
+            // Remake one of ours: it becomes a reference and is remixed like any pasted post.
+            make={url ? { busy: false, disabled: false, onPress: () => void startMake({ kind: 'reference', url, direction: '' }) } : undefined}
           />
         </View>
       );
     }
+    const item = row.item;
+    const job = jobs[item.id] ?? null;
+    const brief = madeBriefOf(item, toMediaFormat(family)) ?? madeBriefOf(item);
     return (
       <View style={!last && styles.referenceGap}>
         <ReadyPostCard
-          item={row.item}
-          family={family}
-          onOpenBrief={openBrief}
-          onOpenSource={row.item.url ? () => openUrl(row.item.url) : undefined}
-          onLongPress={() => confirmDelete(row.item)}
-          createOther={{
-            busy: creatingOtherId === row.item.id,
-            disabled: creatingOtherId !== null || making !== null,
-            onPress: () => void createOtherFormat(row.item),
-          }}
-          add={makeFor(row)}
+          item={item}
+          brief={brief}
+          job={job}
+          onOpenSource={item.url ? () => openUrl(item.url) : undefined}
+          onOpen={openPost}
+          onAdd={(b) => void onAdd(item, b)}
+          adding={addingId === item.id}
+          onRedo={() => redo(item, brief)}
+          onDelete={() => confirmDelete(item)}
+          locked={(job !== null && job.error === null) || addingId !== null}
         />
       </View>
     );
@@ -669,7 +598,6 @@ export default function LibraryScreen() {
   const laneCounts = itemLane ? counts[itemLane] : null;
 
   function renderEmpty(): ReactNode {
-    if (making !== null) return null;
     if (loading) {
       return <LibraryListSkeleton height={lane === 'our_post' ? OUR_POST_ROW_HEIGHT : 84} />;
     }
@@ -688,48 +616,22 @@ export default function LibraryScreen() {
     }
     if (!itemLane) return null;
     if (search.length > 0) {
-      return (
-        <Text style={styles.noMatch}>
-          {itemLane === 'idea' ? 'No ideas match' : 'No references match'}
-        </Text>
-      );
+      return <Text style={styles.noMatch}>{itemLane === 'idea' ? 'No ideas match' : 'No references match'}</Text>;
     }
     const otherFamily = family === 'video' ? 'photo_carousel' : 'video';
     if ((familyCounts?.[otherFamily] ?? 0) > 0) {
-      return (
-        <Text style={styles.noMatch}>
-          {family === 'video' ? 'No reels here yet' : 'No slideshows here yet'}
-        </Text>
-      );
+      return <Text style={styles.noMatch}>{family === 'video' ? 'No reels here yet' : 'No slideshows here yet'}</Text>;
     }
     const copy = EMPTY[itemLane][sub];
-    return (
-      <EmptyState icon={copy.icon} title={copy.title} body={copy.body} compact style={styles.emptyState} />
-    );
+    return <EmptyState icon={copy.icon} title={copy.title} body={copy.body} compact style={styles.emptyState} />;
   }
-
-  const makingCard =
-    making !== null && itemLane !== null ? (
-      <View style={styles.makingWrap}>
-        {makingFamilies.map((family) => (
-          <AiWorkingCard
-            key={family}
-            title={family === 'photo_carousel' ? 'Making your slideshow' : 'Making your reel'}
-            subtitle={`From ${making.label}`}
-            steps={family === 'photo_carousel' ? SLIDESHOW_FILL_STEPS : VIDEO_FILL_STEPS}
-            family={family}
-            progress={making.total > 1 ? { done: making.done + 1, total: making.total } : undefined}
-          />
-        ))}
-      </View>
-    ) : null;
 
   const list = (
     <FlatList
       data={rows}
       keyExtractor={rowKey}
       renderItem={({ item: row, index }) => renderRow(row, index)}
-      ListHeaderComponent={makingCard}
+      extraData={[jobs, addingId, family]}
       contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
       onEndReachedThreshold={0.4}
       onEndReached={() => {
@@ -766,15 +668,28 @@ export default function LibraryScreen() {
 
         {itemLane !== null && (
           <>
-            <QuickCapture
-              mode={itemLane}
-              value={capture}
-              onChangeText={setCapture}
-              onSave={onSaveIdeas}
-              onPaste={() => void onPasteLink()}
-              busy={pasting || making !== null}
-              note={null}
-            />
+            {itemLane === 'idea' ? (
+              <MakeComposer
+                mode="idea"
+                idea={idea}
+                onChangeIdea={setIdea}
+                format={ideaFormat}
+                onChangeFormat={setIdeaFormat}
+                canMake={Boolean(profile) && idea.trim().length > 0}
+                onMake={onMakeIdea}
+              />
+            ) : (
+              <MakeComposer
+                mode="reference"
+                link={link}
+                onChangeLink={setLink}
+                direction={direction}
+                onChangeDirection={setDirection}
+                onPaste={() => void onPasteLink()}
+                canMake={Boolean(profile) && socialLinkIn(link) !== null}
+                onMake={onMakeLink}
+              />
+            )}
             <SubTabs<UsedTab>
               items={[
                 { id: 'unused', label: 'Unused', count: laneCounts?.unused },
@@ -829,11 +744,7 @@ export default function LibraryScreen() {
               onPress={() => setFilterOpen(true)}
               style={[styles.filterButton, activeFilters > 0 && styles.filterButtonActive]}
             >
-              <Icon
-                name="layout-list"
-                size={16}
-                color={activeFilters > 0 ? color.blue700 : color.slate500}
-              />
+              <Icon name="layout-list" size={16} color={activeFilters > 0 ? color.blue700 : color.slate500} />
               {activeFilters > 0 && (
                 <View style={styles.filterBadge}>
                   <Text style={styles.filterBadgeText}>{activeFilters}</Text>
@@ -858,38 +769,14 @@ export default function LibraryScreen() {
         list
       )}
 
-      <MakeFormatSheet
-        visible={pendingMake !== null}
-        sourceLabel={pendingMake ? makeSourceLabel(pendingMake) : ''}
-        busy={false}
-        notes={
-          pendingMake !== null && pendingMake.every((s) => s.kind === 'reference') ? makeNotes : null
-        }
-        onChangeNotes={setMakeNotes}
-        postTypes={postTypes}
-        kind={makeKind}
-        onChangeKind={setMakeKind}
-        onPick={(choice) => void onPickFormat(choice)}
-        onClose={() => {
-          setPendingMake(null);
-          setMakeNotes('');
-        }}
-      />
-
-      <MakePostSheet
-        visible={makeFrom !== null}
-        sourceLabel={makeFrom ? sourceLabelFor(makeFrom) : ''}
-        preferredFamily={makeFrom ? preferredFamilyFor(makeFrom) : null}
-        postTypes={postTypes}
-        busy={makeBusyKey !== null}
+      <WeekPickSheet
+        visible={weekPick !== null}
+        targets={weekPick?.targets ?? []}
+        busyId={weekBusyId}
         onPick={(target) => {
-          if (makeFrom) void buildPost(makeFrom, target);
+          if (weekPick) void addTo(weekPick.item, weekPick.brief, target);
         }}
-        onOpenWeek={(campaignId) => {
-          setMakeFrom(null);
-          router.push(`/(admin)/week/${campaignId}`);
-        }}
-        onClose={() => setMakeFrom(null)}
+        onClose={() => setWeekPick(null)}
       />
 
       <OurPostsFilterSheet
@@ -990,10 +877,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   referenceGap: {
-    marginBottom: 10,
-  },
-  makingWrap: {
-    gap: 10,
     marginBottom: 10,
   },
   noMatch: {

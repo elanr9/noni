@@ -219,8 +219,49 @@ export type AskClaudeOptions = {
    * playbooks). It is cached with the system prompt, so a week of drafts and
    * every validation retry pay about a tenth for it after the first call.
    */
-  cachedPrefix?: string;
+  cachedPrefix?: string | string[];
+  /**
+   * Send cachedPrefix as the leading system block(s), each cached, before the
+   * per call system text. The cache matches by prefix, so callers whose
+   * system text varies per call (write-deck modes) still reuse the brand
+   * docs. Off by default: the prefix leads the user message.
+   */
+  prefixInSystem?: boolean;
+  /**
+   * Abort the request after this many ms (the body read included), so a
+   * caller with its own deadline never waits on a stuck connection.
+   */
+  timeoutMs?: number;
 };
+
+/** system and messages for one call, with cache breakpoints placed per options. */
+function claudePayload(system: string, user: string, options: AskClaudeOptions) {
+  // Cache breakpoints: the system prompt, then the stable prefix. Short
+  // prompts under the model's minimum simply do not cache; nothing breaks.
+  const cache = { type: 'ephemeral' as const };
+  const prefix = (Array.isArray(options.cachedPrefix) ? options.cachedPrefix : [options.cachedPrefix ?? '']).filter((t) => t.trim());
+  if (options.prefixInSystem && prefix.length) {
+    // At most 4 breakpoints per request: up to 3 prefix blocks plus the system.
+    const blocks = prefix.length > 3 ? [...prefix.slice(0, 2), prefix.slice(2).join('\n\n')] : prefix;
+    return {
+      system: [
+        ...blocks.map((text) => ({ type: 'text' as const, text, cache_control: cache })),
+        { type: 'text' as const, text: system, cache_control: cache },
+      ],
+      messages: [{ role: 'user' as const, content: user }],
+    };
+  }
+  const userContent = prefix.length
+    ? [
+        { type: 'text' as const, text: prefix.join('\n\n'), cache_control: cache },
+        { type: 'text' as const, text: user },
+      ]
+    : user;
+  return {
+    system: [{ type: 'text' as const, text: system, cache_control: cache }],
+    messages: [{ role: 'user' as const, content: userContent }],
+  };
+}
 
 type ClaudeUsage = {
   input_tokens?: number;
@@ -257,15 +298,6 @@ export async function askClaude(
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
   const model = claudeModel(options.tier);
-  // Cache breakpoints: the system prompt, then the stable user prefix. Short
-  // prompts under the model's minimum simply do not cache; nothing breaks.
-  const cache = { type: 'ephemeral' as const };
-  const userContent = options.cachedPrefix?.trim()
-    ? [
-        { type: 'text' as const, text: options.cachedPrefix, cache_control: cache },
-        { type: 'text' as const, text: user },
-      ]
-    : user;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -277,9 +309,9 @@ export async function askClaude(
       model,
       max_tokens: maxTokens,
       ...noThinking(model),
-      system: [{ type: 'text', text: system, cache_control: cache }],
-      messages: [{ role: 'user', content: userContent }],
+      ...claudePayload(system, user, options),
     }),
+    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
   });
   if (!res.ok) {
     throw new Error(`Claude ${res.status}: ${await res.text()}`);
@@ -320,13 +352,6 @@ export async function askClaudeStream(
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
   const model = claudeModel(options.tier);
-  const cache = { type: 'ephemeral' as const };
-  const userContent = options.cachedPrefix?.trim()
-    ? [
-        { type: 'text' as const, text: options.cachedPrefix, cache_control: cache },
-        { type: 'text' as const, text: user },
-      ]
-    : user;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -339,8 +364,7 @@ export async function askClaudeStream(
       max_tokens: maxTokens,
       stream: true,
       ...noThinking(model),
-      system: [{ type: 'text', text: system, cache_control: cache }],
-      messages: [{ role: 'user', content: userContent }],
+      ...claudePayload(system, user, options),
     }),
   });
   if (!res.ok || !res.body) {
@@ -822,7 +846,8 @@ export async function loadBrandContext(
         .from('product_features')
         .select('id, name, what_it_does, claim')
         .eq('company_id', companyId)
-        .eq('approved', true),
+        .eq('approved', true)
+        .eq('rejected', false),
       admin
         .from('brain_features')
         .select('id, name, sentence, rank')

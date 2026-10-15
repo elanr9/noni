@@ -14,7 +14,7 @@ import type { StudioNotes } from '../../../components/creator/studio/slides/Note
 import { TimelineEditor, VideoStage } from '../../../components/creator/studio/timeline';
 import { Icon } from '../../../components/ui/Icon';
 import { useAuth } from '../../../lib/auth';
-import { parseHookOptions, parseTalkingPoints, type Brief } from '../../../lib/briefs-api';
+import { parseHookOptions, parseTalkingPoints, weekBriefFromRow, type Brief } from '../../../lib/briefs-api';
 import {
   appendAssetBlock,
   deleteBlock,
@@ -36,6 +36,21 @@ type Mode = 'capture' | 'edit' | 'slides';
 function briefNotes(brief: Brief, changesNote: string | null): StudioNotes {
   const lines: string[] = [];
   if (changesNote) lines.push(`Changes requested: ${changesNote}`);
+  // Briefs from the new editor carry everything in slides: shot is the line
+  // to say, text the on screen label.
+  const week = weekBriefFromRow({ ...brief, post_types: null });
+  if (week && week.slides.length > 0) {
+    for (const slide of week.slides) {
+      const say = slide.shot.trim();
+      const label = slide.text.trim();
+      const head = slide.role === 'cover' ? 'Hook' : slide.role === 'cta' ? 'Close' : label;
+      const body = say || (slide.role === 'point' ? '' : label);
+      if (head && body) lines.push(`${head}: ${body}`);
+      else if (head || body) lines.push(head || body);
+    }
+    if (week.cta.text.trim() && !week.slides.some((s) => s.role === 'cta')) lines.push(`Close: ${week.cta.text.trim()}`);
+    return { title: week.title || brief.title, lines };
+  }
   const hook = brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim();
   if (hook) lines.push(`Hook: ${hook}`);
   for (const point of parseTalkingPoints(brief.talking_points)) {
@@ -104,7 +119,7 @@ export default function StudioScreen(): JSX.Element {
         setAssignment(a);
         setNotes(briefNotes(a.briefs, latestChangesNote(events)));
         setProjectId(pid);
-        load(doc);
+        load(doc, scope.assignmentId);
         setMode(initialMode(doc));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load this post.');

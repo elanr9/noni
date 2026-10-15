@@ -4,8 +4,13 @@
 // distinctness, search phrase and hashtag rules, re-asked once when they
 // fail, and written to assignments.caption and assignment_segment_edits,
 // which the render pass and post-approved already prefer over the brief.
+// Briefs built in the slide editor carry their text in briefs.slides; each
+// creator gets their own wording of every slide (cover, points, CTA) in
+// assignments.slides_variant, same meaning, same numbering, same product
+// line, so twenty accounts never post the same words.
 
 import { adminClient, askClaude, authenticate, handleCors, jsonResponse, softenDashes } from '../_shared/wp8.ts';
+import { slopHits } from '../write-deck/checks.ts';
 import {
   collisions,
   type HashtagRules,
@@ -29,7 +34,22 @@ type BriefRow = {
   title: string | null;
   caption: string | null;
   search_phrase: string | null;
+  slides?: unknown;
 };
+
+/** The manager's slide text that every creator would otherwise post verbatim. */
+type DeckLine = { index: number; role: string; text: string };
+
+const BRIEF_COLUMNS = 'id, company_id, title, caption, search_phrase, slides';
+
+function deckLines(brief: BriefRow): DeckLine[] {
+  if (!Array.isArray(brief.slides)) return [];
+  return brief.slides.flatMap((raw, index) =>
+    isRecord(raw) && typeof raw.text === 'string' && raw.text.trim().length > 0
+      ? [{ index, role: typeof raw.role === 'string' ? raw.role : 'point', text: raw.text }]
+      : [],
+  );
+}
 
 type SegmentRow = {
   id: string;
@@ -50,15 +70,24 @@ type EditRow = {
   screenshot_width: number | null;
 };
 
-type Variant = { caption: string; segments: Record<string, { text?: string; boxes?: string[] }> };
+type Variant = {
+  caption: string;
+  segments: Record<string, { text?: string; boxes?: string[] }>;
+  /** Slide index to this creator's wording of it. */
+  slides: Record<string, string>;
+};
 
 type VaryResult = { varied: number; failed: string[]; problems: Record<string, string[]> };
 
 type Rejection = { assignment: AssignmentRow; caption: string; problems: string[] };
 
-type PromptContext = { taken: string[]; rules: HashtagRules; rejected: Rejection[] };
+type PromptContext = { taken: string[]; rules: HashtagRules; rejected: Rejection[]; takenSlides: Map<number, string[]> };
 
-const CHUNK_SIZE = 4;
+// 8 per call halves round trips; chunks stay sequential inside a brief because
+// distinctness depends on the variants already accepted.
+const CHUNK_SIZE = 8;
+/** Briefs varied at once; briefs share no state. */
+const BRIEF_CONCURRENCY = 6;
 const MAX_JACCARD = 0.6;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,13 +133,25 @@ function parseVariants(raw: string, count: number): Variant[] {
         };
       }
     }
-    return { caption: softenDashes(v.caption), segments };
+    const slides: Variant['slides'] = {};
+    if (isRecord(v.slides)) {
+      for (const [index, text] of Object.entries(v.slides)) {
+        if (typeof text === 'string' && text.trim()) slides[index] = softenDashes(text.replace(/ \/ /g, '\n')).replace(/;/g, ',');
+      }
+    }
+    return { caption: softenDashes(v.caption), segments, slides };
   });
 }
 
 const SYSTEM = `You rewrite short form social copy so several creators can post the same idea without matching each other word for word.
 Return only a JSON array, one object per requested variant, shape:
-[{"caption": string, "segments": {"<segment_id>": {"text": string, "boxes": [string, ...]}}}]
+[{"caption": string, "segments": {"<segment_id>": {"text": string, "boxes": [string, ...]}}, "slides": {"<slide index>": string}}]
+Slides (when the message lists slide text; omit "slides" when it does not):
+- Rewrite every listed slide for every variant. Same advice, same facts, same order of ideas inside the slide, different words and a different sentence shape from the original, from every other variant and from every slide listed as already taken.
+- Keep the structure exactly: a leading number like "3." stays the same number, labels like "Myth:" and "Truth:" stay, the line break count stays (write a line break as " / ").
+- The cover keeps its number and its topic, and still reads like something a player would type into search.
+- The CTA slide keeps the product name, stays first person, and keeps what the product does. Never add a feature.
+- Plain words a real player says. No marketing words (ultimate, elite, unlock, level up, game changer, secret, hack), no "won't tell you", no "not just X, it's Y", no hedges (really, honestly, actually, just).
 Rules:
 - Keep the meaning, the product claims and the call to action. Never invent features or numbers.
 - Every caption must open with different words and use a different sentence structure from the original, from every other variant, and from every caption listed as already taken. Share as few words as possible with any of them.
@@ -124,6 +165,7 @@ Rules:
 function buildPrompt(
   brief: BriefRow,
   segments: SegmentRow[],
+  deck: DeckLine[],
   count: number,
   context: PromptContext,
 ): string {
@@ -168,6 +210,18 @@ function buildPrompt(
     takenBlock,
     rejectedBlock,
     segmentLines.length > 0 ? `On-screen text by segment:\n${segmentLines.join('\n')}` : 'No on-screen text.',
+    deck.length > 0
+      ? `Slide text (rewrite each per variant):\n${deck.map((d) => `- slide ${d.index} (${d.role}): ${JSON.stringify(d.text.replace(/\n+/g, ' / '))}`).join('\n')}`
+      : null,
+    deck.length > 0 && context.takenSlides.size > 0
+      ? `Slide wording already taken (stay clearly different):\n${deck
+          .map((d) => {
+            const taken = context.takenSlides.get(d.index) ?? [];
+            return taken.length > 1 ? `- slide ${d.index}: ${taken.slice(1).map((t) => JSON.stringify(t.replace(/\n+/g, ' / '))).join(' | ')}` : null;
+          })
+          .filter((l): l is string => l !== null)
+          .join('\n')}`
+      : null,
   ]
     .filter((block): block is string => block !== null)
     .join('\n\n');
@@ -234,6 +288,7 @@ async function varyBrief(
   targets: AssignmentRow[],
   force: boolean,
   bank: string[],
+  productName: string,
 ): Promise<VaryResult> {
   const pending = force ? targets : targets.filter((a) => a.caption === null);
   if (pending.length === 0) return { varied: 0, failed: [], problems: {} };
@@ -247,6 +302,20 @@ async function varyBrief(
     .order('slot_index');
   if (segmentError) throw new Error(segmentError.message);
   const segments = ((segmentData ?? []) as SegmentRow[]).filter((s) => s.show_on_screen);
+  const deck = deckLines(brief);
+  // Each slide's wording so far: the original first, then every accepted variant.
+  const takenSlides = new Map<number, string[]>(deck.map((d) => [d.index, [d.text]]));
+  const { data: priorVariants } = await admin
+    .from('assignments')
+    .select('id, slides_variant')
+    .eq('brief_id', brief.id)
+    .eq('company_id', brief.company_id);
+  for (const row of (priorVariants ?? []) as { id: string; slides_variant: unknown }[]) {
+    if (pendingIds.has(row.id) || !Array.isArray(row.slides_variant)) continue;
+    row.slides_variant.forEach((v, index) => {
+      if (isRecord(v) && typeof v.text === 'string' && takenSlides.has(index)) takenSlides.get(index)!.push(v.text);
+    });
+  }
 
   const original = brief.caption ?? brief.title ?? '';
   const rules = hashtagRules(bank, original);
@@ -264,14 +333,46 @@ async function varyBrief(
       taken: [...taken, ...accepted.map((a) => a.variant.caption)],
       rules,
       rejected,
+      takenSlides,
     };
-    const reply = await askClaude(SYSTEM, buildPrompt(brief, segments, batch.length, context), 4096, {
+    const reply = await askClaude(SYSTEM, buildPrompt(brief, segments, deck, batch.length, context), deck.length ? 16000 : 8192, {
       tier: 'fast',
     });
     return parseVariants(reply, batch.length);
   };
 
-  const review = (assignment: AssignmentRow, variant: Variant): Rejection | null => {
+  /** Problems with one creator's slide wording; empty when every slide passes. */
+  const slideProblems = (variant: Variant): Map<number, string> => {
+    const out = new Map<number, string>();
+    const name = productName.toLowerCase();
+    for (const d of deck) {
+      const text = variant.slides[String(d.index)]?.trim() ?? '';
+      if (!text) {
+        out.set(d.index, 'missing');
+        continue;
+      }
+      const num = d.text.match(/^\s*(\d+)[.)]/);
+      const hits = slopHits(text);
+      const ratio = text.split(/\s+/).length / Math.max(1, d.text.split(/\s+/).length);
+      if (num && !new RegExp(`^\\s*${num[1]}[.)]`).test(text)) out.set(d.index, `must start with "${num[1]}."`);
+      else if (/\bmyth:/i.test(d.text) && !/\bmyth:/i.test(text)) out.set(d.index, 'lost the "Myth:" label');
+      else if (name && d.text.toLowerCase().includes(name) && !text.toLowerCase().includes(name)) out.set(d.index, `lost the product name ${productName}`);
+      else if (hits.length) out.set(d.index, `uses ${hits.join(', ')}`);
+      else if (ratio < 0.6 || ratio > 1.5) out.set(d.index, 'length changed too much');
+      else {
+        const close = collisions(text, takenSlides.get(d.index) ?? [d.text], { maxJaccard: 0.7, ignorePhrase: null });
+        if (close.length) out.set(d.index, `too close to ${JSON.stringify(close[0])}`);
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Caption problems reject the variant. Slide problems reject it on the
+   * first pass; on the re-ask the failing slides fall back to the brief's
+   * own wording so one stubborn slide never blocks the creator.
+   */
+  const review = (assignment: AssignmentRow, variant: Variant, final: boolean): Rejection | null => {
     const others = [...taken, ...accepted.map((a) => a.variant.caption)];
     const problems = [
       ...collisions(variant.caption, others, { maxJaccard: MAX_JACCARD, ignorePhrase: brief.search_phrase }).map(
@@ -282,7 +383,18 @@ async function varyBrief(
         : []),
       ...hashtagProblems(variant.caption, rules),
     ];
-    if (problems.length > 0) return { assignment, caption: variant.caption, problems };
+    const bad = slideProblems(variant);
+    if (problems.length > 0 || (bad.size > 0 && !final)) {
+      return { assignment, caption: variant.caption, problems: [...problems, ...[...bad].map(([i, why]) => `slide ${i} ${why}`)] };
+    }
+    for (const [i, why] of bad) {
+      console.warn('vary-copy slide kept original:', assignment.id, i, why);
+      delete variant.slides[String(i)];
+    }
+    for (const d of deck) {
+      const text = variant.slides[String(d.index)];
+      if (text) takenSlides.get(d.index)?.push(text);
+    }
     accepted.push({ assignment, variant });
     return null;
   };
@@ -292,7 +404,7 @@ async function varyBrief(
     try {
       const variants = await ask(chunk, []);
       rejected = chunk.flatMap((assignment, i) => {
-        const rejection = review(assignment, variants[i]);
+        const rejection = review(assignment, variants[i], false);
         return rejection ? [rejection] : [];
       });
     } catch (e) {
@@ -308,7 +420,7 @@ async function varyBrief(
         rejected,
       );
       for (const [i, rejection] of rejected.entries()) {
-        const again = review(rejection.assignment, retry[i]);
+        const again = review(rejection.assignment, retry[i], true);
         if (again) {
           console.error('vary-copy variant rejected twice:', rejection.assignment.id, again.problems);
           problems[rejection.assignment.id] = [...rejection.problems, ...again.problems];
@@ -324,9 +436,15 @@ async function varyBrief(
 
   let varied = 0;
   for (const { assignment, variant } of accepted) {
+    const slidesVariant = deck.length
+      ? (Array.isArray(brief.slides) ? brief.slides : []).map((_, index) => {
+          const text = variant.slides[String(index)];
+          return text ? { text } : null;
+        })
+      : null;
     let update = admin
       .from('assignments')
-      .update({ caption: variant.caption })
+      .update(slidesVariant ? { caption: variant.caption, slides_variant: slidesVariant } : { caption: variant.caption })
       .eq('id', assignment.id)
       .eq('company_id', brief.company_id);
     if (!force) update = update.is('caption', null);
@@ -376,7 +494,7 @@ Deno.serve(async (req) => {
     if (body.brief_id) {
       const { data: brief } = await admin
         .from('briefs')
-        .select('id, company_id, title, caption, search_phrase')
+        .select(BRIEF_COLUMNS)
         .eq('id', body.brief_id)
         .maybeSingle();
       if (!brief) return jsonResponse({ error: 'brief not found' }, 404);
@@ -421,7 +539,7 @@ Deno.serve(async (req) => {
       const byBrief = groupByBrief((assignmentData ?? []) as AssignmentRow[]);
       const { data: briefData } = await admin
         .from('briefs')
-        .select('id, company_id, title, caption, search_phrase')
+        .select(BRIEF_COLUMNS)
         .eq('company_id', campaign.company_id)
         .in('id', [...byBrief.keys()]);
       scope = {
@@ -438,6 +556,10 @@ Deno.serve(async (req) => {
       .select('hashtag_bank')
       .eq('company_id', scope.companyId)
       .maybeSingle();
+    const { data: company } = await admin.from('companies').select('name, settings').eq('id', scope.companyId).maybeSingle();
+    const settings = isRecord(company?.settings) ? company.settings : {};
+    const productName =
+      typeof settings.product_name === 'string' && settings.product_name.trim() ? settings.product_name.trim() : (company?.name ?? '');
     const bank = Array.isArray(profile?.hashtag_bank)
       ? profile.hashtag_bank.filter((tag): tag is string => typeof tag === 'string')
       : [];
@@ -445,19 +567,25 @@ Deno.serve(async (req) => {
     let varied = 0;
     const failed: string[] = [];
     const problems: Record<string, string[]> = {};
-    for (const brief of scope.briefs) {
-      const all = scope.assignmentsByBrief.get(brief.id) ?? [];
-      const targets = scope.targetsByBrief.get(brief.id) ?? [];
-      try {
-        const result = await varyBrief(admin, brief, all, targets, scope.force, bank);
-        varied += result.varied;
-        failed.push(...result.failed);
-        Object.assign(problems, result.problems);
-      } catch (e) {
-        console.error('vary-copy brief failed:', brief.id, e);
-        failed.push(...targets.filter((a) => scope.force || a.caption === null).map((a) => a.id));
+    // Briefs are independent (taken captions and slides live per brief), so a
+    // small pool runs them side by side.
+    const queue = [...scope.briefs];
+    const worker = async () => {
+      for (let brief = queue.shift(); brief; brief = queue.shift()) {
+        const all = scope.assignmentsByBrief.get(brief.id) ?? [];
+        const targets = scope.targetsByBrief.get(brief.id) ?? [];
+        try {
+          const result = await varyBrief(admin, brief, all, targets, scope.force, bank, productName);
+          varied += result.varied;
+          failed.push(...result.failed);
+          Object.assign(problems, result.problems);
+        } catch (e) {
+          console.error('vary-copy brief failed:', brief.id, e);
+          failed.push(...targets.filter((a) => scope.force || a.caption === null).map((a) => a.id));
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(BRIEF_CONCURRENCY, queue.length) }, worker));
     return jsonResponse({ varied, failed, problems });
   } catch (e) {
     console.error('vary-copy error:', e);

@@ -113,10 +113,22 @@ export function submissionThumbPath(
 /** Live edit-job state for a submission, polled while the review screen waits. */
 export async function getSubmissionRenderState(
   submissionId: string,
-): Promise<Pick<Submission, 'render_status' | 'render_error' | 'video_path'> | null> {
+): Promise<Pick<
+  Submission,
+  | 'render_status'
+  | 'render_error'
+  | 'render_claimed_at'
+  | 'video_path'
+  | 'segment_paths'
+  | 'instagram_segment_paths'
+> | null> {
+  // The bake rewrites segment_paths to the finished slides; the review
+  // screen must pick those up when the status flips, not keep the raw uploads.
   const { data, error } = await supabase
     .from('submissions')
-    .select('render_status, render_error, video_path')
+    .select(
+      'render_status, render_error, render_claimed_at, video_path, segment_paths, instagram_segment_paths',
+    )
     .eq('id', submissionId)
     .maybeSingle();
   if (error) throw error;

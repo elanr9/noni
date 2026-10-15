@@ -1,11 +1,13 @@
-// A Library feature screenshot (SSShared.jsx Shot). The real screenshot when
-// the feature has one; otherwise a tinted card with a header bar and text
-// lines, toned by the feature's title. Reels add a play glyph and clip length.
+// A Library feature's media (SSShared.jsx Shot). The real screenshot or screen
+// recording at its own aspect (media/FeatureMedia); the no media card only
+// when the feature has nothing in the Library. ShotPlaceholder is the drawn
+// example card the post type peeks use, where no feature row exists.
 
-import { Image, StyleSheet, Text, View, type DimensionValue } from 'react-native';
+import { StyleSheet, Text, View, type DimensionValue } from 'react-native';
 
 import type { LibraryFeature } from '../../../lib/library-api';
 import { briefTone, color, type as typeToken } from '../../../theme/tokens';
+import { FeatureMediaCard, hasFeatureMedia, NoMediaCard } from './media/FeatureMedia';
 
 export type FeatureTone = { tone: string; bar: string };
 
@@ -56,28 +58,24 @@ export function ShotPlaceholder({ tone, w, video = false, clip }: { tone: Featur
           </View>
         </View>
       ) : null}
-      {video && w >= 80 ? (
+      {video && clip && w >= 80 ? (
         <View style={[styles.clip, { right: w * 0.05, bottom: w * 0.05, paddingVertical: w * 0.01, paddingHorizontal: w * 0.04 }]}>
-          <Text style={[styles.clipText, { fontSize: Math.max(8, w * 0.07) }]}>{clip ?? '0:07'}</Text>
+          <Text style={[styles.clipText, { fontSize: Math.max(8, w * 0.07) }]}>{clip}</Text>
         </View>
       ) : null}
     </View>
   );
 }
 
-export function Shot({ feature, w, video = false }: { feature: LibraryFeature | null; w: number; video?: boolean }) {
+/**
+ * A feature's inset in a box w wide. Live plays a reel's recording muted on
+ * loop (the full canvas); thumbnails show its first frame and length.
+ */
+export function Shot({ feature, w, video = false, live = false }: { feature: LibraryFeature | null; w: number; video?: boolean; live?: boolean }) {
   if (!feature) return null;
-  if (feature.screenshotUrl) {
-    return (
-      <Image
-        accessibilityIgnoresInvertColors
-        source={{ uri: feature.screenshotUrl }}
-        style={[styles.card, { width: w, height: w * 1.1, borderRadius: w * 0.09 }]}
-        resizeMode="cover"
-      />
-    );
-  }
-  return <ShotPlaceholder tone={featureToneFor(feature.title)} w={w} video={video} />;
+  const tone = featureToneFor(feature.title);
+  if (hasFeatureMedia(feature, video)) return <FeatureMediaCard feature={feature} w={w} video={video} live={live} tone={tone} />;
+  return <NoMediaCard tone={tone} w={w} video={video} />;
 }
 
 const styles = StyleSheet.create({

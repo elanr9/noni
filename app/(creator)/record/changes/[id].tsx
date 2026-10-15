@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 
 import { parseChangesNote } from '../../../../components/ReviewThread';
+import { makeHref } from '../../../../components/creator/briefs/reel/routes';
 import { DetailSkeleton } from '../../../../components/states';
 import { Button } from '../../../../components/ui/Button';
 import { Icon } from '../../../../components/ui/Icon';
@@ -146,6 +147,16 @@ export default function ChangesRequestedScreen() {
 
   function onRecordAgain() {
     if (!assignment) return;
+    const make = makeHref(assignment.briefs, assignment.id, {
+      changes: true,
+      flags: changesSections
+        .map((s) => s.label)
+        .filter((l): l is string => l !== null),
+    });
+    if (make !== null) {
+      router.push(make);
+      return;
+    }
     const usesUpload =
       assignment.briefs.format === 'photo_carousel' &&
       assignment.briefs.post_type_id !== null;
