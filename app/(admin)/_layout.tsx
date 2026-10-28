@@ -51,6 +51,8 @@ export default function AdminLayout() {
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="v2-kit" options={{ headerShown: false }} />
+      <Stack.Screen name="new-brief" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'slide_from_bottom', animationDuration: 240 }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
       <Stack.Screen name="creators" options={{ title: 'Creators', headerShown: false }} />
       <Stack.Screen name="creator/[id]" options={{ title: 'Creator' }} />

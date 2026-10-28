@@ -9,6 +9,7 @@ import { isLoaded, useFonts } from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ConfigErrorScreen } from '../components/Screen';
+import { ICON_FONT_FILES } from '../components/v2/Icon';
 import { CompanyOverlays } from '../components/shared';
 import { AuthProvider } from '../lib/auth';
 import { CompanyProvider } from '../lib/company-context';
@@ -28,6 +29,9 @@ const OVERLAY_FONTS = {
   [OVERLAY_TEXT_SPEC.bubble.fontFamily]: require('../assets/fonts/TikTokSans-Bubble.ttf'),
 };
 
+/** Overlay text plus the v2 icon font instances. */
+const FONTS = { ...OVERLAY_FONTS, ...ICON_FONT_FILES };
+
 export default function RootLayout() {
   if (missingSupabaseEnv.length > 0) {
     return <ConfigErrorScreen missing={missingSupabaseEnv} />;
@@ -37,15 +41,15 @@ export default function RootLayout() {
 }
 
 function App() {
-  // The splash stays up until both fonts are registered, so no text preview
-  // ever draws with the system font and then swaps.
-  const [fontsLoaded, fontError] = useFonts(OVERLAY_FONTS);
+  // The splash stays up until every font is registered, so no text preview
+  // ever draws with the system font and no icon draws as a missing glyph.
+  const [fontsLoaded, fontError] = useFonts(FONTS);
   const fontsReady = fontsLoaded || fontError !== null;
 
   useEffect(() => {
     if (!fontsReady) return;
-    for (const family of Object.keys(OVERLAY_FONTS)) {
-      console.log(`overlay font ${family}: ${isLoaded(family) ? 'loaded' : 'MISSING, system fallback'}`);
+    for (const family of Object.keys(FONTS)) {
+      console.log(`font ${family}: ${isLoaded(family) ? 'loaded' : 'MISSING, system fallback'}`);
     }
     if (fontError) console.error('overlay fonts failed to load', fontError);
     void SplashScreen.hideAsync();

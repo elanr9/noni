@@ -1,94 +1,79 @@
 import { useCallback, useState } from 'react';
-import { Tabs, useFocusEffect } from 'expo-router';
+import { Tabs, useFocusEffect, useRouter } from 'expo-router';
 
-import { TabBar, type TabBarItem } from '../../../components/ui/TabBar';
+import { TabBar, type TabBarEntry } from '../../../components/v2';
+import { countAssignmentsInFlight } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
-import { useCompany } from '../../../lib/company-context';
 import { unreadInboxCount } from '../../../lib/inbox-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
-import { color, screenTransition } from '../../../theme/tokens';
+import { color, screenTransition } from '../../../theme/v2';
 
-// Trends is cut per MVP v2; Settings hides here and opens from the gear on
-// Analytics; the Briefs tab is the calendar route (week list + calendar view
-// toggle per the design handoff). Hidden routes stay in the folder so they
-// remain navigable.
-const UNREAD_POLL_MS = 45_000;
+// v2 shell: Review, Briefs, the raised Create button, Messages, Analytics.
+// Fresh campaign managers get Onboarding in place of Messages until the
+// checklist is done. Legacy routes (calendar, library, trends, settings)
+// stay in the folder, hidden from the bar, so deep links keep working.
+const POLL_MS = 45_000;
 
-const ADMIN_ITEMS: Record<string, TabBarItem> = {
-  index: { icon: 'inbox', label: 'Review' },
-  calendar: { icon: 'layout-list', label: 'Briefs' },
-  library: { icon: 'images', label: 'Library' },
-  messages: { icon: 'message-circle', label: 'Messages' },
-  analytics: { icon: 'chart-column', label: 'Analytics' },
-};
+const ADMIN_ENTRIES: TabBarEntry[] = [
+  { kind: 'route', name: 'index', icon: 'inbox', label: 'Review' },
+  { kind: 'route', name: 'briefs', icon: 'list_alt', label: 'Briefs' },
+  { kind: 'create', label: 'Create' },
+  { kind: 'route', name: 'messages', icon: 'chat_bubble', label: 'Messages' },
+  { kind: 'route', name: 'analytics', icon: 'bar_chart', label: 'Analytics' },
+];
 
-// Fresh campaign managers get Onboarding on the left in place of Messages.
-// The tab retires once the checklist is done. The platform admin never sees it.
-const ONBOARDING_ITEMS: Record<string, TabBarItem> = {
-  setup: { icon: 'sparkles', label: 'Onboarding' },
-  index: { icon: 'inbox', label: 'Review' },
-  calendar: { icon: 'layout-list', label: 'Briefs' },
-  library: { icon: 'images', label: 'Library' },
-  analytics: { icon: 'chart-column', label: 'Analytics' },
-};
+const ONBOARDING_ENTRIES: TabBarEntry[] = [
+  { kind: 'route', name: 'setup', icon: 'auto_awesome', label: 'Onboarding' },
+  { kind: 'route', name: 'index', icon: 'inbox', label: 'Review' },
+  { kind: 'route', name: 'briefs', icon: 'list_alt', label: 'Briefs' },
+  { kind: 'create', label: 'Create' },
+  { kind: 'route', name: 'analytics', icon: 'bar_chart', label: 'Analytics' },
+];
 
 export default function AdminTabsLayout() {
   const { profile } = useAuth();
-  const { anyWaiting } = useCompany();
+  const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [waitingCount, setWaitingCount] = useState(0);
 
-  const showSetup =
-    profile?.role === 'campaign_manager' &&
-    !isManagerSetupCompleteFlag(profile.onboarding_answers);
-
+  const showSetup = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers);
   const companyId = profile?.active_company_id;
 
   useFocusEffect(
     useCallback(() => {
       if (companyId === undefined) return;
       const read = () => {
-        void unreadInboxCount()
-          .then(setUnreadCount)
-          .catch(() => undefined);
+        void unreadInboxCount().then(setUnreadCount).catch(() => undefined);
+        void countAssignmentsInFlight().then(setWaitingCount).catch(() => undefined);
       };
       read();
-      const timer = setInterval(read, UNREAD_POLL_MS);
+      const timer = setInterval(read, POLL_MS);
       return () => clearInterval(timer);
     }, [companyId]),
   );
 
-  const base = showSetup ? ONBOARDING_ITEMS : ADMIN_ITEMS;
-  const items: Record<string, TabBarItem> = {
-    ...base,
-    index: { ...base.index, dot: anyWaiting },
-  };
+  const entries = showSetup ? ONBOARDING_ENTRIES : ADMIN_ENTRIES;
+  const onCreate = () => router.push({ pathname: '/(admin)/new-brief', params: { slot: `new-${Date.now()}` } });
 
   return (
     <Tabs
-      tabBar={(props) => <TabBar {...props} items={items} />}
+      tabBar={(props) => (
+        <TabBar {...props} entries={entries} onCreate={onCreate} counts={{ index: waitingCount || undefined, messages: unreadCount || undefined }} />
+      )}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: color.offWhite },
+        sceneStyle: { backgroundColor: color.bg },
         animation: screenTransition.tab,
       }}
     >
-      <Tabs.Screen
-        name="setup"
-        options={{ title: 'Onboarding', href: showSetup ? undefined : null }}
-      />
+      <Tabs.Screen name="setup" options={{ title: 'Onboarding', href: showSetup ? undefined : null }} />
       <Tabs.Screen name="index" options={{ title: 'Review' }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Briefs' }} />
-      <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
-      <Tabs.Screen name="library" options={{ title: 'Library' }} />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          title: 'Messages',
-          href: showSetup ? null : undefined,
-          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
-        }}
-      />
+      <Tabs.Screen name="briefs" options={{ title: 'Briefs' }} />
+      <Tabs.Screen name="messages" options={{ title: 'Messages', href: showSetup ? null : undefined }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Weeks', href: null }} />
+      <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
+      <Tabs.Screen name="library" options={{ title: 'Library', href: null }} />
       <Tabs.Screen name="trends" options={{ title: 'Trends', href: null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', href: null }} />
     </Tabs>
