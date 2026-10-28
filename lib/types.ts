@@ -210,6 +210,7 @@ export type Database = {
           bounty_amount_cents: number | null
           bounty_credited_at: string | null
           brief_id: string
+          library_brief_id: string | null
           campaign_id: string | null
           caption: string | null
           company_id: string
@@ -237,6 +238,7 @@ export type Database = {
           bounty_amount_cents?: number | null
           bounty_credited_at?: string | null
           brief_id: string
+          library_brief_id?: string | null
           campaign_id?: string | null
           caption?: string | null
           company_id: string
@@ -264,6 +266,7 @@ export type Database = {
           bounty_amount_cents?: number | null
           bounty_credited_at?: string | null
           brief_id?: string
+          library_brief_id?: string | null
           campaign_id?: string | null
           caption?: string | null
           company_id?: string
@@ -2869,6 +2872,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      library_briefs: {
+        Row: {
+          audio: Json | null
+          caption: string | null
+          clips: Json | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          from_id: string | null
+          g: Json | null
+          id: string
+          kind: string
+          link: string | null
+          lt: Json | null
+          notes: string
+          tags: string[]
+          title: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          audio?: Json | null
+          caption?: string | null
+          clips?: Json | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          from_id?: string | null
+          g?: Json | null
+          id: string
+          kind: string
+          link?: string | null
+          lt?: Json | null
+          notes?: string
+          tags?: string[]
+          title: string
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          audio?: Json | null
+          caption?: string | null
+          clips?: Json | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          from_id?: string | null
+          g?: Json | null
+          id?: string
+          kind?: string
+          link?: string | null
+          lt?: Json | null
+          notes?: string
+          tags?: string[]
+          title?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       library_items: {
         Row: {

@@ -10,7 +10,7 @@ import { supabase } from './supabase';
 
 export type ViewSnapshot = { t: number; views: number };
 
-export type PlatformStats = { views: number; likes: number; saves: number };
+export type PlatformStats = { views: number; likes: number; saves: number; comments: number; shares: number };
 
 /**
  * One piece of content. Platform rows (TikTok + Instagram) that share an
@@ -18,6 +18,12 @@ export type PlatformStats = { views: number; likes: number; saves: number };
  */
 export type AnalyticsPost = {
   id: string;
+  /** The assignment this post came from, when it did. */
+  assignmentId: string | null;
+  /** Weekly brief id (assignments.brief_id). */
+  briefId: string | null;
+  /** Library brief it was made from; null until the creator flows write it. Posts match library briefs by title until then. */
+  libraryBriefId: string | null;
   title: string;
   creatorId: string | null;
   creatorName: string;
@@ -193,6 +199,8 @@ type MetricSnapshot = {
   views: number | null;
   likes: number | null;
   saves: number | null;
+  comments: number | null;
+  shares: number | null;
   fetched_at: string | null;
 };
 
@@ -206,6 +214,8 @@ type PostRow = {
   task_id: string | null;
   assignments: {
     creator_id: string | null;
+    brief_id: string | null;
+    library_brief_id: string | null;
     briefs: { title: string | null; format: string | null } | null;
     profiles: { full_name: string | null } | null;
   } | null;
@@ -278,9 +288,9 @@ export async function fetchCompanyAnalytics(
       .from('posts')
       .select(
         `id, platform, post_url, posted_at, status, assignment_id, task_id,
-         assignments:assignment_id ( creator_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) ),
+         assignments:assignment_id ( creator_id, brief_id, library_brief_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) ),
          content_tasks:task_id ( title, format, assigned_to, profiles!content_tasks_assigned_to_fkey ( full_name ) ),
-         post_metrics ( views, likes, saves, fetched_at )`,
+         post_metrics ( views, likes, saves, comments, shares, fetched_at )`,
       )
       .neq('status', 'failed'),
     supabase
@@ -354,7 +364,7 @@ export async function fetchCompanyAnalytics(
     let day = '9999-12-31';
     let postUrl: string | null = null;
     const series: ViewSnapshot[][] = [];
-    const empty = (): PlatformStats => ({ views: 0, likes: 0, saves: 0 });
+    const empty = (): PlatformStats => ({ views: 0, likes: 0, saves: 0, comments: 0, shares: 0 });
     const tiktok = empty();
     const instagram = empty();
     let earned = 0;
@@ -382,10 +392,15 @@ export async function fetchCompanyAnalytics(
       target.views += last?.views ?? 0;
       target.likes += last?.likes ?? 0;
       target.saves += last?.saves ?? 0;
+      target.comments += last?.comments ?? 0;
+      target.shares += last?.shares ?? 0;
     }
 
     posts.push({
       id: group.key,
+      assignmentId: first.assignment_id,
+      briefId: first.assignments?.brief_id ?? null,
+      libraryBriefId: first.assignments?.library_brief_id ?? null,
       title,
       creatorId,
       creatorName,
