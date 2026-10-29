@@ -7,5 +7,5 @@ import { useAuth } from '../../lib/auth';
 export default function NewBriefRoute() {
   const { slot } = useLocalSearchParams<{ slot?: string }>();
   const { session } = useAuth();
-  return <NewBriefScreen slot={slot || 'new'} briefsHref="/(admin)/(tabs)/briefs" userId={session?.user.id ?? null} />;
+  return <NewBriefScreen slot={slot || 'new'} briefsHref="/(admin)/(tabs)/briefs" postHref="/(admin)/brief-post" userId={session?.user.id ?? null} />;
 }

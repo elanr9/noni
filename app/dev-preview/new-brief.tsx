@@ -4,5 +4,5 @@ import { NewBriefScreen } from '../../components/admin/v2/newbrief/NewBriefScree
 
 export default function NewBriefPreview() {
   const { slot } = useLocalSearchParams<{ slot?: string }>();
-  return <NewBriefScreen slot={slot || 'new'} briefsHref="/dev-preview/(tabs)/briefs" />;
+  return <NewBriefScreen slot={slot || 'new'} briefsHref="/dev-preview/(tabs)/briefs" postHref="/dev-preview/brief-post" />;
 }

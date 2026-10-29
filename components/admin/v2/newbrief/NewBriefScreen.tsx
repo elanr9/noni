@@ -6,11 +6,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AI_FILL, planGuided } from '../../../../lib/brief-ai';
 import { clearDraft, loadDraft, saveDraft, WIZ_V, type WizardState } from '../../../../lib/brief-drafts';
 import { useLibStore } from '../../../../lib/brief-library-api';
-import { briefWord, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
+import { briefWord, clipLabel, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { color, radius, shadow, text } from '../../../../theme/v2';
-import { Button, Icon, Press, TabPane, tap, type IconName } from '../../../v2';
+import { postsForBrief, useV2Data } from '../../../../lib/v2-posts';
+import { Button, Icon, Press, TabPane, TextButton, UnderlineTabs, tap, type IconName } from '../../../v2';
+import { BriefPostsPanel } from '../posts/BriefPostsPanel';
+import { LongTextView, OutlineView, TemplateView } from './BriefViews';
 import { Celebration } from './Celebration';
+import { GuidedClipScreen } from './GuidedClipScreen';
 import { GuidedForm, type AiState } from './GuidedForm';
 import { LongTextForm } from './LongTextForm';
 import { OptionCards, type OptionDef } from './OptionCards';
@@ -46,6 +50,8 @@ export interface NewBriefScreenProps {
   slot: string;
   /** Briefs tab root to land on after the celebration. */
   briefsHref: string;
+  /** Route prefix for a post made from this brief, `<prefix>/<postId>`. */
+  postHref: string;
   userId?: string | null;
 }
 
@@ -78,7 +84,7 @@ function draftOk(d: WizardState | null, existing: Brief | undefined): d is Wizar
 }
 
 /** Create a post (type, format, compose) or edit a saved brief. Drafts persist per slot. */
-export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScreenProps) {
+export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: NewBriefScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardHeight();
@@ -87,8 +93,13 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
   const removeBrief = useLibStore((s) => s.removeBrief);
   const setJustMade = useLibStore((s) => s.setJustMade);
   const key = `${existing ? 'edit.' : ''}${slot}`;
+  const posts = useV2Data((s) => s.posts);
+  const madeCount = existing ? postsForBrief(posts, existing).length : 0;
 
   const [st, setSt] = useState<WizardState | null>(null);
+  const [editMode, setEditMode] = useState(!existing);
+  const [page, setPage] = useState<'brief' | 'posts'>('brief');
+  const [viewClip, setViewClip] = useState<string | null>(null);
   const [gai, setGai] = useState<AiState | null>(null);
   const [oai, setOai] = useState(false);
   const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
@@ -117,12 +128,12 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
     };
   }, [key, slot]);
 
-  // Persist on every change, debounced a little.
+  // Persist on every change, debounced a little. A saved brief only drafts while editing.
   useEffect(() => {
-    if (!st) return;
+    if (!st || (existing && !editMode)) return;
     const t = setTimeout(() => saveDraft(key, st), 150);
     return () => clearTimeout(t);
-  }, [st, key]);
+  }, [st, key, existing, editMode]);
 
   const patch = (p: Partial<WizardState>) => setSt((x) => (x ? { ...x, ...p } : x));
 
@@ -265,6 +276,16 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
 
   const word = existing ? briefWord(existing) : '';
   const busy = oai || !!gai;
+  const viewing = !!existing && !editMode;
+  const showPosts = viewing && page === 'posts';
+  const updateG = (fn: (cur: GuidedState) => GuidedState) => setSt((x) => (x ? { ...x, g: fn(x.g ?? emptyGuided()) } : x));
+  const setLt = (p: Partial<LongTextState>) => setSt((x) => (x ? { ...x, lt: { ...(x.lt ?? emptyLongText()), ...p } } : x));
+  const startEdit = () => {
+    tap();
+    setEditMode(true);
+  };
+  const clip = viewClip ? g.clips.find((c) => c.id === viewClip) : null;
+  const clipIdx = clip ? g.clips.indexOf(clip) : -1;
 
   return (
     <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top, paddingBottom: keyboard }}>
@@ -273,9 +294,11 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
           <Icon name={st.step === 0 || existing ? 'close' : 'chevron_left'} size={st.step === 0 || existing ? 26 : 32} color={color.ink} />
         </Press>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          {existing ? <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.ink }}>{word}</Text> : <StepDots steps={dots} step={st.step} />}
+          {existing ? <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.ink }}>{viewing ? '' : word}</Text> : <StepDots steps={dots} step={st.step} />}
         </View>
-        {existing && compose ? (
+        {existing && compose && viewing ? (
+          <TextButton label="Edit" onPress={startEdit} />
+        ) : existing && compose ? (
           <Press
             accessibilityRole="button"
             accessibilityLabel="Delete"
@@ -289,12 +312,38 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
         )}
       </View>
 
-      {compose ? (
+      {viewing ? (
+        <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
+          <UnderlineTabs items={[{ key: 'brief' as const, label: word }, { key: 'posts' as const, label: 'Posts', count: madeCount }]} value={page} onChange={setPage} />
+        </View>
+      ) : null}
+
+      {showPosts && existing ? (
+        <TabPane k="posts">
+          <BriefPostsPanel brief={existing} onOpen={(p) => router.push(`${postHref}/${p.id}` as Href)} />
+        </TabPane>
+      ) : viewing ? (
+        <TabPane k="brief">
+          {guided ? (
+            <TemplateView g={g} type={type} onOpenClip={setViewClip} />
+          ) : isLong ? (
+            <LongTextView
+              lt={lt}
+              onChange={(p) => {
+                setLt(p);
+                setEditMode(true);
+              }}
+            />
+          ) : (
+            <OutlineView title={st.title || ''} link={st.link || ''} music={!!st.music} notes={st.notes || ''} />
+          )}
+        </TabPane>
+      ) : compose ? (
         <TabPane k="compose">
           {guided ? (
-            <GuidedForm g={g} type={type} update={(fn) => setSt((x) => (x ? { ...x, g: fn(x.g ?? emptyGuided()) } : x))} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
+            <GuidedForm g={g} type={type} update={updateG} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
           ) : isLong ? (
-            <LongTextForm lt={lt} set={(p) => setSt((x) => (x ? { ...x, lt: { ...(x.lt ?? emptyLongText()), ...p } } : x))} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
+            <LongTextForm lt={lt} set={setLt} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
           ) : (
             <OutlineForm
               st={{ title: st.title || '', notes: st.notes || '', link: st.link || '', music: !!st.music, filled: !!st.filled }}
@@ -317,10 +366,39 @@ export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScre
         </TabPane>
       )}
 
-      {compose ? (
+      {compose && !showPosts ? (
         <View style={{ flexDirection: 'row', paddingTop: 12, paddingHorizontal: 20, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20) + 14, backgroundColor: color.card, ...shadow.footer }}>
-          <Button disabled={!val || busy} onPress={finish} label={existing ? 'Save changes' : guided || isLong ? 'Save post' : 'Save outline'} />
+          {viewing ? (
+            guided ? (
+              <Button label="Open template" onPress={() => g.clips[0] && setViewClip(g.clips[0].id)} />
+            ) : (
+              <Button variant="secondary" label="Edit" onPress={startEdit} />
+            )
+          ) : (
+            <Button disabled={!val || busy} onPress={finish} label={existing ? 'Save changes' : guided || isLong ? 'Save post' : 'Save outline'} />
+          )}
         </View>
+      ) : null}
+
+      {clip ? (
+        <GuidedClipScreen
+          key={clip.id}
+          c={clip}
+          i={clipIdx}
+          type={type}
+          label={clipLabel(clipIdx, type)}
+          title={g.title}
+          fullGreen={!!g.fullGreen}
+          gsAll={g.gs}
+          ctaTaken={g.clips.some((x) => x.cta && x.id !== clip.id)}
+          onChange={(p) => {
+            updateG((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === clip.id ? { ...c, ...p } : c)) }));
+            setEditMode(true);
+          }}
+          onClose={() => setViewClip(null)}
+          onPrev={clipIdx > 0 ? () => setViewClip(g.clips[clipIdx - 1].id) : undefined}
+          onNext={clipIdx < g.clips.length - 1 ? () => setViewClip(g.clips[clipIdx + 1].id) : undefined}
+        />
       ) : null}
 
       {party ? <Celebration twin={party.twin} /> : null}
