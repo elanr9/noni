@@ -10,7 +10,8 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { fmt, MONTHS, sameDay, shortDate } from '../../../../lib/v2-format';
 import { creatorFor, type V2Creator, type V2Post } from '../../../../lib/v2-posts';
 import { color, motion, radius, shadow } from '../../../../theme/v2';
-import { Avatar, Button, FilterButton, Icon, IconToggle, InstagramMark, Label, Press, Sheet, TabPane, TikTokMark, tap } from '../../../v2';
+import { Avatar, Button, FilterButton, Icon, IconToggle, Label, Press, Sheet, TabPane, tap } from '../../../v2';
+import { Marks, PostCard, Views } from '../posts/PostCard';
 import { PostFrame } from '../posts/PostFrame';
 import { HOT_VIEWS, WeekCard, weekDays } from '../posts/WeekCard';
 
@@ -31,48 +32,6 @@ export interface PostsPaneProps {
   creators: V2Creator[];
   onPost: (id: string) => void;
   bottomInset: number;
-}
-
-function Marks() {
-  return (
-    <>
-      <TikTokMark size={12} color={color.grey4} />
-      <InstagramMark size={12} color={color.grey4} strokeWidth={2.4} />
-    </>
-  );
-}
-
-function Views({ n, size = 17 }: { n: number; size?: number }) {
-  return (
-    <View style={{ alignItems: 'flex-end' }}>
-      <Text style={{ fontSize: size, lineHeight: size + 5, fontWeight: '700', letterSpacing: -0.2, color: color.ink }}>{fmt(n)}</Text>
-      <Text style={{ fontSize: 12, lineHeight: 14, fontWeight: '500', color: color.grey4 }}>views</Text>
-    </View>
-  );
-}
-
-function PostCard({ p, creator, onPress }: { p: V2Post; creator: V2Creator; onPress: () => void }) {
-  return (
-    <Press accessibilityRole="button" onPress={onPress} style={styles.card}>
-      <PostFrame post={p} width={52} height={70} radius={12} />
-      <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
-        <Text numberOfLines={2} style={{ fontSize: 15, lineHeight: 19, fontWeight: '700', color: color.ink }}>
-          {p.title}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Avatar name={creator.name} photo={creator.photo} tone={creator.tone} size={16} ring={false} />
-          <Text numberOfLines={1} style={[styles.meta, { flexShrink: 1 }]}>
-            {creator.name}
-          </Text>
-          <Text style={styles.meta}>{'·'}</Text>
-          <Marks />
-          <Text style={styles.meta}>{shortDate(p.date)}</Text>
-        </View>
-      </View>
-      <Views n={p.views} />
-      <Icon name="chevron_right" size={20} color={color.grey3} />
-    </Press>
-  );
 }
 
 function CreatorGroup({ creator, posts, views, open, onToggle, onPost }: { creator: V2Creator; posts: V2Post[]; views: number; open: boolean; onToggle: () => void; onPost: (id: string) => void }) {
@@ -265,7 +224,6 @@ export function PostsPane({ posts, creators, onPost, bottomInset }: PostsPanePro
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 12, borderRadius: 18, backgroundColor: color.card, ...shadow.card },
   meta: { fontSize: 13, lineHeight: 18, fontWeight: '500', color: color.grey4 },
   group: { borderRadius: 18, backgroundColor: color.card, overflow: 'hidden', ...shadow.card },
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, paddingLeft: 16, paddingRight: 14 },
