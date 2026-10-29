@@ -15,7 +15,7 @@ export default function DevTabsLayout() {
   const router = useRouter();
   return (
     <Tabs
-      tabBar={(props) => <TabBar {...props} entries={ENTRIES} counts={{ review: 8, messages: 5 }} onCreate={() => router.push({ pathname: '/dev-preview/new-brief', params: { slot: `new-${Date.now()}` } })} />}
+      tabBar={(props) => <TabBar {...props} entries={ENTRIES} counts={{ review: 8, messages: 5 }} onCreate={() => router.push({ pathname: '/dev-preview/new-brief', params: { slot: 'new' } })} />}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: color.bg }, animation: screenTransition.tab }}
     >
       <Tabs.Screen name="review" options={{ title: 'Review' }} />

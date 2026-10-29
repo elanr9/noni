@@ -53,7 +53,7 @@ export default function AdminTabsLayout() {
   );
 
   const entries = showSetup ? ONBOARDING_ENTRIES : ADMIN_ENTRIES;
-  const onCreate = () => router.push({ pathname: '/(admin)/new-brief', params: { slot: `new-${Date.now()}` } });
+  const onCreate = () => router.push({ pathname: '/(admin)/new-brief', params: { slot: 'new' } });
 
   return (
     <Tabs

@@ -1,0 +1,330 @@
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
+import { useRouter, type Href } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AI_FILL, planGuided } from '../../../../lib/brief-ai';
+import { clearDraft, loadDraft, saveDraft, WIZ_V, type WizardState } from '../../../../lib/brief-drafts';
+import { useLibStore } from '../../../../lib/brief-library-api';
+import { briefWord, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
+import { useKeyboardHeight } from '../../../../lib/keyboard';
+import { color, radius, shadow, text } from '../../../../theme/v2';
+import { Button, Icon, Press, TabPane, tap, type IconName } from '../../../v2';
+import { Celebration } from './Celebration';
+import { GuidedForm, type AiState } from './GuidedForm';
+import { LongTextForm } from './LongTextForm';
+import { OptionCards, type OptionDef } from './OptionCards';
+import { OutlineForm } from './OutlineForm';
+import { StepDots } from './StepDots';
+
+type Step = { key: 'type' | 'kind'; title: string; options: OptionDef[] } | { key: 'compose' };
+
+const STEPS: Step[] = [
+  {
+    key: 'type',
+    title: 'Post type',
+    options: [
+      { label: 'Talking Head', icon: 'record_voice_over', sub: 'Creator to camera' },
+      { label: 'Long Text', icon: 'subject', sub: 'Text on screen, voiceover under it' },
+      { label: 'Slideshow', icon: 'photo_library', sub: 'Images with text, swiped through' },
+      { label: 'Greenscreen', icon: 'wallpaper', sub: 'Creator over a screenshot or clip' },
+    ],
+  },
+  {
+    key: 'kind',
+    title: 'Which format?',
+    options: [
+      { label: 'Guided', icon: 'format_list_numbered' as IconName, sub: 'Clips, overlays, teleprompter' },
+      { label: 'Outline', icon: 'segment', sub: 'Just a title and notes' },
+    ],
+  },
+  { key: 'compose' },
+];
+
+export interface NewBriefScreenProps {
+  /** `new` for a post from the Create button (its draft survives closing); a saved brief's id to edit it. */
+  slot: string;
+  /** Briefs tab root to land on after the celebration. */
+  briefsHref: string;
+  userId?: string | null;
+}
+
+/** The brief a saved template or outline reopens as. */
+function fromBrief(b: Brief): Pick<WizardState, 'g' | 'lt'> {
+  if (b.type === 'Long Text') {
+    return { lt: b.lt || { title: b.title, notes: b.notes || '', onScreen: b.clips?.[0]?.onScreen || b.title, doc: b.clips?.[0]?.doc || null } };
+  }
+  if (b.kind !== 'Guided') return {};
+  return {
+    g: b.g || {
+      ...emptyGuided(),
+      title: b.title,
+      notes: b.notes || '',
+      link: b.link || '',
+      audio: b.audio || { mode: 'creator', track: null },
+      fullGreen: b.clips && b.clips.length ? b.clips.every((c) => c.green) : true,
+      gs: b.clips?.[0]?.gs || null,
+      clips: (b.clips || []).map((c) => newClip(c.text || '', { onScreen: c.onScreen || '', cta: !!c.cta, green: !!c.green, gs: c.gs || null, doc: c.doc || null })),
+    },
+  };
+}
+
+function draftOk(d: WizardState | null, existing: Brief | undefined): d is WizardState {
+  if (!d) return false;
+  if (!existing) return true;
+  if (d.g) return /\S/.test(d.g.title) || d.g.clips.some((c) => /\S/.test(c.text));
+  if (d.lt) return /\S/.test(d.lt.title);
+  return /\S/.test(d.title || '');
+}
+
+/** Create a post (type, format, compose) or edit a saved brief. Drafts persist per slot. */
+export function NewBriefScreen({ slot, briefsHref, userId = null }: NewBriefScreenProps) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardHeight();
+  const existing = useLibStore((s) => s.briefs.find((b) => b.id === slot));
+  const saveBrief = useLibStore((s) => s.saveBrief);
+  const removeBrief = useLibStore((s) => s.removeBrief);
+  const setJustMade = useLibStore((s) => s.setJustMade);
+  const key = `${existing ? 'edit.' : ''}${slot}`;
+
+  const [st, setSt] = useState<WizardState | null>(null);
+  const [gai, setGai] = useState<AiState | null>(null);
+  const [oai, setOai] = useState(false);
+  const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
+  const [arm, setArm] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    const list = timers.current;
+    return () => list.forEach(clearTimeout);
+  }, []);
+
+  // Restore the draft for this slot, or open the saved brief on its compose step.
+  useEffect(() => {
+    let live = true;
+    void loadDraft(key).then((d) => {
+      if (!live) return;
+      const ex = useLibStore.getState().briefs.find((b) => b.id === slot);
+      const init: WizardState = draftOk(d, ex)
+        ? d
+        : ex
+          ? { v: WIZ_V, step: 2, type: ex.type, kind: ex.type === 'Long Text' ? 'Long Text' : ex.kind, title: ex.title, notes: ex.notes, link: ex.link || '', music: !!ex.audio && ex.audio.mode !== 'none', g: null, lt: null, ...fromBrief(ex) }
+          : { v: WIZ_V, step: 0 };
+      setSt(ex ? { ...init, step: 2, type: ex.type, kind: ex.type === 'Long Text' ? 'Long Text' : ex.kind, editingExisting: true } : init);
+    });
+    return () => {
+      live = false;
+    };
+  }, [key, slot]);
+
+  // Persist on every change, debounced a little.
+  useEffect(() => {
+    if (!st) return;
+    const t = setTimeout(() => saveDraft(key, st), 150);
+    return () => clearTimeout(t);
+  }, [st, key]);
+
+  const patch = (p: Partial<WizardState>) => setSt((x) => (x ? { ...x, ...p } : x));
+
+  if (!st) return <View style={{ flex: 1, backgroundColor: color.bg }} />;
+
+  const step = STEPS[st.step];
+  const compose = step.key === 'compose';
+  const longText = st.type === 'Long Text';
+  const guided = compose && st.kind === 'Guided';
+  const isLong = compose && st.kind === 'Long Text';
+  const type = (st.type ?? 'Talking Head') as BriefType;
+  const g: GuidedState = st.g ?? emptyGuided();
+  const lt: LongTextState = st.lt ?? emptyLongText();
+  const dots = longText ? [0, 2] : [0, 1, 2];
+  const val = compose
+    ? guided
+      ? /\S/.test(g.title) && g.clips.some((c) => /\S/.test(c.text))
+      : isLong
+        ? /\S/.test(lt.title) && /\S/.test(lt.onScreen)
+        : /\S/.test(st.title || '')
+    : !!st[step.key as 'type' | 'kind'];
+
+  const next = () =>
+    setSt((x) => {
+      if (!x) return x;
+      if (x.step === 0 && x.type === 'Long Text') return { ...x, kind: 'Long Text', step: 2 };
+      return { ...x, step: Math.min(2, x.step + 1) as WizardState['step'] };
+    });
+  const pick = (v: string) => {
+    if (step.key === 'compose') return;
+    const k = step.key;
+    setSt((x) => (x ? { ...x, [k]: v as BriefType & BriefKind } : x));
+    timers.current.push(setTimeout(next, 340));
+  };
+  const back = () => {
+    if (st.step === 0 || existing) {
+      router.back();
+      return;
+    }
+    setSt((x) => (x ? { ...x, step: (x.step === 2 && x.type === 'Long Text' ? 0 : x.step - 1) as WizardState['step'] } : x));
+  };
+
+  const hasLink = /\S/.test(st.link || '');
+  const fillOutline = () => {
+    if (oai) return;
+    tap();
+    setOai(true);
+    timers.current.push(
+      setTimeout(() => {
+        setOai(false);
+        setSt((x) => {
+          if (!x) return x;
+          const f = hasLink ? AI_FILL.link : AI_FILL.title;
+          return { ...x, title: (x.title || '').trim() || f.title, notes: f.notes, filled: true };
+        });
+      }, 1400),
+    );
+  };
+
+  const celebrate = (id: string, twin: boolean) => {
+    tap();
+    if (existing) {
+      router.back();
+      return;
+    }
+    setParty({ id, twin });
+    timers.current.push(
+      setTimeout(() => {
+        setJustMade(twin ? [id, outlineTwinId(id)] : [id]);
+        try {
+          router.dismissAll();
+        } catch {
+          // already at the root
+        }
+        router.navigate(briefsHref as Href);
+      }, 2300),
+    );
+  };
+
+  const finish = () => {
+    const by = { userId, name: 'You' };
+    const id = existing ? existing.id : slot === 'new' ? uid() : slot;
+    if (guided) {
+      const phrase = g.phrase || planGuided(g, type).phrase;
+      const notes = (g.notes || '').trim() || [`Search: ${phrase}`].concat(g.clips.map((c, i) => `${type === 'Long Text' ? 'Clip' : i === 0 ? 'Hook' : `Clip ${i}`}: ${c.text}`)).filter(Boolean).join('\n');
+      saveBrief(
+        {
+          id,
+          type,
+          kind: 'Guided',
+          title: g.title.trim(),
+          notes,
+          link: g.link || '',
+          g,
+          audio: g.audio,
+          caption: g.caption,
+          tags: g.tags,
+          clips: g.clips.map((c) => ({ ...c, green: type === 'Greenscreen' && (g.fullGreen || c.green), gs: type === 'Greenscreen' ? (g.fullGreen ? g.gs : c.gs) : null })),
+        },
+        by,
+      );
+      clearDraft(key);
+      celebrate(id, true);
+      return;
+    }
+    if (isLong) {
+      saveBrief({ id, type: 'Long Text', kind: 'Guided', noTwin: true, title: lt.title.trim(), notes: lt.notes || '', lt, clips: [newClip(lt.notes || '', { onScreen: lt.onScreen, doc: lt.doc || null })] }, by);
+      clearDraft(key);
+      celebrate(id, false);
+      return;
+    }
+    saveBrief(
+      {
+        id,
+        type,
+        kind: (st.kind ?? 'Outline') as BriefKind,
+        title: (st.title || '').trim(),
+        notes: ((st.notes || '').trim() + (st.music ? '\nMusic: pick a sound that fits and add it on Instagram and TikTok.' : '')).trim(),
+        audio: { mode: st.music ? 'creator' : 'none', track: null },
+        link: (st.link || '').trim(),
+      },
+      by,
+    );
+    clearDraft(key);
+    celebrate(id, false);
+  };
+
+  const del = () => {
+    if (!existing) return;
+    if (!arm) {
+      tap();
+      setArm(true);
+      timers.current.push(setTimeout(() => setArm(false), 2500));
+      return;
+    }
+    removeBrief(existing.id);
+    clearDraft(key);
+    router.back();
+  };
+
+  const word = existing ? briefWord(existing) : '';
+  const busy = oai || !!gai;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top, paddingBottom: keyboard }}>
+      <View style={{ height: 52, flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingRight: 8 }}>
+        <Press accessibilityRole="button" accessibilityLabel={st.step === 0 || existing ? 'Close' : 'Back'} onPress={back} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={st.step === 0 || existing ? 'close' : 'chevron_left'} size={st.step === 0 || existing ? 26 : 32} color={color.ink} />
+        </Press>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          {existing ? <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.ink }}>{word}</Text> : <StepDots steps={dots} step={st.step} />}
+        </View>
+        {existing && compose ? (
+          <Press
+            accessibilityRole="button"
+            accessibilityLabel="Delete"
+            onPress={del}
+            style={{ height: 36, minWidth: 44, paddingHorizontal: arm ? 14 : 0, borderRadius: radius.pill, backgroundColor: arm ? color.amber : 'transparent', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {arm ? <Text style={{ fontSize: 14, fontWeight: '700', color: color.white }}>Delete?</Text> : <Icon name="delete" size={22} color={color.amber} />}
+          </Press>
+        ) : (
+          <View style={{ width: 44 }} />
+        )}
+      </View>
+
+      {compose ? (
+        <TabPane k="compose">
+          {guided ? (
+            <GuidedForm g={g} type={type} update={(fn) => setSt((x) => (x ? { ...x, g: fn(x.g ?? emptyGuided()) } : x))} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
+          ) : isLong ? (
+            <LongTextForm lt={lt} set={(p) => setSt((x) => (x ? { ...x, lt: { ...(x.lt ?? emptyLongText()), ...p } } : x))} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
+          ) : (
+            <OutlineForm
+              st={{ title: st.title || '', notes: st.notes || '', link: st.link || '', music: !!st.music, filled: !!st.filled }}
+              set={(p) => patch(p)}
+              ai={oai}
+              onFill={fillOutline}
+              editingExisting={!!st.editingExisting}
+            />
+          )}
+        </TabPane>
+      ) : (
+        <TabPane k={`step${st.step}`}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 8, paddingHorizontal: 20, paddingBottom: 24 }}>
+            <Text style={[text.meta, { fontWeight: '600' }]}>
+              Step {st.step + 1} of {longText && st.step ? 2 : dots.length}
+            </Text>
+            <Text style={[text.title, { marginTop: 6, marginBottom: 20 }]}>{step.title}</Text>
+            <OptionCards options={step.options} value={st[step.key]} onPick={pick} grid={step.options.length > 2} />
+          </ScrollView>
+        </TabPane>
+      )}
+
+      {compose ? (
+        <View style={{ flexDirection: 'row', paddingTop: 12, paddingHorizontal: 20, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20) + 14, backgroundColor: color.card, ...shadow.footer }}>
+          <Button disabled={!val || busy} onPress={finish} label={existing ? 'Save changes' : guided || isLong ? 'Save post' : 'Save outline'} />
+        </View>
+      ) : null}
+
+      {party ? <Celebration twin={party.twin} /> : null}
+    </View>
+  );
+}
+
