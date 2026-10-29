@@ -31,7 +31,7 @@ export function ApprovedOverlay({
       ? [
           ['zap', 'Clips stitched and overlays burned in'],
           ['share-2', 'Posted to TikTok and Instagram at the slot time'],
-          ['trending-up', 'Views and revenue tracked from the first hour'],
+          ['trending-up', 'Views tracked from the first hour'],
         ]
       : [
           ['zap', 'Slides assembled with their overlay text'],

@@ -185,7 +185,7 @@ export default function SettingsScreen() {
     ],
     [
       'Data',
-      'Analytics come from the connected platforms and Stripe. Noni stores only what it needs to run briefs, approvals and payouts.',
+      'Analytics come from the connected platforms. Noni stores only what it needs to run briefs and approvals.',
     ],
     [
       'Leaving',

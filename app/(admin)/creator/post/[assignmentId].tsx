@@ -24,7 +24,6 @@ import {
   type PostPlatformStats,
 } from '../../../../lib/admin-api';
 import { formatMetric } from '../../../../lib/analytics';
-import { formatCents } from '../../../../lib/wallet-api';
 import {
   borderWidth,
   color,
@@ -152,7 +151,7 @@ function PlatformCard({ stats }: { stats: PostPlatformStats }) {
 
 export default function AdminCreatorPostDetail() {
   const { assignmentId } = useLocalSearchParams<{ assignmentId: string }>();
-  const { profile, managerAccess } = useAuth();
+  const { profile } = useAuth();
   const [data, setData] = useState<AssignmentPostDetail | null>(null);
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -181,7 +180,6 @@ export default function AdminCreatorPostDetail() {
   const brief = data?.assignment.briefs;
   const isVideo = brief?.format === 'video';
   const slideCount = data?.submission?.segment_paths?.length ?? 0;
-  const payoutCents = data?.assignment.bounty_amount_cents ?? null;
   const platforms = data?.platforms ?? [];
 
   return (
@@ -245,19 +243,10 @@ export default function AdminCreatorPostDetail() {
                 </Text>
               </View>
               <View style={styles.summaryDivider} />
-              {managerAccess.viewFinancials ? (
-                <View style={styles.summaryCell}>
-                  <Text style={styles.summaryLabel}>Earned</Text>
-                  <Text style={[styles.summaryValue, styles.summaryGreen]}>
-                    {payoutCents !== null ? formatCents(payoutCents) : '$0.00'}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.summaryCell}>
-                  <Text style={styles.summaryLabel}>Saves</Text>
-                  <Text style={styles.summaryValue}>{metricText(data.totals.saves)}</Text>
-                </View>
-              )}
+              <View style={styles.summaryCell}>
+                <Text style={styles.summaryLabel}>Saves</Text>
+                <Text style={styles.summaryValue}>{metricText(data.totals.saves)}</Text>
+              </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryCell}>
                 <Text style={styles.summaryLabel}>Posted</Text>

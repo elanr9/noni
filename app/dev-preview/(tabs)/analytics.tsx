@@ -1,9 +1,8 @@
-import { Empty, Screen } from '../../../components/v2';
+import { useRouter } from 'expo-router';
+
+import { AnalyticsScreen } from '../../../components/admin/v2/analytics/AnalyticsScreen';
 
 export default function AnalyticsPreview() {
-  return (
-    <Screen title="Analytics" scroll tabRoot>
-      <Empty>Stage F.</Empty>
-    </Screen>
-  );
+  const router = useRouter();
+  return <AnalyticsScreen onCreator={() => undefined} onPost={(id) => router.push({ pathname: '/dev-preview/brief-post/[id]', params: { id } })} />;
 }

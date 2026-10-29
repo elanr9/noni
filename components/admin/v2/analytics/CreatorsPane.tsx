@@ -1,0 +1,42 @@
+// Creators pane (ANALYTICS.md 1b): flat ranked rows, views at right, most
+// viewed first. Only the list scrolls.
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { fmt } from '../../../../lib/v2-format';
+import type { V2Creator } from '../../../../lib/v2-posts';
+import { color, text } from '../../../../theme/v2';
+import { Avatar, Icon, Press } from '../../../v2';
+
+export function CreatorsPane({ creators, onCreator, bottomInset }: { creators: V2Creator[]; onCreator: (id: string) => void; bottomInset: number }) {
+  const ranked = creators.slice().sort((a, b) => b.views - a.views);
+  return (
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: bottomInset + 24 }}>
+      {ranked.length === 0 ? <Text style={[text.body, { color: color.grey4, textAlign: 'center', paddingVertical: 32 }]}>No creators yet</Text> : null}
+      {ranked.map((c, i) => (
+        <Press key={c.id} accessibilityRole="button" onPress={() => onCreator(c.id)} style={[styles.row, i ? styles.line : null]}>
+          <Text style={[styles.rank, { color: i === 0 ? color.blue : color.grey3 }]}>{i + 1}</Text>
+          <Avatar name={c.name} photo={c.photo} tone={c.tone} size={40} ring={false} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text numberOfLines={1} style={{ fontSize: 16, lineHeight: 20, fontWeight: '700', color: color.ink }}>
+              {c.name}
+            </Text>
+            <Text style={text.meta}>
+              {c.posts} {c.posts === 1 ? 'post' : 'posts'}
+            </Text>
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 1 }}>
+            <Text style={{ fontSize: 16, lineHeight: 20, fontWeight: '700', letterSpacing: -0.2, color: color.ink }}>{fmt(c.views)}</Text>
+            <Text style={{ fontSize: 12, lineHeight: 14, fontWeight: '500', color: color.grey4 }}>views</Text>
+          </View>
+          <Icon name="chevron_right" size={20} color={color.grey3} />
+        </Press>
+      ))}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 2 },
+  line: { borderTopWidth: 1, borderTopColor: color.grey2 },
+  rank: { width: 16, textAlign: 'center', fontSize: 13, lineHeight: 16, fontWeight: '700' },
+});

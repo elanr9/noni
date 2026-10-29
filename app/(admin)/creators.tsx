@@ -21,13 +21,11 @@ import {
 } from "../../lib/admin-api";
 import { formatMetric } from "../../lib/analytics";
 import { supabase } from "../../lib/supabase";
-import { formatCents } from "../../lib/wallet-api";
 import { radiusAdmin } from "../../theme/tokens";
 
-type SortKey = "earnedCents" | "views" | "postsCompleted";
+type SortKey = "views" | "postsCompleted";
 
 const ALL_SORTS: Array<{ key: SortKey; label: string }> = [
-  { key: "earnedCents", label: "Earnings" },
   { key: "views", label: "Views" },
   { key: "postsCompleted", label: "Posts" },
 ];
@@ -128,13 +126,8 @@ export default function CreatorsScreen() {
     }, [load]),
   );
 
-  const sorts = managerAccess.viewFinancials
-    ? ALL_SORTS
-    : ALL_SORTS.filter((s) => s.key !== "earnedCents");
-  const activeSort: SortKey =
-    sortKey === "earnedCents" && !managerAccess.viewFinancials
-      ? "views"
-      : sortKey;
+  const sorts = ALL_SORTS;
+  const activeSort: SortKey = sortKey;
 
   // Only creators whose account passed review; the rest sit in the Review queue.
   const sorted = useMemo(
@@ -196,11 +189,7 @@ export default function CreatorsScreen() {
                 name={c.creatorName}
                 handle={extra?.handle ?? null}
                 avatarUri={extra?.avatarUri ?? null}
-                earned={
-                  managerAccess.viewFinancials
-                    ? formatCents(c.earnedCents)
-                    : null
-                }
+                earned={null}
                 posts={`${c.postsCompleted}`}
                 views={formatMetric(c.views)}
                 onPress={() =>

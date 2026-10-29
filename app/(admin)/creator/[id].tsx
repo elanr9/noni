@@ -30,7 +30,6 @@ import {
 import { formatMetric } from '../../../lib/analytics';
 import { supabase } from '../../../lib/supabase';
 import { parseAssignmentMetrics } from '../../../lib/tasks-api';
-import { formatCents } from '../../../lib/wallet-api';
 import {
   borderWidth,
   color,
@@ -95,7 +94,7 @@ async function fetchProfileExtras(
 
 export default function AdminCreatorProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { profile, managerAccess } = useAuth();
+  const { profile } = useAuth();
   const { width: winWidth } = useWindowDimensions();
   const [data, setData] = useState<CreatorDetail | null>(null);
   const [extras, setExtras] = useState<ProfileExtras | null>(null);
@@ -140,9 +139,6 @@ export default function AdminCreatorProfile() {
   );
 
   const assignments = data?.assignments ?? [];
-  const earnedCents = (data?.ledger ?? [])
-    .filter((entry) => entry.amountCents > 0)
-    .reduce((sum, entry) => sum + entry.amountCents, 0);
   const views = assignments.reduce(
     (sum, a) => sum + (parseAssignmentMetrics(a.metrics).views ?? 0),
     0,
@@ -230,9 +226,7 @@ export default function AdminCreatorProfile() {
               credential={extras?.credential ?? null}
               tiktokHandle={extras?.tiktokHandle ?? null}
               instagramHandle={extras?.instagramHandle ?? null}
-              earned={
-                managerAccess.viewFinancials ? formatCents(earnedCents) : null
-              }
+              earned={null}
               posts={`${postedCount}`}
               views={formatMetric(views)}
             />

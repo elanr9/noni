@@ -12,7 +12,6 @@ import {
   Thumb,
 } from '../../components/admin/shared';
 import { formatMetric } from '../../lib/analytics';
-import { useAuth } from '../../lib/auth';
 import {
   getCampaign,
   listCampaigns,
@@ -24,10 +23,6 @@ import { color } from '../../theme/tokens';
 
 function formatViews(n: number): string {
   return formatMetric(Math.round(n)).replace(/k/g, 'K');
-}
-
-function formatSales(cents: number): string {
-  return `$${Math.round(cents / 100).toLocaleString('en-US')}`;
 }
 
 function formatLabel(format: BriefFormat): string {
@@ -44,8 +39,6 @@ function dayTitle(iso: string): string {
 
 export default function WeekDayScreen() {
   const { id, date } = useLocalSearchParams<{ id: string; date: string }>();
-  const { managerAccess } = useAuth();
-  const showSales = managerAccess.viewFinancials;
   const [weekNumber, setWeekNumber] = useState<number | null>(null);
   const [posts, setPosts] = useState<WeekPostItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,10 +83,8 @@ export default function WeekDayScreen() {
   );
 
   const list = posts ?? [];
-  const salesCents = list.reduce((sum, p) => sum + p.salesCents, 0);
   const weekLabel = weekNumber !== null ? `Week ${weekNumber}` : 'Week';
   const subtitleParts = [weekLabel, `${list.length} posts`];
-  if (showSales) subtitleParts.push(`${formatSales(salesCents)} in sales`);
 
   return (
     <>
@@ -139,9 +130,6 @@ export default function WeekDayScreen() {
                 </View>
                 <View style={styles.metrics}>
                   <Text style={styles.views}>{formatViews(p.views)}</Text>
-                  {showSales ? (
-                    <Text style={styles.sales}>{formatSales(p.salesCents)}</Text>
-                  ) : null}
                 </View>
               </Card>
             ))}
