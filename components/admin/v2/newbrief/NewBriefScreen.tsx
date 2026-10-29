@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AI_FILL, planGuided } from '../../../../lib/brief-ai';
 import { clearDraft, loadDraft, saveDraft, WIZ_V, type WizardState } from '../../../../lib/brief-drafts';
 import { useLibStore } from '../../../../lib/brief-library-api';
-import { briefWord, clipLabel, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
+import { briefWord, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { color, radius, shadow, text } from '../../../../theme/v2';
 import { postsForBrief, useV2Data } from '../../../../lib/v2-posts';
@@ -14,12 +14,12 @@ import { Button, Icon, Press, TabPane, TextButton, UnderlineTabs, tap, type Icon
 import { BriefPostsPanel } from '../posts/BriefPostsPanel';
 import { LongTextView, OutlineView, TemplateView } from './BriefViews';
 import { Celebration } from './Celebration';
-import { GuidedClipScreen } from './GuidedClipScreen';
 import { GuidedForm, type AiState } from './GuidedForm';
 import { LongTextForm } from './LongTextForm';
 import { OptionCards, type OptionDef } from './OptionCards';
 import { OutlineForm } from './OutlineForm';
 import { StepDots } from './StepDots';
+import { TemplateEditor } from './TemplateEditor';
 
 type Step = { key: 'type' | 'kind'; title: string; options: OptionDef[] } | { key: 'compose' };
 
@@ -53,6 +53,8 @@ export interface NewBriefScreenProps {
   /** Route prefix for a post made from this brief, `<prefix>/<postId>`. */
   postHref: string;
   userId?: string | null;
+  /** Brand library for the editor's Image tool. */
+  companyId?: string;
 }
 
 /** The brief a saved template or outline reopens as. */
@@ -84,7 +86,7 @@ function draftOk(d: WizardState | null, existing: Brief | undefined): d is Wizar
 }
 
 /** Create a post (type, format, compose) or edit a saved brief. Drafts persist per slot. */
-export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: NewBriefScreenProps) {
+export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, companyId = '' }: NewBriefScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardHeight();
@@ -99,7 +101,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
   const [st, setSt] = useState<WizardState | null>(null);
   const [editMode, setEditMode] = useState(!existing);
   const [page, setPage] = useState<'brief' | 'posts'>('brief');
-  const [viewClip, setViewClip] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{ clip: string | null } | null>(null);
   const [gai, setGai] = useState<AiState | null>(null);
   const [oai, setOai] = useState(false);
   const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
@@ -284,8 +286,11 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
     tap();
     setEditMode(true);
   };
-  const clip = viewClip ? g.clips.find((c) => c.id === viewClip) : null;
-  const clipIdx = clip ? g.clips.indexOf(clip) : -1;
+  /** The template in the creator's editor, playhead on the tapped clip. */
+  const openEditor = (clipId: string | null) => {
+    tap();
+    setEditor({ clip: clipId });
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top, paddingBottom: keyboard }}>
@@ -325,7 +330,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
       ) : viewing ? (
         <TabPane k="brief">
           {guided ? (
-            <TemplateView g={g} type={type} onOpenClip={setViewClip} />
+            <TemplateView g={g} type={type} onOpenClip={openEditor} />
           ) : isLong ? (
             <LongTextView
               lt={lt}
@@ -341,7 +346,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
       ) : compose ? (
         <TabPane k="compose">
           {guided ? (
-            <GuidedForm g={g} type={type} update={updateG} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
+            <GuidedForm g={g} type={type} update={updateG} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} onOpenClip={openEditor} />
           ) : isLong ? (
             <LongTextForm lt={lt} set={setLt} ai={gai} setAi={setGai} editingExisting={!!st.editingExisting} />
           ) : (
@@ -370,7 +375,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
         <View style={{ flexDirection: 'row', paddingTop: 12, paddingHorizontal: 20, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20) + 14, backgroundColor: color.card, ...shadow.footer }}>
           {viewing ? (
             guided ? (
-              <Button label="Open template" onPress={() => g.clips[0] && setViewClip(g.clips[0].id)} />
+              <Button label="Open template" onPress={() => openEditor(g.clips[0]?.id ?? null)} />
             ) : (
               <Button variant="secondary" label="Edit" onPress={startEdit} />
             )
@@ -380,24 +385,18 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null }: Ne
         </View>
       ) : null}
 
-      {clip ? (
-        <GuidedClipScreen
-          key={clip.id}
-          c={clip}
-          i={clipIdx}
+      {editor ? (
+        <TemplateEditor
+          g={g}
           type={type}
-          label={clipLabel(clipIdx, type)}
-          title={g.title}
-          fullGreen={!!g.fullGreen}
-          gsAll={g.gs}
-          ctaTaken={g.clips.some((x) => x.cta && x.id !== clip.id)}
-          onChange={(p) => {
-            updateG((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === clip.id ? { ...c, ...p } : c)) }));
+          startClipId={editor.clip}
+          ownerId={slot}
+          companyId={companyId}
+          onChange={(fn) => {
+            updateG(fn);
             setEditMode(true);
           }}
-          onClose={() => setViewClip(null)}
-          onPrev={clipIdx > 0 ? () => setViewClip(g.clips[clipIdx - 1].id) : undefined}
-          onNext={clipIdx < g.clips.length - 1 ? () => setViewClip(g.clips[clipIdx + 1].id) : undefined}
+          onClose={() => setEditor(null)}
         />
       ) : null}
 

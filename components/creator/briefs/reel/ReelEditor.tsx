@@ -5,13 +5,20 @@
 // toolbar. A plug the manager locked (after the hook, at the end) snaps back
 // when a reorder moves it out of place; one the creator places moves freely.
 // From RLEditor.jsx ReelEditor.
+//
+// With `onClose` the same editor edits a campaign manager's template over
+// the brief screen (V2Editor.jsx EditorScreen): close and the title in the
+// header, a Save pill, and with `scripts` a first Script tool that opens the
+// teleprompter sheet for the clip under the playhead.
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { Easing, FadeIn, SlideInDown } from 'react-native-reanimated';
 
 import {
   addAsset,
   addOverlay,
+  blockAt,
   blockRanges,
   defaultOverlayWindow,
   documentDurationMs,
@@ -32,6 +39,7 @@ import { CLASSIC_TEXT_COLOR } from '../../../../lib/overlay-boxes';
 import { onVideo, useStudioStore } from '../../../../lib/studio-store';
 import { color, type as typeToken } from '../../../../theme/tokens';
 import { Icon, type IconName } from '../../../ui/Icon';
+import { tap } from '../../../v2/haptics';
 import { OverlayLane, OverlayLayer } from '../../studio/overlays';
 import { beginGesture, selectOverlay, updateGesture } from '../../studio/overlays/overlay-actions';
 import { useOverlayUi } from '../../studio/overlays/overlay-ui-store';
@@ -61,16 +69,25 @@ export type ReelEditorProps = {
   /** Where the plug goes: locked after the hook or at the end, or any (the creator moves it). */
   place: CtaPlacement;
   onBack: () => void;
+  /** Next in the creator flow; Save when `onClose` is given. */
   onNext: () => void;
   onAddClip: () => void;
-  onRedoClip: (item: ReelPlanItem) => void;
-  onAi: () => void;
+  /** Re record a clip; without it the clip tools have no Redo clip. */
+  onRedoClip?: (item: ReelPlanItem) => void;
+  /** The AI tool; without it the toolbar has no AI. */
+  onAi?: () => void;
   /** Header line in place of the auto cut count. */
   status?: string;
   /** Label under the sparkles tool; AI by default. */
   aiLabel?: string;
   /** Preview captions from the words Edit my video heard. */
   captions?: boolean;
+  /** Template editing: close disc and `title` in the header, a Save pill in place of Next. */
+  onClose?: () => void;
+  title?: string;
+  /** Teleprompter text per block id. Present: the toolbar leads with Script and its sheet. */
+  scripts?: Record<string, string>;
+  onScript?: (blockId: string, text: string) => void;
 };
 
 function fmt(ms: number): string {
@@ -139,6 +156,54 @@ function Transport({ total, canSwap, onSwap }: { total: number; canSwap: boolean
   );
 }
 
+/** Script tool: blue when the clip under the playhead has a line. Follows the playhead on its own. */
+function ScriptTool({ doc, scripts, onPress }: { doc: VideoDocument; scripts: Record<string, string>; onPress: () => void }): JSX.Element {
+  const blockId = useStudioStore((s) => blockAt(doc, s.playheadMs)?.block.id ?? null);
+  const on = !!(blockId && scripts[blockId]?.trim());
+  return <ToolButton icon="captions" label="Script" on={on} dim={!blockId} onPress={onPress} />;
+}
+
+/** Dark bottom sheet: "Script for clip n", Teleprompter, a five line field, Done. The clip is the one under the playhead when it opened. */
+function ScriptSheet({ doc, scripts, onScript, onClose }: { doc: VideoDocument; scripts: Record<string, string>; onScript: (blockId: string, text: string) => void; onClose: () => void }): JSX.Element {
+  const insets = useSafeAreaInsets();
+  const [blockId] = useState(() => blockAt(doc, useStudioStore.getState().playheadMs)?.block.id ?? null);
+  const n = doc.blocks.findIndex((b) => b.id === blockId) + 1;
+  const value = blockId ? (scripts[blockId] ?? '') : '';
+  const done = () => {
+    tap();
+    onClose();
+  };
+  return (
+    <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetWrap}>
+        <Animated.View entering={FadeIn.duration(200)} style={StyleSheet.absoluteFill}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={done} style={[StyleSheet.absoluteFill, styles.sheetScrim]} />
+        </Animated.View>
+        <Animated.View entering={SlideInDown.duration(240).easing(Easing.bezier(0.2, 0.8, 0.2, 1))} style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) + 14 }]}>
+          <View style={styles.grabber} />
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>Script for clip {n}</Text>
+            <Text style={styles.sheetMeta}>Teleprompter</Text>
+          </View>
+          <TextInput
+            autoFocus
+            multiline
+            value={value}
+            onChangeText={(t) => blockId && onScript(blockId, t)}
+            placeholder="What the creator reads, word for word"
+            placeholderTextColor={color.whiteA45}
+            textAlignVertical="top"
+            style={styles.scriptInput}
+          />
+          <Pressable accessibilityRole="button" onPress={done} style={styles.sheetDone}>
+            <Text style={styles.sheetDoneText}>Done</Text>
+          </Pressable>
+        </Animated.View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 /** Split shows only when the playhead sits inside a clip; mounted only while a clip is selected. */
 function SplitTool({ doc }: { doc: VideoDocument }): JSX.Element | null {
   const canSplit = useStudioStore((s) => splitBlockAt(doc, s.playheadMs) !== doc);
@@ -152,12 +217,14 @@ function SplitTool({ doc }: { doc: VideoDocument }): JSX.Element | null {
 }
 
 export function ReelEditor(props: ReelEditorProps): JSX.Element {
-  const { doc, items, companyId, cuts, place, onBack, onNext, onAddClip, onRedoClip, onAi, status, aiLabel = 'AI', captions = false } = props;
+  const { doc, items, companyId, cuts, place, onBack, onNext, onAddClip, onRedoClip, onAi, status, aiLabel = 'AI', captions = false, onClose, title = '', scripts, onScript } = props;
   const insets = useSafeAreaInsets();
   const selection = useStudioStore((s) => s.selection);
   const stageRef = useRef<React.ElementRef<typeof VideoStage>>(null);
   const [picking, setPicking] = useState(false);
   const [trim, setTrim] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const template = !!onClose;
   const [snapHint, setSnapHint] = useState(false);
   useEffect(() => {
     if (!snapHint) return;
@@ -258,17 +325,49 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
   const range = block ? (blockRanges(doc).find((r) => r.block.id === block.id) ?? null) : null;
   const selectedMs = range ? Math.round((range.endMs - range.startMs) / 1000) : 0;
 
+  const titleSize = title.length > 40 ? 12 : title.length > 28 ? 13 : 15;
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.headerBtn}>
-          <Icon name="chevron-left" size={22} color={color.white} />
-        </Pressable>
-        <Text style={styles.headerText}>{status ?? (cuts ? `Auto cut \u00b7 ${cuts} pause${cuts === 1 ? '' : 's'} removed` : 'Auto cut on')}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Next" onPress={onNext} style={[styles.headerBtn, styles.headerNext]}>
-          <Icon name="arrow-right" size={22} color={color.white} />
-        </Pressable>
-      </View>
+      {template ? (
+        <View style={styles.header}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={() => {
+              tap();
+              onClose?.();
+            }}
+            style={styles.headerBtn}
+          >
+            <Icon name="x" size={22} color={color.white} />
+          </Pressable>
+          <Text numberOfLines={2} style={[styles.titleText, { fontSize: titleSize }]}>
+            {title}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save"
+            onPress={() => {
+              tap();
+              onNext();
+            }}
+            style={styles.savePill}
+          >
+            <Text style={styles.saveText}>Save</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.header}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.headerBtn}>
+            <Icon name="chevron-left" size={22} color={color.white} />
+          </Pressable>
+          <Text style={styles.headerText}>{status ?? (cuts ? `Auto cut \u00b7 ${cuts} pause${cuts === 1 ? '' : 's'} removed` : 'Auto cut on')}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Next" onPress={onNext} style={[styles.headerBtn, styles.headerNext]}>
+            <Icon name="arrow-right" size={22} color={color.white} />
+          </Pressable>
+        </View>
+      )}
 
       <VideoStage ref={stageRef} doc={doc}>
         <MeasuredOverlayLayer doc={doc} captions={captions} />
@@ -279,8 +378,8 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
       <View style={styles.timeline}>
         {doc.blocks.length === 0 ? (
           <Pressable accessibilityRole="button" onPress={onAddClip} style={styles.emptyClip}>
-            <Icon name="video" size={16} color={color.white} />
-            <Text style={styles.emptyClipText}>Record</Text>
+            <Icon name={template ? 'plus' : 'video'} size={16} color={color.white} />
+            <Text style={styles.emptyClipText}>{template ? 'Add clip' : 'Record'}</Text>
           </Pressable>
         ) : (
           <>
@@ -328,19 +427,31 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           </Pressable>
           <SplitTool doc={doc} />
           <ClipTool icon="clock" label="Trim" onPress={() => setTrim(true)} />
-          {selectedItem ? <ClipTool icon="video" label="Redo clip" onPress={() => onRedoClip(selectedItem)} /> : null}
-          <ClipTool icon="trash-2" label="Delete" onPress={confirmDelete} />
+          {selectedItem && onRedoClip ? <ClipTool icon="video" label="Redo clip" onPress={() => onRedoClip(selectedItem)} /> : null}
+          {template && doc.blocks.length < 2 ? null : <ClipTool icon="trash-2" label="Delete" onPress={confirmDelete} />}
         </ScrollView>
       ) : (
         <View style={[styles.toolbar, { paddingBottom: insets.bottom + 8 }]}>
+          {scripts && onScript ? (
+            <ScriptTool
+              doc={doc}
+              scripts={scripts}
+              onPress={() => {
+                tap();
+                store.setPlaying(false);
+                setScriptOpen(true);
+              }}
+            />
+          ) : null}
           <ToolButton icon="pencil" label="Text" dim={!canAdd} onPress={addText} />
           <ToolButton icon="image-plus" label="Image" dim={!canAdd} onPress={() => { store.setPlaying(false); setPicking(true); }} />
           <ToolButton icon="layout-list" label="Captions" on={doc.subtitles.enabled} onPress={toggleCaptions} />
-          <ToolButton icon="sparkles" label={aiLabel} onPress={onAi} />
+          {onAi ? <ToolButton icon="sparkles" label={aiLabel} onPress={onAi} /> : null}
         </View>
       )}
 
       {picking ? <PicturePickerSheet companyId={companyId} onPick={addPicture} onClose={() => setPicking(false)} /> : null}
+      {scriptOpen && scripts && onScript ? <ScriptSheet doc={doc} scripts={scripts} onScript={onScript} onClose={() => setScriptOpen(false)} /> : null}
     </View>
   );
 }
@@ -351,6 +462,19 @@ const styles = StyleSheet.create({
   headerBtn: { width: 44, height: 44, borderRadius: 999, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center' },
   headerNext: { backgroundColor: color.blue500 },
   headerText: { flex: 1, textAlign: 'center', fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '700', color: color.whiteA60 },
+  titleText: { flex: 1, minWidth: 0, marginHorizontal: 8, fontFamily: typeToken.font.ui, fontWeight: '600', lineHeight: 18, color: color.white },
+  savePill: { height: 36, paddingHorizontal: 16, borderRadius: 999, backgroundColor: color.blue500, alignItems: 'center', justifyContent: 'center' },
+  saveText: { fontFamily: typeToken.font.ui, fontSize: 14, fontWeight: '700', color: color.white },
+  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheetScrim: { backgroundColor: color.scrimStrong },
+  sheet: { backgroundColor: color.ink800, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 10 },
+  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: color.whiteA28, marginBottom: 10 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sheetTitle: { fontFamily: typeToken.font.ui, fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.white },
+  sheetMeta: { fontFamily: typeToken.font.ui, fontSize: 12, lineHeight: 16, fontWeight: '500', color: color.whiteA60 },
+  scriptInput: { height: 144, borderRadius: 14, backgroundColor: color.whiteA16, color: color.white, paddingHorizontal: 14, paddingVertical: 12, fontFamily: typeToken.font.ui, fontSize: 17, lineHeight: 24, fontWeight: '600' },
+  sheetDone: { marginTop: 12, height: 48, borderRadius: 999, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center' },
+  sheetDoneText: { fontFamily: typeToken.font.ui, fontSize: 15, fontWeight: '700', color: color.ink },
   transport: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 2 },
   time: { fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '600', color: color.white, fontVariant: ['tabular-nums'] },
   timeTotal: { color: color.whiteA45 },

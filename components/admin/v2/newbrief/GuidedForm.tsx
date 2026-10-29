@@ -3,14 +3,13 @@ import { ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { planGuided } from '../../../../lib/brief-ai';
-import { clipLabel, newClip, type AudioTrack, type BriefClip, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
+import { newClip, type AudioTrack, type BriefClip, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
 import { color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Label, Option, Press, Sheet, Toggle, tap } from '../../../v2';
 import { AudioCover } from '../audio/AudioCover';
 import { AudioSheet } from '../audio/AudioSheet';
 import { ClipGrid } from './ClipGrid';
 import { MediaFill, ShimmerLine } from './ClipFrame';
-import { GuidedClipScreen } from './GuidedClipScreen';
 import { LinkDialog } from './LinkDialog';
 import { MediaPickerSheet } from './MediaPickerSheet';
 import { FIELD, TitleInput } from './TitleInput';
@@ -26,15 +25,16 @@ export interface GuidedFormProps {
   setAi: (a: AiState | null) => void;
   /** Editing a saved brief: no step label, no link or AI row, no title ideas. */
   editingExisting?: boolean;
+  /** A clip tile or Add clip: the template opens in the creator's editor on that clip. */
+  onOpenClip: (id: string) => void;
 }
 
 const BIG = { height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, flex: 1, minWidth: 0 } as const;
 
 /** Guided compose: pinned Add link / Fill in with AI, then title, sound, notes and the clip grid. */
-export function GuidedForm({ g, type, update, ai, setAi, editingExisting }: GuidedFormProps) {
+export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpenClip }: GuidedFormProps) {
   const set = (patch: Partial<GuidedState>) => update((cur) => ({ ...cur, ...patch }));
   const setClip = (id: string, patch: Partial<BriefClip>) => update((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
-  const [open, setOpen] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [soundOpen, setSoundOpen] = useState(false);
   const [soundPick, setSoundPick] = useState(false);
@@ -93,8 +93,6 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting }: Guid
   const pend = (k: string) => !!ai && (ai.stage === k || (k.startsWith('clip') && ai.stage.startsWith('clip') && +ai.stage.slice(4) <= +k.slice(4)));
   const justFilled = (i: number) => !!ai && (ai.stage === `clip${i + 1}` || (ai.stage === 'caption' && i === g.clips.length - 1));
 
-  const cur = open ? g.clips.find((c) => c.id === open) : null;
-  const curIdx = cur ? g.clips.indexOf(cur) : -1;
   const gsLabel = g.gs ? (g.gs.kind === 'video' ? `Video, ${g.gs.dur}s. Creators record to its length` : 'Image, untimed') : 'Add an image or video';
 
   return (
@@ -196,11 +194,11 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting }: Guid
           gsAll={g.gs}
           pending={(i) => pend(`clip${i}`)}
           justFilled={justFilled}
-          onOpen={(id) => setOpen(id)}
+          onOpen={onOpenClip}
           onAdd={() => {
             const c = newClip('');
             set({ clips: g.clips.concat([c]) });
-            setOpen(c.id);
+            onOpenClip(c.id);
           }}
           onReorder={(from, to) =>
             update((cur) => {
@@ -268,31 +266,6 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting }: Guid
           else if (gsPick) setClip(gsPick, { gs: m });
         }}
       />
-      {cur ? (
-        <GuidedClipScreen
-          key={cur.id}
-          c={cur}
-          i={curIdx}
-          type={type}
-          label={clipLabel(curIdx, type)}
-          title={g.title}
-          fullGreen={!!g.fullGreen}
-          gsAll={g.gs}
-          ctaTaken={g.clips.some((x) => x.cta && x.id !== cur.id)}
-          onChange={(patch) => setClip(cur.id, patch)}
-          onClose={() => setOpen(null)}
-          onPrev={curIdx > 0 ? () => setOpen(g.clips[curIdx - 1].id) : undefined}
-          onNext={curIdx < g.clips.length - 1 ? () => setOpen(g.clips[curIdx + 1].id) : undefined}
-          onRemove={
-            !long && g.clips.length > 1
-              ? () => {
-                  set({ clips: g.clips.filter((c) => c.id !== cur.id) });
-                  setOpen(null);
-                }
-              : undefined
-          }
-        />
-      ) : null}
     </>
   );
 }
