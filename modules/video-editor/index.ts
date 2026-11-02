@@ -26,7 +26,10 @@ export type NativePiece = {
   crop: EditCrop | null;
 };
 
-export type NativeTimeline = { pieces: NativePiece[] };
+/** A sound mixed under the video at export: the file, where it starts in the track, and the two volumes (0..1). */
+export type NativeAudio = { uri: string; startMs: number; volume: number; voiceVolume: number };
+
+export type NativeTimeline = { pieces: NativePiece[]; audio?: NativeAudio | null };
 
 /** One cell of a studio block. Image cells send kind 'image' and no media;
  * the native side keeps their time with an empty range and JS draws them. */
@@ -43,7 +46,7 @@ export type NativeCell = {
 export type NativeBlock = { layout: BlockLayout; durationMs: number; cells: NativeCell[] };
 
 /** Studio document shape: two video and two audio tracks, 1080x1920 render. */
-export type NativeBlockTimeline = { blocks: NativeBlock[] };
+export type NativeBlockTimeline = { blocks: NativeBlock[]; audio?: NativeAudio | null };
 
 export type ExportResult = { uri: string; durationMs: number };
 
@@ -113,10 +116,19 @@ export function toNativeTimeline(timeline: EditTimeline): NativeTimeline {
   return { pieces: timeline.pieces.map(toNativePiece) };
 }
 
+/** The document's sound as the native mix wants it; null when the track has no file to mix. */
+export function nativeAudioFor(doc: Pick<VideoDocument, 'audio'>): NativeAudio | null {
+  const a = doc.audio;
+  const uri = a?.track.url ?? null;
+  if (!a || !uri) return null;
+  return { uri, startMs: Math.max(0, a.start * 1000), volume: Math.max(0, Math.min(1, a.vol / 100)), voiceVolume: Math.max(0, Math.min(1, a.voice / 100)) };
+}
+
 /** A video cell without a local file plays as an image cell (black on the
  * native side) until its asset is available on this device. */
 export function toNativeBlockTimeline(doc: VideoDocument): NativeBlockTimeline {
   return {
+    audio: nativeAudioFor(doc),
     blocks: doc.blocks.map((block) => ({
       layout: block.layout,
       durationMs: blockDurationMs(block),

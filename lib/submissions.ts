@@ -16,6 +16,7 @@ import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
 import type { Assignment, ContentTask, TaskStatus } from './tasks';
+import type { PostAudio } from './brief-library';
 import type { Json } from './types';
 import type { SubmissionCue } from './video-edit';
 
@@ -242,6 +243,8 @@ async function createAssignmentSubmission(params: {
   instagramPaths?: string[] | null;
   /** Studio posts: the frozen edit document the render builds from. */
   project?: { id: string; document: Json } | null;
+  /** The sound on the post (track, start, mix) for review and publish. */
+  audio?: PostAudio | null;
 }): Promise<Assignment> {
   const {
     assignment,
@@ -256,6 +259,7 @@ async function createAssignmentSubmission(params: {
     slideAspect,
     instagramPaths,
     project,
+    audio,
   } = params;
 
   const { data: submission, error: insertError } = await supabase
@@ -272,6 +276,7 @@ async function createAssignmentSubmission(params: {
       ...(slideAspect !== undefined ? { slide_aspect: slideAspect } : {}),
       ...(instagramPaths ? { instagram_segment_paths: instagramPaths } : {}),
       ...(project ? { project_id: project.id, edit_document: project.document } : {}),
+      ...(audio ? { audio: audio as unknown as Json } : {}),
       // Both formats go through the edit pass: videos stitch and burn
       // overlays, photos get the admin's text and pictures baked onto each
       // slide so the reviewed file is the posted file.
@@ -434,6 +439,7 @@ export async function submitProject(params: {
     format: 'video',
     audioGain: document.gain,
     project,
+    audio: document.audio ?? null,
   });
 }
 

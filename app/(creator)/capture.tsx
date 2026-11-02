@@ -86,7 +86,7 @@ export default function CaptureRoute() {
       const { doc, scripts } = recordToDoc(clips, brief ?? null);
       useStudioStore.getState().load(doc, a.id);
       await saveProject({ companyId, creatorId, assignmentId: a.id, document: doc });
-      await saveEditHandoff(a.id, { title, scripts, draftKey });
+      await saveEditHandoff(a.id, { title, scripts, draftKey, soundMode: brief?.audio?.mode ?? null, talkingHead: brief?.type === 'Talking Head' });
       void draft;
       router.replace({ pathname: '/(creator)/edit/[id]', params: { id: a.id } });
     },

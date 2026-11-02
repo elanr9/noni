@@ -19,6 +19,8 @@ export interface ReviewMetaOverlayProps {
   /** Slideshows only: pager dots sit between the photo and the caption. */
   slideCount?: number;
   slideIndex?: number;
+  /** "Title · Artist" when the creator put a sound under the post. */
+  sound?: string | null;
 }
 
 const RAIL_ICONS: IconName[] = ['heart', 'message-circle', 'bookmark', 'share-2'];
@@ -37,11 +39,12 @@ export function ReviewMetaOverlay({
   hashtags,
   slideCount = 0,
   slideIndex = 0,
+  sound: soundLine = null,
 }: ReviewMetaOverlayProps) {
   const shownHandle = handle !== null ? `@${handle}` : creatorName;
   const meta = typeLabel !== null ? `${typeLabel} \u00b7 ${ageLabel}` : ageLabel;
   const tags = hashtags.map((tag) => (tag.startsWith('#') ? tag : `#${tag}`)).join(' ');
-  const sound = format === 'video' ? `Original sound  \u00b7  ${shownHandle}` : 'Photo mode';
+  const sound = soundLine ?? (format === 'video' ? `Original sound  \u00b7  ${shownHandle}` : 'Photo mode');
 
   return (
     <View pointerEvents="none" style={styles.wrap}>

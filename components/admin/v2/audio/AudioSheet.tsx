@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useAudioPlayer } from 'expo-audio';
 import { ScrollView, Text, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
+import { loadSavedSounds, remoteTracks, storeSavedSounds } from '../../../../lib/audio-api';
 import { AUDIO_LIB, AU_SUGGEST, searchTracks, trackBars, trackLength, trackUses, type LibraryTrack } from '../../../../lib/audio-library';
 import type { AudioTrack } from '../../../../lib/brief-library';
 import { color, radius, shadow } from '../../../../theme/v2';
@@ -20,14 +22,62 @@ export interface AudioSheetProps {
   value: AudioPick | null;
   onChange: (v: AudioPick) => void;
   title?: string;
+  /** Campaign tags that pick the For this post section. */
+  tags?: string[];
+  /** Starting Sound level for a new pick: 100, or 25 for talking head posts. */
+  defaultVol?: number;
+  /** Shown on the trim step when a sound is already set. */
+  onRemove?: () => void;
 }
 
 /** Search a sound, preview it, then trim: the window stays put and the waveform scrolls under it. */
-export function AudioSheet({ open, onClose, len = 15, value, onChange, title = 'Add sound' }: AudioSheetProps) {
+const POST_TAGS = ['soccer', 'sport', 'tutorial'];
+
+export function AudioSheet({ open, onClose, len = 15, value, onChange, title = 'Add sound', tags = POST_TAGS, defaultVol = 100, onRemove }: AudioSheetProps) {
   const [q, setQ] = useState('');
   const [playing, setPlaying] = useState<string | null>(null);
   const [saved, setSaved] = useState<Set<string>>(() => new Set(['s2']));
   const [draft, setDraft] = useState<AudioPick | null>(null);
+  /** Instagram results for the query; null while loading or when the API is not answering. */
+  const [remote, setRemote] = useState<{ q: string; tracks: LibraryTrack[] } | null>(null);
+  const [known, setKnown] = useState<LibraryTrack[]>(AUDIO_LIB);
+  const player = useAudioPlayer(null);
+
+  useEffect(() => {
+    void loadSavedSounds().then(setSaved);
+  }, []);
+
+  // Search the Audio API a beat after typing stops; an empty query asks for trending.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const t = setTimeout(() => {
+      void remoteTracks(q).then((tracks) => {
+        if (!live) return;
+        if (tracks) {
+          setRemote({ q, tracks });
+          setKnown((k) => [...tracks, ...k.filter((x) => !tracks.some((r) => r.id === x.id))]);
+        } else setRemote(null);
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [q, open]);
+
+  // Preview: the platform's preview clip when the track has one; the cover bars otherwise.
+  useEffect(() => {
+    const t = known.find((x) => x.id === playing);
+    const url = t?.previewUrl ?? t?.url ?? null;
+    if (!playing || !url) {
+      player.pause();
+      return;
+    }
+    player.replace({ uri: url });
+    player.play();
+    return () => player.pause();
+  }, [playing, known, player]);
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
@@ -37,16 +87,18 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
       setDraft(value && value.track ? { ...value } : null);
     }
   }
-  const results = searchTracks(q);
+  const remoteFor = remote && remote.q === q ? remote.tracks : null;
+  const results = q.trim() ? (remoteFor ?? searchTracks(q)) : null;
   const pick = (t: LibraryTrack) => {
     setPlaying(t.id);
-    setDraft({ track: t, start: value && value.track && value.track.id === t.id ? value.start : 0, vol: value ? value.vol : 100, voice: value ? value.voice : 100 });
+    setDraft({ track: t, start: value && value.track && value.track.id === t.id ? value.start : 0, vol: value ? value.vol : defaultVol, voice: value ? value.voice : 100 });
   };
   const toggleSave = (id: string) =>
     setSaved((s) => {
       const n = new Set(s);
       if (n.has(id)) n.delete(id);
       else n.add(id);
+      storeSavedSounds(n);
       return n;
     });
   const row = (t: LibraryTrack) => (
@@ -59,17 +111,30 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
         {list.map(row)}
       </View>
     ) : null;
-  const trending = AUDIO_LIB.filter((t) => t.trend);
-  const forYou = AUDIO_LIB.filter((t) => t.tags.includes('soccer') || t.tags.includes('sport') || t.tags.includes('tutorial'));
-  const savedList = AUDIO_LIB.filter((t) => saved.has(t.id));
+  const trendingRemote = remote && remote.q === '' ? remote.tracks : null;
+  const trending = trendingRemote ?? AUDIO_LIB.filter((t) => t.trend);
+  const forYou = AUDIO_LIB.filter((t) => t.tags.some((tag) => tags.includes(tag)));
+  const savedList = known.filter((t) => saved.has(t.id));
   const footer = draft ? (
-    <Button
-      label="Use this sound"
-      onPress={() => {
-        onChange(draft);
-        onClose();
-      }}
-    />
+    <>
+      {value?.track && onRemove ? (
+        <Button
+          variant="secondary"
+          label="Remove sound"
+          onPress={() => {
+            onRemove();
+            onClose();
+          }}
+        />
+      ) : null}
+      <Button
+        label="Use this sound"
+        onPress={() => {
+          onChange(draft);
+          onClose();
+        }}
+      />
+    </>
   ) : undefined;
   return (
     <Sheet open={open} onClose={onClose} title={draft ? undefined : title} footer={footer}>

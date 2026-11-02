@@ -41,6 +41,10 @@ import {
   type AssignmentWithBrief,
 } from '../../../lib/tasks-api';
 import { color, radius, shadow, space, type } from '../../../theme/tokens';
+import { TikTokSoundCard } from '../../../components/admin/v2/audio/TikTokSoundCard';
+import type { PostAudio } from '../../../lib/brief-library';
+import { parsePostAudio } from '../../../lib/edit-document';
+import { supabase } from '../../../lib/supabase';
 
 type Platform = 'tiktok' | 'instagram';
 
@@ -64,6 +68,8 @@ export default function PostDetailScreen() {
     instagram: string | null;
   }>({ tiktok: null, instagram: null });
   const [markingMusic, setMarkingMusic] = useState(false);
+  /** The sound under the latest take, for the TikTok card. */
+  const [audio, setAudio] = useState<PostAudio | null>(null);
 
   const onMusicAdded = useCallback(async () => {
     if (assignment === null || markingMusic) return;
@@ -91,6 +97,10 @@ export default function PostDetailScreen() {
     try {
       const row = await getAssignment(profile.active_company_id, id);
       setAssignment(row);
+      if (row?.submission_id) {
+        const { data } = await supabase.from('submissions').select('audio').eq('id', row.submission_id).maybeSingle();
+        setAudio(parsePostAudio(data?.audio));
+      }
       if (row !== null) {
         const account = await getCreatorAccount(row.company_id, profile.id);
         setHandles({
@@ -274,7 +284,18 @@ export default function PostDetailScreen() {
         </View>
       </View>
 
-      {musicCard !== null && (
+      {audio !== null && assignment.music_marked_by_creator_at === null && (
+        <View style={[styles.noticeCard, shadow.shadowCard]}>
+          <View style={styles.noticeHead}>
+            <View style={styles.linkIcon}>
+              <Icon name="music-2" size={16} color={color.ink} />
+            </View>
+            <Text style={styles.noticeTitle}>Add the sound on TikTok</Text>
+          </View>
+          <TikTokSoundCard audio={audio} tiktokUrl={urlFor('tiktok')} onDone={() => void onMusicAdded()} />
+        </View>
+      )}
+      {audio === null && musicCard !== null && (
         <View style={[styles.noticeCard, shadow.shadowCard]}>
           <View style={styles.noticeHead}>
             <View style={styles.linkIcon}>

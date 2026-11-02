@@ -10,7 +10,20 @@ export type BriefType = 'Talking Head' | 'Long Text' | 'Slideshow' | 'Greenscree
 export const BRIEF_TYPES: readonly BriefType[] = ['Talking Head', 'Long Text', 'Slideshow', 'Greenscreen'];
 
 export type AudioMode = 'none' | 'pick' | 'creator' | null;
-export type AudioTrack = { id: string; title: string; artist: string; dur: number; cover?: string | null };
+export type AudioTrack = {
+  id: string;
+  title: string;
+  artist: string;
+  dur: number;
+  cover?: string | null;
+  /** Instagram audio id when the track came from the Audio API; attached at Reel publish. */
+  igAudioId?: string | null;
+  /** A file the editor can play and mix; null when only the platform can attach it. */
+  url?: string | null;
+  previewUrl?: string | null;
+};
+/** A sound on a post: the track, where it starts in seconds and the mix (0 to 100). */
+export type PostAudio = { track: AudioTrack; start: number; vol: number; voice: number };
 export type BriefAudio = { mode: AudioMode; track: AudioTrack | null };
 
 /** Green screen media behind the creator. `dur` in seconds for video, 0 for an image. */

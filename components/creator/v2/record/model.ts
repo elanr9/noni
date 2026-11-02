@@ -99,11 +99,14 @@ export function recordToDoc(clips: RecordClip[], brief: Brief | null, override?:
     }
     at += ms;
   }
-  return { doc: { ...base, assets, blocks, overlays, subtitles: { ...base.subtitles, enabled: false } }, scripts };
+  // A sound the brief requires opens already applied at 0:00; talking head posts start it at 25.
+  const required = brief?.audio?.mode === 'pick' && brief.audio.track ? brief.audio.track : null;
+  const audio = required ? { track: required, start: 0, vol: brief?.type === 'Talking Head' ? 25 : 100, voice: 100 } : null;
+  return { doc: { ...base, assets, blocks, overlays, subtitles: { ...base.subtitles, enabled: false }, ...(audio ? { audio } : {}) }, scripts };
 }
 
 /** Editor hand-off facts the camera leaves for the editor route. */
-export type EditHandoff = { title: string; scripts: Record<string, string>; draftKey: string | null };
+export type EditHandoff = { title: string; scripts: Record<string, string>; draftKey: string | null; soundMode?: 'none' | 'pick' | 'creator' | null; talkingHead?: boolean };
 
 export async function loadEditHandoff(assignmentId: string): Promise<EditHandoff | null> {
   try {

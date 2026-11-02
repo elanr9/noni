@@ -46,6 +46,8 @@ import { useOverlayUi } from '../../studio/overlays/overlay-ui-store';
 import { PicturePickerSheet, type PicturePick } from '../../studio/overlays/PicturePickerSheet';
 import { TimelineStrip } from '../../studio/timeline/TimelineStrip';
 import { VideoStage } from '../../studio/timeline/VideoStage';
+import { AudioChip } from '../../../admin/v2/audio/AudioChip';
+import { AudioSheet } from '../../../admin/v2/audio/AudioSheet';
 import { CaptionPreview } from '../raw/CaptionPreview';
 import type { ReelPlanItem } from './plan';
 import { deleteItemBlocks, lockPlug } from './sync';
@@ -88,6 +90,10 @@ export type ReelEditorProps = {
   /** Teleprompter text per block id. Present: the toolbar leads with Script and its sheet. */
   scripts?: Record<string, string>;
   onScript?: (blockId: string, text: string) => void;
+  /** The brief's sound rule: 'none' hides the Sound tool. */
+  soundMode?: 'none' | 'pick' | 'creator' | null;
+  /** Talking head posts start a new sound at 25. */
+  talkingHead?: boolean;
 };
 
 function fmt(ms: number): string {
@@ -217,7 +223,8 @@ function SplitTool({ doc }: { doc: VideoDocument }): JSX.Element | null {
 }
 
 export function ReelEditor(props: ReelEditorProps): JSX.Element {
-  const { doc, items, companyId, cuts, place, onBack, onNext, onAddClip, onRedoClip, onAi, status, aiLabel = 'AI', captions = false, onClose, title = '', scripts, onScript } = props;
+  const { doc, items, companyId, cuts, place, onBack, onNext, onAddClip, onRedoClip, onAi, status, aiLabel = 'AI', captions = false, onClose, title = '', scripts, onScript, soundMode = null, talkingHead = false } = props;
+  const [soundOpen, setSoundOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const selection = useStudioStore((s) => s.selection);
   const stageRef = useRef<React.ElementRef<typeof VideoStage>>(null);
@@ -371,6 +378,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
 
       <VideoStage ref={stageRef} doc={doc}>
         <MeasuredOverlayLayer doc={doc} captions={captions} />
+        {doc.audio ? <AudioChip audio={doc.audio} onPress={() => { store.setPlaying(false); setSoundOpen(true); }} style={{ position: 'absolute', left: 12, bottom: 12 }} /> : null}
       </VideoStage>
 
       <Transport total={total} canSwap={canSwap} onSwap={() => block && store.commit(onVideo((d) => swapCells(d, block.id)))} />
@@ -445,12 +453,22 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           ) : null}
           <ToolButton icon="pencil" label="Text" dim={!canAdd} onPress={addText} />
           <ToolButton icon="image-plus" label="Image" dim={!canAdd} onPress={() => { store.setPlaying(false); setPicking(true); }} />
+          {soundMode !== 'none' ? <ToolButton icon="music-2" label="Sound" on={!!doc.audio} dim={total === 0} onPress={() => { tap(); store.setPlaying(false); setSoundOpen(true); }} /> : null}
           <ToolButton icon="layout-list" label="Captions" on={doc.subtitles.enabled} onPress={toggleCaptions} />
           {onAi ? <ToolButton icon="sparkles" label={aiLabel} onPress={onAi} /> : null}
         </View>
       )}
 
       {picking ? <PicturePickerSheet companyId={companyId} onPick={addPicture} onClose={() => setPicking(false)} /> : null}
+      <AudioSheet
+        open={soundOpen}
+        onClose={() => setSoundOpen(false)}
+        len={Math.max(1, Math.round(total / 1000))}
+        value={doc.audio ?? null}
+        defaultVol={talkingHead ? 25 : 100}
+        onChange={(v) => store.commit(onVideo((d) => ({ ...d, audio: v })))}
+        onRemove={() => store.commit(onVideo((d) => ({ ...d, audio: null })))}
+      />
       {scriptOpen && scripts && onScript ? <ScriptSheet doc={doc} scripts={scripts} onScript={onScript} onClose={() => setScriptOpen(false)} /> : null}
     </View>
   );

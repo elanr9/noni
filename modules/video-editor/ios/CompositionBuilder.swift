@@ -96,6 +96,8 @@ internal struct BuiltTimeline {
   let composition: AVMutableComposition
   let videoComposition: AVMutableVideoComposition
   let durationMs: Double
+  /// Music under the video with the voice level, when the timeline carries a sound.
+  let audioMix: AVAudioMix?
 }
 
 internal enum CompositionBuilder {
@@ -104,7 +106,7 @@ internal enum CompositionBuilder {
 
   static func build(timeline: TimelineRecord, cache: AssetCache) async throws -> BuiltTimeline {
     if timeline.isBlockTimeline {
-      return try await buildBlocks(timeline.blocks, cache: cache)
+      return try await buildBlocks(timeline.blocks, timelineAudio: timeline.audio, cache: cache)
     }
     guard !timeline.pieces.isEmpty else {
       throw VideoEditorException("Timeline has no pieces")
@@ -193,11 +195,60 @@ internal enum CompositionBuilder {
     videoComposition.frameDuration = frameDuration
     videoComposition.instructions = instructions
 
+    let audioMix = try await mixMusic(timeline.audio, into: composition, voiceTracks: [audioTrack].compactMap { $0 }, total: total)
+
     return BuiltTimeline(
       composition: composition,
       videoComposition: videoComposition,
-      durationMs: total.seconds * 1000
+      durationMs: total.seconds * 1000,
+      audioMix: audioMix
     )
+  }
+
+  // MARK: Music
+
+  /// Lays the sound on its own track from `startMs`, looping to the end of the
+  /// video, and returns the mix that sets the music and voice levels.
+  private static func mixMusic(
+    _ music: AudioRecord?,
+    into composition: AVMutableComposition,
+    voiceTracks: [AVMutableCompositionTrack],
+    total: CMTime
+  ) async throws -> AVAudioMix? {
+    guard let music, !music.uri.isEmpty, total > .zero else { return nil }
+    let url = try AssetCache.url(from: music.uri)
+    let asset = AVURLAsset(url: url)
+    guard let source = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
+    let sourceRange = try await source.load(.timeRange)
+    guard sourceRange.duration > .zero,
+          let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+    else { return nil }
+
+    var from = CMTime(seconds: max(0, music.startMs / 1000), preferredTimescale: timescale)
+    if from >= sourceRange.duration { from = .zero }
+    var cursor = CMTime.zero
+    var guardLoops = 0
+    while cursor < total, guardLoops < 200 {
+      let take = CMTimeMinimum(CMTimeSubtract(sourceRange.duration, from), CMTimeSubtract(total, cursor))
+      if take <= .zero { break }
+      try track.insertTimeRange(CMTimeRange(start: CMTimeAdd(sourceRange.start, from), duration: take), of: source, at: cursor)
+      cursor = CMTimeAdd(cursor, take)
+      from = .zero
+      guardLoops += 1
+    }
+
+    let mix = AVMutableAudioMix()
+    var params: [AVMutableAudioMixInputParameters] = []
+    let musicParams = AVMutableAudioMixInputParameters(track: track)
+    musicParams.setVolume(Float(max(0, min(1, music.volume))), at: .zero)
+    params.append(musicParams)
+    for voice in voiceTracks {
+      let voiceParams = AVMutableAudioMixInputParameters(track: voice)
+      voiceParams.setVolume(Float(max(0, min(1, music.voiceVolume))), at: .zero)
+      params.append(voiceParams)
+    }
+    mix.inputParameters = params
+    return mix
   }
 
   // MARK: Blocks
@@ -210,7 +261,7 @@ internal enum CompositionBuilder {
   /// the player for that window.
   static let blockRenderSize = CGSize(width: 1080, height: 1920)
 
-  private static func buildBlocks(_ blocks: [BlockRecord], cache: AssetCache) async throws -> BuiltTimeline {
+  private static func buildBlocks(_ blocks: [BlockRecord], timelineAudio: AudioRecord?, cache: AssetCache) async throws -> BuiltTimeline {
     guard !blocks.isEmpty else {
       throw VideoEditorException("Timeline has no blocks")
     }
@@ -342,10 +393,13 @@ internal enum CompositionBuilder {
     videoComposition.frameDuration = frameDuration
     videoComposition.instructions = instructions
 
+    let audioMix = try await mixMusic(timelineAudio, into: composition, voiceTracks: audioTracks.compactMap { $0 }, total: total)
+
     return BuiltTimeline(
       composition: composition,
       videoComposition: videoComposition,
-      durationMs: total.seconds * 1000
+      durationMs: total.seconds * 1000,
+      audioMix: audioMix
     )
   }
 

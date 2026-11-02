@@ -6,6 +6,7 @@
 // in the 1080x1920 render. Mirrored on the server in
 // supabase/functions/_shared/editDocument.ts; change both together.
 import type { OverlayBox } from './overlay-boxes';
+import type { PostAudio } from './brief-library';
 import type { Json } from './types';
 import type { EditCrop, EditSpeed } from './video-edit';
 import { EDIT_SPEEDS, MAX_CROP_SCALE } from './video-edit';
@@ -104,6 +105,9 @@ export type VideoDocument = {
   /** Raw takes and their words from Edit my video (lib/auto-edit.ts).
    * Opaque here; the render ignores it. */
   autoEdit?: Json;
+  /** The sound under the video: track, start offset and the two volumes. The
+   * export mixes it in; the publish attaches the Instagram audio id. */
+  audio?: PostAudio | null;
 };
 
 export type SlideAspect = '9:16' | '4:5' | '1:1';
@@ -769,6 +773,30 @@ function parseSlideAspect(raw: unknown): SlideAspect {
   return raw === '4:5' || raw === '1:1' ? raw : '9:16';
 }
 
+/** The sound on a post, when the value holds one. */
+export function parsePostAudio(value: unknown): PostAudio | null {
+  if (!isRec(value) || !isRec(value.track)) return null;
+  const t = value.track;
+  const id = str(t.id);
+  const title = str(t.title);
+  if (!id || !title) return null;
+  return {
+    track: {
+      id,
+      title,
+      artist: str(t.artist) ?? '',
+      dur: num(t.dur, 0),
+      cover: str(t.cover) ?? null,
+      igAudioId: str(t.igAudioId) ?? null,
+      url: str(t.url) ?? null,
+      previewUrl: str(t.previewUrl) ?? null,
+    },
+    start: Math.max(0, num(value.start, 0)),
+    vol: Math.max(0, Math.min(100, num(value.vol, 100))),
+    voice: Math.max(0, Math.min(100, num(value.voice, 100))),
+  };
+}
+
 /** Null when the value is not an edit document at all. */
 export function parseEditDocument(value: Json | null | undefined): EditDocument | null {
   if (!isRec(value)) return null;
@@ -807,6 +835,7 @@ export function parseEditDocument(value: Json | null | undefined): EditDocument 
       : { enabled: true, y: DEFAULT_SUBTITLE_Y },
     ...(isRec(value.reelPlan) ? { reelPlan: value.reelPlan as Json } : {}),
     ...(isRec(value.autoEdit) ? { autoEdit: value.autoEdit as Json } : {}),
+    ...(parsePostAudio(value.audio) ? { audio: parsePostAudio(value.audio) } : {}),
   };
   const total = documentDurationMs(doc);
   const overlays = Array.isArray(value.overlays)

@@ -23,6 +23,8 @@ import {
   type EditTarget,
 } from '../../../components/admin/review/ReviewEditMode';
 import { ReviewMetaOverlay } from '../../../components/admin/review/ReviewMetaOverlay';
+import { AudioChip } from '../../../components/admin/v2/audio/AudioChip';
+import { parsePostAudio } from '../../../lib/edit-document';
 import { ReviewTopBar } from '../../../components/admin/review/ReviewTopBar';
 import {
   RevisionMode,
@@ -543,6 +545,7 @@ export default function ReviewScreen() {
   const { assignment, row, submission } = current;
   const briefRow = assignment.briefs;
   const isReel = row.format === 'video';
+  const postAudio = parsePostAudio(submission?.audio);
   const slideAspect = asSlideAspect(submission?.slide_aspect);
   const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
   const editStalled = editPending && submission !== null && renderStalled(submission);
@@ -919,7 +922,9 @@ export default function ReviewScreen() {
           hashtags={briefRow.hashtags}
           slideCount={isReel ? 0 : surfaceSlides.length}
           slideIndex={slideIndex}
+          sound={postAudio ? `${postAudio.track.title} \u00b7 ${postAudio.track.artist}` : null}
         />
+        {postAudio ? <AudioChip audio={postAudio} style={{ position: 'absolute', left: 12, top: insets.top + 100 }} /> : null}
         <ReviewTopBar
           topInset={insets.top}
           counterLabel={counterLabel}

@@ -140,6 +140,7 @@ final class VideoEditorPreviewView: ExpoView {
     let previousMs = previous.isNumeric ? max(previous.seconds, 0) * 1000 : 0
 
     let item = AVPlayerItem(asset: built.composition)
+    item.audioMix = built.audioMix
     item.videoComposition = built.videoComposition
     durationMs = built.durationMs
 

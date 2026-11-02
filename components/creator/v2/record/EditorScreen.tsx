@@ -13,6 +13,9 @@ import { useStudioUploads } from '../../../../lib/studio-uploads';
 import { submitProject } from '../../../../lib/submissions';
 import { getAssignment } from '../../../../lib/tasks-api';
 import { color } from '../../../../theme/v2';
+import { Sheet } from '../../../v2';
+import { TikTokSoundCard } from '../../../admin/v2/audio/TikTokSoundCard';
+import type { PostAudio } from '../../../../lib/brief-library';
 import { ReelEditor } from '../../briefs/reel/ReelEditor';
 import { SentOverlay } from '../SentOverlay';
 import { clearRecordDraft, loadEditHandoff, type EditHandoff } from './model';
@@ -29,6 +32,8 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+  /** The sound on the sent post; the TikTok copy and search sheet shows before leaving. */
+  const [tiktok, setTiktok] = useState<PostAudio | null>(null);
   useProjectAutosave(scope);
   const uploads = useStudioUploads(scope);
 
@@ -78,6 +83,10 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
       await clearDraft(scope.companyId, assignmentId).catch(() => undefined);
       if (handoff?.draftKey) clearRecordDraft(handoff.draftKey);
       useStudioStore.setState({ ownerId: null, document: null, dirty: false, past: [], future: [] });
+      if (current.audio) {
+        setTiktok(current.audio);
+        return;
+      }
       setSent(true);
       setTimeout(() => router.dismissTo('/(creator)/(tabs)'), 1500);
     } catch (e) {
@@ -104,7 +113,21 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
         onAddClip={() => router.back()}
         scripts={hasScripts ? scripts : undefined}
         onScript={hasScripts ? (blockId, text) => setHandoff((h) => (h ? { ...h, scripts: { ...h.scripts, [blockId]: text } } : h)) : undefined}
+        soundMode={handoff.soundMode ?? null}
+        talkingHead={!!handoff.talkingHead}
       />
+      <Sheet open={tiktok !== null} onClose={() => undefined} title="Add the sound on TikTok">
+        {tiktok ? (
+          <TikTokSoundCard
+            audio={tiktok}
+            onDone={() => {
+              setTiktok(null);
+              setSent(true);
+              setTimeout(() => router.dismissTo('/(creator)/(tabs)'), 1500);
+            }}
+          />
+        ) : null}
+      </Sheet>
       {sent ? <SentOverlay /> : null}
     </View>
   );

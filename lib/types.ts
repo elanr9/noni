@@ -4591,6 +4591,7 @@ export type Database = {
       submissions: {
         Row: {
           assignment_id: string | null
+          audio: Json | null
           audio_gain: number
           created_at: string | null
           creator_id: string
@@ -4614,6 +4615,7 @@ export type Database = {
         }
         Insert: {
           assignment_id?: string | null
+          audio?: Json | null
           audio_gain?: number
           created_at?: string | null
           creator_id: string
@@ -4637,6 +4639,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string | null
+          audio?: Json | null
           audio_gain?: number
           created_at?: string | null
           creator_id?: string

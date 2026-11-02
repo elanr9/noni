@@ -39,11 +39,21 @@ struct BlockRecord {
   var cells: [CellRecord] = []
 }
 
+/// A sound mixed under the video: the file, where it starts in the track, and
+/// the music and voice volumes (0...1). Loops to fit the video.
+struct AudioRecord {
+  var uri: String = ""
+  var startMs: Double = 0
+  var volume: Double = 1
+  var voiceVolume: Double = 1
+}
+
 struct TimelineRecord: Record {
   @Field var pieces: [PieceRecord] = []
 
   var blocks: [BlockRecord] = []
   var isBlockTimeline = false
+  var audio: AudioRecord? = nil
 
   var isEmpty: Bool {
     isBlockTimeline ? blocks.isEmpty : pieces.isEmpty
@@ -51,12 +61,15 @@ struct TimelineRecord: Record {
 
   static func parse(_ raw: [String: Any]) throws -> TimelineRecord {
     if let blocks = raw["blocks"] as? [Any] {
-      return try parseBlocks(blocks)
+      var record = try parseBlocks(blocks)
+      record.audio = parseAudio(raw["audio"])
+      return record
     }
     guard let pieces = raw["pieces"] as? [Any] else {
       throw VideoEditorException("timeline.pieces is missing")
     }
     var record = TimelineRecord()
+    record.audio = parseAudio(raw["audio"])
     record.pieces = try pieces.map { entry in
       guard let dict = entry as? [String: Any], let uri = dict["uri"] as? String else {
         throw VideoEditorException("timeline piece is missing a uri")
@@ -98,6 +111,16 @@ struct TimelineRecord: Record {
       return block
     }
     return record
+  }
+
+  private static func parseAudio(_ value: Any?) -> AudioRecord? {
+    guard let dict = value as? [String: Any], let uri = dict["uri"] as? String, !uri.isEmpty else { return nil }
+    var audio = AudioRecord()
+    audio.uri = uri
+    audio.startMs = number(dict["startMs"]) ?? 0
+    audio.volume = number(dict["volume"]) ?? 1
+    audio.voiceVolume = number(dict["voiceVolume"]) ?? 1
+    return audio
   }
 
   private static func parseCrop(_ value: Any?) -> CropRecord? {
@@ -159,6 +182,7 @@ private actor ExportCoordinator {
       exportSession.outputFileType = .mp4
       exportSession.shouldOptimizeForNetworkUse = true
       exportSession.videoComposition = built.videoComposition
+      exportSession.audioMix = built.audioMix
       session = exportSession
 
       await exportSession.export()
