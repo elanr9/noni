@@ -14,6 +14,7 @@ export default function DevPreviewLayout() {
       <Stack.Screen name="new-brief" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', animationDuration: 240 }} />
       <Stack.Screen name="brief-post/[id]" />
       <Stack.Screen name="creator/[id]" />
+      <Stack.Screen name="chat" />
     </Stack>
   );
 }

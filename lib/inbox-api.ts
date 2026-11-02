@@ -201,7 +201,13 @@ export async function loadInbox(
   };
 }
 
-/** Tab badge: creator thread unread + team DM unread + channel unread. */
+/** Messages tab badge: unread direct messages only (creator threads and team DMs), no channels. */
+export async function unreadDmCount(companyId: string, meId: string): Promise<number> {
+  const [creators, manager] = await Promise.all([listCreatorInbox(companyId, meId), listManagerInbox(companyId, meId)]);
+  return creators.reduce((sum, c) => sum + c.unread, 0) + manager.dms.reduce((sum, d) => sum + d.unread, 0);
+}
+
+/** Every unread message: creator thread unread + team DM unread + channel unread. */
 export async function unreadInboxCount(): Promise<number> {
   const { data, error } = await supabase.rpc('unread_inbox_count');
   if (error) throw error;

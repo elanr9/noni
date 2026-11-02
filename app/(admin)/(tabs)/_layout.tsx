@@ -4,7 +4,7 @@ import { Tabs, useFocusEffect, useRouter } from 'expo-router';
 import { TabBar, type TabBarEntry } from '../../../components/v2';
 import { countAssignmentsInFlight } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
-import { unreadInboxCount } from '../../../lib/inbox-api';
+import { unreadDmCount } from '../../../lib/inbox-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, screenTransition } from '../../../theme/v2';
 
@@ -38,18 +38,19 @@ export default function AdminTabsLayout() {
 
   const showSetup = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers);
   const companyId = profile?.active_company_id;
+  const meId = profile?.id;
 
   useFocusEffect(
     useCallback(() => {
-      if (companyId === undefined) return;
+      if (companyId === undefined || meId === undefined) return;
       const read = () => {
-        void unreadInboxCount().then(setUnreadCount).catch(() => undefined);
+        void unreadDmCount(companyId, meId).then(setUnreadCount).catch(() => undefined);
         void countAssignmentsInFlight().then(setWaitingCount).catch(() => undefined);
       };
       read();
       const timer = setInterval(read, POLL_MS);
       return () => clearInterval(timer);
-    }, [companyId]),
+    }, [companyId, meId]),
   );
 
   const entries = showSetup ? ONBOARDING_ENTRIES : ADMIN_ENTRIES;
