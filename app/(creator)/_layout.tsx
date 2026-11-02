@@ -109,6 +109,7 @@ export default function CreatorLayout() {
           <Stack.Screen name="briefs" />
           <Stack.Screen name="outline/[id]" />
           <Stack.Screen name="capture" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
+          <Stack.Screen name="edit/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="slides/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
           <Stack.Screen name="balance" options={{ headerShown: false }} />

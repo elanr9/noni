@@ -20,7 +20,12 @@ type Props = {
 };
 
 /** One word advances every 250/speed ms (README §5). */
-const MS_PER_WORD = 250;
+export const MS_PER_WORD = 250;
+
+/** How many words have been spoken `elapsedMs` into a take at `speed` (the v2 Say this card lights them). */
+export function wordsSpokenBy(elapsedMs: number, speed = 1): number {
+  return Math.floor(elapsedMs / (MS_PER_WORD / speed));
+}
 
 export function Teleprompter({
   text,
