@@ -89,7 +89,7 @@ export default function KitchenSink() {
         </Section>
 
         <Section title="SectionLabel">
-          <SectionLabel right={<StatPill value="$238" unit="/day avg" />}>
+          <SectionLabel right={<StatPill value="38" unit="posts" />}>
             Posts made this week
           </SectionLabel>
         </Section>
@@ -140,7 +140,7 @@ export default function KitchenSink() {
 
         <Section title="StatPill">
           <View style={styles.row}>
-            <StatPill value="$238" unit="/day avg" />
+            <StatPill value="38" unit="posts" />
             <StatPill value="12.4K" unit="views/day" />
           </View>
         </Section>

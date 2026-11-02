@@ -54,7 +54,7 @@ export default function V2KitScreen() {
             <Text style={text.row}>Sofia Reyes</Text>
             <Text style={text.body}>Body copy at 15 over 20.</Text>
             <Text style={text.meta}>2h ago</Text>
-            <Text style={num.lg}>$1,240</Text>
+            <Text style={num.lg}>12.4k</Text>
             <Text style={num.sm}>12,480</Text>
           </Card>
         </Section>

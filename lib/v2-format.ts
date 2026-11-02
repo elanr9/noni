@@ -1,7 +1,6 @@
 /**
- * Numbers, money and dates for the v2 admin screens. One formatter each so
- * every figure in the app reads the same way (README rule: 3k, 3.4k, 10.5k,
- * 1.4M; money() for payouts).
+ * Numbers and dates for the v2 admin screens. One formatter each so every
+ * figure in the app reads the same way (README rule: 3k, 3.4k, 10.5k, 1.4M).
  */
 
 /** Under 1,000 as is; 1,000 to 999,999 with one decimal and no trailing .0; 1M and up as 1.4M. */
@@ -10,25 +9,6 @@ export function fmt(n: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
   if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   return String(v);
-}
-
-/** Whole dollars with thousands separators: 1240 to "$1,240". */
-export function money(dollars: number): string {
-  return `$${Math.round(dollars).toLocaleString('en-US')}`;
-}
-
-/** Cents to whole dollars. */
-export function moneyCents(cents: number): string {
-  return money(cents / 100);
-}
-
-/** Creator payout per live post, in dollars. */
-export const PAYOUT_PER_POST = 40;
-
-/** "$0.95": payout divided by views in thousands. */
-export function perThousand(views: number, paid = PAYOUT_PER_POST): string {
-  if (views <= 0) return '$0.00';
-  return `$${(paid / (views / 1000)).toFixed(2)}`;
 }
 
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;

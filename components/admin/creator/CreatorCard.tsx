@@ -17,7 +17,6 @@ export interface CreatorCardProps {
   /** Preferred linked handle; null renders a quiet placeholder. */
   handle: string | null;
   avatarUri: string | null;
-  earned: string | null;
   posts: string;
   views: string;
   onPress: () => void;
@@ -25,13 +24,12 @@ export interface CreatorCardProps {
 
 /**
  * Admin handoff §10 — one card per creator: 44px profile photo, name,
- * @handle, three stat blocks on off-white. Every card is the same height.
+ * @handle, two stat blocks on off-white. Every card is the same height.
  */
 export function CreatorCard({
   name,
   handle,
   avatarUri,
-  earned,
   posts,
   views,
   onPress,
@@ -56,9 +54,6 @@ export function CreatorCard({
         <Icon name="chevron-right" size={18} color={color.slate300} />
       </View>
       <View style={styles.stats}>
-        {earned !== null ? (
-          <StatBlock label="Earned" value={earned} tone="green" />
-        ) : null}
         <StatBlock label="Posts" value={posts} />
         <StatBlock label="Views" value={views} />
       </View>

@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-na
 import { color } from '../../../theme/tokens';
 
 export interface StatPillProps {
-  /** Bold ink figure, e.g. "$238". */
+  /** Bold ink figure, e.g. "38". */
   value: string;
   /** Quiet unit after it, e.g. "/day avg". */
   unit: string;

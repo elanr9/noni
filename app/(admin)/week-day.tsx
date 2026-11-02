@@ -175,11 +175,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     color: color.ink,
   },
-  sales: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: color.green,
-  },
   notFound: {
     paddingVertical: 32,
     textAlign: 'center',

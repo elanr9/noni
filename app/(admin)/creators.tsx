@@ -189,7 +189,6 @@ export default function CreatorsScreen() {
                 name={c.creatorName}
                 handle={extra?.handle ?? null}
                 avatarUri={extra?.avatarUri ?? null}
-                earned={null}
                 posts={`${c.postsCompleted}`}
                 views={formatMetric(c.views)}
                 onPress={() =>
