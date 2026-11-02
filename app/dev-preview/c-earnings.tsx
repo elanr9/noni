@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useRouter } from 'expo-router';
 
 import { EarningsScreen } from '../../components/creator/v2/EarningsScreen';
@@ -15,7 +16,8 @@ const SUMMARY: PayoutSummary = {
 
 export default function Preview() {
   const router = useRouter();
-  const posts = useV2Data((s) => s.posts.filter((p) => p.creatorId === 'fab'));
+  const all = useV2Data((s) => s.posts);
+  const posts = useMemo(() => all.filter((p) => p.creatorId === 'fab'), [all]);
   const loaded = useV2Data((s) => s.loaded);
   return <EarningsScreen posts={posts} loaded={loaded} summary={SUMMARY} onPost={() => undefined} onPayouts={() => router.back()} />;
 }
