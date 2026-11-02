@@ -76,7 +76,7 @@ export function routeNotificationTap(
       return;
     }
     if (campaignId) {
-      router.push(`/(admin)/week/${campaignId}`);
+      router.push('/(admin)/(tabs)/briefs');
       return;
     }
     router.push('/(admin)/(tabs)');

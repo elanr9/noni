@@ -2,12 +2,12 @@ import { getShareExtensionKey } from 'expo-share-intent';
 
 /**
  * A link shared to Noni from TikTok or Instagram arrives as a deep link
- * carrying the share extension key. Send it straight to the Library, which
- * reads the shared link and opens the Make it into sheet.
+ * carrying the share extension key. Open the new brief modal, which reads
+ * the shared link into its Add link field.
  */
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
   if (path.includes(`dataUrl=${getShareExtensionKey()}`)) {
-    return '/(admin)/(tabs)/library';
+    return '/(admin)/new-brief?slot=new';
   }
   return path;
 }

@@ -12,7 +12,7 @@ import {
   ideasHref,
   parseFormat,
   parseSlot,
-  weekHref,
+  BRIEFS_TAB_HREF,
   type SlotParams,
 } from '../../../components/admin/briefs/routes';
 import { BriefHeader, KindChip } from '../../../components/shared/briefs';
@@ -64,7 +64,7 @@ export default function KindScreen() {
         cta: { text: '', featureId: null },
         creatorNote: null,
       });
-      router.dismissTo(weekHref(campaignId, slotLabel(slot), format));
+      router.dismissTo(BRIEFS_TAB_HREF);
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again.');
     } finally {

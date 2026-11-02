@@ -185,7 +185,7 @@ export default function ManagerSetupScreen() {
             title="Create your first brief"
             sub="Noni drafts it with you in Briefs. Approve it and it lands in a creator's queue."
             done={state.brief}
-            onPress={() => router.push('/(admin)/(tabs)/create')}
+            onPress={() => router.push('/(admin)/(tabs)/briefs')}
           />
           {needsCreators ? (
             <StepRow

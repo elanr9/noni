@@ -25,8 +25,7 @@ import {
 } from '../../lib/library-api';
 import { listMediaLibrary, type MediaLibraryItem } from '../../lib/media-library-api';
 import { borderWidth, color, radiusAdmin, shadow, type } from '../../theme/tokens';
-import { LibraryListSkeleton } from './library/LibraryListSkeleton';
-import { PostThumb, Segmented, Sheet } from './shared';
+import { PostThumb, Segmented, Sheet, SkeletonCard } from './shared';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { PressableScale } from '../ui/PressableScale';
@@ -303,7 +302,7 @@ export function LibraryPickerSheet({
 
   const emptyCopy =
     segment === SEGMENT_MEDIA
-      ? 'No media yet. Add screenshots and recordings in the Library tab.'
+      ? 'No media yet.'
       : 'Nothing here for this post type yet.';
 
   return (
@@ -353,7 +352,11 @@ export function LibraryPickerSheet({
           <NewIdeaRow text={typedIdea} onPress={() => onPick({ kind: 'fill', text: typedIdea })} />
         )}
         {loading && visibleRows.length === 0 ? (
-          <LibraryListSkeleton height={MEDIA_CARD_HEIGHT} count={3} />
+          <View style={{ gap: 10 }}>
+            {[0, 1, 2].map((i) => (
+              <SkeletonCard key={i} height={MEDIA_CARD_HEIGHT} radius={radiusAdmin.lg} />
+            ))}
+          </View>
         ) : visibleRows.length === 0 ? (
           !showNewIdea && <Text style={styles.empty}>{emptyCopy}</Text>
         ) : (

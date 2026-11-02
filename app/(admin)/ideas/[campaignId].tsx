@@ -25,7 +25,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { IdeaCard } from '../../../components/admin/ideas/IdeaCard';
 import { MakeKindSheet } from '../../../components/admin/ideas/MakeKindSheet';
-import { editorHref, parseFormat, weekHref } from '../../../components/admin/briefs/routes';
+import { BRIEFS_TAB_HREF, editorHref, parseFormat } from '../../../components/admin/briefs/routes';
 import { BriefHeader, InkToast } from '../../../components/shared/briefs';
 import { Icon } from '../../../components/ui/Icon';
 import { PressableScale } from '../../../components/ui/PressableScale';
@@ -305,7 +305,7 @@ export default function IdeasScreen() {
         <BriefHeader
           title="Ideas"
           sub={sub || undefined}
-          onBack={() => (campaignId ? router.dismissTo(weekHref(campaignId)) : router.back())}
+          onBack={() => (campaignId ? router.dismissTo(BRIEFS_TAB_HREF) : router.back())}
           right={
             messages.length ? (
               <Pressable

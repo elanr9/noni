@@ -10,7 +10,7 @@ import type { AppMode } from './active-mode';
  * role   creator | manager
  * screen creator: home | posts | chat | profile | assignment/<id> | post/<id>
  *                 | posts/<id> | channel/<id>
- *        manager: home | settings | analytics | review/<id> | week/<id>
+ *        manager: home | settings | analytics | briefs | review/<id>
  *                 | chat/<id> | messages/<id> | account-approval/<id>
  *                 | creator/<id> | music/<id>
  */
@@ -60,11 +60,12 @@ export function routeForDeepLink(link: DeepLink): string {
     return `${CREATOR_ROOT}/(tabs)`;
   }
   if (screen === 'home') return `${MANAGER_ROOT}/(tabs)`;
-  if (screen === 'settings' || screen === 'analytics') return `${MANAGER_ROOT}/(tabs)/${screen}`;
+  if (screen === 'settings' || screen === 'analytics' || screen === 'briefs') return `${MANAGER_ROOT}/(tabs)/${screen}`;
+  // Week links predate the Briefs library; they land on the tab.
+  if (screen === 'week') return `${MANAGER_ROOT}/(tabs)/briefs`;
   if (
     id &&
     (screen === 'review' ||
-      screen === 'week' ||
       screen === 'chat' ||
       screen === 'messages' ||
       screen === 'account-approval' ||

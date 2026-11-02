@@ -10,8 +10,8 @@ import { color, screenTransition } from '../../../theme/v2';
 
 // v2 shell: Review, Briefs, the raised Create button, Messages, Analytics.
 // Fresh campaign managers get Onboarding in place of Messages until the
-// checklist is done. Legacy routes (calendar, library, trends, settings)
-// stay in the folder, hidden from the bar, so deep links keep working.
+// checklist is done. Settings stays in the folder, hidden from the bar, so
+// its deep link keeps working.
 const POLL_MS = 45_000;
 
 const ADMIN_ENTRIES: TabBarEntry[] = [
@@ -71,10 +71,6 @@ export default function AdminTabsLayout() {
       <Tabs.Screen name="briefs" options={{ title: 'Briefs' }} />
       <Tabs.Screen name="messages" options={{ title: 'Messages', href: showSetup ? null : undefined }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Weeks', href: null }} />
-      <Tabs.Screen name="create" options={{ title: 'Create', href: null }} />
-      <Tabs.Screen name="library" options={{ title: 'Library', href: null }} />
-      <Tabs.Screen name="trends" options={{ title: 'Trends', href: null }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', href: null }} />
     </Tabs>
   );

@@ -62,10 +62,5 @@ export function ideasHref(p: IdeasParams): Href {
   return { pathname: '/(admin)/ideas/[campaignId]', params } as Href;
 }
 
-/** Back to the week; `added` is the two digit slot label the toast names. */
-export function weekHref(campaignId: string, added?: string, format?: BriefMediaFormat): Href {
-  const params: Record<string, string> = { id: campaignId };
-  if (added) params.added = added;
-  if (format) params.format = format;
-  return { pathname: '/(admin)/week/[id]', params } as Href;
-}
+/** The Briefs tab: where every post flow lands when it is done. */
+export const BRIEFS_TAB_HREF = '/(admin)/(tabs)/briefs' as Href;

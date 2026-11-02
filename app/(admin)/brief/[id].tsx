@@ -14,7 +14,7 @@ import {
   parseFormat,
   parseKind,
   parseSlot,
-  weekHref,
+  BRIEFS_TAB_HREF,
   type EditorParams,
 } from '../../../components/admin/briefs/routes';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -25,7 +25,7 @@ import {
   type WeekBrief,
   type WeekBriefInput,
 } from '../../../lib/briefs-api';
-import { defaultMustHaves, postTypeByKey, slotLabel } from '../../../lib/brief-copy';
+import { defaultMustHaves, postTypeByKey } from '../../../lib/brief-copy';
 import { useCompany } from '../../../lib/company-context';
 import { parseIdeaParams } from '../../../lib/idea-chat';
 import { listLibraryFeatures, type LibraryFeature } from '../../../lib/library-api';
@@ -41,10 +41,10 @@ export default function BriefEditorScreen() {
   const inWeek = campaignId.length > 0;
   const leave = useCallback(
     (fmt: ReturnType<typeof parseFormat>) => {
-      if (inWeek) router.dismissTo(weekHref(campaignId, slotLabel(slot), fmt));
+      if (inWeek) router.dismissTo(BRIEFS_TAB_HREF);
       else router.back();
     },
-    [inWeek, campaignId, slot],
+    [inWeek],
   );
   const [brief, setBrief] = useState<WeekBrief | null | undefined>(undefined);
   const [features, setFeatures] = useState<LibraryFeature[]>([]);
