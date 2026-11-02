@@ -30,7 +30,7 @@ const SETUP_EXEMPT = [
   '/profile',
   '/posts',
   '/earnings',
-  '/balance',
+  '/payouts',
   '/kitchen-sink',
 ];
 
@@ -112,7 +112,7 @@ export default function CreatorLayout() {
           <Stack.Screen name="edit/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="slides/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
-          <Stack.Screen name="balance" options={{ headerShown: false }} />
+          <Stack.Screen name="payouts" options={{ headerShown: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
           <Stack.Screen name="channel/[chatId]" options={{ headerShown: false }} />
           <Stack.Screen

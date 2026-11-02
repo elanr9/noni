@@ -11,6 +11,13 @@ export function fmt(n: number): string {
   return String(v);
 }
 
+/** Payout money from cents: "$40", "$1,240", "$12.50". The only money formatter in the v2 apps. */
+export function money(cents: number): string {
+  const dollars = Math.round(cents) / 100;
+  const whole = Number.isInteger(dollars);
+  return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
 export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 export const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;

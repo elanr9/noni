@@ -1,25 +1,60 @@
-import { useRouter } from 'expo-router';
-import { Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 
-import { color, text } from '../../../theme/v2';
-import { Card, Icon, Row, Screen } from '../../../components/v2';
+import { EarningsScreen } from '../../../components/creator/v2/EarningsScreen';
+import { useAuth } from '../../../lib/auth';
+import { loadPayoutSummary, type PayoutSummary } from '../../../lib/payouts-api';
+import { useV2Data } from '../../../lib/v2-posts';
 
-/** Earnings tab: the creator's own payout view. Payouts and history sit behind the Payouts row. */
+/** Earnings tab: the creator's own analytics and payout figures. */
 export default function CreatorEarnings() {
   const router = useRouter();
+  const { profile } = useAuth();
+  const companyId = profile?.active_company_id;
+  const meId = profile?.id;
+  const posts = useV2Data((s) => s.posts);
+  const loaded = useV2Data((s) => s.loaded);
+  const load = useV2Data((s) => s.load);
+  const [summary, setSummary] = useState<PayoutSummary | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (companyId) void load(companyId);
+  }, [companyId, load]);
+
+  const refresh = useCallback(async () => {
+    if (!companyId || !meId) return;
+    try {
+      setSummary(await loadPayoutSummary(companyId, meId));
+    } catch {
+      // Keep what is on screen.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [companyId, meId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
+
+  const mine = useMemo(() => posts.filter((p) => p.creatorId === meId), [posts, meId]);
   return (
-    <Screen title="Earnings" scroll tabRoot>
-      <Card pad={0} style={{ paddingVertical: 4, paddingHorizontal: 16 }}>
-        <Row last chevron onPress={() => router.push('/(creator)/balance')}>
-          <View style={{ width: 40, height: 40, borderRadius: 999, backgroundColor: color.greenTint, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="payments" size={22} color={color.green} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={text.row}>Payouts</Text>
-            <Text style={text.meta}>Balance and history</Text>
-          </View>
-        </Row>
-      </Card>
-    </Screen>
+    <EarningsScreen
+      posts={mine}
+      loaded={loaded}
+      summary={summary}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        if (companyId) void load(companyId, true);
+        void refresh();
+      }}
+      onPost={(p) => {
+        if (p.assignmentId) router.push(`/(creator)/posts/${p.assignmentId}`);
+      }}
+      onPayouts={() => router.push('/(creator)/payouts')}
+    />
   );
 }
