@@ -12,7 +12,7 @@ import { useAuth } from '../../lib/auth';
 import { CreatorQueueProvider } from '../../lib/creator-queue';
 import { trackPresence } from '../../lib/presence';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
-import { color, motion, screenTransition } from '../../theme/tokens';
+import { color, motion, screenTransition } from '../../theme/v2';
 
 /**
  * Routes a creator may use before setup is complete. Everything else
@@ -29,7 +29,7 @@ const SETUP_EXEMPT = [
   '/channel',
   '/profile',
   '/posts',
-  '/analytics',
+  '/earnings',
   '/balance',
   '/kitchen-sink',
 ];
@@ -99,12 +99,17 @@ export default function CreatorLayout() {
           screenOptions={{
             headerShown: false,
             headerBackButtonDisplayMode: 'minimal',
-            contentStyle: { backgroundColor: color.offWhite },
+            contentStyle: { backgroundColor: color.bg },
             animation: screenTransition.push,
-            animationDuration: motion.base,
+            animationDuration: motion.push,
           }}
         >
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="create" options={{ presentation: 'transparentModal', animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
+          <Stack.Screen name="briefs" />
+          <Stack.Screen name="outline/[id]" />
+          <Stack.Screen name="capture" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
+          <Stack.Screen name="slides/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
           <Stack.Screen name="balance" options={{ headerShown: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
@@ -115,7 +120,7 @@ export default function CreatorLayout() {
               headerShown: true,
               title: 'Account setup',
               headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.offWhite },
+              headerStyle: { backgroundColor: color.bg },
               headerTintColor: color.ink,
             }}
           />
@@ -127,7 +132,7 @@ export default function CreatorLayout() {
               headerShown: true,
               title: 'Connect accounts',
               headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.offWhite },
+              headerStyle: { backgroundColor: color.bg },
               headerTintColor: color.ink,
             }}
           />
@@ -137,7 +142,7 @@ export default function CreatorLayout() {
               headerShown: true,
               title: 'Warm up',
               headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.offWhite },
+              headerStyle: { backgroundColor: color.bg },
               headerTintColor: color.ink,
             }}
           />
@@ -146,7 +151,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen name="record/changes/[id]" />
@@ -155,7 +160,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -163,7 +168,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen name="post/[id]" />
@@ -173,7 +178,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -181,7 +186,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -189,7 +194,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -197,7 +202,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -205,7 +210,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.modal,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
           <Stack.Screen
@@ -213,7 +218,7 @@ export default function CreatorLayout() {
             options={{
               presentation: 'fullScreenModal',
               animation: screenTransition.fade,
-              animationDuration: motion.base,
+              animationDuration: motion.push,
             }}
           />
         </Stack>

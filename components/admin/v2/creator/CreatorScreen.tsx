@@ -24,7 +24,12 @@ const MAX_WEEK = 1;
 
 export interface CreatorScreenProps {
   id: string;
-  onMessage: () => void;
+  /** Admin: the Message word in the header. */
+  onMessage?: () => void;
+  /** Creator app: the settings disc in the header. */
+  onSettings?: () => void;
+  /** Tab root: no back chevron, bottom clear of the tab bar. */
+  tabRoot?: boolean;
   onPost: (p: V2Post) => void;
 }
 
@@ -50,7 +55,7 @@ function monthRows(m: Date): (Date | null)[][] {
   return rows;
 }
 
-export function CreatorScreen({ id, onMessage, onPost }: CreatorScreenProps) {
+export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPost }: CreatorScreenProps) {
   const insets = useSafeAreaInsets();
   const posts = useV2Data((s) => s.posts);
   const creators = useV2Data((s) => s.creators);
@@ -107,9 +112,19 @@ export function CreatorScreen({ id, onMessage, onPost }: CreatorScreenProps) {
     setGrid(false);
   };
 
+  const right = onSettings ? (
+    <Press accessibilityRole="button" accessibilityLabel="Settings" onPress={onSettings} style={{ width: 36, height: 36, borderRadius: 999, backgroundColor: color.grey2, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+      <Icon name="settings" size={20} color={color.ink} />
+    </Press>
+  ) : onMessage ? (
+    <TextButton label="Message" onPress={onMessage} />
+  ) : undefined;
+  const header = tabRoot ? <View style={{ height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 12 }}>{right}</View> : null;
+
   if (!loaded) {
     return (
-      <Screen back right={<TextButton label="Message" onPress={onMessage} />}>
+      <Screen back={!tabRoot} tabRoot={tabRoot} right={right}>
+        {header}
         <View style={{ paddingHorizontal: 20, paddingTop: 2, gap: 18 }}>
           <Skeleton h={60} />
           <Skeleton h={46} />
@@ -120,7 +135,8 @@ export function CreatorScreen({ id, onMessage, onPost }: CreatorScreenProps) {
   }
 
   return (
-    <Screen back right={<TextButton label="Message" onPress={onMessage} />}>
+    <Screen back={!tabRoot} tabRoot={tabRoot} right={right}>
+      {header}
       <View style={{ paddingHorizontal: 20, paddingTop: 2 }}>
         <View style={styles.who}>
           <Avatar name={c?.name} photo={c?.photo} tone={c?.tone ?? 'grey'} size={60} ring={false} />
@@ -170,7 +186,7 @@ export function CreatorScreen({ id, onMessage, onPost }: CreatorScreenProps) {
         ) : null}
       </View>
       <TabPane k={listKey} duration={220}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 10, paddingHorizontal: 20, paddingBottom: insets.bottom + 40, gap: 10 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 10, paddingHorizontal: 20, paddingBottom: tabRoot ? 12 : insets.bottom + 40, gap: 10 }}>
           {shown.length === 0 ? <Text style={styles.empty}>{empty}</Text> : shown.map((p) => <PostCard key={p.id} p={p} onPress={() => onPost(p)} />)}
         </ScrollView>
       </TabPane>

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
+import { router } from 'expo-router';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { JUST_MADE_MS, freshJustMade, useLibStore } from '../../../../lib/brief-library-api';
 import { BRIEF_TYPES, TYPE_META, briefHay, type Brief, type BriefKind, type BriefType } from '../../../../lib/brief-library';
-import { color, motion, radius, shadow, space } from '../../../../theme/v2';
+import { color, motion, radius, shadow, space, text } from '../../../../theme/v2';
 import { Button, Chip, Empty, FilterButton, Icon, Label, Press, RootTitle, Seg, Sheet, useTabBarInset } from '../../../v2';
 import { BriefCard, markWords } from './BriefCard';
 import { TypeTile } from './TypeTile';
@@ -27,10 +28,14 @@ export interface BriefListProps {
   onOpen: (b: Brief) => void;
   /** Posts made per brief id, for the Most used sort. */
   uses?: (b: Brief) => number;
+  /** Pushed screen: 52px header with a back chevron instead of the root title, no tab bar inset. */
+  back?: boolean;
+  /** Empty copy when nothing matches and there is no query. */
+  empty?: string;
 }
 
 /** Pinned title, search, Guided / Outlines Seg and filter; only the cards scroll. */
-export function BriefList({ title, right, onOpen, uses }: BriefListProps) {
+export function BriefList({ title, right, onOpen, uses, back = false, empty }: BriefListProps) {
   const briefs = useLibStore((s) => s.briefs);
   const justMadeRaw = useLibStore((s) => s.justMade);
   const clearJustMade = useLibStore((s) => s.clearJustMade);
@@ -113,9 +118,19 @@ export function BriefList({ title, right, onOpen, uses }: BriefListProps) {
   ];
 
   return (
-    <View style={{ flex: 1, paddingBottom: barInset }}>
+    <View style={{ flex: 1, paddingBottom: back ? 0 : barInset }}>
       <View style={{ paddingHorizontal: space.screen, paddingBottom: 10, zIndex: 5 }}>
-        <RootTitle title={title} right={right} />
+        {back ? (
+          <View style={{ height: 52, flexDirection: 'row', alignItems: 'center', marginLeft: -16, marginRight: -12 }}>
+            <Press accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="chevron_left" size={32} color={color.ink} />
+            </Press>
+            <Text style={[text.row, { flex: 1 }]}>{title}</Text>
+            {right}
+          </View>
+        ) : (
+          <RootTitle title={title} right={right} />
+        )}
         <View style={{ marginBottom: 12, zIndex: 5 }}>
           <View style={{ height: 48, borderRadius: 16, backgroundColor: color.card, flexDirection: 'row', alignItems: 'center', paddingLeft: 14, paddingRight: 8, borderWidth: 2, borderColor: showPop ? color.blue : 'transparent', ...shadow.card }}>
             <Icon name="search" size={22} color={color.grey3} />
@@ -175,7 +190,7 @@ export function BriefList({ title, right, onOpen, uses }: BriefListProps) {
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: space.screen, paddingBottom: 12 }}>
         {list.length === 0 ? (
-          <Empty>{q ? 'No matches.' : `No ${effKind === 'Guided' ? 'guided posts' : 'outlines'} yet.`}</Empty>
+          <Empty>{q ? 'No matches.' : (empty ?? `No ${effKind === 'Guided' ? 'guided posts' : 'outlines'} yet.`)}</Empty>
         ) : (
           list.map((b, i) => {
             const fresh = !!jm && jm.ids.includes(b.id);

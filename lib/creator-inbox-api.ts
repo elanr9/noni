@@ -199,7 +199,13 @@ export async function loadCreatorInbox(companyId: string, meId: string): Promise
   return { team, dms, channels };
 }
 
-/** Badge for the creator Messages tab: team thread plus every chat's unread. */
+/** Messages tab badge: unread direct messages (the team thread and manager DMs), no channels. */
+export async function unreadCreatorDmCount(companyId: string, meId: string): Promise<number> {
+  const inbox = await loadCreatorInbox(companyId, meId);
+  return inbox.team.unread + inbox.dms.reduce((total, r) => total + r.unread, 0);
+}
+
+/** Every unread message: team thread plus every chat's unread. */
 export async function unreadCreatorInboxCount(companyId: string, meId: string): Promise<number> {
   const inbox = await loadCreatorInbox(companyId, meId);
   const sum = (rows: { unread: number }[]) => rows.reduce((total, r) => total + r.unread, 0);

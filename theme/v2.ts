@@ -97,6 +97,7 @@ export const motion = {
 export const screenTransition = {
   push: 'slide_from_right',
   modal: 'slide_from_bottom',
+  fade: 'fade',
   tab: 'none',
 } as const;
 

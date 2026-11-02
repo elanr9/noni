@@ -118,7 +118,7 @@ export function routeNotificationTap(
       return;
     }
     if (tiktok || ig) {
-      router.push('/(creator)/(tabs)/posts');
+      router.push('/(creator)/(tabs)/profile');
       return;
     }
   }

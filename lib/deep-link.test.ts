@@ -47,7 +47,7 @@ describe('routeForDeepLink', () => {
       '/(creator)/(tabs)',
     );
     expect(routeForDeepLink({ role: 'creator', companyId: A, screen: 'posts', id: null })).toBe(
-      '/(creator)/(tabs)/posts',
+      '/(creator)/(tabs)/profile',
     );
     expect(
       routeForDeepLink({ role: 'creator', companyId: A, screen: 'posts', id: ASSIGNMENT }),

@@ -8,7 +8,7 @@ import type { AppMode } from './active-mode';
  *   noni://<role>/<company_id>/<screen>[/<id>]
  *
  * role   creator | manager
- * screen creator: home | posts | chat | profile | assignment/<id> | post/<id>
+ * screen creator: home | posts | chat | profile | earnings | assignment/<id> | post/<id>
  *                 | posts/<id> | channel/<id>
  *        manager: home | settings | analytics | briefs | review/<id>
  *                 | chat/<id> | messages/<id> | account-approval/<id>
@@ -51,8 +51,9 @@ export function routeForDeepLink(link: DeepLink): string {
   const { screen, id } = link;
   if (link.role === 'creator') {
     if (screen === 'home') return `${CREATOR_ROOT}/(tabs)`;
-    if (screen === 'posts' && !id) return `${CREATOR_ROOT}/(tabs)/posts`;
-    if (screen === 'profile') return `${CREATOR_ROOT}/(tabs)/profile`;
+    // The posts list lives on Profile; Earnings is its own tab.
+    if ((screen === 'posts' && !id) || screen === 'profile') return `${CREATOR_ROOT}/(tabs)/profile`;
+    if (screen === 'earnings') return `${CREATOR_ROOT}/(tabs)/earnings`;
     if (screen === 'chat') return `${CREATOR_ROOT}/chat`;
     if (id && (screen === 'assignment' || screen === 'post' || screen === 'posts' || screen === 'channel')) {
       return `${CREATOR_ROOT}/${screen}/${id}`;

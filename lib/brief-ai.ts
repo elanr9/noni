@@ -138,6 +138,11 @@ const GEN = {
   p3: HOW.p3,
 };
 
+/** A creator's copy of a stored long text: `{a|b}` spins resolve again so no two accounts post the same string. */
+export function varyLongText(src: string): string {
+  return src.includes('{') ? src.split('\n\n').map((p) => cap(spin(p))).join('\n\n') : src;
+}
+
 /** Two or three short paragraphs for a 7 second text post. Never the same string twice. */
 export function longTextPlan(title: string): string {
   const t = (title || '').trim();
