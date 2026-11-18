@@ -7,10 +7,10 @@ import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture
 
 import { blockRanges, trimCell, type VideoDocument } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
-import { color } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
 import { useEvent } from '../../editor/useEvent';
 import { BLOCK_RADIUS, HANDLE_W } from './layout';
+import { color } from '../../../../theme/v2';
+import { Icon } from '../../../v2';
 
 export type TrimEdge = 'in' | 'out';
 
@@ -79,7 +79,7 @@ export function TrimHandles(props: {
           hitSlop={{ top: 6, bottom: 6, left: 10, right: 4 }}
           style={[styles.handle, styles.left, { top: laneTop, height: laneHeight }]}
         >
-          <Icon name="chevron-left" size={14} color={color.ink} />
+          <Icon name="chevron_left" size={14} color={color.ink} />
         </View>
       </GestureDetector>
       <GestureDetector gesture={panOut}>
@@ -89,7 +89,7 @@ export function TrimHandles(props: {
           hitSlop={{ top: 6, bottom: 6, left: 4, right: 10 }}
           style={[styles.handle, styles.right, { top: laneTop, height: laneHeight }]}
         >
-          <Icon name="chevron-right" size={14} color={color.ink} />
+          <Icon name="chevron_right" size={14} color={color.ink} />
         </View>
       </GestureDetector>
     </>

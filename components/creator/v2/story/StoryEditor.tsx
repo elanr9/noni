@@ -13,20 +13,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { stText, uid, type ClipDoc, type GsMedia, type StOverlay, type StText, type StTextStyle } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { ST_FONTS, stRender } from '../../../../lib/st-text';
-import { color, motion } from '../../../../theme/v2';
+import { color, editor, motion } from '../../../../theme/v2';
 import { GradientFill, MediaFill } from '../../../admin/v2/newbrief/ClipFrame';
 import { MediaPickerSheet } from '../../../admin/v2/newbrief/MediaPickerSheet';
 import { Icon, Press, tap, type IconName } from '../../../v2';
 import { StTextView } from '../../../v2/StTextView';
 import { TikTokChrome } from './TikTokChrome';
 
-const ST_SWATCH = ['#FFFFFF', '#0B0B0C', '#1BA6EE', '#2BBF7A', '#FFD60A', '#FF8A00', '#FE2C55', '#FF2D78', '#7E3BFF'];
+const ST_SWATCH: readonly string[] = editor.swatch;
 const ST_STYLES: StTextStyle[] = ['none', 'inv-bg', 'bg', 'outline'];
 const STYLE_ICON: Record<string, IconName> = { none: 'title', 'inv-bg': 'format_color_fill', bg: 'invert_colors', outline: 'border_color', 'inv-outline': 'border_color' };
 const FONT_NAMES = ['Classic', 'Serif', 'Bold', 'Typewriter', 'Round'];
 /** Where text may sit, percent of the frame: clear of the side rail and the caption. */
 const SAFE = { l: 15, r: 78, t: 4, b: 92 };
-const ST_BG: [string, string] = ['#2B2B31', '#1A1A1F'];
+const ST_BG: [string, string] = [editor.panelTop, editor.panel];
 
 type Tab = 'font' | 'color' | 'style' | 'align';
 type Range = { start: number; end: number };
@@ -165,50 +165,50 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
   const scrimStyle = useAnimatedStyle(() => ({ opacity: 1 - scrY.get() }));
 
   const optBtn = (on: boolean, fn: () => void, child: ReactNode, w = 44) => (
-    <Press onPress={fn} style={{ minWidth: w, height: 38, paddingHorizontal: 10, borderRadius: 10, backgroundColor: on ? '#fff' : 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' }}>
+    <Press onPress={fn} style={{ minWidth: w, height: 38, paddingHorizontal: 10, borderRadius: 10, backgroundColor: on ? editor.white : editor.w14, alignItems: 'center', justifyContent: 'center' }}>
       {child}
     </Press>
   );
   const tabBtn = (name: IconName, k: Tab) => (
-    <Press key={k} onPress={() => setTab(k)} style={{ width: 48, height: 44, borderRadius: 12, backgroundColor: tab === k ? 'rgba(255,255,255,0.22)' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-      <Icon name={name} size={24} color="#fff" />
+    <Press key={k} onPress={() => setTab(k)} style={{ width: 48, height: 44, borderRadius: 12, backgroundColor: tab === k ? editor.w22 : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name={name} size={24} color={editor.white} />
     </Press>
   );
   const rail = (name: IconName, fn: () => void, label: string) => (
     <Press key={label} accessibilityLabel={label} onPress={fn} style={{ alignItems: 'center', gap: 4, width: 52 }}>
-      <View style={{ width: 44, height: 44, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={name} size={22} color="#fff" />
+      <View style={{ width: 44, height: 44, borderRadius: 999, backgroundColor: editor.k45, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={name} size={22} color={editor.white} />
       </View>
-      <Text style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: '#fff', textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{label}</Text>
+      <Text style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: editor.white, textShadowColor: editor.k60, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{label}</Text>
     </Press>
   );
 
   return (
     <Modal visible animationType="slide" statusBarTranslucent onRequestClose={onBack}>
-      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: editor.black }}>
         <View style={{ flex: 1, paddingTop: insets.top, paddingBottom: keyboard > 0 ? keyboard : 0 }}>
           {/* Header */}
           <View style={{ height: 44, marginTop: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8, zIndex: 2 }}>
             {editing ? <View style={{ width: 44 }} /> : (
               <Press accessibilityLabel="Back" onPress={onBack} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="chevron_left" size={30} color="#fff" />
+                <Icon name="chevron_left" size={30} color={editor.white} />
               </Press>
             )}
-            <Text numberOfLines={1} style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#fff' }}>{editing ? '' : title}</Text>
+            <Text numberOfLines={1} style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: editor.white }}>{editing ? '' : title}</Text>
             <Press onPress={editing ? finishEdit : onDone} style={{ height: 44, paddingHorizontal: 12, justifyContent: 'center' }}>
-              <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: '#fff' }}>Done</Text>
+              <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: editor.white }}>Done</Text>
             </Press>
           </View>
 
           {/* Canvas */}
           <View style={{ flex: 1, marginBottom: 0 }} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
-            <Pressable onPress={tapCanvas} style={{ flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#1A1A1F' }}>
-              {photo ? <Image source={{ uri: photo }} resizeMode="cover" style={StyleSheet.absoluteFill} /> : green ? <GradientFill colors={['#1BA6EE', '#0A4DA3']} deg={160} /> : <GradientFill colors={ST_BG} deg={180} />}
-              {!photo ? <View style={{ position: 'absolute', left: '50%', bottom: 0, width: 220 * scale, height: 300 * scale, marginLeft: -110 * scale, borderTopLeftRadius: 999, borderTopRightRadius: 999, backgroundColor: green ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)' }} /> : null}
+            <Pressable onPress={tapCanvas} style={{ flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: editor.panel }}>
+              {photo ? <Image source={{ uri: photo }} resizeMode="cover" style={StyleSheet.absoluteFill} /> : green ? <GradientFill colors={[color.blue, editor.greenScreenDeep]} deg={160} /> : <GradientFill colors={ST_BG} deg={180} />}
+              {!photo ? <View style={{ position: 'absolute', left: '50%', bottom: 0, width: 220 * scale, height: 300 * scale, marginLeft: -110 * scale, borderTopLeftRadius: 999, borderTopRightRadius: 999, backgroundColor: green ? editor.w12 : editor.w05 }} /> : null}
               <TikTokChrome handle={handle} width={size.w} />
-              <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: editing ? 1 : 0 }]} />
-              <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(255,255,255,0.7)', opacity: guides.v ? 1 : 0 }} />
-              <View pointerEvents="none" style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.7)', opacity: guides.h ? 1 : 0 }} />
+              <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: editor.k45, opacity: editing ? 1 : 0 }]} />
+              <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, backgroundColor: editor.w70, opacity: guides.v ? 1 : 0 }} />
+              <View pointerEvents="none" style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, backgroundColor: editor.w70, opacity: guides.h ? 1 : 0 }} />
 
               {doc.overlays.map((o) => (
                 <CanvasItem
@@ -228,7 +228,7 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
                   onGuides={setGuides}
                   onDrop={() => remove(o.id)}
                 >
-                  <View style={{ width: (o.w / 100) * size.w, aspectRatio: 4 / 5, overflow: 'hidden', boxShadow: '0 6px 18px rgba(0,0,0,0.35)', borderWidth: 1.5, borderColor: sel === o.id ? '#fff' : 'transparent' }}>
+                  <View style={{ width: (o.w / 100) * size.w, aspectRatio: 4 / 5, overflow: 'hidden', boxShadow: `0 6px 18px ${editor.k35}`, borderWidth: 1.5, borderColor: sel === o.id ? editor.white : 'transparent' }}>
                     <MediaFill src={o.src} />
                   </View>
                   {sel === o.id && !drag ? <CornerButton side="right" icon="close" label="Delete" onPress={() => remove(o.id)} /> : null}
@@ -262,7 +262,7 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
                     pinchBase={x.size || 24}
                     opacity={editing ? 0.35 : script !== undefined && onScript && !on && !drag ? 0.45 : 1}
                   >
-                    <View onLayout={(e) => heights.current.set(x.id, e.nativeEvent.layout.height)} style={{ maxWidth: maxW, padding: 8, borderRadius: 6, borderWidth: 1.5, borderColor: on ? 'rgba(255,255,255,0.95)' : 'transparent' }}>
+                    <View onLayout={(e) => heights.current.set(x.id, e.nativeEvent.layout.height)} style={{ maxWidth: maxW, padding: 8, borderRadius: 6, borderWidth: 1.5, borderColor: on ? editor.w95 : 'transparent' }}>
                       <InlineText x={x} scale={scale} maxWidth={maxW - 16} />
                     </View>
                     {on && !drag ? (
@@ -282,25 +282,25 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
               ) : null}
 
               {!doc.texts.length && !doc.overlays.length && !editing ? (
-                <Text pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: '44%', textAlign: 'center', fontSize: 16, lineHeight: 22, fontWeight: '600', color: 'rgba(255,255,255,0.6)' }}>Tap to add text</Text>
+                <Text pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: '44%', textAlign: 'center', fontSize: 16, lineHeight: 22, fontWeight: '600', color: editor.w60 }}>Tap to add text</Text>
               ) : null}
 
               <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 130, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 18, gap: 8, opacity: drag ? 1 : 0 }}>
-                <GradientFill colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.75)']} deg={180} />
-                <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '600', color: '#fff' }}>Drag here to delete</Text>
-                <View style={{ width: 52, height: 52, borderRadius: 999, borderWidth: 2, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="delete" size={24} color="#fff" />
+                <GradientFill colors={[editor.clear, editor.k75]} deg={180} />
+                <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '600', color: editor.white }}>Drag here to delete</Text>
+                <View style={{ width: 52, height: 52, borderRadius: 999, borderWidth: 2, borderColor: editor.white, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="delete" size={24} color={editor.white} />
                 </View>
               </View>
 
               {(selT || selO) && !drag ? (
                 <View style={{ position: 'absolute', left: 10, top: '50%', marginTop: -116, width: 40, height: 232, alignItems: 'center' }}>
-                  <Icon name={selO ? 'photo_size_select_large' : 'format_line_spacing'} size={18} color="#fff" style={{ marginBottom: 8, transform: selO ? undefined : [{ rotate: '90deg' }] }} />
+                  <Icon name={selO ? 'photo_size_select_large' : 'format_line_spacing'} size={18} color={editor.white} style={{ marginBottom: 8, transform: selO ? undefined : [{ rotate: '90deg' }] }} />
                   <GestureDetector gesture={slider}>
                     <View style={{ flex: 1, width: 40, alignItems: 'center' }}>
-                      <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, width: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.28)' }} />
-                      <View pointerEvents="none" style={{ position: 'absolute', bottom: 0, width: 6, borderRadius: 3, backgroundColor: '#fff', height: `${sliderVal * 100}%` }} />
-                      <View pointerEvents="none" style={{ position: 'absolute', width: 26, height: 26, borderRadius: 999, backgroundColor: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.45)', top: `${(1 - sliderVal) * 100}%`, marginTop: -13 }} />
+                      <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, width: 6, borderRadius: 3, backgroundColor: editor.w28 }} />
+                      <View pointerEvents="none" style={{ position: 'absolute', bottom: 0, width: 6, borderRadius: 3, backgroundColor: editor.white, height: `${sliderVal * 100}%` }} />
+                      <View pointerEvents="none" style={{ position: 'absolute', width: 26, height: 26, borderRadius: 999, backgroundColor: editor.white, boxShadow: `0 2px 8px ${editor.k45}`, top: `${(1 - sliderVal) * 100}%`, marginTop: -13 }} />
                     </View>
                   </GestureDetector>
                 </View>
@@ -314,13 +314,13 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
               </View>
             ) : null}
             {onScript && !editing ? (
-              <Press onPress={() => { setScrDraft(script ?? ''); setScr(true); }} style={{ position: 'absolute', left: '50%', top: 52, width: Math.min(280, size.w * 0.78), marginLeft: -Math.min(280, size.w * 0.78) / 2, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(20,20,24,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', zIndex: 3, alignItems: 'center' }}>
+              <Press onPress={() => { setScrDraft(script ?? ''); setScr(true); }} style={{ position: 'absolute', left: '50%', top: 52, width: Math.min(280, size.w * 0.78), marginLeft: -Math.min(280, size.w * 0.78) / 2, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: editor.glass, borderWidth: 1, borderColor: editor.w12, zIndex: 3, alignItems: 'center' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 }}>
-                  <Icon name="subtitles" size={11} color="rgba(255,255,255,0.6)" />
-                  <Text style={{ fontSize: 9, lineHeight: 12, fontWeight: '600', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Script</Text>
-                  <Icon name="edit" size={10} color="rgba(255,255,255,0.6)" />
+                  <Icon name="subtitles" size={11} color={editor.w60} />
+                  <Text style={{ fontSize: 9, lineHeight: 12, fontWeight: '600', color: editor.w60, textTransform: 'uppercase', letterSpacing: 0.6 }}>Script</Text>
+                  <Icon name="edit" size={10} color={editor.w60} />
                 </View>
-                <Text numberOfLines={2} style={{ textAlign: 'center', fontSize: 11, lineHeight: 14, fontWeight: script ? '500' : '400', color: script ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)' }}>{script || 'Tap to write what the creator says'}</Text>
+                <Text numberOfLines={2} style={{ textAlign: 'center', fontSize: 11, lineHeight: 14, fontWeight: script ? '500' : '400', color: script ? editor.w90 : editor.w55 }}>{script || 'Tap to write what the creator says'}</Text>
               </Press>
             ) : null}
           </View>
@@ -329,39 +329,39 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
           <View style={{ height: panelH, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: keyboard > 0 ? 8 : Math.max(insets.bottom, 24) }}>
             {editT ? (
               <Animated.View key={tab} entering={FadeIn.duration(160)} style={{ alignItems: 'center', gap: 12, width: '100%' }}>
-                {hasRange ? <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: 'rgba(255,255,255,0.7)', marginBottom: -6 }}>Styling selected words</Text> : null}
+                {hasRange ? <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: editor.w70, marginBottom: -6 }}>Styling selected words</Text> : null}
                 {tab === 'font' ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
                     {FONT_NAMES.map((l, i) => (
-                      <View key={l}>{optBtn(editT.font === i, () => upd(editT.id, { font: i }), <Text style={{ fontSize: 14, fontWeight: '600', color: editT.font === i ? '#000' : '#fff', fontFamily: i === 1 ? 'Georgia' : i === 3 ? 'Courier New' : undefined }}>{l}</Text>, 72)}</View>
+                      <View key={l}>{optBtn(editT.font === i, () => upd(editT.id, { font: i }), <Text style={{ fontSize: 14, fontWeight: '600', color: editT.font === i ? editor.black : editor.white, fontFamily: i === 1 ? 'Georgia' : i === 3 ? 'Courier New' : undefined }}>{l}</Text>, 72)}</View>
                     ))}
                   </ScrollView>
                 ) : tab === 'align' ? (
                   <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                     {(['left', 'center', 'right'] as const).map((v) => (
-                      <View key={v}>{optBtn(editT.align === v, () => upd(editT.id, { align: v }), <Icon name={`format_align_${v}` as IconName} size={20} color={editT.align === v ? '#000' : '#fff'} />)}</View>
+                      <View key={v}>{optBtn(editT.align === v, () => upd(editT.id, { align: v }), <Icon name={`format_align_${v}` as IconName} size={20} color={editT.align === v ? editor.black : editor.white} />)}</View>
                     ))}
-                    <View style={{ width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 4 }} />
+                    <View style={{ width: 1, height: 24, backgroundColor: editor.w25, marginHorizontal: 4 }} />
                     {([['align_horizontal_left', { x: 24 }], ['align_horizontal_center', { x: 50 }], ['align_horizontal_right', { x: 76 }], ['align_vertical_center', { y: 50 }]] as const).map(([n, p]) => (
-                      <View key={n}>{optBtn(false, () => upd(editT.id, p), <Icon name={n} size={20} color="#fff" />)}</View>
+                      <View key={n}>{optBtn(false, () => upd(editT.id, p), <Icon name={n} size={20} color={editor.white} />)}</View>
                     ))}
                   </View>
                 ) : tab === 'style' ? (
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     {ST_STYLES.map((k) => {
                       const on = hasRange ? false : editT.style === k;
-                      const r = stRender({ ...editT, style: k, size: 13, color: k === 'none' && editT.color === '#FFFFFF' && !on ? '#fff' : editT.color }, 1);
+                      const r = stRender({ ...editT, style: k, size: 13, color: k === 'none' && editT.color === editor.white && !on ? editor.white : editT.color }, 1);
                       return <View key={k}>{optBtn(on, () => style({ style: k }), <View style={[r.box, { paddingHorizontal: 6, paddingVertical: 2 }]}><Text style={[r.text, { fontSize: 13, lineHeight: 16 }]}>Aa</Text></View>, 52)}</View>;
                     })}
                   </View>
                 ) : (
                   <View style={{ flexDirection: 'row', gap: 10 }}>
                     {ST_SWATCH.map((c) => (
-                      <Press key={c} onPress={() => style({ color: c })} style={{ width: 30, height: 30, borderRadius: 999, backgroundColor: c, borderWidth: 2.5, borderColor: '#fff', boxShadow: !hasRange && editT.color === c ? '0 0 0 2px #000, 0 0 0 4px #fff' : '0 1px 3px rgba(0,0,0,0.4)' }} />
+                      <Press key={c} onPress={() => style({ color: c })} style={{ width: 30, height: 30, borderRadius: 999, backgroundColor: c, borderWidth: 2.5, borderColor: editor.white, boxShadow: !hasRange && editT.color === c ? `0 0 0 2px ${editor.black}, 0 0 0 4px ${editor.white}` : `0 1px 3px ${editor.k40}` }} />
                     ))}
                   </View>
                 )}
-                <View style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)' }}>
+                <View style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: 16, backgroundColor: editor.w12 }}>
                   {tabBtn('text_fields', 'font')}
                   {tabBtn('palette', 'color')}
                   {tabBtn(STYLE_ICON[editT.style] ?? 'title', 'style')}
@@ -380,21 +380,21 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
 
           {onScript ? (
             <>
-              <Animated.View pointerEvents={scr ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 8 }, scrimStyle]}>
+              <Animated.View pointerEvents={scr ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, { backgroundColor: editor.k50, zIndex: 8 }, scrimStyle]}>
                 <Pressable style={{ flex: 1 }} onPress={() => setScr(false)} />
               </Animated.View>
-              <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#17171C', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 12, paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + (keyboard > 0 ? keyboard - insets.bottom : 0), gap: 12, zIndex: 9 }, scrStyle]}>
-                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', alignSelf: 'center' }} />
+              <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: editor.sheet, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 12, paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + (keyboard > 0 ? keyboard - insets.bottom : 0), gap: 12, zIndex: 9 }, scrStyle]}>
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: editor.w25, alignSelf: 'center' }} />
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: '#fff' }}>Script</Text>
+                  <Text style={{ fontSize: 17, lineHeight: 22, fontWeight: '700', color: editor.white }}>Script</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Icon name="subtitles" size={14} color="rgba(255,255,255,0.55)" />
-                    <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: 'rgba(255,255,255,0.55)' }}>Teleprompter</Text>
+                    <Icon name="subtitles" size={14} color={editor.w55} />
+                    <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: editor.w55 }}>Teleprompter</Text>
                   </View>
                 </View>
-                <TextInput value={scrDraft} onChangeText={setScrDraft} multiline placeholder="What the creator reads, word for word" placeholderTextColor="rgba(255,255,255,0.4)" style={{ minHeight: 150, backgroundColor: '#26262D', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 19, lineHeight: 27, fontWeight: '600', color: '#fff', textAlignVertical: 'top' }} />
+                <TextInput value={scrDraft} onChangeText={setScrDraft} multiline placeholder="What the creator reads, word for word" placeholderTextColor={editor.w40} style={{ minHeight: 150, backgroundColor: editor.field, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 19, lineHeight: 27, fontWeight: '600', color: editor.white, textAlignVertical: 'top' }} />
                 <Press onPress={() => { onScript(scrDraft.trim()); setScr(false); }} style={{ height: 52, borderRadius: 999, backgroundColor: color.blue, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#fff' }}>Save script</Text>
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: editor.white }}>Save script</Text>
                 </Press>
               </Animated.View>
             </>
@@ -408,16 +408,16 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
 
 function Arrow({ dir, on, onPress, style }: { dir: 'left' | 'right'; on: boolean; onPress?: () => void; style?: object }) {
   return (
-    <Press disabled={!on} onPress={onPress} style={[{ width: 40, height: 40, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', opacity: on ? 1 : 0.3 }, style]}>
-      <Icon name={dir === 'left' ? 'chevron_left' : 'chevron_right'} size={22} color="#fff" />
+    <Press disabled={!on} onPress={onPress} style={[{ width: 40, height: 40, borderRadius: 999, backgroundColor: editor.w14, alignItems: 'center', justifyContent: 'center', opacity: on ? 1 : 0.3 }, style]}>
+      <Icon name={dir === 'left' ? 'chevron_left' : 'chevron_right'} size={22} color={editor.white} />
     </Press>
   );
 }
 
 function CornerButton({ side, icon, label, onPress }: { side: 'left' | 'right'; icon: IconName; label: string; onPress: () => void }) {
   return (
-    <Press accessibilityLabel={label} onPress={onPress} style={{ position: 'absolute', [side]: -14, top: -14, width: 28, height: 28, borderRadius: 999, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.3)' }}>
-      <Icon name={icon} size={icon === 'edit' ? 15 : 16} weight={700} color="#000" />
+    <Press accessibilityLabel={label} onPress={onPress} style={{ position: 'absolute', [side]: -14, top: -14, width: 28, height: 28, borderRadius: 999, backgroundColor: editor.white, alignItems: 'center', justifyContent: 'center', boxShadow: `0 2px 6px ${editor.k30}` }}>
+      <Icon name={icon} size={icon === 'edit' ? 15 : 16} weight={700} color={editor.black} />
     </Press>
   );
 }
@@ -442,7 +442,7 @@ function EditingInput({ x, scale, onText, onRange }: { x: StText; scale: number;
         value={x.text}
         onChangeText={onText}
         onSelectionChange={(e) => onRange(e.nativeEvent.selection)}
-        selectionColor="#fff"
+        selectionColor={editor.white}
         style={[r.text, { padding: 0, margin: 0, textShadowColor: 'transparent', minWidth: 40 }]}
       />
     </View>

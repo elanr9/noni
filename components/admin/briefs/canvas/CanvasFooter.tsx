@@ -62,7 +62,7 @@ export function NextButton({ label, ok, onPress, icon = 'arrow-right' }: { label
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, minHeight: 0, justifyContent: 'center', gap: 6, paddingHorizontal: 14, paddingTop: 2, paddingBottom: 4, overflow: 'hidden' },
+  wrap: { flex: 1, minHeight: 0, alignSelf: 'stretch', justifyContent: 'center', gap: 6, paddingHorizontal: 14, paddingTop: 2, paddingBottom: 4, overflow: 'hidden' },
   top: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   strip: { flex: 1, minWidth: 0 },

@@ -4,7 +4,7 @@
 // the script in a sheet. Retake drops the current clip; guided clips auto
 // advance. Clips persist locally and to recording_drafts between launches.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { CameraView, type CameraType } from 'expo-camera';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
@@ -14,7 +14,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { wordsSpokenBy } from '../../../Teleprompter';
 import type { Brief, GsMedia } from '../../../../lib/brief-library';
 import type { MediaAsset } from '../../../../lib/edit-document';
-import { color, motion } from '../../../../theme/v2';
+import { color, editor, motion } from '../../../../theme/v2';
 import { MediaFill } from '../../../admin/v2/newbrief/ClipFrame';
 import { MediaPickerSheet } from '../../../admin/v2/newbrief/MediaPickerSheet';
 import { PermissionGate } from '../../../creator/studio/capture/PermissionGate';
@@ -22,13 +22,14 @@ import { VIDEO_BITRATE } from '../../../creator/studio/capture/constants';
 import { useCapturePermissions } from '../../../creator/studio/capture/useCapturePermissions';
 import { useRecorder } from '../../../creator/studio/capture/useRecorder';
 import { Button, Icon, Press, tap } from '../../../v2';
+import { toast } from '../../../v2/Toast';
 import { StTextView } from '../../../v2/StTextView';
 import { SentOverlay } from '../SentOverlay';
 import { clipScreenTexts, clock, loadRecordDraft, saveRecordDraft, type RecordClip, type RecordDraft, type RecordMode } from './model';
 
 /** The Say this card lights 2.6 words a second. */
 const SAY_SPEED = 0.65;
-const RED = '#FE2C55';
+const RED = editor.tiktok;
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export interface RecordScreenProps {
@@ -49,9 +50,11 @@ export interface RecordScreenProps {
   onSent: () => void;
   /** Each kept clip, for the server side draft. */
   onClip?: (clip: RecordClip, assignmentId: string | null) => Promise<string | null>;
+  /** Label on the Next button (the editor's Add clip says "Add to edit"). */
+  nextLabel?: string;
 }
 
-export function RecordScreen({ mode, brief, initialText = '', draftKey, initialClip = null, onClose, onNext, onSubmit, onSent, onClip }: RecordScreenProps) {
+export function RecordScreen({ mode, brief, initialText = '', draftKey, initialClip = null, onClose, onNext, onSubmit, onSent, onClip, nextLabel }: RecordScreenProps) {
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
   const permissions = useCapturePermissions();
@@ -196,11 +199,15 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
         await onNext(kept, draft);
       }
     } catch (e) {
-      Alert.alert('Could not continue', e instanceof Error ? e.message : 'Try again');
+      toast.error(e instanceof Error ? `Could not continue. ${e.message}` : 'Could not continue. Try again.', { label: 'Retry', onPress: () => void finishRef.current() });
     } finally {
       setBusy(false);
     }
   };
+  const finishRef = useRef(finish);
+  useEffect(() => {
+    finishRef.current = finish;
+  });
   const flip = () => {
     if (rec) return;
     tap();
@@ -237,18 +244,18 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
   const H = W * (16 / 9);
 
   const sideBtn = (name: 'replay', onPress: () => void, hidden: boolean) => (
-    <Press disabled={hidden} onPress={onPress} accessibilityLabel="Retake" style={{ width: 52, height: 52, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', opacity: hidden ? 0 : 1 }}>
-      <Icon name={name} size={26} color="#fff" />
+    <Press disabled={hidden} onPress={onPress} accessibilityLabel="Retake" style={{ width: 52, height: 52, borderRadius: 999, backgroundColor: editor.w18, alignItems: 'center', justifyContent: 'center', opacity: hidden ? 0 : 1 }}>
+      <Icon name={name} size={26} color={editor.white} />
     </Press>
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
+    <View style={{ flex: 1, backgroundColor: editor.black }}>
       {permissions.state === 'granted' ? (
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} mode="video" mute={false} mirror={facing === 'front'} videoQuality="1080p" videoBitrate={VIDEO_BITRATE} onCameraReady={() => setCameraReadyAt(Date.now())} onMountError={(e) => Alert.alert('Camera', e.message)} />
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} mode="video" mute={false} mirror={facing === 'front'} videoQuality="1080p" videoBitrate={VIDEO_BITRATE} onCameraReady={() => setCameraReadyAt(Date.now())} onMountError={(e) => toast.error(`The camera did not start. ${e.message}`)} />
       ) : permissions.state === 'loading' ? (
         <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={editor.white} />
         </View>
       ) : (
         <PermissionGate permissions={permissions} />
@@ -256,13 +263,13 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
 
       {/* Green screen reference: the picked picture or video sits in the overlay slot. */}
       {greenOn && gsCur ? (
-        <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: '50%', width: W * 0.4, height: W * 0.4 * 1.25, marginLeft: -W * 0.2, marginTop: -W * 0.25, borderRadius: 4, overflow: 'hidden', boxShadow: '0 6px 18px rgba(0,0,0,0.35)', opacity: 0.95 }}>
+        <View pointerEvents="none" style={{ position: 'absolute', left: '50%', top: '50%', width: W * 0.4, height: W * 0.4 * 1.25, marginLeft: -W * 0.2, marginTop: -W * 0.25, borderRadius: 4, overflow: 'hidden', boxShadow: `0 6px 18px ${editor.k35}`, opacity: 0.95 }}>
           <MediaFill src={gsCur.src} />
         </View>
       ) : null}
       {greenOn && gsCur?.kind === 'video' ? (
-        <View style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 50, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' }}>
-          <View style={{ height: '100%', width: `${progress * 100}%`, backgroundColor: '#fff' }} />
+        <View style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 50, height: 3, borderRadius: 2, backgroundColor: editor.w25, overflow: 'hidden' }}>
+          <View style={{ height: '100%', width: `${progress * 100}%`, backgroundColor: editor.white }} />
         </View>
       ) : null}
 
@@ -273,24 +280,24 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
         ))}
       </View>
 
-      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 140, backgroundColor: 'rgba(0,0,0,0.2)' }} />
-      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 260, backgroundColor: 'rgba(0,0,0,0.3)' }} />
+      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 140, backgroundColor: editor.k20 }} />
+      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 260, backgroundColor: editor.k30 }} />
 
       {/* Header */}
       <View style={{ position: 'absolute', left: 8, right: 8, top: insets.top + 6, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Press accessibilityLabel="Close" onPress={onClose} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="close" size={26} color="#fff" />
+          <Icon name="close" size={26} color={editor.white} />
         </Press>
-        <Text numberOfLines={1} style={{ flex: 1, textAlign: 'center', fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 }}>{title}</Text>
+        <Text numberOfLines={1} style={{ flex: 1, textAlign: 'center', fontSize: 15, lineHeight: 20, fontWeight: '700', color: editor.white, textShadowColor: editor.k50, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 }}>{title}</Text>
         <Press accessibilityLabel="Flip camera" onPress={flip} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="cameraswitch" size={26} color="#fff" />
+          <Icon name="cameraswitch" size={26} color={editor.white} />
         </Press>
       </View>
 
       {rec ? (
-        <View style={{ position: 'absolute', alignSelf: 'center', top: insets.top + 60, height: 26, paddingLeft: 8, paddingRight: 10, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.5)', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ position: 'absolute', alignSelf: 'center', top: insets.top + 60, height: 26, paddingLeft: 8, paddingRight: 10, borderRadius: 999, backgroundColor: editor.k50, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Animated.View style={[{ width: 8, height: 8, borderRadius: 999, backgroundColor: RED }, blinkStyle]} />
-          <Text style={{ fontSize: 13, lineHeight: 26, fontWeight: '700', color: '#fff' }}>{clock(t)}{timed ? <Text style={{ color: 'rgba(255,255,255,0.6)' }}>{` / ${clock(limitS)}`}</Text> : null}</Text>
+          <Text style={{ fontSize: 13, lineHeight: 26, fontWeight: '700', color: editor.white }}>{clock(t)}{timed ? <Text style={{ color: editor.w60 }}>{` / ${clock(limitS)}`}</Text> : null}</Text>
         </View>
       ) : null}
 
@@ -298,14 +305,14 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
       {ownGs && !rec && permissions.state === 'granted' ? (
         <View style={{ position: 'absolute', right: 10, top: insets.top + 66, alignItems: 'center', gap: 10 }}>
           <Press onPress={() => setGsPick(true)} style={{ alignItems: 'center', gap: 4, width: 56 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 999, backgroundColor: gsMap[gIdx] ? '#fff' : 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="wallpaper" size={22} color={gsMap[gIdx] ? '#000' : '#fff'} />
+            <View style={{ width: 44, height: 44, borderRadius: 999, backgroundColor: gsMap[gIdx] ? editor.white : editor.k45, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="wallpaper" size={22} color={gsMap[gIdx] ? editor.black : editor.white} />
             </View>
-            <Text style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: '#fff', textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{gsMap[gIdx] ? 'Replace' : 'Green screen'}</Text>
+            <Text style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: editor.white, textShadowColor: editor.k60, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{gsMap[gIdx] ? 'Replace' : 'Green screen'}</Text>
           </Press>
           {gsMap[gIdx] ? (
-            <Press accessibilityLabel="Remove green screen" onPress={() => update((d) => { const m = { ...d.gsMap }; delete m[gIdx]; return { ...d, gsMap: m }; })} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="close" size={16} color="#fff" />
+            <Press accessibilityLabel="Remove green screen" onPress={() => update((d) => { const m = { ...d.gsMap }; delete m[gIdx]; return { ...d, gsMap: m }; })} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: editor.k45, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="close" size={16} color={editor.white} />
             </Press>
           ) : null}
         </View>
@@ -313,9 +320,9 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
 
       {/* Say this */}
       {guided && !seven && curLine ? (
-        <View style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 96, paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-          <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '600', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Say this</Text>
-          <Text style={{ fontSize: 22, lineHeight: 30, fontWeight: '700', color: '#fff' }}>
+        <View style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 96, paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, borderRadius: 18, backgroundColor: editor.k55 }}>
+          <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '600', color: editor.w60, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>Say this</Text>
+          <Text style={{ fontSize: 22, lineHeight: 30, fontWeight: '700', color: editor.white }}>
             {words.map((w, i) => (
               <Text key={i} style={{ opacity: lit < 0 || i <= lit ? 1 : 0.45 }}>{w} </Text>
             ))}
@@ -323,19 +330,19 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
         </View>
       ) : null}
       {seven && brief ? (
-        <View pointerEvents={rec ? 'none' : 'auto'} style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 60, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.55)', opacity: rec ? 0 : 1 }}>
-          <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#fff' }}>{brief.title}</Text>
-          {brief.notes ? <Text style={{ fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.75)', marginTop: 4 }}>{brief.notes}</Text> : null}
+        <View pointerEvents={rec ? 'none' : 'auto'} style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 60, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 18, backgroundColor: editor.k55, opacity: rec ? 0 : 1 }}>
+          <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: editor.white }}>{brief.title}</Text>
+          {brief.notes ? <Text style={{ fontSize: 13, lineHeight: 18, color: editor.w75, marginTop: 4 }}>{brief.notes}</Text> : null}
         </View>
       ) : null}
       {seven && allDone && !rec ? (
-        <Press onPress={() => setEditText(true)} style={{ position: 'absolute', alignSelf: 'center', top: H * 0.42 + 90, height: 32, paddingHorizontal: 14, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.92)', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Press onPress={() => setEditText(true)} style={{ position: 'absolute', alignSelf: 'center', top: H * 0.42 + 90, height: 32, paddingHorizontal: 14, borderRadius: 999, backgroundColor: editor.w92, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="edit" size={16} color={color.ink} />
           <Text style={{ fontSize: 13, fontWeight: '700', color: color.ink }}>Edit text</Text>
         </Press>
       ) : null}
       {!guided && brief ? (
-        <Press onPress={() => setScript(true)} style={{ position: 'absolute', alignSelf: 'center', top: insets.top + (rec ? 96 : 60), height: 30, paddingLeft: 12, paddingRight: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.92)', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+        <Press onPress={() => setScript(true)} style={{ position: 'absolute', alignSelf: 'center', top: insets.top + (rec ? 96 : 60), height: 30, paddingLeft: 12, paddingRight: 8, borderRadius: 999, backgroundColor: editor.w92, flexDirection: 'row', alignItems: 'center', gap: 2 }}>
           <Text style={{ fontSize: 13, fontWeight: '600', color: color.blueDeep }}>View script</Text>
           <Icon name="keyboard_arrow_down" size={18} color={color.blueDeep} />
         </Press>
@@ -349,23 +356,23 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
                 const got = done[i];
                 const on = i === ci;
                 return (
-                  <Press key={i} disabled={rec} onPress={() => update((d) => ({ ...d, ci: i }))} style={{ width: 44, height: 58, borderRadius: 10, overflow: 'hidden', backgroundColor: got ? '#000' : 'rgba(255,255,255,0.08)', borderWidth: got ? 0 : 1.5, borderColor: 'rgba(255,255,255,0.45)', borderStyle: 'dashed', boxShadow: on ? '0 0 0 2.5px #fff' : 'none', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }}>
+                  <Press key={i} disabled={rec} onPress={() => update((d) => ({ ...d, ci: i }))} style={{ width: 44, height: 58, borderRadius: 10, overflow: 'hidden', backgroundColor: got ? editor.black : editor.w08, borderWidth: got ? 0 : 1.5, borderColor: editor.w45, borderStyle: 'dashed', boxShadow: on ? `0 0 0 2.5px ${editor.white}` : 'none', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }}>
                     {got && thumbs[got.asset.id] ? <Image source={{ uri: thumbs[got.asset.id] }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
-                    <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '700', color: '#fff', textShadowColor: 'rgba(0,0,0,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{got ? clock((got.asset.durationMs ?? 0) / 1000) : i + 1}</Text>
+                    <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '700', color: editor.white, textShadowColor: editor.k70, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{got ? clock((got.asset.durationMs ?? 0) / 1000) : i + 1}</Text>
                   </Press>
                 );
               })
             : kept.map((c) => (
-                <View key={c.asset.id} style={{ width: 44, height: 58, borderRadius: 10, overflow: 'hidden', backgroundColor: '#222', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }}>
+                <View key={c.asset.id} style={{ width: 44, height: 58, borderRadius: 10, overflow: 'hidden', backgroundColor: editor.tile, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }}>
                   {thumbs[c.asset.id] ? <Image source={{ uri: thumbs[c.asset.id] }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
-                  <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '700', color: '#fff', textShadowColor: 'rgba(0,0,0,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{clock((c.asset.durationMs ?? 0) / 1000)}</Text>
+                  <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '700', color: editor.white, textShadowColor: editor.k70, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 }}>{clock((c.asset.durationMs ?? 0) / 1000)}</Text>
                 </View>
               ))}
-          {!guided && kept.length ? <Text style={{ fontSize: 13, lineHeight: 16, fontWeight: '600', color: 'rgba(255,255,255,0.75)', paddingLeft: 6 }}>{`${kept.length} ${kept.length === 1 ? 'clip' : 'clips'} · ${clock(total)}`}</Text> : null}
+          {!guided && kept.length ? <Text style={{ fontSize: 13, lineHeight: 16, fontWeight: '600', color: editor.w75, paddingLeft: 6 }}>{`${kept.length} ${kept.length === 1 ? 'clip' : 'clips'} · ${clock(total)}`}</Text> : null}
         </ScrollView>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, alignItems: 'center' }}>{sideBtn('replay', retake, rec || !(guided ? !!done[ci] : kept.length > 0))}</View>
-          <Press accessibilityLabel={rec ? 'Stop' : 'Record'} disabled={saving || permissions.state !== 'granted'} onPress={rec ? recorder.stop : start} haptic={false} scaleTo={0.94} style={{ width: 84, height: 84, borderRadius: 999, borderWidth: 5, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
+          <Press accessibilityLabel={rec ? 'Stop' : 'Record'} disabled={saving || permissions.state !== 'granted'} onPress={rec ? recorder.stop : start} haptic={false} scaleTo={0.94} style={{ width: 84, height: 84, borderRadius: 999, borderWidth: 5, borderColor: editor.white, alignItems: 'center', justifyContent: 'center' }}>
             {timed && rec ? (
               <Svg width={84} height={84} viewBox="0 0 84 84" style={{ position: 'absolute', left: -5, top: -5 }}>
                 <AnimatedCircle cx={42} cy={42} r={39.5} stroke={RED} strokeWidth={5} fill="none" strokeDasharray={ringLen} strokeDashoffset={ringLen * (1 - progress)} strokeLinecap="round" rotation={-90} origin="42, 42" />
@@ -374,9 +381,10 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
             <Animated.View style={[{ backgroundColor: RED }, innerStyle]} />
           </Press>
           <View style={{ flex: 1, alignItems: 'center' }}>
-            <Press disabled={rec || !allDone || busy} onPress={() => void finish()} style={{ height: 52, paddingLeft: 20, paddingRight: 18, borderRadius: 999, backgroundColor: seven ? color.blue : '#fff', flexDirection: 'row', alignItems: 'center', gap: 4, opacity: rec || !allDone ? 0 : busy ? 0.6 : 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: seven ? '#fff' : color.ink }}>{seven ? 'Submit' : 'Next'}</Text>
-              <Icon name={seven ? 'arrow_upward' : 'arrow_forward'} size={20} weight={700} color={seven ? '#fff' : color.ink} />
+            <Press disabled={rec || !allDone || busy} onPress={() => void finish()} style={{ height: 52, paddingLeft: 20, paddingRight: 18, borderRadius: 999, backgroundColor: seven ? color.blue : editor.white, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: rec || !allDone ? 0 : busy ? 0.6 : 1 }}>
+              {busy ? <ActivityIndicator size="small" color={seven ? editor.white : color.ink} style={{ marginRight: 4 }} /> : null}
+              <Text style={{ fontSize: 15, fontWeight: '700', color: seven ? editor.white : color.ink }}>{busy ? (seven ? 'Sending' : 'Opening') : seven ? 'Submit' : (nextLabel ?? 'Next')}</Text>
+              {!busy ? <Icon name={seven ? 'arrow_upward' : 'arrow_forward'} size={20} weight={700} color={seven ? editor.white : color.ink} /> : null}
             </Press>
           </View>
         </View>
@@ -385,10 +393,10 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
       {/* Script sheet */}
       {!guided && brief ? (
         <>
-          <Animated.View pointerEvents={script ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.35)' }, scrimStyle]}>
+          <Animated.View pointerEvents={script ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, { backgroundColor: editor.k35 }, scrimStyle]}>
             <Press scaleTo={1} haptic={false} onPress={() => setScript(false)} style={{ flex: 1 }} />
           </Animated.View>
-          <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '60%', backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10, paddingHorizontal: 20, paddingBottom: Math.max(insets.bottom, 24) + 10 }, scriptStyle]}>
+          <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '60%', backgroundColor: editor.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10, paddingHorizontal: 20, paddingBottom: Math.max(insets.bottom, 24) + 10 }, scriptStyle]}>
             <View style={{ width: 40, height: 5, borderRadius: 999, backgroundColor: color.grey2, alignSelf: 'center', marginBottom: 10 }} />
             <Text style={{ fontSize: 20, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2, color: color.ink, marginBottom: 10 }}>{brief.title}</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -399,8 +407,8 @@ export function RecordScreen({ mode, brief, initialText = '', draftKey, initialC
       ) : null}
 
       <Modal visible={editText} transparent animationType="fade" onRequestClose={() => setEditText(false)}>
-        <Press scaleTo={1} haptic={false} onPress={() => setEditText(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + 16 }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 12, gap: 10 }} onStartShouldSetResponder={() => true}>
+        <Press scaleTo={1} haptic={false} onPress={() => setEditText(false)} style={{ flex: 1, backgroundColor: editor.k75, justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + 16 }}>
+          <View style={{ backgroundColor: editor.white, borderRadius: 20, padding: 12, gap: 10 }} onStartShouldSetResponder={() => true}>
             <TextInput autoFocus multiline value={myText} onChangeText={(v) => update((d) => ({ ...d, myText: v }))} style={{ minHeight: 88, backgroundColor: color.grey1, borderRadius: 14, fontSize: 16, lineHeight: 22, fontWeight: '600', color: color.ink, paddingHorizontal: 14, paddingVertical: 12, textAlign: 'center', textAlignVertical: 'top' }} />
             <Button label="Done" onPress={() => setEditText(false)} />
           </View>

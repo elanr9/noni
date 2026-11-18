@@ -116,6 +116,7 @@ export function WeekCard({ week, onWeek, minWeek = -3, maxWeek = 0, selected, on
             accessibilityLabel={step < 0 ? 'Previous week' : 'Next week'}
             disabled={dis}
             onPress={() => slide(step)}
+            haptic={false}
             style={[styles.chev, step < 0 ? { left: 2 } : { right: 2 }, { opacity: dis ? 0.25 : 1 }]}
           >
             <Icon name={step < 0 ? 'chevron_left' : 'chevron_right'} size={22} color={color.grey3} />

@@ -2,9 +2,8 @@ import { useRef, useState, type JSX, type ReactNode } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 
 import { MAX_GAIN, MIN_GAIN, clampGain } from '../../../lib/video-edit';
-import { Icon } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
-import { color, type } from '../../../theme/tokens';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, Press } from '../../v2';
 
 /** Dark inline panel that swaps in for the toolbar while one tool is open. */
 export function ToolPanel(props: {
@@ -17,17 +16,17 @@ export function ToolPanel(props: {
   return (
     <View style={styles.panel}>
       <View style={styles.header}>
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel="Cancel"
           onPress={onCancel}
           hitSlop={10}
           style={styles.headerBtn}
         >
-          <Icon name="x" size={20} color={color.white} />
-        </PressableScale>
+          <Icon name="close" size={20} color={color.white} />
+        </Press>
         <Text style={styles.title}>{title}</Text>
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel="Done"
           onPress={onDone}
@@ -35,7 +34,7 @@ export function ToolPanel(props: {
           style={styles.headerBtn}
         >
           <Icon name="check" size={20} color={color.white} />
-        </PressableScale>
+        </Press>
       </View>
       <View style={styles.body}>{children}</View>
     </View>
@@ -55,7 +54,7 @@ export function SpeedOptions(props: {
         {options.map((s) => {
           const on = s === value;
           return (
-            <PressableScale
+            <Press
               key={s}
               accessibilityRole="button"
               accessibilityLabel={`${s}x speed`}
@@ -64,7 +63,7 @@ export function SpeedOptions(props: {
               style={[styles.speedChip, on && styles.speedChipOn]}
             >
               <Text style={[styles.speedText, on && styles.speedTextOn]}>{s}x</Text>
-            </PressableScale>
+            </Press>
           );
         })}
       </View>
@@ -150,11 +149,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   title: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '700',
   },
   body: {
@@ -171,7 +170,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -180,15 +179,15 @@ const styles = StyleSheet.create({
   },
   speedText: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '700',
   },
   speedTextOn: {
     color: color.ink,
   },
   caption: {
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
     textAlign: 'center',
   },
   faderRow: {
@@ -206,7 +205,7 @@ const styles = StyleSheet.create({
   faderTrack: {
     height: 3,
     borderRadius: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: editor.w22,
   },
   faderFill: {
     position: 'absolute',
@@ -220,7 +219,7 @@ const styles = StyleSheet.create({
     width: 2,
     height: 10,
     borderRadius: 1,
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: editor.w50,
   },
   faderKnob: {
     position: 'absolute',
@@ -233,7 +232,7 @@ const styles = StyleSheet.create({
     width: 48,
     textAlign: 'right',
     color: color.white,
-    fontSize: type.size.meta,
+    fontSize: editorType.size.meta,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },

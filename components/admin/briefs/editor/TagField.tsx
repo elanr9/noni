@@ -2,14 +2,16 @@
 // backspace on an empty field removes the last one.
 
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View,
+  type TextInputInstance,
+} from 'react-native';
 
 import { color, radius, type as typeToken } from '../../../../theme/tokens';
 import { Icon } from '../../../ui/Icon';
 
 export function TagField({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
   const [v, setV] = useState('');
-  const ref = useRef<TextInput>(null);
+  const ref = useRef<TextInputInstance>(null);
   const add = (raw: string) => {
     const t = raw.replace(/^#+/, '').replace(/[^\w]/g, '').toLowerCase();
     if (t && !tags.includes(t)) onChange([...tags, t]);
@@ -40,7 +42,7 @@ export function TagField({ tags, onChange }: { tags: string[]; onChange: (tags: 
         blurOnSubmit={false}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder={tags.length ? '' : 'collegesoccer'}
+        placeholder={tags.length ? '' : 'Add a tag'}
         placeholderTextColor={color.slate400}
         style={styles.input}
       />

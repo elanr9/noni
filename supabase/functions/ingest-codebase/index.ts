@@ -43,7 +43,7 @@ form video ads. For each user facing capability, return:
 name          what an admin would call it
 what_it_does  one sentence, mechanism only. What happens, not what it
               means for the user.
-              GOOD: "Writes personalized emails to every coach on a
+              GOOD: "Writes personalized emails to every client on a
                      target list and follows up automatically."
               BAD:  "Streamlines outreach so you can focus on the game."
 surface       route or screen name if identifiable, else null

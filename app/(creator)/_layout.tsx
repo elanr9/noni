@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { Redirect, Stack, usePathname } from 'expo-router';
 
-import { LoadingScreen } from '../../components/Screen';
-import { CreatorToastProvider } from '../../components/creator/Toast';
 import {
   profileCanCreate,
   profileIsCampaignManager,
@@ -18,7 +17,8 @@ import { color, motion, screenTransition } from '../../theme/v2';
  * Routes a creator may use before setup is complete. Everything else
  * redirects to Home, which shows the checklist until setup is done.
  * Setup routes themselves, chat, and profile stay reachable so the gate
- * can never loop.
+ * can never loop. Create stays reachable so its sheet can say what is left
+ * to finish instead of the button doing nothing.
  */
 const SETUP_EXEMPT = [
   '/setup',
@@ -31,7 +31,8 @@ const SETUP_EXEMPT = [
   '/posts',
   '/earnings',
   '/payouts',
-  '/kitchen-sink',
+  '/create',
+  '/assignment',
 ];
 
 function isSetupExempt(pathname: string): boolean {
@@ -39,6 +40,14 @@ function isSetupExempt(pathname: string): boolean {
   if (pathname === '/' || pathname === '/index') return true;
   return SETUP_EXEMPT.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.bg }}>
+      <ActivityIndicator color={color.grey4} />
+    </View>
   );
 }
 
@@ -94,7 +103,6 @@ export default function CreatorLayout() {
 
   return (
     <CreatorQueueProvider>
-      <CreatorToastProvider>
         <Stack
           screenOptions={{
             headerShown: false,
@@ -107,123 +115,22 @@ export default function CreatorLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="create" options={{ presentation: 'transparentModal', animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="briefs" />
+          <Stack.Screen name="resume/[id]" options={{ presentation: 'transparentModal', animation: 'fade', animationDuration: motion.press * 2, contentStyle: { backgroundColor: 'transparent' } }} />
+          <Stack.Screen name="assignment/[id]" />
           <Stack.Screen name="outline/[id]" />
           <Stack.Screen name="capture" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="edit/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
           <Stack.Screen name="slides/[id]" options={{ presentation: 'fullScreenModal', animation: screenTransition.modal, animationDuration: motion.push }} />
-          <Stack.Screen name="kitchen-sink" options={{ headerShown: true, title: 'UI kit' }} />
           <Stack.Screen name="payouts" options={{ headerShown: false }} />
           <Stack.Screen name="chat" options={{ headerShown: false }} />
           <Stack.Screen name="channel/[chatId]" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="account-setup"
-            options={{
-              headerShown: true,
-              title: 'Account setup',
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.bg },
-              headerTintColor: color.ink,
-            }}
-          />
+          <Stack.Screen name="account-setup" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="setup/index" />
-          <Stack.Screen
-            name="setup/connect"
-            options={{
-              headerShown: true,
-              title: 'Connect accounts',
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.bg },
-              headerTintColor: color.ink,
-            }}
-          />
-          <Stack.Screen
-            name="setup/warmup"
-            options={{
-              headerShown: true,
-              title: 'Warm up',
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: color.bg },
-              headerTintColor: color.ink,
-            }}
-          />
-          <Stack.Screen
-            name="record/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen name="record/changes/[id]" />
-          <Stack.Screen
-            name="studio/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="upload/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen name="post/[id]" />
+          <Stack.Screen name="setup/connect" options={{ headerShown: false }} />
+          <Stack.Screen name="setup/warmup" options={{ headerShown: false }} />
           <Stack.Screen name="posts/[id]" />
-          <Stack.Screen
-            name="make/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="make/record/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="make/edit/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="make/raw/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="make/cut/[id]"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.modal,
-              animationDuration: motion.push,
-            }}
-          />
-          <Stack.Screen
-            name="make/sent"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: screenTransition.fade,
-              animationDuration: motion.push,
-            }}
-          />
         </Stack>
-      </CreatorToastProvider>
     </CreatorQueueProvider>
   );
 }

@@ -2,9 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
-import { color, radius, shadow, type } from '../../theme/tokens';
-import { Icon } from '../ui/Icon';
-import { PressableScale } from '../ui/PressableScale';
+import { color, editor, editorType, radius, shadow } from '../../theme/v2';
+import { Icon, Press } from '../v2';
 
 /**
  * Chat vocabulary for the manager thread and per-post revision threads
@@ -58,7 +57,7 @@ export function Bubble({ side, author, time, avatarInitial, children }: BubblePr
         </View>
         <View style={styles.managerCol}>
           {label !== '' && <Text style={styles.bubbleLabel}>{label}</Text>}
-          <View style={[styles.bubble, styles.bubbleManager, shadow.shadowCard]}>{body}</View>
+          <View style={[styles.bubble, styles.bubbleManager, shadow.card]}>{body}</View>
         </View>
       </View>
     );
@@ -67,7 +66,7 @@ export function Bubble({ side, author, time, avatarInitial, children }: BubblePr
   return (
     <View style={styles.creatorCol}>
       {time !== undefined && <Text style={[styles.bubbleLabel, styles.labelRight]}>{time}</Text>}
-      <View style={[styles.bubble, styles.bubbleCreator, shadow.shadowAccent]}>{body}</View>
+      <View style={[styles.bubble, styles.bubbleCreator, shadow.glow]}>{body}</View>
     </View>
   );
 }
@@ -82,14 +81,14 @@ export interface QuotedReplyProps {
 export function QuotedReply({ author, excerpt, onAccent = false }: QuotedReplyProps) {
   return (
     <View style={[styles.quote, onAccent ? styles.quoteOnAccent : styles.quoteOnWhite]}>
-      <View style={[styles.quoteBar, { backgroundColor: onAccent ? color.whiteA75 : color.accent }]} />
+      <View style={[styles.quoteBar, { backgroundColor: onAccent ? editor.w75 : color.blue }]} />
       <View style={styles.quoteBody}>
         <Text style={[styles.quoteAuthor, { color: onAccent ? color.white : color.ink }]}>
           {author}
         </Text>
         <Text
           numberOfLines={1}
-          style={[styles.quoteExcerpt, { color: onAccent ? color.whiteA75 : color.slate500 }]}
+          style={[styles.quoteExcerpt, { color: onAccent ? editor.w75 : color.grey4 }]}
         >
           {excerpt}
         </Text>
@@ -108,14 +107,14 @@ export interface PostRefCardProps {
 export function PostRefCard({ title, format, onPress }: PostRefCardProps) {
   const slideshow = format === 'photo_carousel';
   return (
-    <PressableScale
+    <Press
       accessibilityRole="button"
       accessibilityLabel={`Open post ${title}`}
       onPress={onPress}
       style={styles.postRef}
     >
       <View style={styles.postRefIcon}>
-        <Icon name={slideshow ? 'images' : 'video'} size={15} color={color.blue700} />
+        <Icon name={slideshow ? 'photo_library' : 'videocam'} size={15} color={color.blueDeep} />
       </View>
       <View style={styles.postRefBody}>
         <Text numberOfLines={1} style={styles.postRefTitle}>
@@ -123,8 +122,8 @@ export function PostRefCard({ title, format, onPress }: PostRefCardProps) {
         </Text>
         <Text style={styles.postRefMeta}>{slideshow ? 'Slideshow' : 'Reel'}</Text>
       </View>
-      <Icon name="chevron-right" size={16} color={color.slate400} />
-    </PressableScale>
+      <Icon name="chevron_right" size={16} color={color.grey4} />
+    </Press>
   );
 }
 
@@ -182,33 +181,33 @@ export function VoiceNote({ uri, durationLabel, onAccent = false }: VoiceNotePro
 
   return (
     <View style={styles.voiceRow}>
-      <PressableScale
+      <Press
         accessibilityRole="button"
         accessibilityLabel={playing ? 'Pause voice note' : 'Play voice note'}
         onPress={() => void toggle()}
         style={[
           styles.voicePlay,
-          { backgroundColor: onAccent ? color.white : color.accent },
+          { backgroundColor: onAccent ? color.white : color.blue },
         ]}
       >
         <Icon
-          name={playing ? 'pause' : 'play'}
+          name={playing ? 'pause' : 'play_arrow'}
           size={13}
-          color={onAccent ? color.accent : color.white}
+          color={onAccent ? color.blue : color.white}
         />
-      </PressableScale>
+      </Press>
       <View style={styles.wave}>
         {WAVE_BARS.map((h, i) => (
           <View
             key={i}
             style={[
               styles.waveBar,
-              { height: h, backgroundColor: onAccent ? color.whiteA75 : color.slate300 },
+              { height: h, backgroundColor: onAccent ? editor.w75 : color.grey3 },
             ]}
           />
         ))}
       </View>
-      <Text style={[styles.voiceDuration, { color: onAccent ? color.white : color.slate500 }]}>
+      <Text style={[styles.voiceDuration, { color: onAccent ? color.white : color.grey4 }]}>
         {durationLabel}
       </Text>
     </View>
@@ -223,12 +222,12 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     paddingHorizontal: 11,
     borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
+    backgroundColor: color.grey1,
   },
   dividerText: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.bold,
-    color: color.slate500,
+    fontSize: editorType.size.micro11,
+    fontWeight: editorType.weight.bold,
+    color: color.grey4,
   },
   managerRow: {
     flexDirection: 'row',
@@ -251,19 +250,19 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: radius.pill,
-    backgroundColor: color.blue100,
+    backgroundColor: color.blueTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.heavy,
-    color: color.blue700,
+    fontSize: editorType.size.label,
+    fontWeight: editorType.weight.heavy,
+    color: color.blueDeep,
   },
   bubbleLabel: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.semibold,
-    color: color.slate400,
+    fontSize: editorType.size.micro11,
+    fontWeight: editorType.weight.semibold,
+    color: color.grey4,
     paddingHorizontal: 4,
   },
   labelRight: {
@@ -276,28 +275,28 @@ const styles = StyleSheet.create({
   },
   bubbleManager: {
     backgroundColor: color.white,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    borderBottomRightRadius: radius.lg,
+    borderTopLeftRadius: radius.card,
+    borderTopRightRadius: radius.card,
+    borderBottomRightRadius: radius.card,
     borderBottomLeftRadius: 6,
     borderWidth: 1,
-    borderColor: color.line,
+    borderColor: color.grey2,
   },
   bubbleCreator: {
-    backgroundColor: color.accent,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
+    backgroundColor: color.blue,
+    borderTopLeftRadius: radius.card,
+    borderTopRightRadius: radius.card,
     borderBottomRightRadius: 6,
-    borderBottomLeftRadius: radius.lg,
+    borderBottomLeftRadius: radius.card,
   },
   bubbleTextManager: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
+    fontSize: editorType.size.bodySm,
+    lineHeight: editorType.size.bodySm * editorType.leading.body,
     color: color.ink,
   },
   bubbleTextCreator: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
+    fontSize: editorType.size.bodySm,
+    lineHeight: editorType.size.bodySm * editorType.leading.body,
     color: color.white,
   },
   quote: {
@@ -307,10 +306,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   quoteOnWhite: {
-    backgroundColor: color.fillQuiet,
+    backgroundColor: color.grey1,
   },
   quoteOnAccent: {
-    backgroundColor: color.whiteA16,
+    backgroundColor: editor.w16,
   },
   quoteBar: {
     width: 3,
@@ -321,26 +320,26 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   quoteAuthor: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.heavy,
+    fontSize: editorType.size.micro11,
+    fontWeight: editorType.weight.heavy,
   },
   quoteExcerpt: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.medium,
+    fontSize: editorType.size.label,
+    fontWeight: editorType.weight.medium,
   },
   postRef: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     padding: 10,
-    borderRadius: radius.sm,
-    backgroundColor: color.fillQuiet,
+    borderRadius: radius.thumb,
+    backgroundColor: color.grey1,
   },
   postRefIcon: {
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: color.blue100,
+    backgroundColor: color.blueTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -350,13 +349,13 @@ const styles = StyleSheet.create({
   },
   postRefTitle: {
     fontSize: 13.5,
-    fontWeight: type.weight.bold,
+    fontWeight: editorType.weight.bold,
     color: color.ink,
   },
   postRefMeta: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.semibold,
-    color: color.slate500,
+    fontSize: editorType.size.micro11,
+    fontWeight: editorType.weight.semibold,
+    color: color.grey4,
   },
   voiceRow: {
     flexDirection: 'row',
@@ -381,7 +380,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   voiceDuration: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.bold,
+    fontSize: editorType.size.label,
+    fontWeight: editorType.weight.bold,
   },
 });

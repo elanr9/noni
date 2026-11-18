@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 
 import { CLASSIC_TEXT_COLOR, OVERLAY_TEXT_SPEC } from '../../../lib/overlay-boxes';
-import { color } from '../../../theme/tokens';
 import { OutlinedText } from '../../ui/OutlinedText';
 import { PLACE_EDGE, clamp } from '../slides/frame';
 import {
@@ -20,6 +19,7 @@ import {
   SUBTITLE_WIDTH,
 } from './subtitles';
 import { useEvent } from './useEvent';
+import { editor } from '../../../theme/v2';
 
 const TAP_SLOP_PX = 4;
 
@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
     right: -6,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: color.whiteA75,
+    borderColor: editor.w75,
     borderStyle: 'dashed',
   },
 });

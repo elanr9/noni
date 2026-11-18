@@ -1,9 +1,9 @@
 import type { JSX } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { color, radius, space, type } from '../../../../theme/tokens';
-import { PressableScale } from '../../../ui/PressableScale';
 import type { CapturePermissions } from './useCapturePermissions';
+import { color, editor, editorType, radius, space } from '../../../../theme/v2';
+import { Press } from '../../../v2';
 
 export function PermissionGate({ permissions }: { permissions: CapturePermissions }): JSX.Element {
   const blocked = permissions.state === 'blocked';
@@ -15,7 +15,7 @@ export function PermissionGate({ permissions }: { permissions: CapturePermission
           ? 'Noni needs the camera and microphone to record. Turn both on in Settings and come back.'
           : 'Allow both so you can record clips for this post.'}
       </Text>
-      <PressableScale
+      <Press
         accessibilityRole="button"
         style={styles.button}
         onPress={() => {
@@ -24,7 +24,7 @@ export function PermissionGate({ permissions }: { permissions: CapturePermission
         }}
       >
         <Text style={styles.buttonText}>{blocked ? 'Open Settings' : 'Allow access'}</Text>
-      </PressableScale>
+      </Press>
     </View>
   );
 }
@@ -34,20 +34,20 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: space.gutter,
+    paddingHorizontal: space[6],
     gap: space[3],
-    backgroundColor: color.ink900,
+    backgroundColor: editor.deep,
   },
   title: {
     color: color.white,
-    fontSize: type.size.card,
-    fontWeight: type.weight.bold,
+    fontSize: editorType.size.card,
+    fontWeight: editorType.weight.bold,
     textAlign: 'center',
   },
   body: {
-    color: color.whiteA75,
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
+    color: editor.w75,
+    fontSize: editorType.size.bodySm,
+    lineHeight: editorType.size.bodySm * editorType.leading.body,
     textAlign: 'center',
   },
   button: {
@@ -59,7 +59,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: color.ink,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
+    fontSize: editorType.size.bodySm,
+    fontWeight: editorType.weight.bold,
   },
 });

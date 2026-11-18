@@ -3,8 +3,8 @@ import { memo, type JSX } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 
 import type { Clip, MediaAsset } from '../../../../lib/edit-document';
-import { color } from '../../../../theme/tokens';
 import { useAssetFrames } from './useAssetFrames';
+import { editor } from '../../../../theme/v2';
 
 export const BlockThumbs = memo(function BlockThumbs(props: {
   asset: MediaAsset | null;
@@ -63,5 +63,5 @@ export const BlockThumbs = memo(function BlockThumbs(props: {
 
 const styles = StyleSheet.create({
   row: { position: 'absolute', top: 0, left: 0, flexDirection: 'row' },
-  empty: { backgroundColor: color.ink800 },
+  empty: { backgroundColor: editor.deepRaised },
 });

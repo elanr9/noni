@@ -1,647 +1,354 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {
-  useFocusEffect,
-  useLocalSearchParams,
-  useRouter,
-} from 'expo-router';
+// A creator's live (or scheduled) post, v2: the media, where it stands, the
+// sound to add, real per platform numbers and what it earned, and links out.
+// Posts that are not approved or live hand over to assignment/[id].
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, RefreshControl, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { FormatTag } from '../../../components/creator/Chips';
-import {
-  INSTAGRAM_SHARE,
-  TIKTOK_SHARE,
-  savesForViews,
-  shortDateLabel,
-  viralityTopPercents,
-} from '../../../components/creator/posts-shared';
-import { SlideNav, type SlideNavSlide } from '../../../components/creator/SlideNav';
-import { Screen } from '../../../components/layout/Screen';
-import { DetailSkeleton } from '../../../components/states';
-import { Button } from '../../../components/ui/Button';
-import { Icon } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { Segmented } from '../../../components/ui/Segmented';
+import { EmptyHero, SlidesHero, VideoHero } from '../../../components/creator/v2/PostDetailScreen';
+import { AudioCover } from '../../../components/admin/v2/audio/AudioCover';
+import { TikTokSoundCard } from '../../../components/admin/v2/audio/TikTokSoundCard';
+import { Button, Card, Chip, Icon, Label, Row, Screen, Seg, Sheet, Skeleton, TikTokMark, InstagramMark } from '../../../components/v2';
+import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
-import {
-  countOnDate,
-  publishTimeLabel,
-  useCreatorQueue,
-} from '../../../lib/creator-queue';
-import { earningsForViews, formatCount } from '../../../lib/earnings';
-import {
-  getAssignment,
-  markMusicAdded,
-  parseAssignmentMetrics,
-  type AssignmentWithBrief,
-} from '../../../lib/tasks-api';
-import { color, radius, shadow, space, type } from '../../../theme/tokens';
-import { TikTokSoundCard } from '../../../components/admin/v2/audio/TikTokSoundCard';
-import type { PostAudio } from '../../../lib/brief-library';
-import { parsePostAudio } from '../../../lib/edit-document';
-import { supabase } from '../../../lib/supabase';
+import { loadCreatorPostDetail, type CreatorPostDetail } from '../../../lib/creator-post-detail';
+import { countOnDate, publishTimeLabel, useCreatorQueue } from '../../../lib/creator-queue';
+import { fmt, money, parseDayKey, shortDate } from '../../../lib/v2-format';
+import { useV2Data } from '../../../lib/v2-posts';
+import { markMusicAdded } from '../../../lib/tasks-api';
+import { color, motion, num, radius, text, tone } from '../../../theme/v2';
 
 type Platform = 'tiktok' | 'instagram';
 
-function cleanHandle(raw: string | null): string | null {
-  const trimmed = raw?.trim().replace(/^@/, '') ?? '';
-  return trimmed.length > 0 ? trimmed : null;
+function cleanHandle(raw: string | null | undefined): string | null {
+  const h = raw?.trim().replace(/^@/, '') ?? '';
+  return h.length > 0 ? h : null;
 }
 
-export default function PostDetailScreen() {
+function Stat({ value, label, accent }: { value: string; label: string; accent?: boolean }) {
+  return (
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <Text style={[num.lg, accent ? { color: color.green } : null]}>{value}</Text>
+      <Text numberOfLines={1} style={text.meta}>{label}</Text>
+    </View>
+  );
+}
+
+export default function CreatorLivePostScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { width: W } = useWindowDimensions();
   const { profile } = useAuth();
   const { assignments } = useCreatorQueue();
+  const companyId = profile?.active_company_id ?? null;
 
-  const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [platformIndex, setPlatformIndex] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [handles, setHandles] = useState<{
-    tiktok: string | null;
-    instagram: string | null;
-  }>({ tiktok: null, instagram: null });
-  const [markingMusic, setMarkingMusic] = useState(false);
-  /** The sound under the latest take, for the TikTok card. */
-  const [audio, setAudio] = useState<PostAudio | null>(null);
+  const posts = useV2Data((s) => s.posts);
+  const v2Company = useV2Data((s) => s.companyId);
+  const loadV2 = useV2Data((s) => s.load);
 
-  const onMusicAdded = useCallback(async () => {
-    if (assignment === null || markingMusic) return;
-    setMarkingMusic(true);
-    try {
-      const row = await markMusicAdded(assignment.id);
-      setAssignment((prev) =>
-        prev === null
-          ? prev
-          : { ...prev, music_marked_by_creator_at: row.music_marked_by_creator_at },
-      );
-    } catch {
-      setMarkingMusic(false);
-      return;
-    }
-    setMarkingMusic(false);
-  }, [assignment, markingMusic]);
+  const [detail, setDetail] = useState<CreatorPostDetail | null>(null);
+  const [error, setError] = useState<'missing' | 'failed' | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [handles, setHandles] = useState<Record<Platform, string | null>>({ tiktok: null, instagram: null });
+  const [platform, setPlatform] = useState<Platform>('tiktok');
+  const [sound, setSound] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const shown = useRef(false);
+  const retry = useRef<() => void>(() => undefined);
 
-  const load = useCallback(async () => {
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-    if (!profile?.active_company_id) return;
-    try {
-      const row = await getAssignment(profile.active_company_id, id);
-      setAssignment(row);
-      if (row?.submission_id) {
-        const { data } = await supabase.from('submissions').select('audio').eq('id', row.submission_id).maybeSingle();
-        setAudio(parsePostAudio(data?.audio));
+  const load = useCallback(
+    async (manual = false) => {
+      if (!companyId || !id || !profile) return;
+      try {
+        const next = await loadCreatorPostDetail(companyId, id);
+        if (!next) {
+          setDetail(null);
+          setError('missing');
+          return;
+        }
+        setError(null);
+        shown.current = true;
+        setDetail(next);
+        const account = await getCreatorAccount(companyId, profile.id).catch(() => null);
+        setHandles({ tiktok: cleanHandle(account?.tiktok_handle), instagram: cleanHandle(account?.instagram_handle) });
+      } catch {
+        if (!shown.current) setError('failed');
+        else if (manual) toast.error('Could not refresh this post.', { label: 'Retry', onPress: () => retry.current() });
+      } finally {
+        setRefreshing(false);
       }
-      if (row !== null) {
-        const account = await getCreatorAccount(row.company_id, profile.id);
-        setHandles({
-          tiktok: cleanHandle(account?.tiktok_handle ?? null),
-          instagram: cleanHandle(account?.instagram_handle ?? null),
-        });
-      }
-    } catch {
-      setAssignment(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, profile?.id, profile?.active_company_id]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [companyId, id, profile?.id],
+  );
+
+  useEffect(() => {
+    retry.current = () => void load(true);
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load]),
+      if (companyId) void loadV2(companyId, v2Company === companyId);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [load, companyId]),
   );
 
-  const isPosted =
-    assignment !== null &&
-    (assignment.status === 'posted' || assignment.status === 'approved');
-  const scheduled = assignment !== null && assignment.status === 'approved';
+  const a = detail?.assignment ?? null;
+  const live = a !== null && (a.status === 'posted' || a.status === 'approved');
+  const scheduled = a?.status === 'approved';
 
+  // Anything not approved or live belongs on the post detail.
   useEffect(() => {
-    if (assignment !== null && !isPosted) {
-      router.replace({
-        pathname: '/(creator)/assignment/[id]',
-        params: { id: assignment.id },
-      });
-    }
-  }, [assignment, isPosted, router]);
+    if (a && !live) router.replace({ pathname: '/(creator)/assignment/[id]', params: { id: a.id } });
+  }, [a, live, router]);
 
-  const topPercents = useMemo(
-    () => viralityTopPercents(assignments),
-    [assignments],
-  );
+  const stats = useMemo(() => posts.find((p) => p.assignmentId === id) ?? null, [posts, id]);
 
-  if (loading || (assignment !== null && !isPosted)) {
-    return <DetailSkeleton />;
-  }
+  const heroW = Math.min(240, W * 0.6);
+  const heroH = (heroW * 16) / 9;
 
-  if (assignment === null) {
+  if (!detail || !a || !live) {
     return (
-      <Screen contentStyle={styles.center}>
-        <Text style={styles.missing}>Post not found</Text>
-        <PressableScale onPress={() => router.back()}>
-          <Text style={styles.backLink}>Go back</Text>
-        </PressableScale>
+      <Screen back title="Post">
+        {error ? (
+          <Animated.View entering={FadeIn.duration(200)} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+            <Icon name="cloud_off" size={40} color={color.grey3} />
+            <Text style={[text.card, { textAlign: 'center' }]}>{error === 'missing' ? 'This post is gone' : 'Could not load this post'}</Text>
+            <Text style={[text.body, { color: color.grey4, textAlign: 'center' }]}>
+              {error === 'missing' ? 'It was removed or moved to another team.' : 'Check your connection and try again.'}
+            </Text>
+            {error === 'missing' ? (
+              <Button pill variant="quiet" label="Go back" onPress={() => router.back()} />
+            ) : (
+              <Button
+                pill
+                label="Try again"
+                icon="refresh"
+                onPress={() => {
+                  setError(null);
+                  void load();
+                }}
+              />
+            )}
+          </Animated.View>
+        ) : (
+          <View style={{ paddingHorizontal: 20, alignItems: 'center', gap: 12, paddingTop: 8 }}>
+            <Skeleton w={heroW} h={heroH} r={radius.sheet} />
+            <Skeleton h={44} />
+            <Skeleton h={96} />
+          </View>
+        )}
       </Screen>
     );
   }
 
-  const brief = assignment.briefs;
-  const isPhoto = brief.format === 'photo_carousel';
-  const metrics = parseAssignmentMetrics(assignment.metrics);
-  const totalViews = metrics.views ?? 0;
-  const totalLikes = metrics.likes ?? 0;
-  const totalSaves = savesForViews(totalViews, assignment.metrics);
+  const title = a.briefs?.title?.trim() || 'Post';
+  const slideshow = detail.slideshow;
+  const audio = detail.submission?.audio ?? null;
+  const publishTime = publishTimeLabel(a, countOnDate(assignments, a.scheduled_date));
+  const day = a.scheduled_date ? shortDate(parseDayKey(a.scheduled_date)) : null;
+  const when = scheduled ? `Posts ${day ? `${day} at ` : 'at '}${publishTime}` : day ? `Posted ${day}` : 'Live';
 
-  const platform: Platform = platformIndex === 1 ? 'instagram' : 'tiktok';
-  const share = platform === 'tiktok' ? TIKTOK_SHARE : INSTAGRAM_SHARE;
-  const views = Math.round(totalViews * share);
-  const likes = Math.round(totalLikes * share);
-  const saves = Math.round(totalSaves * share);
-  const earned = earningsForViews(views).earned;
-
-  const tier = earningsForViews(totalViews);
-  const tierFill = ((tier.earned % 20) / 20) * 100;
-
-  const topPercent = topPercents.get(assignment.id);
-  const showTopChip = topPercent !== undefined && topPercent <= 10;
-
-  const handle = handles[platform];
-  const publishTime = publishTimeLabel(
-    assignment,
-    countOnDate(assignments, assignment.scheduled_date),
-  );
-  const postedLine = [
-    scheduled
-      ? `Scheduled ${shortDateLabel(assignment.scheduled_date)}, posts at ${publishTime}`
-      : `Posted ${shortDateLabel(assignment.scheduled_date)} at ${publishTime}`,
-    handle !== null ? `@${handle}` : null,
-  ]
-    .filter((v) => v !== null)
-    .join(' · ');
-
-  const musicCard =
-    isPhoto && assignment.status === 'posted'
-      ? assignment.music_approved_at !== null
-        ? {
-            title: 'Music approved',
-            body: 'You are earning on this post.',
-            action: false,
-          }
-        : assignment.music_marked_by_creator_at !== null
-          ? {
-              title: 'Music sent for review',
-              body: 'Your manager will check it soon.',
-              action: false,
-            }
-          : {
-              title: 'Add the music',
-              body: 'Open the post on TikTok and Instagram, add the trending sound, then come back and tap done.',
-              action: true,
-            }
-      : null;
-
-  const slides: SlideNavSlide[] = (brief.script ?? '')
-    .split('\n\n')
-    .map((block) => block.trim())
-    .filter((block) => block.length > 0)
-    .map((text) => ({ text }));
-  if (slides.length === 0) {
-    slides.push({ text: brief.hook ?? brief.title });
-  }
-
-  const postUrl = assignment.post_url;
   const urlFor = (p: Platform): string | null => {
-    if (postUrl !== null && postUrl.toLowerCase().includes(p)) return postUrl;
+    const postUrl = a.post_url;
+    if (postUrl && postUrl.toLowerCase().includes(p)) return postUrl;
     const h = handles[p];
-    if (h === null) return null;
-    return p === 'tiktok'
-      ? `https://www.tiktok.com/@${h}`
-      : `https://www.instagram.com/${h}/`;
+    if (!h) return null;
+    return p === 'tiktok' ? `https://www.tiktok.com/@${h}` : `https://www.instagram.com/${h}/`;
   };
-
   const openOn = (p: Platform) => {
     const url = urlFor(p);
-    if (url !== null) void Linking.openURL(url);
+    if (!url) {
+      toast.show(`Add your ${p === 'tiktok' ? 'TikTok' : 'Instagram'} handle in Settings first.`);
+      return;
+    }
+    void Linking.openURL(url).catch(() => toast.error('Could not open the app.'));
   };
 
+  const musicAdded = a.music_marked_by_creator_at !== null;
+  const markAdded = async () => {
+    if (marking) return;
+    setMarking(true);
+    try {
+      const row = await markMusicAdded(a.id);
+      setDetail((d) => (d ? { ...d, assignment: { ...d.assignment, music_marked_by_creator_at: row.music_marked_by_creator_at } } : d));
+      setSound(false);
+      toast.success('Sent to your team to check');
+    } catch {
+      toast.error('Could not save that. Try again.', { label: 'Retry', onPress: () => void markAdded() });
+    } finally {
+      setMarking(false);
+    }
+  };
+
+  // Slideshows need the sound added by hand on each app; reels carry it already.
+  const musicLine =
+    slideshow && a.status === 'posted'
+      ? a.music_approved_at !== null
+        ? { tone: 'green' as const, label: 'Music approved' }
+        : musicAdded
+          ? { tone: 'amber' as const, label: 'Music in review' }
+          : { tone: 'blue' as const, label: 'Add the music' }
+      : null;
+
+  const ps = stats ? stats[platform] : null;
+
   return (
-    <Screen scroll bg={color.white} contentStyle={styles.content}>
-      <View style={styles.topBar}>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          onPress={() => router.back()}
-          style={styles.backBtn}
-        >
-          <Icon name="chevron-left" size={22} color={color.ink} />
-        </PressableScale>
-        <Text style={styles.topTitle}>Post</Text>
-        <View style={styles.topSpacer} />
-      </View>
-
-      <View style={[styles.media, shadow.shadowMedia]}>
-        {isPhoto ? (
-          <SlideNav slides={slides} variant="dark" style={styles.mediaFill} swipe />
-        ) : (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel={playing ? 'Pause' : 'Play'}
-            onPress={() => setPlaying((p) => !p)}
-            style={styles.mediaFill}
-          >
-            <View style={styles.playWrap}>
-              <View style={styles.playBtn}>
-                <Icon
-                  name={playing ? 'pause' : 'play'}
-                  size={22}
-                  color={color.white}
-                />
-              </View>
-            </View>
-            <Text style={styles.mediaTitle} numberOfLines={2}>
-              {brief.title}
-            </Text>
-          </PressableScale>
-        )}
-        <View style={styles.mediaChips} pointerEvents="none">
-          <FormatTag format={brief.format} />
-          {showTopChip && (
-            <View style={styles.topChip}>
-              <Icon name="trending-up" size={11} color={color.green} />
-              <Text style={styles.topChipText}>{`Top ${topPercent}%`}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {audio !== null && assignment.music_marked_by_creator_at === null && (
-        <View style={[styles.noticeCard, shadow.shadowCard]}>
-          <View style={styles.noticeHead}>
-            <View style={styles.linkIcon}>
-              <Icon name="music-2" size={16} color={color.ink} />
-            </View>
-            <Text style={styles.noticeTitle}>Add the sound on TikTok</Text>
-          </View>
-          <TikTokSoundCard audio={audio} tiktokUrl={urlFor('tiktok')} onDone={() => void onMusicAdded()} />
-        </View>
-      )}
-      {audio === null && musicCard !== null && (
-        <View style={[styles.noticeCard, shadow.shadowCard]}>
-          <View style={styles.noticeHead}>
-            <View style={styles.linkIcon}>
-              <Icon name="music-2" size={16} color={color.ink} />
-            </View>
-            <Text style={styles.noticeTitle}>{musicCard.title}</Text>
-          </View>
-          <Text style={styles.noticeBody}>{musicCard.body}</Text>
-          {musicCard.action && (
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={markingMusic}
-              onPress={() => void onMusicAdded()}
-            >
-              I added the music
-            </Button>
-          )}
-        </View>
-      )}
-
-      <View style={styles.titleBlock}>
-        <Text style={styles.title}>{brief.title}</Text>
-        <Text style={styles.postedLine}>{postedLine}</Text>
-      </View>
-
-      {scheduled ? (
-        <View style={[styles.noticeCard, shadow.shadowCard]}>
-          <View style={styles.noticeHead}>
-            <View style={styles.linkIcon}>
-              <Icon name="clock" size={16} color={color.green} />
-            </View>
-            <Text style={styles.noticeTitle}>Scheduled</Text>
-          </View>
-          <Text style={styles.noticeBody}>
-            {`Posts at ${publishTime}. Views and earnings show up once it is live.`}
-          </Text>
-        </View>
-      ) : (
-        <>
-          <Segmented
-            options={['TikTok', 'Instagram']}
-            value={platformIndex}
-            onChange={setPlatformIndex}
+    <Screen back title="Post">
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load(true);
+              if (companyId) void loadV2(companyId, true);
+            }}
+            tintColor={color.grey4}
           />
+        }
+      >
+        <Animated.View entering={FadeIn.duration(220)} style={{ alignItems: 'center', paddingBottom: 16 }}>
+          {detail.media.length === 0 ? (
+            <EmptyHero width={heroW} height={heroH} state="Posted" />
+          ) : slideshow ? (
+            <SlidesHero uris={detail.media} width={heroW} height={heroH} rendering={false} />
+          ) : (
+            <VideoHero uri={detail.media[0]} width={heroW} height={heroH} rendering={false} />
+          )}
+        </Animated.View>
 
-          <View style={styles.statGrid}>
-            {(
-              [
-                { label: 'Views', value: formatCount(views), money: false },
-                { label: 'Likes', value: formatCount(likes), money: false },
-                { label: 'Saves', value: formatCount(saves), money: false },
-                { label: 'Earned', value: `$${earned.toFixed(2)}`, money: true },
-              ] as const
-            ).map((s) => (
-              <View key={s.label} style={[styles.statCard, shadow.shadowCard]}>
-                <Text style={[styles.statValue, s.money && styles.statValueMoney]}>
-                  {s.value}
-                </Text>
-                <Text style={styles.statLabel}>{s.label}</Text>
+        <Animated.View entering={FadeInDown.delay(60).duration(240).easing(motion.tabEase)} style={{ alignItems: 'center', gap: 8, paddingBottom: 16 }}>
+          <Text style={[text.card, { textAlign: 'center' }]} numberOfLines={2}>
+            {title}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Chip small tone="green" label={scheduled ? 'Approved' : 'Live'} />
+            <Chip small tone={slideshow ? 'purple' : 'blue'} label={slideshow ? 'Slideshow' : 'Reel'} />
+            <Text style={text.meta}>{when}</Text>
+          </View>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(120).duration(240).easing(motion.tabEase)}>
+          {scheduled ? (
+            <Card style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: tone.green.tint, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="schedule" size={22} color={tone.green.fg} />
               </View>
-            ))}
-          </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <Text style={text.row}>Scheduled</Text>
+                <Text style={[text.body, { color: color.grey4 }]}>{`It goes up at ${publishTime}. Views and earnings show here once it is live.`}</Text>
+              </View>
+            </Card>
+          ) : null}
 
-          <View style={[styles.tierCard, shadow.shadowCard]}>
-            <View style={styles.tierRow}>
-              <Text style={styles.tierAmount}>{`$${tier.earned.toFixed(2)}`}</Text>
-              <Text style={styles.tierToGo}>
-                {`${formatCount(tier.toGo)} views to $${tier.next}`}
-              </Text>
-            </View>
-            <View style={styles.tierTrack}>
-              <View style={[styles.tierFill, { width: `${tierFill}%` }]} />
-            </View>
-          </View>
+          {audio || musicLine ? (
+            <>
+              <Label style={{ marginTop: 8, marginBottom: 8, marginLeft: 4 }}>Sound</Label>
+              <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {audio ? (
+                  <AudioCover t={audio.track} size={48} />
+                ) : (
+                  <View style={{ width: 48, height: 48, borderRadius: radius.thumb, backgroundColor: tone.purple.tint, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="music_note" size={24} color={tone.purple.fg} />
+                  </View>
+                )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={text.row}>
+                    {audio ? audio.track.title : 'Trending sound'}
+                  </Text>
+                  <Text numberOfLines={1} style={text.meta}>
+                    {audio ? audio.track.artist : musicLine?.label}
+                  </Text>
+                </View>
+                {musicLine && musicLine.tone !== 'blue' ? (
+                  <Chip small tone={musicLine.tone} label={musicLine.label} />
+                ) : (
+                  <Button pill variant="secondary" label={musicAdded ? 'Added' : 'Add it'} disabled={musicAdded} onPress={() => setSound(true)} />
+                )}
+              </Card>
+            </>
+          ) : null}
 
-          <View style={styles.links}>
-            {(
-              [
-                { platform: 'tiktok', label: 'Open on TikTok', icon: 'music-2' },
-                { platform: 'instagram', label: 'Open on Instagram', icon: 'at-sign' },
-              ] as const
-            ).map((row) => {
-              const rowHandle = handles[row.platform];
-              return (
-                <PressableScale
-                  key={row.platform}
-                  accessibilityRole="button"
-                  accessibilityLabel={row.label}
-                  onPress={() => openOn(row.platform)}
-                  style={[styles.linkRow, shadow.shadowCard]}
-                >
-                  <View style={styles.linkIcon}>
-                    <Icon name={row.icon} size={16} color={color.ink} />
-                  </View>
-                  <View style={styles.linkBody}>
-                    <Text style={styles.linkLabel}>{row.label}</Text>
-                    {rowHandle !== null && (
-                      <Text style={styles.linkHandle}>{`@${rowHandle}`}</Text>
-                    )}
-                  </View>
-                  <Icon name="arrow-right" size={17} color={color.slate400} />
-                </PressableScale>
-              );
-            })}
+          {!scheduled ? (
+            <>
+              <Seg<Platform>
+                style={{ marginTop: 8, marginBottom: 12 }}
+                value={platform}
+                onChange={setPlatform}
+                options={[
+                  { key: 'tiktok', label: 'TikTok' },
+                  { key: 'instagram', label: 'Instagram' },
+                ]}
+              />
+              {stats === null ? (
+                <Skeleton h={164} />
+              ) : (
+                <Animated.View key={platform} entering={FadeIn.duration(200)}>
+                  <Card style={{ gap: 16 }}>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <Stat value={fmt(ps?.views ?? 0)} label="views" />
+                      <Stat value={fmt(ps?.likes ?? 0)} label="likes" />
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <Stat value={fmt(ps?.comments ?? 0)} label="comments" />
+                      <Stat value={fmt(ps?.saves ?? 0)} label="saves" />
+                    </View>
+                  </Card>
+                </Animated.View>
+              )}
+              <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: tone.green.tint, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="payments" size={22} color={tone.green.fg} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={text.row}>Earned on this post</Text>
+                  <Text style={text.meta}>{stats ? `${fmt(stats.views)} views on both apps` : 'Counting views'}</Text>
+                </View>
+                {stats ? <Text style={[num.sm, { color: color.green }]}>{money(stats.earnedCents)}</Text> : <ActivityIndicator size="small" color={color.grey3} />}
+              </Card>
+            </>
+          ) : null}
+
+          <Label style={{ marginTop: 8, marginBottom: 8, marginLeft: 4 }}>Open</Label>
+          <Card pad={0} style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
+            <Row chevron onPress={() => openOn('tiktok')}>
+              <TikTokMark size={22} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={text.row}>Open on TikTok</Text>
+                {handles.tiktok ? <Text style={text.meta}>{`@${handles.tiktok}`}</Text> : null}
+              </View>
+            </Row>
+            <Row chevron last onPress={() => openOn('instagram')}>
+              <InstagramMark size={22} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={text.row}>Open on Instagram</Text>
+                {handles.instagram ? <Text style={text.meta}>{`@${handles.instagram}`}</Text> : null}
+              </View>
+            </Row>
+          </Card>
+        </Animated.View>
+      </ScrollView>
+
+      <Sheet open={sound} onClose={() => (marking ? undefined : setSound(false))} title={slideshow ? 'Add the music' : 'Add the sound on TikTok'}>
+        {audio ? (
+          <TikTokSoundCard audio={audio} tiktokUrl={urlFor('tiktok')} onDone={() => void markAdded()} />
+        ) : (
+          <View style={{ gap: 16 }}>
+            <Text style={[text.body, { color: color.grey4 }]}>Open the post on TikTok and Instagram, add the trending sound, then come back and tap Done.</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button variant="quiet" label="Not yet" disabled={marking} onPress={() => setSound(false)} />
+              <Button label={marking ? 'Saving' : 'Done'} disabled={marking} onPress={() => void markAdded()} />
+            </View>
           </View>
-        </>
-      )}
+        )}
+      </Sheet>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  content: {
-    gap: space[4],
-    paddingBottom: space[10],
-  },
-  center: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[3],
-  },
-  missing: {
-    fontSize: type.size.body,
-    color: color.slate500,
-  },
-  backLink: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-    color: color.blue700,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topTitle: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  topSpacer: {
-    width: 40,
-  },
-  media: {
-    height: 330,
-    borderRadius: radius['2xl'],
-    backgroundColor: color.ink900,
-    overflow: 'hidden',
-  },
-  mediaFill: {
-    flex: 1,
-  },
-  mediaChips: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  topChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-    borderRadius: radius.pill,
-    backgroundColor: color.greenSoft,
-  },
-  topChipText: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.bold,
-    color: color.green,
-  },
-  playWrap: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaTitle: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
-    textAlign: 'center',
-    fontSize: type.size.body,
-    fontWeight: type.weight.bold,
-    lineHeight: type.size.body * type.leading.snug,
-    letterSpacing: -0.2,
-    color: color.white,
-  },
-  titleBlock: {
-    gap: 4,
-  },
-  title: {
-    fontSize: type.size.cardLg,
-    lineHeight: type.size.cardLg * type.leading.title,
-    letterSpacing: -0.4,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  postedLine: {
-    fontSize: type.size.chip,
-    color: color.slate500,
-  },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: space[3],
-  },
-  statCard: {
-    width: '47%',
-    flexGrow: 1,
-    gap: 2,
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  statValue: {
-    fontSize: type.size.cardLg,
-    fontWeight: type.weight.heavy,
-    letterSpacing: -0.4,
-    color: color.ink,
-  },
-  statValueMoney: {
-    color: color.green,
-  },
-  statLabel: {
-    fontSize: type.size.chip,
-    color: color.slate500,
-  },
-  tierCard: {
-    gap: 10,
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  tierRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  tierAmount: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.heavy,
-    color: color.green,
-  },
-  tierToGo: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.semibold,
-    color: color.slate500,
-  },
-  tierTrack: {
-    height: 6,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-    overflow: 'hidden',
-  },
-  tierFill: {
-    height: '100%',
-    borderRadius: radius.pill,
-    backgroundColor: color.green,
-  },
-  links: {
-    gap: space[3],
-  },
-  noticeCard: {
-    gap: space[3],
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  noticeHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-  },
-  noticeTitle: {
-    flex: 1,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  noticeBody: {
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * type.leading.snug,
-    color: color.slate500,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.white,
-    borderWidth: 1,
-    borderColor: color.line,
-  },
-  linkIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.pill,
-    backgroundColor: color.fillQuiet,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  linkBody: {
-    flex: 1,
-    minWidth: 0,
-    gap: 1,
-  },
-  linkLabel: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  linkHandle: {
-    fontSize: type.size.label,
-    color: color.slate500,
-  },
-});

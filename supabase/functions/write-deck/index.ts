@@ -67,6 +67,7 @@ import {
   stripDashes,
   type BrandContext,
 } from '../_shared/wp8.ts';
+import { brandAudience } from '../_shared/brandVoice.ts';
 import { brandDocBlocks as baseDocBlocks } from '../_shared/generateBrief.ts';
 import { loadStudy, loadStudyById, patternLines, type PatternCard } from '../_shared/referenceStudy.ts';
 import { checkDeck, dropColons, HEDGES, overlap, slopHits, words, type CtaPlace, type InSlide, type OutSlide } from './checks.ts';
@@ -363,9 +364,9 @@ function typeBlock(spec: TypeSpec, postType: PostTypeIn | null, story: boolean, 
     `COVER: ${spec.cover}`,
     story ? storyNote(format) : `BODY: ${spec.body}`,
     story || !spec.slideShape ? '' : `SLIDE SHAPE: ${spec.slideShape}`,
-    `CTA: ${spec.cta} First person, names ${productName}, says the one real thing it does for this exact problem. ${format === 'reel' ? `The CTA text is the on screen line (4 to 12 words). The CTA shot is what they say: ONE line of 6 to 16 words, a tip with ${productName} in it as the creator's own habit ("I let ${productName} send the follow up so no coach goes cold"). ${CTA_NUDGE} ${CUE_RULE}` : `Written in the same shape and numbering as the slides around it so it reads as one of them, not an ad. ${CTA_NUDGE}`}`,
+    `CTA: ${spec.cta} First person, names ${productName}, says the one real thing it does for this exact problem. ${format === 'reel' ? `The CTA text is the on screen line (4 to 12 words). The CTA shot is what they say: ONE line of 6 to 16 words, a tip with ${productName} in it as the creator's own habit ("I run it through ${productName} first so I never skip that step"). ${CTA_NUDGE} ${CUE_RULE}` : `Written in the same shape and numbering as the slides around it so it reads as one of them, not an ad. ${CTA_NUDGE}`}`,
     format === 'slideshow'
-      ? 'PHOTOS: shot on every slide is the photo the creator takes for it, 3 to 8 words. It shows the moment the reader is in or the life they want (sideline before a game, boots on turf, laptop open at night, phone in hand in the car), never a literal picture of the advice. Easy to shoot today on a phone, calm enough to read text on top. On the CTA slide a product screenshot sits inset, so its shot is a plain background.'
+      ? 'PHOTOS: shot on every slide is the photo the creator takes for it, 3 to 8 words. It shows the moment the reader is in or the life they want (laptop open at night, coffee on the desk, phone in hand in the car, the view on a walk), never a literal picture of the advice. Easy to shoot today on a phone, calm enough to read text on top. On the CTA slide a product screenshot sits inset, so its shot is a plain background.'
       : '',
     `WHAT KILLS THIS TYPE: ${spec.kills}`,
   ]
@@ -572,12 +573,12 @@ async function chatReply(admin: ReturnType<typeof adminClient>, companyId: strin
   const past = used.past.filter((t) => !weekTitles.includes(t));
 
   const productName = brand.productName;
-  const reelVoice = VOICE_RULES(productName, 'reel').split('\n').find((l) => l.startsWith('REEL CUES')) ?? '';
+  const reelVoice = VOICE_RULES(productName, 'reel', brandAudience(brand)).split('\n').find((l) => l.startsWith('REEL CUES')) ?? '';
   // Same bytes every turn for this company, so the system prompt caches too.
   const system = [
-    `You pitch short form post ideas (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. Everything you pitch gets made into a real post by real players, so it has to sound like them.`,
+    `You pitch short form post ideas (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. Everything you pitch gets made into a real post by real creators from this audience, so it has to sound like them.`,
     chatTypesBlock(),
-    VOICE_RULES(productName, 'slideshow'),
+    VOICE_RULES(productName, 'slideshow', brandAudience(brand)),
     reelVoice ? `For reels: ${reelVoice}` : '',
     ...featureLines(brand, null),
     brand.bannedPhrases.length ? `BANNED PHRASES from this team (never use): ${brand.bannedPhrases.join(' | ')}` : '',
@@ -685,13 +686,13 @@ async function prepareMake(
     ? await within(approvedExamples(admin, companyId, pinnedFormat), LOOKUP_MS, 'Loading examples').catch(() => [] as string[])
     : [];
   const productName = brand.productName;
-  const reelCues = VOICE_RULES(productName, 'reel').split('\n').find((l) => l.startsWith('REEL CUES')) ?? '';
+  const reelCues = VOICE_RULES(productName, 'reel', brandAudience(brand)).split('\n').find((l) => l.startsWith('REEL CUES')) ?? '';
   const avoid = (Array.isArray(body.avoid) ? body.avoid : []).filter((t): t is string => typeof t === 'string' && Boolean(t.trim())).slice(-6);
 
   const system = [
-    `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager gave you ${remix ? 'a reference post that won in another niche to remix for us' : 'a post idea'}. Write the best possible UGC post for this company: everything you write gets posted by real players, so it has to sound like them.`,
+    `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager gave you ${remix ? 'a reference post that won in another niche to remix for us' : 'a post idea'}. Write the best possible UGC post for this company: everything you write gets posted by real creators from this audience, so it has to sound like them.`,
     makeTypesBlock(formats, pinnedType),
-    VOICE_RULES(productName, pinnedFormat ?? 'slideshow'),
+    VOICE_RULES(productName, pinnedFormat ?? 'slideshow', brandAudience(brand)),
     !pinnedFormat && reelCues ? `For reels: ${reelCues}` : '',
     DETAILS_RULES(productName),
     `CTA: exactly one cta slide, first person, names ${productName}, says the one real thing it does for this exact problem. ${CTA_NUDGE}`,
@@ -754,8 +755,8 @@ async function makeShort(admin: ReturnType<typeof adminClient>, companyId: strin
   const brand = await within(brandFor(admin, companyId), LOOKUP_MS, 'Loading the brand');
   const productName = brand.productName;
   const system = [
-    `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager picked this post in the idea chat; you finish it. Everything you write gets posted by real players, so it has to sound like them.`,
-    VOICE_RULES(productName, format),
+    `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager picked this post in the idea chat; you finish it. Everything you write gets posted by real creators from this audience, so it has to sound like them.`,
+    VOICE_RULES(productName, format, brandAudience(brand)),
     DETAILS_RULES(productName),
     shortRules(productName, format, typeId, kind, idea),
   ].join('\n\n');
@@ -923,8 +924,8 @@ Deno.serve(async (req) => {
         timeoutMs: drafting ? Math.max(1000, left()) : CALL_MS,
       });
     const writerIntro = manager
-      ? `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager is building one post in an editor and asked you for help. Everything you write gets posted by real players, so it has to sound like them.`
-      : `You help a creator who posts for ${brand.companyName} from their own account write their own ${format === 'reel' ? 'reel' : 'slideshow'}. The manager's slides are fixed; you write only the creator's own slides, in the creator's first person voice. Never invent facts about their life (schools, offers, stats); when a line needs their own detail, keep it general or leave one short [bracket] for them to fill.`;
+      ? `You write short form posts (TikTok and Instagram slideshows and reels) that creators post from their own accounts for ${brand.companyName}. A campaign manager is building one post in an editor and asked you for help. Everything you write gets posted by real creators from this audience, so it has to sound like them.`
+      : `You help a creator who posts for ${brand.companyName} from their own account write their own ${format === 'reel' ? 'reel' : 'slideshow'}. The manager's slides are fixed; you write only the creator's own slides, in the creator's first person voice. Never invent facts about their life (where they work or study, results, numbers); when a line needs their own detail, keep it general or leave one short [bracket] for them to fill.`;
     const placement = placementRule(slides, story, freestyle, format, productName, spec.numbered);
     const makeNote = prepared
       ? prepared.source
@@ -946,8 +947,8 @@ Deno.serve(async (req) => {
       const system = [
         writerIntro,
         typeText,
-        VOICE_RULES(productName, format),
-        `TASK: pitch 8 different covers for this post type, best first. Each one is a post a strict campaign manager would approve on sight: a real problem this audience has this month, narrow enough to deliver in ${bodyCount ? `${bodyCount} slides` : 'one post'}, something a player would save or send to a teammate, and close enough to a ${productName} feature that the CTA lands naturally. Spread them across different problems and moments in the audience's year; no two ideas about the same thing.`,
+        VOICE_RULES(productName, format, brandAudience(brand)),
+        `TASK: pitch 8 different covers for this post type, best first. Each one is a post a strict campaign manager would approve on sight: a real problem this audience has this month, narrow enough to deliver in ${bodyCount ? `${bodyCount} slides` : 'one post'}, something someone in this audience would save or send to a friend, and close enough to a ${productName} feature that the CTA lands naturally. Spread them across different problems and moments in the audience's year; no two ideas about the same thing.`,
         `ANSWER with one JSON object and nothing else: {"ideas": [{"cover": string, "say": string, "count": number, "angle": string}]}. cover follows the COVER rule above. ${format === 'reel' ? 'say is the spoken hook, one punchy line of 5 to 12 words.' : 'say is an empty string.'} count is how many body slides (the CTA included) this idea needs, ${noBody || story ? '0' : 'within 3 to 8'}; when the cover names a number, count is that number. angle is one plain sentence to the manager on why this post earns saves or sends, naming the concrete detail it hinges on.`,
       ].join('\n\n');
       const user = [
@@ -987,8 +988,8 @@ Deno.serve(async (req) => {
       const system = [
         `You are the strictest campaign manager on a UGC team for ${brand.companyName}. You read a finished post the way its target viewer will meet it on their feed, and you decide if it ships. You are hard to impress and allergic to anything that sounds generated.`,
         typeText,
-        VOICE_RULES(productName, format),
-        'TASK: score the post 0 to 100 for how well it will do with this audience (scroll stop on the cover, specificity of every slide, sounds like a real player, the CTA feels like a tip, worth saving). Then give the fixes that would raise it most, at most 4, worst first. A fix names the slide index, the problem in a few plain words, and the ready to use replacement: the full new text (and shot when that changes too) written to every rule above. Only fix what is wrong; a post with no real problems gets an empty fixes list. Never suggest a fix that breaks the slide shape or numbering. Long is a problem: a cue over one line, a slide over one short sentence, a setup line ("Here is why", "the real problem") or an ad read gets a shorter fix.',
+        VOICE_RULES(productName, format, brandAudience(brand)),
+        'TASK: score the post 0 to 100 for how well it will do with this audience (scroll stop on the cover, specificity of every slide, sounds like a real person in this audience, the CTA feels like a tip, worth saving). Then give the fixes that would raise it most, at most 4, worst first. A fix names the slide index, the problem in a few plain words, and the ready to use replacement: the full new text (and shot when that changes too) written to every rule above. Only fix what is wrong; a post with no real problems gets an empty fixes list. Never suggest a fix that breaks the slide shape or numbering. Long is a problem: a cue over one line, a slide over one short sentence, a setup line ("Here is why", "the real problem") or an ad read gets a shorter fix.',
         'ANSWER with one JSON object and nothing else: {"score": number, "verdict": string, "fixes": [{"i": number, "problem": string, "text": string, "shot": string}]}. verdict is one plain sentence to the manager. Put a line break inside text as " / ".',
       ].join('\n\n');
       const user = [
@@ -1049,7 +1050,7 @@ Deno.serve(async (req) => {
       [
         writerIntro,
         typeText,
-        manager ? VOICE_RULES(productName, format) : VOICE_RULES(productName, 'reel').replace(/REEL CUES ARE SPOKEN[^\n]*/, 'THIS IS THE CREATOR\'S OWN POST: first person, their voice, never an invented fact about their life.'),
+        manager ? VOICE_RULES(productName, format, brandAudience(brand)) : VOICE_RULES(productName, 'reel', brandAudience(brand)).replace(/REEL CUES ARE SPOKEN[^\n]*/, 'THIS IS THE CREATOR\'S OWN POST: first person, their voice, never an invented fact about their life.'),
         DETAILS_RULES(productName),
         `ANSWER with one JSON object and nothing else: {"note": string, "slides": [{"i": number, "text": string, "shot": string, "feature_id": string | null}], "caption": string, "hashtags": string[], "search_phrase": string}. "slides" holds ONLY the slides tagged WRITE, each with its index i${every ? ' (return every slide; the ones the feedback is not about come back unchanged)' : ''}. Put a line break inside text as " / ". note is one plain sentence to the manager about what you wrote and why it works. ${details ? 'Fill caption, hashtags and search_phrase.' : 'caption, hashtags and search_phrase are empty values.'}`,
       ].join('\n\n');
@@ -1098,7 +1099,7 @@ Deno.serve(async (req) => {
     } else if (drafting) {
       const bodyN = slides.length - 1;
       task = [
-        `Write this whole ${postType?.name ?? 'post'} from scratch. First pick its topic: one real problem this audience has this month, specific and narrow, that a strict campaign manager would approve on sight, that a player would save or send to a teammate, and that sits close enough to one feature that the CTA lands naturally. It must not overlap any taken cover.`,
+        `Write this whole ${postType?.name ?? 'post'} from scratch. First pick its topic: one real problem this audience has this month, specific and narrow, that a strict campaign manager would approve on sight, that someone in this audience would save or send to a friend, and that sits close enough to one feature that the CTA lands naturally. It must not overlap any taken cover.`,
         format === 'reel'
           ? 'Then write the cover (title card text and the spoken hook in shot), every point and the CTA.'
           : 'Then write the cover, every slide and the CTA.',

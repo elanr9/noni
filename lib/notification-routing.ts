@@ -24,9 +24,9 @@ export function routeNotificationTap(
   const campaignId = str(data, 'campaign_id');
 
   if (mode === 'admin') {
-    // Billing moved to the web dashboard; land on settings where its link lives.
+    // Billing lives on the web console; Settings carries its "Open web console" row.
     if (event === 'credits_low' || event === 'company_topup' || event === 'company_spend') {
-      router.push('/(admin)/(tabs)/settings');
+      router.push('/(admin)/settings');
       return;
     }
     if (event === 'message' && creatorId) {
@@ -71,6 +71,7 @@ export function routeNotificationTap(
       router.push('/(admin)/(tabs)/analytics');
       return;
     }
+    // review/[id] loads any state and hands live posts on to brief-post.
     if (event === 'post_live' && assignmentId) {
       router.push(`/(admin)/review/${assignmentId}`);
       return;
@@ -106,6 +107,24 @@ export function routeNotificationTap(
     router.push('/(creator)/(tabs)');
     return;
   }
+  // A new brief from the team: open it the way the creator Briefs list does.
+  if (event === 'brief_published') {
+    const briefId = str(data, 'brief_id');
+    const kind = str(data, 'kind');
+    const type = str(data, 'type');
+    if (!briefId) {
+      router.push('/(creator)/briefs');
+      return;
+    }
+    if (kind === 'Guided' && type === 'Slideshow') {
+      router.push({ pathname: '/(creator)/slides/[id]', params: { id: briefId } });
+    } else if (kind === 'Guided' && type !== 'Long Text') {
+      router.push({ pathname: '/(creator)/capture', params: { mode: 'guided', id: briefId } });
+    } else {
+      router.push({ pathname: '/(creator)/outline/[id]', params: { id: briefId } });
+    }
+    return;
+  }
   if (event === 'post_live' || event === 'milestone') {
     const tiktok = str(data, 'tiktok_url');
     const ig = str(data, 'instagram_url');
@@ -122,6 +141,8 @@ export function routeNotificationTap(
       return;
     }
   }
+  // The v2 post detail: status, the sent media and, for changes requested,
+  // the manager's notes above a Make changes button that resumes the post.
   if (
     event === 'approved' ||
     event === 'changes_requested' ||
@@ -132,8 +153,9 @@ export function routeNotificationTap(
       router.push(`/(creator)/assignment/${assignmentId}`);
       return;
     }
+    // Legacy task links (no assignment) have no detail screen left; Home lists the post.
     if (taskId) {
-      router.push(`/(creator)/post/${taskId}`);
+      router.push('/(creator)/(tabs)');
       return;
     }
   }

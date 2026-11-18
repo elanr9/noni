@@ -81,7 +81,7 @@ const MULTI_SPEAKER_PATTERNS: RegExp[] = [
   /["\u201c][^"\u201d]+["\u201d]\s*,?\s*\b(he|she|they)\s+(said|says|asked|asks|replied|replies)\b/i,
 ];
 
-// Screenplay-style speaker labels at line starts: "Coach:", "Me:", "Her:".
+// Screenplay-style speaker labels at line starts: "Host:", "Me:", "Her:".
 // Timeline and step labels ("Fall:", "September:", "Step:") are not speakers.
 const SPEAKER_LABEL = /^\s*([A-Z][a-z]{1,12}):\s+\S/gm;
 const NON_SPEAKER_LABELS = new Set([
@@ -116,7 +116,7 @@ const NUMBER_WORD = /\d|\b(one|two|three|four|five|six|seven|eight|nine|ten|twen
 // Imperatives that mark a step, not a moral.
 const INSTRUCTION_OPENER = /^\s*(?:then\s+|so\s+|and\s+)?(end|send|email|lock|type|keep|start|follow|build|cut|use|make|add|ask|write|put|close|include|attach|reach|call|text|link|post|tag|check|update|pick|choose|go|get|stop|wait|expect|schedule|book|visit|record|film|upload|search)\b/i;
 
-/** "send them for me" dangles; "draft my emails so coaches read them" has its noun. */
+/** "send them for me" dangles; "draft my emails so clients read them" has its noun. */
 function hasDanglingPronoun(cta: string): boolean {
   const trimmed = cta.trim();
   const ending = /\b(them|it|this|that|those|these)\s*(for me|for you)?[.!?]?\s*$/i.exec(trimmed);
@@ -240,7 +240,7 @@ function mentionsAny(text: string, names: string[]): boolean {
   });
 }
 
-/** "Coaches reveal the real fit, right here, now": three comma parts, all but at most one under 4 words. */
+/** "Reviews reveal the real fit, right here, now": three comma parts, all but at most one under 4 words. */
 function isStitchedFragments(hook: string): boolean {
   const parts = hook.split(',').map((p) => p.trim()).filter(Boolean);
   if (parts.length < 3) return false;
@@ -377,7 +377,7 @@ export function runTier1Checks(
     fail(
       'multi_speaker',
       'talking_points',
-      'a line starts with a speaker label like "Coach:"; single speaker only, no dialogue',
+      'a line starts with a speaker label like "Host:"; single speaker only, no dialogue',
     );
   }
 

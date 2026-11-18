@@ -1,5 +1,6 @@
-import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import Constants from 'expo-constants';
+import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
@@ -57,8 +58,25 @@ function exchangeCode(code: string): Promise<boolean> {
   return exchange;
 }
 
+/** Query and hash params off a callback URL; expo-auth-session no longer exports its QueryParams helper. */
+function getQueryParams(input: string): { params: Record<string, string>; errorCode: string | null } {
+  const url = new URL(input, 'https://phony.example');
+  const errorCode = url.searchParams.get('errorCode');
+  url.searchParams.delete('errorCode');
+  const params: Record<string, string> = {};
+  url.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+  if (url.hash) {
+    new URLSearchParams(url.hash.replace(/^#/, '')).forEach((value, key) => {
+      params[key] = value;
+    });
+  }
+  return { params, errorCode };
+}
+
 export async function createSessionFromUrl(url: string): Promise<boolean> {
-  const { params, errorCode } = QueryParams.getQueryParams(url);
+  const { params, errorCode } = getQueryParams(url);
 
   if (errorCode) {
     throw new Error(errorCode);
@@ -158,3 +176,86 @@ export async function signInWithGoogle(): Promise<boolean> {
   return true;
 }
 
+
+/** True where the native Sign in with Apple sheet exists (iOS 13+). */
+export async function appleSignInAvailable(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return false;
+  return AppleAuthentication.isAvailableAsync().catch(() => false);
+}
+
+/**
+ * Native Sign in with Apple (App Store guideline 4.8). Apple signs a hashed
+ * nonce into the identity token; Supabase checks it against the raw nonce.
+ * Returns false when the user cancels the sheet. Invites match on the
+ * email Apple shares: a "Hide My Email" relay address will not match an
+ * invite, so that user lands on the invite-required screen.
+ */
+export async function signInWithApple(): Promise<boolean> {
+  const rawNonce = Crypto.randomUUID() + Crypto.randomUUID();
+  const hashedNonce = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    rawNonce,
+  );
+
+  let credential: AppleAuthentication.AppleAuthenticationCredential;
+  try {
+    credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+      nonce: hashedNonce,
+    });
+  } catch (e) {
+    if ((e as { code?: string } | null)?.code === 'ERR_REQUEST_CANCELED') {
+      return false;
+    }
+    throw e;
+  }
+  if (!credential.identityToken) {
+    throw new Error('Apple did not return an identity token. Try again.');
+  }
+
+  const { data, error } = await supabase.auth.signInWithIdToken({
+    provider: 'apple',
+    token: credential.identityToken,
+    nonce: rawNonce,
+  });
+  if (error) throw error;
+
+  // Apple sends the name only on the very first authorization, and never in
+  // the identity token, so save it now: into the auth metadata (invite
+  // acceptance reads full_name there) and into the profile if it is empty.
+  const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+    .filter((part): part is string => !!part && part.trim().length > 0)
+    .join(' ')
+    .trim();
+  const userId = data.user?.id;
+  if (fullName && userId) {
+    await supabase.auth
+      .updateUser({
+        data: {
+          full_name: fullName,
+          given_name: credential.fullName?.givenName ?? null,
+          family_name: credential.fullName?.familyName ?? null,
+        },
+      })
+      .catch(() => undefined);
+    // The signup trigger creates the profile when an invite matched; claim
+    // covers a profile that is still missing. Then fill an empty name only.
+    await supabase.rpc('claim_pending_invite').then(
+      () => undefined,
+      () => undefined,
+    );
+    await supabase
+      .from('profiles')
+      .update({ full_name: fullName })
+      .eq('id', userId)
+      .is('full_name', null)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+  }
+  return true;
+}

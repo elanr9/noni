@@ -1,0 +1,225 @@
+/* Briefs tab: week cards or calendar, week detail with all 21 posts, brief detail, new brief, ideas. */
+const briefStore = { weeks: window.V2.weeks, listeners: new Set() };
+const useBriefs = () => { const [, tick] = React.useState({}); React.useEffect(() => { briefStore.listeners.add(tick); return () => briefStore.listeners.delete(tick); }, []); return briefStore; };
+const bumpBriefs = () => briefStore.listeners.forEach((l) => l({}));
+const weekChip = (w) => w.status === 'current' ? <Chip tone="green" icon="bolt">Day {w.day} of 7</Chip> : w.status === 'next' ? <Chip tone="amber" icon="edit_calendar">Plan by Sat</Chip> : <Chip tone="grey">Done</Chip>;
+
+function WeekCard({ w, onClick }) {
+  const reels = w.posts.filter((p) => p.format === 'Reel'), slides = w.posts.filter((p) => p.format === 'Slideshow');
+  const done = (l) => l.filter((p) => p.state === 'Posted').length;
+  const bar = (icon, n, d) => <span style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}><Icon name={icon} size={20} fill={0} weight={300} color="var(--grey-4)" /><span style={{ flex: 1, height: 5, borderRadius: 999, background: 'var(--grey-1)', overflow: 'hidden' }}><span style={{ display: 'block', width: `${d ? (n / d) * 100 : 0}%`, height: '100%', background: 'var(--blue)', borderRadius: 999 }} /></span><span style={{ font: '600 15px/20px var(--font)', color: 'var(--grey-5, #3C4452)', whiteSpace: 'nowrap' }}>{n}/{d}</span></span>;
+  const planned = w.status !== 'next';
+  return (
+    <Card onClick={onClick} pad={'18px 20px 20px'}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ font: '700 21px/26px var(--font)', color: 'var(--ink)', whiteSpace: 'nowrap', letterSpacing: -0.3 }}>Week {w.n}</span>
+        <span style={{ font: '400 15px/20px var(--font)', color: 'var(--grey-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{w.range}</span>
+        {w.status === 'current' ? <Chip tone="green">Day {w.day} of 7</Chip> : w.status === 'next' ? <Chip tone="blue">Next week</Chip> : <Chip tone="grey">Done</Chip>}
+        <Icon name="chevron_right" size={20} weight={400} color="var(--grey-3)" />
+      </div>
+      {planned ? <div style={{ display: 'flex', gap: 18, paddingTop: 16 }}>{bar('videocam', done(reels), reels.length)}{bar('imagesmode', done(slides), slides.length)}</div>
+        : <div style={{ font: '400 16px/22px var(--font)', color: 'var(--grey-3)', paddingTop: 12 }}>Not planned yet. Tap to start it.</div>}
+    </Card>
+  );
+}
+
+function PostRow({ p, i, last, onClick }) {
+  const { fmt, money } = window.V2;
+  const open = p.state === 'Open';
+  return (
+    <Row last={last} top={10} bottom={10} onClick={onClick}>
+      <Thumb w={40} post={p} title={false} radius={8} style={open ? { background: 'var(--grey-1)', opacity: 1 } : undefined} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="t-row" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: open ? 'var(--blue)' : undefined }}>{open ? 'Write this brief' : p.title}</span>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}><Chip tone={STATE_TONE[p.state]} style={{ height: 22, fontSize: 12 }}>{p.state}</Chip><span className="t-meta" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Day {p.day} · {p.creatorName} · {p.kind}</span></span>
+      </span>
+      {p.state === 'Posted' ? <><Num small align="right" value={fmt(p.views)} label="views" /><Num small align="right" value={money(p.sales)} label="sales" tone="green" style={{ width: 44 }} /></> : <Icon name="chevron_right" size={22} color="var(--grey-3)" />}
+    </Row>
+  );
+}
+
+function BriefsScreen() {
+  const nav = useNav();
+  const loaded = useLoaded(400);
+  const TODAY = 20;
+  const [mode, setMode] = React.useState('Day');
+  const [wk, setWk] = React.useState(0);
+  const [day, setDay] = React.useState(TODAY);
+  const slots = {};
+  const dates = Array.from({ length: 7 }, (_, i) => 19 + wk * 7 + i);
+  const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const dnum = (d) => d > 31 ? d - 31 : d;
+  const mon = (d) => d > 31 ? 'Nov' : 'Oct';
+  const long = (d) => `${DOW[(d - 19 + 700) % 7]}, ${mon(d)} ${dnum(d)}`;
+  const list = (d) => slots[d] || [];
+  const addSlot = (d, i) => nav.push('NewBrief', { n: 5, slot: `d${d}-${i}` }, { modal: true });
+  const draftOf = (d, i) => { try { return JSON.parse(localStorage.getItem('noni.brief.d' + d + '-' + i) || 'null'); } catch (e) { return null; } };
+  const creators = window.V2.creators;
+  const SLOT = [['videocam', 'Reel', 'blue'], ['videocam', 'Reel', 'blue'], ['photo_library', 'Slideshow', 'purple']];
+  const nb = (dis, onClick, name) => <button type="button" className="p" disabled={dis} onClick={onClick} style={{ width: 32, height: 32, borderRadius: 999, background: '#fff', boxShadow: 'var(--shadow-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: dis ? 0.35 : 1, flex: '0 0 auto' }}><Icon name={name} size={20} color="var(--ink)" /></button>;
+  const EmptySlot = ({ d, i }) => { const [ic, lbl, tone] = SLOT[i]; const [fg, tint] = TONES[tone]; return (
+    <Card onClick={() => addSlot(d, i)} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <span style={{ width: 44, height: 58, borderRadius: 10, background: tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name={ic} size={22} color={fg} /></span>
+      <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>Create Post {i + 1}</span>{draftOf(d, i) ? <span className="t-meta" style={{ color: 'var(--blue-deep)', fontWeight: 600 }}>In progress</span> : null}</span>
+      <span style={{ display: 'flex', alignItems: 'center' }}>{creators.slice(0, 3).map((c, k) => <span key={c.id} style={{ marginLeft: k ? -8 : 0, borderRadius: 999, border: '2px solid #fff', display: 'flex' }}><Avatar name={c.name} photo={c.photo} tone={c.tone} size={26} ring={false} /></span>)}</span>
+      <Icon name="chevron_right" size={22} color="var(--grey-3)" />
+    </Card>); };
+  return (
+    <Screen title="Briefs" right={<span style={{ display: 'flex', background: 'var(--grey-1)', borderRadius: 999, padding: 3 }}>{[['Day', 'today'], ['Week', 'calendar_view_week']].map(([k, ic]) => <button key={k} type="button" className="p" aria-label={k} onClick={() => setMode(k)} style={{ width: 40, height: 34, borderRadius: 999, background: mode === k ? '#fff' : 'transparent', boxShadow: mode === k ? 'var(--shadow-card)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={ic} size={20} color={mode === k ? 'var(--ink)' : 'var(--grey-4)'} /></button>)}</span>}>
+      {!loaded ? [0, 1, 2].map((i) => <Skeleton key={i} h={96} />) : <>
+        <Card pad={12} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px 12px' }}>
+            {nb(wk <= -1, () => { setWk((w) => w - 1); setDay(19 + (wk - 1) * 7); }, 'chevron_left')}
+            <span style={{ flex: 1, textAlign: 'center', font: '700 15px/20px var(--font)', color: 'var(--ink)' }}>{mon(dates[0])} {dnum(dates[0])} to {mon(dates[6]) !== mon(dates[0]) ? mon(dates[6]) + ' ' : ''}{dnum(dates[6])}</span>
+            {nb(wk >= 2, () => { setWk((w) => w + 1); setDay(19 + (wk + 1) * 7); }, 'chevron_right')}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+            {dates.map((d, i) => { const on = mode === 'Day' && d === day, today = d === TODAY, n = list(d).length, past = d < TODAY; return (
+              <button key={d} type="button" className="p" onClick={() => { setDay(d); setMode('Day'); }} style={{ height: 64, borderRadius: 14, background: on ? 'var(--blue)' : today ? 'var(--blue-tint)' : 'transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, padding: 0 }}>
+                <span style={{ font: '600 11px/13px var(--font)', color: on ? 'rgba(255,255,255,0.8)' : today ? 'var(--blue-deep)' : 'var(--grey-4)' }}>{DOW[i][0]}</span>
+                <span style={{ font: '700 18px/22px var(--font)', color: on ? '#fff' : today ? 'var(--blue-deep)' : past ? 'var(--grey-3)' : 'var(--ink)', letterSpacing: -0.3 }}>{dnum(d)}</span>
+                <span style={{ display: 'flex', gap: 3, height: 5 }}>{[0, 1, 2].map((k) => <span key={k} style={{ width: 5, height: 5, borderRadius: 999, background: on ? (k < n ? '#fff' : 'rgba(255,255,255,0.35)') : k < n ? 'var(--blue)' : 'var(--grey-2)' }} />)}</span>
+              </button>); })}
+          </div>
+        </Card>
+        {mode === 'Day' ? <>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 12px' }}><span style={{ font: '700 22px/28px var(--font)', color: 'var(--ink)', letterSpacing: -0.3 }}>{day === TODAY ? 'Today' : long(day)}</span></div>
+          {[0, 1, 2].map((i) => { const p = list(day)[i]; return p ? <PostRow key={p.id} p={p} i={i} last onClick={() => nav.push('Brief', { id: p.id })} /> : <EmptySlot key={i} d={day} i={i} />; })}
+        </> : <>
+          {dates.map((d, i) => { const n = list(d).length, today = d === TODAY; return (
+            <Card key={d} onClick={() => { setDay(d); setMode('Day'); }} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <span style={{ width: 48, height: 48, borderRadius: 12, background: today ? 'var(--blue)' : 'var(--grey-1)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><span style={{ font: '600 10px/12px var(--font)', color: today ? 'rgba(255,255,255,0.85)' : 'var(--grey-4)', textTransform: 'uppercase' }}>{DOW[i]}</span><span style={{ font: '700 18px/22px var(--font)', color: today ? '#fff' : 'var(--ink)' }}>{dnum(d)}</span></span>
+              <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{today ? 'Today' : long(d)}</span><span className="t-meta">{n ? `${n} of 3 briefed` : 'Nothing briefed yet'}</span></span>
+              <span style={{ display: 'flex', gap: 5 }}>{SLOT.map(([ic, , tone], k) => { const [fg, tint] = TONES[tone]; return <span key={k} style={{ width: 26, height: 34, borderRadius: 7, background: k < n ? fg : tint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={ic} size={14} color={k < n ? '#fff' : fg} /></span>; })}</span>
+              <Icon name="chevron_right" size={20} color="var(--grey-3)" />
+            </Card>); })}
+        </>}
+      </>}
+    </Screen>
+  );
+}
+
+function WeekScreen({ n }) {
+  const nav = useNav();
+  const { weeks } = useBriefs();
+  const w = weeks.find((x) => x.n === n);
+  const [lane, setLane] = React.useState('All');
+  const { fmt, money } = window.V2;
+  const list = w.posts.filter((p) => lane === 'All' || p.format === lane);
+  return (
+    <Screen back title={`Week ${w.n}`} right={<TextButton onClick={() => nav.push('Ideas', { n })}>Ideas</TextButton>}>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}><span className="t-meta" style={{ whiteSpace: 'nowrap', flex: 1 }}>{w.range}</span>{weekChip(w)}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingTop: 12 }}>
+          <Num value={money(w.sales)} label="in sales" tone="green" /><Num value={fmt(w.views)} label="views" /><Num value={`${w.done}/21`} label="posted" />
+        </div>
+      </Card>
+      <Seg options={[{ label: 'All', count: 21 }, { label: 'Reel', key: 'Reel', count: w.reels, tone: 'blue' }, { label: 'Slides', key: 'Slideshow', count: w.slides, tone: 'purple' }]} value={lane} onChange={setLane} style={{ marginBottom: 12 }} />
+      <Card pad={'4px 16px'}>{list.map((p, i) => <PostRow key={p.id} p={p} i={i} last={i === list.length - 1} onClick={() => p.state === 'Open' ? nav.push('NewBrief', { n, slot: p.id }, { modal: true }) : nav.push('Brief', { id: p.id })} />)}</Card>
+    </Screen>
+  );
+}
+
+function BriefScreen({ id }) {
+  const nav = useNav();
+  const { weeks } = useBriefs();
+  const p = weeks.flatMap((w) => w.posts).find((x) => x.id === id) || window.V2.queue.find((x) => x.id === id);
+  const c = window.V2.creator(p.creator);
+  const s = window.V2.script;
+  const { fmt, money } = window.V2;
+  const [sheet, setSheet] = React.useState(false);
+  const L = ({ children }) => <div className="t-meta" style={{ marginTop: 12, color: 'var(--blue-deep)', fontWeight: 600 }}>{children}</div>;
+  return (
+    <Screen back title={p.creatorName} right={<TextButton onClick={() => setSheet(true)}>Edit</TextButton>}>
+      <Card style={{ display: 'flex', gap: 16 }}>
+        <Thumb w={88} post={p} radius={12} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="t-card">{p.title}</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}><Chip tone={FORMAT_TONE[p.format]}>{p.format}</Chip><Chip tone={STATE_TONE[p.state]}>{p.state}</Chip></div>
+          <div className="t-meta" style={{ marginTop: 8 }}>{p.kind} · {p.type} · Day {p.day}</div>
+        </div>
+      </Card>
+      <Card style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar name={c.name} photo={c.photo} tone={c.tone} size={44} />
+        <span style={{ flex: 1 }}><span className="t-row" style={{ display: 'block' }}>{c.name}</span><span className="t-meta">{p.state === 'Posted' ? 'Posted on day ' + p.day : p.state}</span></span>
+        {p.state === 'Posted' ? <><Num small align="right" value={fmt(p.views)} label="views" /><Num small align="right" value={money(p.sales)} label="sales" tone="green" /></> : null}
+      </Card>
+      {p.state === 'Posted' ? <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><Button variant="secondary" pill onClick={() => nav.push('Thread', { id })}>Thread</Button><Button variant="secondary" pill onClick={() => nav.push('Creator', { id: p.creator })}>Profile</Button></div> : null}
+      <Card>
+        <div className="t-card">{p.kind === 'Unscripted' ? 'What you asked for' : 'Script'}</div>
+        {p.kind === 'Unscripted' ? <div className="t-body" style={{ marginTop: 8 }}>Anything about getting scouted. Mention FieldVision once. One product screenshot.</div> : <>
+          <L>Hook</L><div className="t-body">{s.hook}</div>
+          {(p.kind === 'Outlined' ? s.points.slice(0, 1) : s.points).map((pt, i) => <div key={i}><L>{p.kind === 'Outlined' ? 'Their story' : `Point ${i + 1}`}</L><div className="t-body">{p.kind === 'Outlined' ? `${p.creatorName} fills the middle.` : pt}</div></div>)}
+          <L>Close</L><div className="t-body">{s.close}</div>
+        </>}
+        <L>Caption</L><div className="t-body" style={{ color: 'var(--grey-4)' }}>{s.caption}</div>
+      </Card>
+      <Sheet open={sheet} onClose={() => setSheet(false)} title="Edit brief" footer={<Button onClick={() => setSheet(false)}>Done</Button>}>
+        <Option on onClick={() => {}} meta="Opens the slide editor">Rewrite the script</Option>
+        <Option on={false} onClick={() => {}} meta={`Now ${p.creatorName}`}>Move to another creator</Option>
+        <Option on={false} onClick={() => {}} meta={`Now day ${p.day}`}>Move to another day</Option>
+      </Sheet>
+    </Screen>
+  );
+}
+
+const TYPES = { Reel: ['Talking head', 'Numbered list', 'How to', 'Explainer', 'Storytime', 'Green screen react', 'Long text'], Slideshow: ['How to', 'Numbered tips', 'Getting started', 'Myths'] };
+
+const STEPS = [
+  { key: 'format', title: 'What are we making?', options: [['Post', 'videocam', 'A video the creator records'], ['Slideshow', 'photo_library', 'Images with text, swiped through']] },
+  { key: 'kind', title: 'How much do you script?', options: [['Guided', 'format_list_numbered', 'You write every point'], ['Outlined', 'segment', 'You set the hook and close'], ['Unscripted', 'auto_awesome', 'The creator makes what they want']] },
+  { key: 'type', title: 'Post type', options: [['Talking Head', 'record_voice_over', 'Creator to camera'], ['Green Screen', 'preview', 'Creator over a screenshot or clip'], ['Long Text', 'notes', 'Text on screen, voiceover under it']] },
+];
+function NewBriefScreen({ n = 5, slot }) {
+  const nav = useNav();
+  const key = 'noni.brief.' + slot;
+  const load = () => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } };
+  const [st, setSt] = React.useState(() => load() || { step: 0 });
+  React.useEffect(() => { localStorage.setItem(key, JSON.stringify(st)); }, [st]);
+  const step = STEPS[st.step];
+  const pick = (v) => { haptic(); setSt((x) => ({ ...x, [step.key]: v })); };
+  const next = () => setSt((x) => ({ ...x, step: Math.min(STEPS.length - 1, x.step + 1) }));
+  const back = () => st.step === 0 ? nav.pop() : setSt((x) => ({ ...x, step: x.step - 1 }));
+  const val = st[step.key];
+  const done = st.step === STEPS.length - 1;
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', paddingTop: 54, background: 'var(--bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 52, padding: '0 8px 0 4px', flexShrink: 0 }}>
+        <button type="button" className="p" aria-label="Back" onClick={back} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={st.step === 0 ? 'close' : 'chevron_left'} size={st.step === 0 ? 26 : 32} color="var(--ink)" /></button>
+        <span style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: 6 }}>{STEPS.map((_, i) => <span key={i} style={{ width: i === st.step ? 24 : 8, height: 8, borderRadius: 999, background: i <= st.step ? 'var(--blue)' : 'var(--grey-2)', transition: 'width 200ms' }} />)}</span>
+        <span style={{ width: 44 }} />
+      </div>
+      <div className="v2-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 20px 24px' }}>
+        <div className="t-meta" style={{ fontWeight: 600, color: 'var(--grey-4)' }}>Step {st.step + 1} of {STEPS.length}</div>
+        <h1 className="t-h" style={{ margin: '6px 0 20px' }}>{step.title}</h1>
+        {step.options.map(([label, ic, sub]) => { const on = val === label; return (
+          <Card key={label} onClick={() => pick(label)} style={{ display: 'flex', alignItems: 'center', gap: 14, boxShadow: on ? '0 0 0 2px var(--blue), var(--shadow-card)' : 'var(--shadow-card)' }}>
+            <span style={{ width: 48, height: 48, borderRadius: 14, background: on ? 'var(--blue)' : 'var(--blue-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name={ic} size={24} color={on ? '#fff' : 'var(--blue-deep)'} /></span>
+            <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{label}</span><span className="t-meta" style={{ display: 'block', marginTop: 2 }}>{sub}</span></span>
+            <span style={{ width: 24, height: 24, borderRadius: 999, border: on ? 'none' : '2px solid var(--grey-2)', background: on ? 'var(--blue)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>{on ? <Icon name="check" size={16} weight={700} color="#fff" /> : null}</span>
+          </Card>); })}
+      </div>
+      <div style={{ flexShrink: 0, padding: '12px 20px 34px', display: 'flex', background: 'var(--card)', boxShadow: '0 -1px 0 var(--grey-2)' }}><Button disabled={!val} onClick={done ? nav.pop : next}>{done ? 'Continue' : 'Next'}</Button></div>
+    </div>
+  );
+}
+
+function IdeasScreen({ n }) {
+  const nav = useNav();
+  const ideas = [['Why your first touch looks slow on camera', 'Explainer'], ['The pass map that got me a trial', 'Storytime'], ['Recovery speed: the stat nobody films', 'Talking head'], ['What coaches look at first on FieldVision', 'How to'], ['How to tag your best plays in one tap', 'Numbered tips']];
+  const [used, setUsed] = React.useState([]);
+  return (
+    <Screen back title="Ideas">
+      <div className="t-meta" style={{ padding: '4px 4px 12px' }}>From this week's top football posts. Tap one to brief it.</div>
+      {ideas.map(([t, ty], i) => (
+        <Card key={t} onClick={() => { setUsed((u) => [...u, t]); nav.push('NewBrief', { n }, { modal: true }); }} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <Thumb w={48} post={{ title: t, type: ty }} title={false} radius={8} />
+          <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{t}</span><span className="t-meta">{['41k', '28k', '19k', '12k', '9.8k'][i]} views on the source · {['TikTok', 'Instagram', 'TikTok', 'TikTok', 'Instagram'][i]}</span></span>
+          <Chip tone={used.includes(t) ? 'green' : 'blue'}>{used.includes(t) ? 'Briefed' : 'Brief it'}</Chip>
+        </Card>
+      ))}
+    </Screen>
+  );
+}
+
+Object.assign(window, { BriefsScreen, WeekScreen, BriefScreen, NewBriefScreen, IdeasScreen });

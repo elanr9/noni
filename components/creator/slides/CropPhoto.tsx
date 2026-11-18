@@ -10,6 +10,7 @@ import {
   StyleSheet,
   View,
   type GestureResponderEvent,
+  type HostInstance,
 } from 'react-native';
 
 import { touchFocal } from './GestureItem';
@@ -156,7 +157,7 @@ function createCropGesture(initial: Props) {
 
 export function CropPhoto(props: Props): JSX.Element {
   const { uri, crop, stageWidth, stageHeight, onLoad } = props;
-  const layerRef = useRef<View>(null);
+  const layerRef = useRef<HostInstance>(null);
   const [gesture] = useState(() => createCropGesture(props));
 
   useEffect(() => {

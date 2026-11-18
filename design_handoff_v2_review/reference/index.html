@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Noni v2 — Campaign manager</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..700,0..1,0&display=block">
+<link rel="stylesheet" href="tokens.css">
+<style>body{margin:0;min-height:100vh;background:#DDDEE2;display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px 24px 60px;font-family:var(--font)}
+.intro{max-width:560px;text-align:center}.intro h1{margin:0;font:700 22px/28px var(--font);color:var(--grey-5)}.intro p{margin:8px 0 0;font:400 15px/20px var(--font);color:var(--grey-4)}
+.links{display:flex;gap:16px;justify-content:center;font:400 13px/18px var(--font)}.links a{color:var(--grey-4)}
+.sw{display:flex;gap:4px;padding:4px;border-radius:999px;background:#fff;box-shadow:var(--shadow-card)}.sw button{padding:8px 16px;border-radius:999px;font:700 13px var(--font);color:var(--grey-4);cursor:pointer}.sw button.on{background:var(--ink);color:#fff}@keyframes v2-spin{to{transform:rotate(360deg)}}@keyframes ap-pop{0%{transform:scale(0.2);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}@keyframes ap-draw{to{stroke-dashoffset:0}}@keyframes ap-swap-out{to{opacity:0;transform:scale(0.6)}}@keyframes ap-swap-in{from{opacity:0;transform:scale(0.6) rotate(-20deg)}to{opacity:1;transform:scale(1) rotate(0)}}@keyframes ap-flood{from{transform:scale(0)}to{transform:scale(1)}}@keyframes ap-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}@keyframes ap-lift{to{transform:translateY(-70px)}}@keyframes ap-fly{0%{opacity:0;transform:translate(-190px,320px) rotate(45deg) scale(0.7)}12%{opacity:1}100%{opacity:1;transform:translate(170px,-330px) rotate(45deg) scale(1.1)}}@keyframes ap-trail{0%{opacity:0}20%{opacity:0.9}100%{opacity:0}}@keyframes ap-flood2{from{transform:translate(-190px,320px) scale(0)}to{transform:translate(0,0) scale(1)}}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="v2-data.js"></script>
+<script type="text/babel" data-presets="react" src="V2Kit.jsx.txt"></script>
+<script type="text/babel" data-presets="react" src="V2Review.jsx.txt"></script>
+<script type="text/babel" data-presets="react" src="V2Editor.jsx.txt"></script>
+<script type="text/babel" data-presets="react" src="V2Briefs.jsx.txt"></script>
+<script type="text/babel" data-presets="react" src="V2Messages.jsx.txt"></script>
+<script type="text/babel" data-presets="react" src="V2Analytics.jsx.txt"></script>
+</head>
+<body>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1BA6EE"></rect><path d="M50 32v36M32 50h36" stroke="#fff" stroke-width="8" stroke-linecap="round"></path></svg></template>
+<div class="intro"><h1>Noni v2, campaign manager</h1><p>Tinted ground, white cards, brand blue often, green for live and earning, amber for waiting, purple for slideshows. Everything pushes and pops. Approve a post and it leaves the queue before the server hears about it.</p></div>
+<div id="root"></div>
+<div class="links"><a href="tokens.css">tokens.css</a><a href="theme/tokens.ts.txt">theme/tokens.ts</a><a href="MIGRATION.md">MIGRATION.md</a></div>
+<script type="text/babel" data-presets="react">
+function App() {
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => { window.setBusy && window.setBusy(busy); }, [busy]);
+  const tabs = [
+    { key: 'review', label: 'Review', icon: 'inbox', root: 'Review', count: 8 },
+    { key: 'briefs', label: 'Briefs', icon: 'list_alt', root: 'Briefs' },
+    { key: 'create', label: 'Create', action: ({ push }) => push('NewBrief', { n: 5 }, { modal: true }) },
+    { key: 'messages', label: 'Messages', icon: 'chat_bubble', root: 'Messages', count: 5 },
+    { key: 'analytics', label: 'Analytics', icon: 'bar_chart', root: 'Analytics' },
+  ];
+  const screens = { Editor: EditorScreen, Review: ReviewScreen, CreatorQueue: CreatorQueueScreen, ReviewDetail: ReviewDetailScreen, Creator: CreatorScreen, Thread: ThreadScreen, Music: MusicScreen, Account: AccountScreen, Briefs: BriefsScreen, Week: WeekScreen, Brief: BriefScreen, NewBrief: NewBriefScreen, Ideas: IdeasScreen, Messages: MessagesScreen, Chat: ChatScreen, Analytics: AnalyticsScreen, Settings: SettingsScreen };
+  return <><div className="sw"><button type="button" className={busy ? '' : 'on'} onClick={() => setBusy(false)}>4 creators</button><button type="button" className={busy ? 'on' : ''} onClick={() => setBusy(true)}>10 creators</button></div><Phone><Shell tabs={tabs} screens={screens} /></Phone></>;
+}
+const start = () => (window.Shell && window.ReviewScreen && window.BriefsScreen && window.MessagesScreen && window.AnalyticsScreen) ? ReactDOM.createRoot(document.getElementById('root')).render(<App />) : setTimeout(start, 30);
+start();
+</script>
+</body></html>

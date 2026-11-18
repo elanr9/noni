@@ -11,8 +11,8 @@ export default function BriefsPreview() {
   const insets = useSafeAreaInsets();
   const posts = useV2Data((s) => s.posts);
   return (
-    <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top }}>
-      <BriefList title="Briefs" uses={(b) => postsForBrief(posts, b).length} onOpen={(b) => router.push({ pathname: '/dev-preview/new-brief', params: { slot: b.id } })} />
+    <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top + 12 }}>
+      <BriefList uses={(b) => postsForBrief(posts, b).length} onOpen={(b) => router.push({ pathname: '/dev-preview/new-brief', params: { slot: b.id } })} />
     </View>
   );
 }

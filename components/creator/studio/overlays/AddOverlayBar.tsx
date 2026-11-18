@@ -18,12 +18,11 @@ import {
 import { DEFAULT_SHOT_PLACEMENT } from '../../../../lib/media-library-api';
 import { CLASSIC_TEXT_COLOR } from '../../../../lib/overlay-boxes';
 import { useStudioStore } from '../../../../lib/studio-store';
-import { color, radius, type } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
-import { PressableScale } from '../../../ui/PressableScale';
 import { beginGesture, commitVideo, selectOverlay, updateGesture } from './overlay-actions';
 import { useOverlayUi } from './overlay-ui-store';
 import { PicturePickerSheet, type PicturePick } from './PicturePickerSheet';
+import { color, editor, editorType, radius } from '../../../../theme/v2';
+import { Icon, Press } from '../../../v2';
 
 const TEXT_DEFAULTS = { size: 0.05, x: 0.5, y: 0.3 } as const;
 
@@ -81,17 +80,17 @@ export function AddOverlayBar(props: AddOverlayBarProps): JSX.Element {
 
   return (
     <View style={styles.row}>
-      <PressableScale
+      <Press
         accessibilityRole="button"
         accessibilityLabel="Add text"
         onPress={addText}
         disabled={!canAdd}
         style={[styles.btn, !canAdd && styles.btnOff]}
       >
-        <Icon name="pencil" size={16} color={color.white} />
+        <Icon name="edit" size={16} color={color.white} />
         <Text style={styles.btnText}>Text</Text>
-      </PressableScale>
-      <PressableScale
+      </Press>
+      <Press
         accessibilityRole="button"
         accessibilityLabel="Add picture"
         onPress={() => setPicking(true)}
@@ -100,7 +99,7 @@ export function AddOverlayBar(props: AddOverlayBarProps): JSX.Element {
       >
         <Icon name="image" size={16} color={color.white} />
         <Text style={styles.btnText}>Picture</Text>
-      </PressableScale>
+      </Press>
       {picking ? (
         <PicturePickerSheet companyId={companyId} onPick={addPicture} onClose={() => setPicking(false)} />
       ) : null}
@@ -120,14 +119,14 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: 14,
     borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
+    backgroundColor: editor.w16,
   },
   btnOff: {
     opacity: 0.4,
   },
   btnText: {
     color: color.white,
-    fontSize: type.size.chip,
+    fontSize: editorType.size.chip,
     fontWeight: '600',
   },
 });

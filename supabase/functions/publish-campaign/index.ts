@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { buildCreatorWeek, seededShuffle, type CampaignBrief } from '../_shared/shuffle.ts';
-import { handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { adminClient, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { gateAudience, publishBlock } from '../_shared/plan.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -162,6 +163,24 @@ Deno.serve(async (req) => {
       { error: 'no creators with approved accounts; approve accounts in Review first' },
       400,
     );
+  }
+
+  // Paywall and creator cap (noni-web publishBlock): publishing needs an
+  // operable plan, and the approved audience must fit the plan's per-campaign
+  // cap. Checked here too so the app and direct calls cannot bypass it.
+  const { data: caller } = await db.auth.getUser(authHeader.replace('Bearer ', ''));
+  if (!caller?.user) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+  const admin = adminClient();
+  const block = await publishBlock(
+    admin,
+    campaign.company_id,
+    await gateAudience(admin, caller.user.id, campaign.company_id),
+    creators.length,
+  );
+  if (block) {
+    return jsonResponse({ error: block.error, upgrade: true }, 402);
   }
 
   const rows: Array<{

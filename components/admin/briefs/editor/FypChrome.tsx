@@ -37,7 +37,7 @@ function Rail({ gap }: { gap: number }) {
 export function FypChrome({
   caption,
   tags,
-  handle = '@elan.recruiting',
+  handle = '@yourcreator',
   w,
   h,
   index,
@@ -85,7 +85,7 @@ export function FypChrome({
   }
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <LinearGradient colors={['transparent', color.scrimStrong]} style={[styles.band, { bottom: 0, height: 0.38 * h }]} />
+      <LinearGradient colors={['transparent', color.scrimStrong]} style={[styles.band, styles.scrim, { bottom: 0, height: 0.38 * h }]} />
       <View style={{ position: 'absolute', right: 10, bottom: 0.14 * h }}>
         <Rail gap={16} />
       </View>
@@ -106,6 +106,8 @@ export function FypChrome({
 
 const styles = StyleSheet.create({
   band: { position: 'absolute', left: 0, right: 0, backgroundColor: color.ink900 },
+  /** The reel caption fade sits over the clip, nothing opaque behind it. */
+  scrim: { backgroundColor: 'transparent' },
   tab: { fontFamily: typeToken.font.ui, fontWeight: '700', fontSize: 15 },
   tabOn: { color: color.white, borderBottomWidth: 2, borderBottomColor: color.white, paddingBottom: 4 },
   railItem: { alignItems: 'center', gap: 2 },

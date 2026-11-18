@@ -124,6 +124,11 @@ export function moveCta<T extends { role: string }>(arr: T[], place: CtaPlacemen
   return out;
 }
 
+/** A clip is done with on screen text, a line for the creator, a screen recording or a picture on it. */
+export function slideFilled(s: Pick<EditorSlide, 'text' | 'shot' | 'inset_feature_id' | 'pics'>): boolean {
+  return Boolean(s.text.trim() || s.shot.trim() || s.inset_feature_id || s.pics?.length);
+}
+
 export function useBriefEditor(opts: BriefEditorOptions) {
   const { briefId, companyId, brief, format, kind, postType, onSaved } = opts;
   const reel = format === 'reel';
@@ -210,7 +215,7 @@ export function useBriefEditor(opts: BriefEditorOptions) {
   const title = slides[0]?.text ?? '';
   const points = slides.filter((s) => s.role === 'point');
   const ctaOk = Boolean(slides[ctaIdx]?.text.trim());
-  const pointsOk = points.length > 0 && points.every((p) => p.text.trim()) && (story || ctaOk);
+  const pointsOk = points.length > 0 && points.every(slideFilled) && (story || ctaOk);
   const lastIdx = slides.length - 1;
   const onLastPoint = step === 'points' && sel >= lastIdx;
   const onCta = !story && step === 'points' && cur?.role === 'cta';
@@ -267,6 +272,32 @@ export function useBriefEditor(opts: BriefEditorOptions) {
       setSel(1);
     },
     [buildDeck],
+  );
+
+  /** One more clip right after the current one, selected and ready to type. */
+  const addPoint = useCallback(() => {
+    const at = Math.max(1, sel + 1);
+    setSlides((arr) => {
+      const fresh: EditorSlide = { id: nextId.current++, role: 'point', text: '', shot: '', inset_feature_id: null };
+      const next = [...arr];
+      next.splice(Math.min(at, next.length), 0, fresh);
+      return next;
+    });
+    setSel(at);
+    setEditNonce((n) => n + 1);
+  }, [sel]);
+
+  /** Drop one clip; the cover and the CTA stay, and at least one point stays. */
+  const removePoint = useCallback(
+    (at: number) => {
+      setSlides((arr) => {
+        const s = arr[at];
+        if (!s || s.role !== 'point' || arr.filter((x) => x.role === 'point').length <= 1) return arr;
+        return arr.filter((_, i) => i !== at);
+      });
+      setSel((cur) => (cur >= at ? Math.max(1, cur - 1) : cur));
+    },
+    [],
   );
 
   const go = useCallback(
@@ -705,6 +736,8 @@ export function useBriefEditor(opts: BriefEditorOptions) {
     clearError: () => setError(null),
     showIntro,
     patchAt,
+    addPoint,
+    removePoint,
     setBoxFor,
     go,
     next,

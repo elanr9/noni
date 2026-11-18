@@ -18,8 +18,6 @@ import {
   type PreviewTimeEvent,
   type VideoEditorPreviewHandle,
 } from '../../../modules/video-editor';
-import { color } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
 import type { ShotPreview } from '../SegmentOverlayPreview';
 import { FrameFit } from '../slides/FrameFit';
 import { TikTokChrome } from '../slides/TikTokChrome';
@@ -28,6 +26,8 @@ import { StageInset, type InsetPlacement } from './StageInset';
 import { StageSubtitles } from './StageSubtitles';
 import type { AvoidBand, BoxPlacement } from './StageTextBox';
 import { TextBoxLayer } from './TextBoxLayer';
+import { color, editor } from '../../../theme/v2';
+import { Icon } from '../../v2';
 
 export type StageSize = { w: number; h: number };
 
@@ -205,7 +205,7 @@ export const EditorStage = memo(
           {!playing && !cropping ? (
             <View style={styles.playWrap} pointerEvents="none">
               <View style={styles.play}>
-                <Icon name="play" size={26} color={color.white} />
+                <Icon name="play_arrow" size={26} color={color.white} />
               </View>
             </View>
           ) : null}
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#111',
+    backgroundColor: editor.stage,
   },
   playWrap: {
     position: 'absolute',
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: editor.k45,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 4,

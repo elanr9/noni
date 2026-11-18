@@ -120,3 +120,24 @@ export async function loadEditHandoff(assignmentId: string): Promise<EditHandoff
 export function saveEditHandoff(assignmentId: string, h: EditHandoff): Promise<void> {
   return AsyncStorage.setItem(`noni.edit.${assignmentId}`, JSON.stringify(h)).catch(() => undefined);
 }
+
+/** Local draft key for a post being resumed by id. */
+export function postDraftKey(assignmentId: string): string {
+  return `post:${assignmentId}`;
+}
+
+/**
+ * Drop every local trace of a post: the camera draft that points at it (free,
+ * brief or per post key), the editor hand-off and the slideshow draft.
+ */
+export async function forgetPostDrafts(assignmentId: string, libraryBriefId: string | null): Promise<void> {
+  const keys = ['free', postDraftKey(assignmentId), ...(libraryBriefId ? [`brief:${libraryBriefId}`] : [])];
+  await Promise.all(
+    keys.map(async (k) => {
+      const d = await loadRecordDraft(k);
+      if (d && (k === postDraftKey(assignmentId) || d.assignmentId === assignmentId)) clearRecordDraft(k);
+    }),
+  );
+  await AsyncStorage.removeItem(`noni.edit.${assignmentId}`).catch(() => undefined);
+  if (libraryBriefId) await AsyncStorage.removeItem(`noni.slides.${libraryBriefId}`).catch(() => undefined);
+}

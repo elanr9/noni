@@ -4,8 +4,10 @@ import { ScrollView, Text, TextInput, View, type NativeScrollEvent, type NativeS
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
-import { loadSavedSounds, remoteTracks, storeSavedSounds } from '../../../../lib/audio-api';
-import { AUDIO_LIB, AU_SUGGEST, searchTracks, trackBars, trackLength, trackUses, type LibraryTrack } from '../../../../lib/audio-library';
+import { loadSavedSounds, searchAudio, storeSavedSounds, type AudioSearchResult } from '../../../../lib/audio-api';
+import { trackBars, trackLength, trackUses, type LibraryTrack } from '../../../../lib/audio-library';
+import { soundSuggestions } from '../../../../lib/company-copy';
+import { useCompanyNiche } from '../../../../lib/company-copy-api';
 import type { AudioTrack } from '../../../../lib/brief-library';
 import { color, radius, shadow } from '../../../../theme/v2';
 import { Button, Icon, Label, Press, Sheet } from '../../../v2';
@@ -22,7 +24,7 @@ export interface AudioSheetProps {
   value: AudioPick | null;
   onChange: (v: AudioPick) => void;
   title?: string;
-  /** Campaign tags that pick the For this post section. */
+  /** Search chips under the empty field; defaults to the company's niche keywords. */
   tags?: string[];
   /** Starting Sound level for a new pick: 100, or 25 for talking head posts. */
   defaultVol?: number;
@@ -31,16 +33,17 @@ export interface AudioSheetProps {
 }
 
 /** Search a sound, preview it, then trim: the window stays put and the waveform scrolls under it. */
-const POST_TAGS = ['soccer', 'sport', 'tutorial'];
-
-export function AudioSheet({ open, onClose, len = 15, value, onChange, title = 'Add sound', tags = POST_TAGS, defaultVol = 100, onRemove }: AudioSheetProps) {
+export function AudioSheet({ open, onClose, len = 15, value, onChange, title = 'Add sound', tags, defaultVol = 100, onRemove }: AudioSheetProps) {
+  const company = useCompanyNiche();
+  const chips = tags ?? soundSuggestions(company);
   const [q, setQ] = useState('');
   const [playing, setPlaying] = useState<string | null>(null);
-  const [saved, setSaved] = useState<Set<string>>(() => new Set(['s2']));
+  const [saved, setSaved] = useState<LibraryTrack[]>([]);
   const [draft, setDraft] = useState<AudioPick | null>(null);
-  /** Instagram results for the query; null while loading or when the API is not answering. */
-  const [remote, setRemote] = useState<{ q: string; tracks: LibraryTrack[] } | null>(null);
-  const [known, setKnown] = useState<LibraryTrack[]>(AUDIO_LIB);
+  /** The last answer from sound search and the query it was for. */
+  const [search, setSearch] = useState<{ q: string; res: AudioSearchResult } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [known, setKnown] = useState<LibraryTrack[]>([]);
   const player = useAudioPlayer(null);
 
   useEffect(() => {
@@ -52,23 +55,21 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
     if (!open) return;
     let live = true;
     const t = setTimeout(() => {
-      void remoteTracks(q).then((tracks) => {
+      void searchAudio(q).then((res) => {
         if (!live) return;
-        if (tracks) {
-          setRemote({ q, tracks });
-          setKnown((k) => [...tracks, ...k.filter((x) => !tracks.some((r) => r.id === x.id))]);
-        } else setRemote(null);
+        setSearch({ q, res });
+        if (res.ok) setKnown((k) => [...res.tracks, ...k.filter((x) => !res.tracks.some((r) => r.id === x.id))]);
       });
     }, 250);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [q, open]);
+  }, [q, open, attempt]);
 
   // Preview: the platform's preview clip when the track has one; the cover bars otherwise.
   useEffect(() => {
-    const t = known.find((x) => x.id === playing);
+    const t = known.find((x) => x.id === playing) ?? saved.find((x) => x.id === playing);
     const url = t?.previewUrl ?? t?.url ?? null;
     if (!playing || !url) {
       player.pause();
@@ -77,7 +78,7 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
     player.replace({ uri: url });
     player.play();
     return () => player.pause();
-  }, [playing, known, player]);
+  }, [playing, known, saved, player]);
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
@@ -87,22 +88,23 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
       setDraft(value && value.track ? { ...value } : null);
     }
   }
-  const remoteFor = remote && remote.q === q ? remote.tracks : null;
-  const results = q.trim() ? (remoteFor ?? searchTracks(q)) : null;
+  /** null while the search for the current query is in flight. */
+  const current = search && search.q === q ? search.res : null;
   const pick = (t: LibraryTrack) => {
     setPlaying(t.id);
     setDraft({ track: t, start: value && value.track && value.track.id === t.id ? value.start : 0, vol: value ? value.vol : defaultVol, voice: value ? value.voice : 100 });
   };
-  const toggleSave = (id: string) =>
+  const toggleSave = (t: LibraryTrack) =>
     setSaved((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+      const n = s.some((x) => x.id === t.id) ? s.filter((x) => x.id !== t.id) : [t, ...s];
       storeSavedSounds(n);
       return n;
     });
   const row = (t: LibraryTrack) => (
-    <AudioRow key={t.id} t={t} playing={playing === t.id} onPlay={() => setPlaying(playing === t.id ? null : t.id)} onPick={() => pick(t)} saved={saved.has(t.id)} onSave={() => toggleSave(t.id)} />
+    <AudioRow key={t.id} t={t} playing={playing === t.id} onPlay={() => setPlaying(playing === t.id ? null : t.id)} onPick={() => pick(t)} saved={saved.some((x) => x.id === t.id)} onSave={() => toggleSave(t)} />
+  );
+  const note = (text: string) => (
+    <Text style={{ paddingVertical: 24, textAlign: 'center', fontSize: 15, lineHeight: 20, color: color.grey4 }}>{text}</Text>
   );
   const section = (label: string, list: LibraryTrack[]) =>
     list.length ? (
@@ -111,10 +113,19 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
         {list.map(row)}
       </View>
     ) : null;
-  const trendingRemote = remote && remote.q === '' ? remote.tracks : null;
-  const trending = trendingRemote ?? AUDIO_LIB.filter((t) => t.trend);
-  const forYou = AUDIO_LIB.filter((t) => t.tags.some((tag) => tags.includes(tag)));
-  const savedList = known.filter((t) => saved.has(t.id));
+  const failed = current && !current.ok ? current.error : null;
+  const failure = failed ? (
+    <View style={{ alignItems: 'center', gap: 10, paddingVertical: 20 }}>
+      <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.ink, textAlign: 'center' }}>
+        {failed === 'unconfigured' ? 'Sound search is not set up yet' : "Couldn't reach sound search"}
+      </Text>
+      <Text style={{ fontSize: 13, lineHeight: 18, color: color.grey4, textAlign: 'center' }}>
+        {failed === 'unconfigured' ? 'Your saved sounds still work. Try again later.' : 'Check your connection and try again.'}
+      </Text>
+      <Button variant="secondary" label="Retry" onPress={() => setAttempt((n) => n + 1)} />
+    </View>
+  ) : null;
+  const trending = current && current.ok && !q.trim() ? current.tracks : [];
   const footer = draft ? (
     <>
       {value?.track && onRemove ? (
@@ -173,9 +184,9 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
               </Press>
             ) : null}
           </View>
-          {!q ? (
+          {!q && chips.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6, paddingTop: 10, paddingBottom: 2 }}>
-              {AU_SUGGEST.map((s) => (
+              {chips.map((s) => (
                 <Press key={s} onPress={() => setQ(s)} style={{ height: 32, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: color.grey1, justifyContent: 'center' }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: color.ink }}>{s}</Text>
                 </Press>
@@ -184,20 +195,26 @@ export function AudioSheet({ open, onClose, len = 15, value, onChange, title = '
           ) : null}
           <View style={{ marginTop: 4, maxHeight: 380 }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} nestedScrollEnabled>
-              {results ? (
-                results.length ? (
+              {q.trim() ? (
+                current === null ? (
+                  note('Searching')
+                ) : !current.ok ? (
+                  failure
+                ) : current.tracks.length ? (
                   <>
-                    {section('Music', results.filter((t) => t.kind === 'music'))}
-                    {section('Original sounds', results.filter((t) => t.kind === 'original'))}
+                    {section('Music', current.tracks.filter((t) => t.kind !== 'original'))}
+                    {section('Original sounds', current.tracks.filter((t) => t.kind === 'original'))}
                   </>
                 ) : (
-                  <Text style={{ paddingVertical: 24, textAlign: 'center', fontSize: 15, lineHeight: 20, color: color.grey4 }}>{`No sounds for "${q}"`}</Text>
+                  note(`No sounds for "${q}"`)
                 )
               ) : (
                 <>
+                  {failure}
                   {section('Trending', trending)}
-                  {section('For this post', forYou.filter((t) => !t.trend))}
-                  {section('Saved', savedList)}
+                  {section('Saved', saved)}
+                  {current === null && !saved.length ? note('Loading sounds') : null}
+                  {current && current.ok && !trending.length && !saved.length ? note('Search for a sound') : null}
                 </>
               )}
             </ScrollView>
@@ -227,7 +244,7 @@ function AudioRow({ t, playing, onPlay, onPick, saved, onSave }: { t: LibraryTra
           {t.trend ? <Icon name="trending_up" size={16} color={color.blue} /> : null}
         </View>
         <Text numberOfLines={1} style={{ fontSize: 13, lineHeight: 16, color: color.grey4 }}>
-          {t.artist} · {trackLength(t.dur)} · {trackUses(t.uses)}
+          {[t.artist, trackLength(t.dur), trackUses(t.uses)].filter(Boolean).join(' · ')}
         </Text>
       </Press>
       <Press accessibilityLabel="Save" onPress={onSave} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>

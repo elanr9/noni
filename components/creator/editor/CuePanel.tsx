@@ -5,9 +5,8 @@ import { memo, useCallback, useEffect, useRef, type JSX } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 
 import type { TranscriptWord } from '../../../lib/video-edit';
-import { color, type } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, Press } from '../../v2';
 
 /** Index of the word playing at `sourceMs`, or the last word that started before it. */
 export function wordIndexAt(words: TranscriptWord[], sourceMs: number): number {
@@ -30,7 +29,7 @@ const WordChip = memo(function WordChip(props: {
   const { word, on, onPick } = props;
   const press = useCallback(() => onPick(word), [onPick, word]);
   return (
-    <PressableScale
+    <Press
       accessibilityRole="button"
       accessibilityLabel={`Show at "${word.w}"`}
       accessibilityState={{ selected: on }}
@@ -38,7 +37,7 @@ const WordChip = memo(function WordChip(props: {
       style={[styles.word, on && styles.wordOn]}
     >
       <Text style={[styles.wordText, on && styles.wordTextOn]}>{word.w}</Text>
-    </PressableScale>
+    </Press>
   );
 });
 
@@ -76,7 +75,7 @@ export function CuePanel(props: {
     <View style={styles.wrap}>
       {pending ? (
         <View style={styles.empty}>
-          <ActivityIndicator color={color.whiteA60} />
+          <ActivityIndicator color={editor.w60} />
           <Text style={styles.emptyText}>Listening to this clip</Text>
         </View>
       ) : words.length === 0 ? (
@@ -106,16 +105,16 @@ export function CuePanel(props: {
         <Text style={styles.caption} numberOfLines={1}>
           {kindLabel}
         </Text>
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel={resetLabel}
           onPress={onReset}
           disabled={!canReset || pending}
           style={[styles.resetBtn, (!canReset || pending) && styles.resetOff]}
         >
-          <Icon name="rotate-ccw" size={14} color={color.white} />
+          <Icon name="replay" size={14} color={color.white} />
           <Text style={styles.resetText}>{resetLabel}</Text>
-        </PressableScale>
+        </Press>
       </View>
     </View>
   );
@@ -134,15 +133,15 @@ const styles = StyleSheet.create({
     height: WORD_H,
     borderRadius: 8,
     justifyContent: 'center',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
-  wordOn: { backgroundColor: color.accent },
+  wordOn: { backgroundColor: color.blue },
   wordText: {
-    color: color.whiteA75,
-    fontSize: type.size.chip,
-    fontWeight: type.weight.medium,
+    color: editor.w75,
+    fontSize: editorType.size.chip,
+    fontWeight: editorType.weight.medium,
   },
-  wordTextOn: { color: color.white, fontWeight: type.weight.bold },
+  wordTextOn: { color: color.white, fontWeight: editorType.weight.bold },
   empty: {
     minHeight: 36,
     flexDirection: 'row',
@@ -152,8 +151,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     flex: 1,
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
   },
   row: {
     flexDirection: 'row',
@@ -163,8 +162,8 @@ const styles = StyleSheet.create({
   },
   caption: {
     flex: 1,
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
   },
   resetBtn: {
     flexDirection: 'row',
@@ -173,12 +172,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 34,
     borderRadius: 10,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   resetOff: { opacity: 0.4 },
   resetText: {
     color: color.white,
-    fontSize: type.size.label,
-    fontWeight: type.weight.semibold,
+    fontSize: editorType.size.label,
+    fontWeight: editorType.weight.semibold,
   },
 });

@@ -1,0 +1,79 @@
+import { Easing, type TextStyle, type ViewStyle } from 'react-native';
+
+/**
+ * Noni v2 tokens. Drop in at theme/tokens.ts.
+ * Rule: anything outside this file is a bug.
+ * Reference: Venmo. Tinted ground, white cards, brand blue often, a small accent palette, big tappable cards.
+ */
+
+export const color = {
+  bg: '#F2F3F5', card: '#FFFFFF',
+  ink: '#111114', grey4: '#6B6B76', grey3: '#AEAEB7', grey2: '#E4E4E9', grey1: '#F2F3F5',
+  blue: '#1BA6EE', blueDeep: '#0A7FC2', blueTint: '#E3F4FD',
+  green: '#1F9D5B', greenTint: '#E2F5EA',
+  amber: '#D97E0B', amberTint: '#FDF1DC',
+  purple: '#7C5CE6', purpleTint: '#EEE9FB',
+  pink: '#E0457B', pinkTint: '#FCE7EF',
+  scrim: 'rgba(17,17,20,0.4)',
+} as const;
+
+/** Accent roles. Green is live and earning, amber is waiting, purple is slideshows, blue is the brand and everything interactive. */
+export const tone = {
+  blue: { fg: color.blue, tint: color.blueTint, text: color.blueDeep },
+  green: { fg: color.green, tint: color.greenTint, text: color.green },
+  amber: { fg: color.amber, tint: color.amberTint, text: color.amber },
+  purple: { fg: color.purple, tint: color.purpleTint, text: color.purple },
+  pink: { fg: color.pink, tint: color.pinkTint, text: color.pink },
+  grey: { fg: color.grey4, tint: color.grey1, text: color.grey4 },
+} as const;
+export const stateTone = { Posted: 'green', Approved: 'green', Waiting: 'amber', 'Changes requested': 'amber', Recording: 'blue', Open: 'grey' } as const;
+export const formatTone = { Reel: 'blue', Slideshow: 'purple' } as const;
+
+/** Pastel gradient seeds by post type, for thumbnails with no extracted frame. */
+export const typeGradient = {
+  'Numbered list': ['#4FB8F5', '#7C5CE6'], 'Talking head': ['#F6A23B', '#E0457B'], 'How to': ['#2BBF7A', '#1BA6EE'], Explainer: ['#8E6CF0', '#1BA6EE'], Storytime: ['#F06292', '#F6A23B'],
+  'Numbered tips': ['#26C6DA', '#1BA6EE'], Myths: ['#EF5350', '#7C5CE6'], 'Green screen react': ['#43A047', '#C0CA33'], 'Long text': ['#546E7A', '#1BA6EE'], Anything: ['#90A4AE', '#4FB8F5'],
+} as const;
+
+/** Five text styles. Nothing else. */
+export const text: Record<'title' | 'card' | 'row' | 'body' | 'meta', TextStyle> = {
+  title: { fontSize: 32, lineHeight: 38, fontWeight: '700', letterSpacing: -0.6, color: color.ink },
+  card: { fontSize: 20, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2, color: color.ink },
+  row: { fontSize: 17, lineHeight: 22, fontWeight: '600', color: color.ink },
+  body: { fontSize: 15, lineHeight: 20, fontWeight: '400', color: color.ink },
+  meta: { fontSize: 13, lineHeight: 18, fontWeight: '400', color: color.grey4 },
+};
+
+/** Money and counts: biggest type on their row. Same sizes as title / row, 600 weight, tabular digits. */
+export const num: Record<'lg' | 'sm', TextStyle> = {
+  lg: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.5, color: color.ink, fontVariant: ['tabular-nums'] },
+  sm: { fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.ink, fontVariant: ['tabular-nums'] },
+};
+
+/** Spacing: 4, 8, 12, 16, 24, 32. Screen padding 20 left and right, no exceptions. */
+export const space = { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32, screen: 20 } as const;
+
+export const radius = { card: 16, thumb: 10, pill: 999 } as const;
+
+/** Soft card shadow on every card. Float for sheets and the Create button. */
+export const shadow: Record<'card' | 'float', ViewStyle> = {
+  card: { shadowColor: '#101828', shadowOffset: { width: 0, height: 6 }, shadowRadius: 8, shadowOpacity: 0.06, elevation: 2 },
+  float: { shadowColor: '#101828', shadowOffset: { width: 0, height: 8 }, shadowRadius: 12, shadowOpacity: 0.14, elevation: 6 },
+};
+
+export const motion = {
+  press: 90,
+  push: 240,
+  pressScale: 0.97,
+  easeOut: Easing.bezier(0.22, 0.61, 0.36, 1),
+} as const;
+
+/** Push and pop, never fade. Tabs switch instantly. */
+export const screenTransition = {
+  push: 'slide_from_right',
+  modal: 'slide_from_bottom',
+  tab: 'none',
+} as const;
+
+/** Control heights. Buttons are solid blue: full width or pill. Icons are Material Symbols Rounded, filled. */
+export const control = { button: 52, pill: 36, row: 56, tapMin: 44 } as const;

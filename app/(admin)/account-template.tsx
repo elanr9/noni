@@ -29,6 +29,8 @@ import {
   uploadTemplateAsset,
   type AccountTemplate,
 } from '../../lib/account-template';
+import { useCompanyNiche } from '../../lib/company-copy-api';
+import { resolveCompanyNiche, suggestAccountNames } from '../../lib/company-copy';
 import { signedVerificationUrl } from '../../lib/creator-accounts-api';
 import { borderWidth, color, radiusAdmin, type } from '../../theme/tokens';
 
@@ -38,7 +40,17 @@ const EMPTY: AccountTemplate = {
   instagramLink: '',
   profilePicturePath: null,
   exampleScreenshotPath: null,
+  niche: '',
+  searchPhrases: [],
 };
+
+/** One search phrase per line in the editor. */
+function splitPhrases(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
 
 /** Wide profile-header crop (avatar + bio), not a full phone frame. */
 const EXAMPLE_ASPECT = 2.6;
@@ -53,13 +65,15 @@ async function pickImage(): Promise<string | null> {
 
 function goBack() {
   if (router.canGoBack()) router.back();
-  else router.replace('/(admin)/(tabs)/settings');
+  else router.replace('/(admin)/settings');
 }
 
 export default function AccountTemplateScreen() {
   const { profile, permissions } = useAuth();
   const canEdit = permissions.edit_account_template;
   const [template, setTemplate] = useState<AccountTemplate>(EMPTY);
+  const [searchText, setSearchText] = useState('');
+  const company = useCompanyNiche();
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,6 +85,7 @@ export default function AccountTemplateScreen() {
       const saved = await getAccountTemplate(profile.active_company_id);
       if (saved !== null) {
         setTemplate(saved);
+        setSearchText(saved.searchPhrases.join('\n'));
         if (saved.exampleScreenshotPath !== null) {
           setScreenshotUrl(
             await signedVerificationUrl(saved.exampleScreenshotPath).catch(() => null),
@@ -109,7 +124,11 @@ export default function AccountTemplateScreen() {
         'example-screenshot',
         uri,
       );
-      const next = { ...template, exampleScreenshotPath: path };
+      const next = {
+        ...template,
+        searchPhrases: splitPhrases(searchText),
+        exampleScreenshotPath: path,
+      };
       await persist(next);
       setTemplate(next);
       setScreenshotUrl(await signedVerificationUrl(path).catch(() => null));
@@ -124,7 +143,9 @@ export default function AccountTemplateScreen() {
     if (!profile) return;
     setBusy(true);
     try {
-      await persist(template);
+      const next = { ...template, searchPhrases: splitPhrases(searchText) };
+      await persist(next);
+      setTemplate(next);
       Alert.alert('Saved', 'Creators see the updated template on their setup screen.');
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : 'Try again');
@@ -132,6 +153,17 @@ export default function AccountTemplateScreen() {
       setBusy(false);
     }
   };
+
+  // Live preview: what setup will suggest with the niche as typed.
+  const nameIdeas = suggestAccountNames(
+    'Sam Lee',
+    resolveCompanyNiche({
+      companyName: company.companyName,
+      slug: company.slug,
+      templateNiche: template.niche || company.niche,
+      hashtags: company.keywords,
+    }),
+  );
 
   return (
     <AdminScreen
@@ -161,8 +193,45 @@ export default function AccountTemplateScreen() {
         <>
           <Text style={styles.body}>
             {canEdit
-              ? 'The standard for a creator account. Creators copy the bios and Instagram link, then match the example look. Setup also suggests display names like Name | College Soccer Recruiting and usernames like name.d1soccer.'
+              ? `The standard for a creator account. Creators copy the bios and Instagram link, then match the example look. Setup suggests display names like ${nameIdeas.displayNames[0]} and usernames like ${nameIdeas.usernames[0] ?? 'sam.creates'}, built from your niche.`
               : 'The standard for a creator account. Your Noni admin manages this template; you can view it but not change it.'}
+          </Text>
+
+          <SectionLabel style={styles.sectionLabel}>Niche</SectionLabel>
+          <View style={styles.fieldCard}>
+            <TextInput
+              style={styles.linkInput}
+              value={template.niche}
+              onChangeText={(niche) => setTemplate((t) => ({ ...t, niche }))}
+              placeholder={company.niche ?? 'What the feed should be about, e.g. home workouts'}
+              placeholderTextColor={color.slate400}
+              autoCorrect={false}
+              editable={canEdit}
+            />
+          </View>
+          <Text style={styles.fieldHint}>
+            Used for suggested handles, the warm-up steps and the feed check.
+          </Text>
+
+          <SectionLabel style={styles.sectionLabel}>Warm-up searches</SectionLabel>
+          <View style={styles.fieldCard}>
+            <TextInput
+              style={styles.bioInput}
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder={
+                company.searchPhrases.length > 0
+                  ? company.searchPhrases.join('\n')
+                  : 'One search per line, the way your audience would type it'
+              }
+              placeholderTextColor={color.slate400}
+              autoCapitalize="none"
+              multiline
+              editable={canEdit}
+            />
+          </View>
+          <Text style={styles.fieldHint}>
+            Creators search these while warming up a fresh account.
           </Text>
 
           <SectionLabel style={styles.sectionLabel}>Instagram bio</SectionLabel>
@@ -192,7 +261,7 @@ export default function AccountTemplateScreen() {
                 onChangeText={(instagramLink) =>
                   setTemplate((t) => ({ ...t, instagramLink }))
                 }
-                placeholder="fieldvisionai.com"
+                placeholder={company.slug ? `${company.slug}.com` : 'yourbrand.com'}
                 placeholderTextColor={color.slate400}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -272,7 +341,7 @@ export default function AccountTemplateScreen() {
             )}
           </PressableScale>
           <Text style={styles.barLine}>
-            This is the bar. Same bio shape, same grid, no gym content.
+            This is the bar. Same bio shape, same grid, nothing off topic.
           </Text>
         </>
       )}
@@ -309,6 +378,12 @@ const styles = StyleSheet.create({
     lineHeight: type.size.bodySm * 1.45,
     color: color.ink,
     padding: 0,
+  },
+  fieldHint: {
+    marginTop: 6,
+    fontSize: type.size.chip,
+    lineHeight: type.size.chip * 1.4,
+    color: color.slate500,
   },
   fieldFooter: {
     flexDirection: 'row',

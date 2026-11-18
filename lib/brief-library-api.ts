@@ -29,8 +29,13 @@ type LibState = {
   /** The table is missing or unreachable; the library runs from the local cache. */
   offline: boolean;
   load(companyId: string): Promise<void>;
-  saveBrief(input: SaveBriefInput, by: { userId: string | null; name: string }): Brief;
-  removeBrief(id: string): void;
+  /** Saves locally at once; `synced` resolves to null when the server has it, else an error message (the save stays queued). */
+  saveBrief(input: SaveBriefInput, by: { userId: string | null; name: string }): { brief: Brief; synced: Promise<string | null> };
+  /** Removes locally at once; `synced` resolves to null when the server delete went through. */
+  removeBrief(id: string): { synced: Promise<string | null> };
+  /** Saves or deletes made while the server was unreachable, waiting to be sent. */
+  pending: string[];
+  deleted: string[];
   setJustMade(ids: string[]): void;
   clearJustMade(): void;
   /** Dev preview: replace the list without touching storage. */
@@ -89,42 +94,93 @@ function warnOnce(e: unknown) {
   console.warn('library_briefs unavailable, running from the local cache', e instanceof Error ? e.message : e);
 }
 
-function persist(companyId: string | null, briefs: Brief[]) {
+type Cache = { briefs: Brief[]; pending: string[]; deleted: string[] };
+
+function persist(companyId: string | null, c: Cache) {
   if (!companyId) return;
-  AsyncStorage.setItem(CACHE_KEY(companyId), JSON.stringify(briefs)).catch(() => undefined);
+  AsyncStorage.setItem(CACHE_KEY(companyId), JSON.stringify(c)).catch(() => undefined);
 }
 
-export const useLibStore = create<LibState>((set, get) => ({
+function readCache(raw: string | null): Cache | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    // Older caches were a bare list with no record of what was unsent: trust the server for those.
+    if (Array.isArray(v)) return { briefs: v as Brief[], pending: [], deleted: [] };
+    const c = v as Partial<Cache>;
+    return { briefs: c.briefs ?? [], pending: c.pending ?? [], deleted: c.deleted ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+function errText(e: unknown): string {
+  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') return (e as { message: string }).message;
+  return String(e);
+}
+
+export const useLibStore = create<LibState>((set, get) => {
+  const save = () => {
+    const { companyId, briefs, pending, deleted } = get();
+    persist(companyId, { briefs, pending, deleted });
+  };
+  const upsertRemote = async (rows: Brief[], companyId: string, userId: string | null): Promise<string | null> => {
+    const { error } = await supabase.from('library_briefs').upsert(rows.map((b) => briefToRow(b, companyId, userId)));
+    if (get().companyId !== companyId) return error ? errText(error) : null;
+    const ids = rows.map((r) => r.id);
+    if (error) {
+      warnOnce(error);
+      set({ pending: [...new Set([...get().pending, ...ids])], offline: true });
+      save();
+      return errText(error);
+    }
+    set({ pending: get().pending.filter((p) => !ids.includes(p)), offline: false });
+    save();
+    return null;
+  };
+  const deleteRemote = async (ids: string[], companyId: string): Promise<string | null> => {
+    const { error } = await supabase.from('library_briefs').delete().in('id', ids);
+    if (get().companyId !== companyId) return error ? errText(error) : null;
+    if (error) {
+      warnOnce(error);
+      set({ deleted: [...new Set([...get().deleted, ...ids])], offline: true });
+      save();
+      return errText(error);
+    }
+    set({ deleted: get().deleted.filter((d) => !ids.includes(d)), offline: false });
+    save();
+    return null;
+  };
+
+  return {
   companyId: null,
   briefs: [],
   loaded: false,
   justMade: null,
   offline: false,
+  pending: [],
+  deleted: [],
 
   async load(companyId) {
-    if (get().companyId !== companyId) set({ companyId, briefs: [], loaded: false });
-    try {
-      const raw = await AsyncStorage.getItem(CACHE_KEY(companyId));
-      if (raw && get().companyId === companyId && !get().loaded) set({ briefs: JSON.parse(raw) as Brief[] });
-    } catch {
-      // cache is best effort
-    }
+    if (get().companyId !== companyId) set({ companyId, briefs: [], loaded: false, pending: [], deleted: [] });
+    const cached = readCache(await AsyncStorage.getItem(CACHE_KEY(companyId)).catch(() => null));
+    if (cached && get().companyId === companyId && !get().loaded) set({ briefs: cached.briefs, pending: cached.pending, deleted: cached.deleted });
     try {
       const { data, error } = await supabase.from('library_briefs').select('*').eq('company_id', companyId).order('updated_at', { ascending: false });
       if (error) throw error;
       if (get().companyId !== companyId) return;
-      const remote = (data ?? []).map(rowToBrief);
-      // Keep anything saved locally that the server has not seen yet.
-      const local = get().briefs.filter((b) => !remote.some((r) => r.id === b.id));
-      const merged = [...local, ...remote].sort((a, b) => b.ts - a.ts);
+      const { pending, deleted } = get();
+      // The server is the truth; only saves this device made offline ride on top of it.
+      const unsent = get().briefs.filter((b) => pending.includes(b.id));
+      const remote = (data ?? []).map(rowToBrief).filter((r) => !deleted.includes(r.id) && !unsent.some((u) => u.id === r.id));
+      const merged = [...unsent, ...remote].sort((a, b) => b.ts - a.ts);
       set({ briefs: merged, loaded: true, offline: false });
-      persist(companyId, merged);
-      for (const b of local) {
-        void supabase.from('library_briefs').upsert(briefToRow(b, companyId, null)).then(({ error: e }) => e && warnOnce(e));
-      }
+      save();
+      if (unsent.length) void upsertRemote(unsent, companyId, null);
+      if (deleted.length) void deleteRemote(deleted, companyId);
     } catch (e) {
       warnOnce(e);
-      set({ loaded: true, offline: true });
+      if (get().companyId === companyId) set({ loaded: true, offline: true });
     }
   },
 
@@ -172,23 +228,21 @@ export const useLibStore = create<LibState>((set, get) => ({
       list = upsert(list, twin);
       rows.push(twin);
     }
-    set({ briefs: list });
-    persist(companyId, list);
-    if (companyId) {
-      void supabase
-        .from('library_briefs')
-        .upsert(rows.map((b) => briefToRow(b, companyId, by.userId)))
-        .then(({ error }) => error && warnOnce(error));
-    }
-    return brief;
+    const ids = rows.map((r) => r.id);
+    set({ briefs: list, pending: [...new Set([...get().pending, ...ids])], deleted: get().deleted.filter((d) => !ids.includes(d)) });
+    save();
+    const synced = companyId ? upsertRemote(rows, companyId, by.userId) : Promise.resolve('No company selected');
+    return { brief, synced };
   },
 
   removeBrief(id) {
     const { companyId } = get();
-    const list = get().briefs.filter((b) => b.id !== id);
-    set({ briefs: list });
-    persist(companyId, list);
-    if (companyId) void supabase.from('library_briefs').delete().eq('id', id).then(({ error }) => error && warnOnce(error));
+    // A Guided brief takes its Outline twin with it.
+    const ids = get().briefs.filter((b) => b.id === id || b.from === id).map((b) => b.id);
+    if (!ids.includes(id)) ids.push(id);
+    set({ briefs: get().briefs.filter((b) => !ids.includes(b.id)), pending: get().pending.filter((p) => !ids.includes(p)), deleted: [...new Set([...get().deleted, ...ids])] });
+    save();
+    return { synced: companyId ? deleteRemote(ids, companyId) : Promise.resolve('No company selected') };
   },
 
   setJustMade(ids) {
@@ -200,7 +254,8 @@ export const useLibStore = create<LibState>((set, get) => ({
   seed(briefs) {
     set({ briefs, loaded: true, companyId: get().companyId ?? 'preview' });
   },
-}));
+  };
+});
 
 export function libFind(id: string | undefined | null): Brief | undefined {
   if (!id) return undefined;

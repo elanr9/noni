@@ -30,7 +30,8 @@ export function StepStrip({ steps, current, dark = false, onJump }: StepStripPro
       {steps.map((s, i) => {
         const done = i < current;
         const now = i === current;
-        const showName = now || (done && steps.length <= 4);
+        // Only the current step is named; done steps are a check, so the strip fits beside a title.
+        const showName = now;
         const canJump = done && Boolean(onJump);
         return (
           <View key={s.id} style={styles.item}>

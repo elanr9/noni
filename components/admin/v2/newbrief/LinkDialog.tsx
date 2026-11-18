@@ -3,7 +3,7 @@ import { Modal, Pressable, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
-import { SAMPLE_LINK } from '../../../../lib/brief-ai';
+import { linkFrom } from '../../../../lib/brief-ai';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { color, radius, shadow } from '../../../../theme/v2';
 import { Button, Icon, Press, tap } from '../../../v2';
@@ -20,11 +20,15 @@ export interface LinkDialogProps {
 /** "Reference link": a centred white card over a 45% scrim with a Paste pill in the field. */
 export function LinkDialog({ open, link, onClose, onAdd, onRemove }: LinkDialogProps) {
   const [draft, setDraft] = useState(link);
+  const [hint, setHint] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(open);
   const keyboard = useKeyboardHeight();
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setDraft(link);
+    if (open) {
+      setDraft(link);
+      setHint(null);
+    }
   }
   if (!open) return null;
   const paste = async () => {
@@ -35,7 +39,9 @@ export function LinkDialog({ open, link, onClose, onAdd, onRemove }: LinkDialogP
     } catch {
       t = '';
     }
-    setDraft(t || SAMPLE_LINK);
+    const found = linkFrom(t);
+    if (found) setDraft(found);
+    else setHint('Nothing to paste. Copy a video link first.');
   };
   return (
     <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
@@ -47,7 +53,10 @@ export function LinkDialog({ open, link, onClose, onAdd, onRemove }: LinkDialogP
             <TextInput
               autoFocus
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={(v) => {
+                setDraft(v);
+                setHint(null);
+              }}
               placeholder="TikTok or Instagram link"
               placeholderTextColor={color.grey3}
               inputMode="url"
@@ -60,6 +69,7 @@ export function LinkDialog({ open, link, onClose, onAdd, onRemove }: LinkDialogP
               <Text style={{ fontSize: 13, fontWeight: '700', color: color.white }}>Paste</Text>
             </Press>
           </View>
+          {hint ? <Text style={{ fontSize: 13, lineHeight: 18, color: color.amber }}>{hint}</Text> : null}
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Button
               variant="quiet"
@@ -73,7 +83,12 @@ export function LinkDialog({ open, link, onClose, onAdd, onRemove }: LinkDialogP
               label="Add"
               disabled={!/\S/.test(draft)}
               onPress={() => {
-                onAdd(draft.trim());
+                const found = linkFrom(draft.trim());
+                if (!found) {
+                  setHint("That doesn't look like a link. Paste a TikTok, Instagram or YouTube URL.");
+                  return;
+                }
+                onAdd(found);
                 onClose();
               }}
             />

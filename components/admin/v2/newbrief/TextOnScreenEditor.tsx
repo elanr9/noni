@@ -4,11 +4,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { GsMedia, StText } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
-import { color, radius } from '../../../../theme/v2';
+import { briefs, color, editor, radius } from '../../../../theme/v2';
 import { Icon, Press } from '../../../v2';
 import { ClipFrame } from './ClipFrame';
 
-const ED = { bg: '#0F0F12', chip: '#26262D' };
+const ED = { bg: briefs.editorBg, chip: editor.field };
 
 export interface TextOnScreenEditorProps {
   open: boolean;
@@ -58,7 +58,7 @@ export function TextOnScreenEditor({ open, title, text, green, gs, onChange, onD
           <ClipFrame width={fw} height={fh} radius={14} texts={draft.trim() ? [cur] : []} green={green} gs={gs} />
         </View>
         <View style={{ marginHorizontal: 16, backgroundColor: ED.chip, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, gap: 6 }}>
-          <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Text on screen</Text>
+          <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: editor.w55, textTransform: 'uppercase', letterSpacing: 0.4 }}>Text on screen</Text>
           <TextInput
             autoFocus
             multiline
@@ -68,12 +68,12 @@ export function TextOnScreenEditor({ open, title, text, green, gs, onChange, onD
               onChange({ ...text, text: t });
             }}
             placeholder="Type what shows on screen"
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholderTextColor={editor.w40}
             style={{ minHeight: 72, maxHeight: 140, fontSize: 17, lineHeight: 23, fontWeight: '600', color: color.white, padding: 0 }}
           />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <View style={{ width: 8, height: 8, borderRadius: radius.pill, backgroundColor: color.blue }} />
-            <Text style={{ fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.55)' }}>TikTok classic, centred. Blank line for a new paragraph.</Text>
+            <Text style={{ fontSize: 12, lineHeight: 16, color: editor.w55 }}>TikTok classic, centred. Blank line for a new paragraph.</Text>
           </View>
         </View>
       </View>

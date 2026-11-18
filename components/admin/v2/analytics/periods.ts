@@ -2,7 +2,7 @@
 // Pure functions over the device clock, the views-per-day feed and the live
 // posts, so the screen only holds range, offset and the selected point.
 import type { AnalyticsDay } from '../../../../lib/analytics-api';
-import { addDays, DAY_LETTERS, DAY_NAMES, dayKey, fmtRange, MONTHS, MONTHS_SHORT, shortDate, sunday, today } from '../../../../lib/v2-format';
+import { addDays, DAY_LETTERS, DAY_NAMES, dayKey, fmtRange, MONTHS, MONTHS_SHORT, parseDayKey, shortDate, sunday, today } from '../../../../lib/v2-format';
 import type { V2Post } from '../../../../lib/v2-posts';
 
 export type Range = 'week' | 'last' | 'month' | 'all';
@@ -45,9 +45,8 @@ export function scopedPosts(posts: V2Post[], now = today()): V2Post[] {
     .filter((p) => p.state === 'Posted' && p.date <= now)
     .sort((a, b) => b.date.getTime() - a.date.getTime())
     .filter((p) => {
-      const k = `${p.title.trim().toLowerCase()}|${p.creatorId ?? p.creatorName}|${p.date.getTime()}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
       return true;
     });
 }
@@ -65,13 +64,28 @@ export function viewsBetween(byDay: Map<string, number>, from: Date, to: Date): 
   return n;
 }
 
+/** Sign-ups and sales inside [from, to): everything on the company's Stripe, and the part on creator codes. */
+export function salesBetween(days: AnalyticsDay[], from: Date, to: Date): { signups: number; salesCents: number; codedSignups: number; codedSalesCents: number } {
+  const a = dayKey(from);
+  const b = dayKey(to);
+  const out = { signups: 0, salesCents: 0, codedSignups: 0, codedSalesCents: 0 };
+  for (const d of days) {
+    if (d.day < a || d.day >= b) continue;
+    out.signups += d.signups;
+    out.salesCents += d.salesCents;
+    out.codedSignups += d.codedSignups;
+    out.codedSalesCents += d.codedSalesCents;
+  }
+  return out;
+}
+
 /** The first day anything happened: the earliest day with views or the earliest live post. */
 export function firstDate(days: AnalyticsDay[], posts: V2Post[], now = today()): Date {
   let first: Date | null = null;
   const consider = (d: Date) => {
     if (!first || d < first) first = d;
   };
-  for (const d of days) if (d.views > 0) consider(new Date(`${d.day}T00:00:00`));
+  for (const d of days) if (d.views > 0) consider(parseDayKey(d.day));
   for (const p of posts) consider(p.date);
   return first ?? now;
 }

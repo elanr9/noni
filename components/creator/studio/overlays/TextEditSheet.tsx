@@ -22,11 +22,10 @@ import {
   overlayTextContrast,
 } from '../../../../lib/overlay-boxes';
 import { useStudioStore } from '../../../../lib/studio-store';
-import { color, radius, type } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
-import { PressableScale } from '../../../ui/PressableScale';
 import { beginGesture, endGesture, selectOverlay, updateGesture } from './overlay-actions';
 import { useOverlayUi } from './overlay-ui-store';
+import { color, editor, editorType, radius } from '../../../../theme/v2';
+import { Icon, Press } from '../../../v2';
 
 const MAX_CHARS = 160;
 const SWATCH = 30;
@@ -35,7 +34,7 @@ function Swatch(props: { pick: { color: string; bg: boolean }; selected: boolean
   const { pick, selected, onPress } = props;
   const fill = pick.bg ? overlayBoxFill(pick.color) : pick.color;
   return (
-    <PressableScale
+    <Press
       accessibilityRole="button"
       accessibilityLabel={`${pick.color} ${pick.bg ? 'bubble' : 'text'}`}
       accessibilityState={{ selected }}
@@ -46,7 +45,7 @@ function Swatch(props: { pick: { color: string; bg: boolean }; selected: boolean
       <View style={[styles.swatch, { backgroundColor: fill }]}>
         {pick.bg ? <Text style={[styles.swatchGlyph, { color: overlayTextContrast(pick.color) }]}>A</Text> : null}
       </View>
-    </PressableScale>
+    </Press>
   );
 }
 
@@ -116,17 +115,17 @@ export function TextEditSheet(props: { overlay: TextOverlay }): JSX.Element {
         <Pressable accessibilityLabel="Close" style={styles.scrim} onPress={cancel} />
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
-            <PressableScale
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Cancel"
               onPress={cancel}
               hitSlop={10}
               style={styles.headerBtn}
             >
-              <Icon name="x" size={20} color={color.white} />
-            </PressableScale>
+              <Icon name="close" size={20} color={color.white} />
+            </Press>
             <Text style={styles.title}>Text</Text>
-            <PressableScale
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Done"
               onPress={save}
@@ -135,7 +134,7 @@ export function TextEditSheet(props: { overlay: TextOverlay }): JSX.Element {
               style={[styles.headerBtn, !canSave && styles.headerBtnOff]}
             >
               <Icon name="check" size={20} color={color.white} />
-            </PressableScale>
+            </Press>
           </View>
           <TextInput
             value={text}
@@ -144,7 +143,7 @@ export function TextEditSheet(props: { overlay: TextOverlay }): JSX.Element {
             autoFocus
             maxLength={MAX_CHARS}
             placeholder="Type your text"
-            placeholderTextColor={color.whiteA45}
+            placeholderTextColor={editor.w45}
             selectionColor={color.white}
             keyboardAppearance="dark"
             accessibilityLabel="Text words"
@@ -166,7 +165,7 @@ export function TextEditSheet(props: { overlay: TextOverlay }): JSX.Element {
             ))}
           </ScrollView>
           <View style={styles.footer}>
-            <PressableScale
+            <Press
               accessibilityRole="switch"
               accessibilityLabel="Background"
               accessibilityState={{ checked: pick.bg }}
@@ -174,17 +173,17 @@ export function TextEditSheet(props: { overlay: TextOverlay }): JSX.Element {
               style={[styles.pill, pick.bg && styles.pillOn]}
             >
               <Text style={[styles.pillText, pick.bg && styles.pillTextOn]}>Background</Text>
-            </PressableScale>
+            </Press>
             <View style={styles.footerSpacer} />
-            <PressableScale
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Delete text"
               onPress={remove}
               hitSlop={8}
               style={styles.deleteBtn}
             >
-              <Icon name="trash-2" size={18} color={color.white} />
-            </PressableScale>
+              <Icon name="delete" size={18} color={color.white} />
+            </Press>
             <Text style={styles.counter}>{`${text.length}/${MAX_CHARS}`}</Text>
           </View>
         </View>
@@ -200,10 +199,10 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: editor.k20,
   },
   panel: {
-    backgroundColor: '#111114',
+    backgroundColor: color.ink,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 12,
@@ -222,26 +221,26 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   headerBtnOff: {
     opacity: 0.4,
   },
   title: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '700',
   },
   input: {
     minHeight: 84,
     maxHeight: 160,
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     lineHeight: 22,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
     textAlignVertical: 'top',
   },
   swatchRow: {
@@ -265,7 +264,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: color.whiteA28,
+    borderColor: editor.w28,
   },
   swatchGlyph: {
     fontSize: 14,
@@ -284,7 +283,7 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 14,
     borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
+    backgroundColor: editor.w16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -293,7 +292,7 @@ const styles = StyleSheet.create({
   },
   pillText: {
     color: color.white,
-    fontSize: type.size.chip,
+    fontSize: editorType.size.chip,
     fontWeight: '600',
   },
   pillTextOn: {
@@ -305,11 +304,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.danger,
+    backgroundColor: color.pink,
   },
   counter: {
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
     fontVariant: ['tabular-nums'],
   },
 });

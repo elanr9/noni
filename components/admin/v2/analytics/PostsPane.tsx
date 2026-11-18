@@ -3,14 +3,15 @@
 // the month label and the shared week card; then the only scrolling list,
 // as post cards or as expanding creator cards. Filter sheet: creator, format,
 // sort.
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { ScrollView, StyleSheet, Text, View, type RefreshControlProps, type ScrollViewInstance } from 'react-native';
+import { useScrollToTop } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { fmt, MONTHS, sameDay, shortDate } from '../../../../lib/v2-format';
 import { creatorFor, type V2Creator, type V2Post } from '../../../../lib/v2-posts';
 import { color, motion, radius, shadow } from '../../../../theme/v2';
-import { Avatar, Button, FilterButton, Icon, IconToggle, Label, Press, Sheet, TabPane, tap } from '../../../v2';
+import { Avatar, Button, FilterButton, Icon, IconToggle, Label, Press, Sheet, TabPane } from '../../../v2';
 import { Marks, PostCard, Views } from '../posts/PostCard';
 import { PostFrame } from '../posts/PostFrame';
 import { HOT_VIEWS, WeekCard, weekDays } from '../posts/WeekCard';
@@ -32,6 +33,7 @@ export interface PostsPaneProps {
   creators: V2Creator[];
   onPost: (id: string) => void;
   bottomInset: number;
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
 function CreatorGroup({ creator, posts, views, open, onToggle, onPost }: { creator: V2Creator; posts: V2Post[]; views: number; open: boolean; onToggle: () => void; onPost: (id: string) => void }) {
@@ -81,7 +83,9 @@ function CreatorGroup({ creator, posts, views, open, onToggle, onPost }: { creat
   );
 }
 
-export function PostsPane({ posts, creators, onPost, bottomInset }: PostsPaneProps) {
+export function PostsPane({ posts, creators, onPost, bottomInset, refreshControl }: PostsPaneProps) {
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  useScrollToTop(scrollRef);
   const [by, setBy] = useState<By>('posts');
   const [mode, setMode] = useState<Mode>('list');
   const [week, setWeek] = useState(0);
@@ -168,7 +172,8 @@ export function PostsPane({ posts, creators, onPost, bottomInset }: PostsPanePro
           </TabPane>
         ) : null}
       </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 2, paddingHorizontal: 20, paddingBottom: bottomInset + 24, gap: 10 }}>
+      <TabPane k={mode === 'cal' ? `${by}:cal:${week}:${day ? day.getTime() : 'week'}` : `${by}:list`} duration={motion.tabInShort}>
+      <ScrollView ref={scrollRef} refreshControl={refreshControl} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 2, paddingHorizontal: 20, paddingBottom: bottomInset + 24, gap: 10 }}>
         {list.length === 0 ? (
           <Text style={{ paddingVertical: 32, textAlign: 'center', fontSize: 15, lineHeight: 20, fontWeight: '600', color: color.grey4 }}>{empty}</Text>
         ) : by === 'posts' ? (
@@ -182,7 +187,6 @@ export function PostsPane({ posts, creators, onPost, bottomInset }: PostsPanePro
               views={g.views}
               open={expanded === g.creator.id}
               onToggle={() => {
-                tap();
                 setExpanded(expanded === g.creator.id ? null : g.creator.id);
               }}
               onPost={onPost}
@@ -190,6 +194,7 @@ export function PostsPane({ posts, creators, onPost, bottomInset }: PostsPanePro
           ))
         )}
       </ScrollView>
+      </TabPane>
       <Sheet
         open={filt}
         onClose={() => setFilt(false)}

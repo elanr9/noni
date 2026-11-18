@@ -1,9 +1,8 @@
 import type { JSX } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Icon, type IconName } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
-import { color, type } from '../../../theme/tokens';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, type IconName, Press } from '../../v2';
 
 export type ToolId =
   | 'split'
@@ -53,34 +52,34 @@ export function EditorToolbar(props: {
     insetSelected = false,
     onTool,
   } = props;
-  const insetTools: Tool[] = [{ id: 'delete', label: 'Delete', icon: 'trash-2', enabled: false }];
+  const insetTools: Tool[] = [{ id: 'delete', label: 'Delete', icon: 'delete', enabled: false }];
   const textTools: Tool[] = [
-    { id: 'edit-text', label: 'Edit', icon: 'pencil', enabled: true },
+    { id: 'edit-text', label: 'Edit', icon: 'edit', enabled: true },
     { id: 'text-color', label: 'Text color', icon: 'palette', enabled: true },
-    { id: 'add-text', label: 'Add text', icon: 'plus', enabled: canAddText },
-    { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
+    { id: 'add-text', label: 'Add text', icon: 'add', enabled: canAddText },
+    { id: 'delete', label: 'Delete', icon: 'delete', enabled: canDelete },
   ];
   const clipTools: Tool[] = [
     ...(canAddText
-      ? [{ id: 'add-text' as const, label: 'Text', icon: 'plus' as const, enabled: true }]
+      ? [{ id: 'add-text' as const, label: 'Text', icon: 'add' as const, enabled: true }]
       : []),
     ...(canStyleText
       ? [{ id: 'text-color' as const, label: 'Text color', icon: 'palette' as const, enabled: true }]
       : []),
     ...(cutTools
       ? ([
-          { id: 'split', label: 'Split', icon: 'scissors', enabled: canSplit },
-          { id: 'replace', label: 'Replace', icon: 'repeat', enabled: hasSelection },
-          { id: 'delete', label: 'Delete', icon: 'trash-2', enabled: canDelete },
+          { id: 'split', label: 'Split', icon: 'content_cut', enabled: canSplit },
+          { id: 'replace', label: 'Replace', icon: 'swap_horiz', enabled: hasSelection },
+          { id: 'delete', label: 'Delete', icon: 'delete', enabled: canDelete },
           { id: 'crop', label: 'Crop', icon: 'crop', enabled: hasSelection },
           {
             id: 'mute',
             label: selectedMuted ? 'Unmute' : 'Mute',
-            icon: 'volume-x',
+            icon: 'volume_off',
             enabled: hasSelection,
             active: selectedMuted,
           },
-          { id: 'volume', label: 'Volume', icon: 'volume-2', enabled: true },
+          { id: 'volume', label: 'Volume', icon: 'volume_up', enabled: true },
         ] satisfies Tool[])
       : []),
   ];
@@ -93,7 +92,7 @@ export function EditorToolbar(props: {
       keyboardShouldPersistTaps="handled"
     >
       {tools.map((tool) => (
-        <PressableScale
+        <Press
           key={tool.id}
           accessibilityRole="button"
           accessibilityLabel={tool.label}
@@ -106,11 +105,11 @@ export function EditorToolbar(props: {
             <Icon
               name={tool.icon}
               size={22}
-              color={tool.active ? color.accent : color.white}
+              color={tool.active ? color.blue : color.white}
             />
           </View>
           <Text style={styles.label}>{tool.label}</Text>
-        </PressableScale>
+        </Press>
       ))}
     </ScrollView>
   );
@@ -125,7 +124,7 @@ const styles = StyleSheet.create({
     width: 74,
     height: 76,
     borderRadius: 14,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
@@ -139,7 +138,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: color.white,
-    fontSize: type.size.label,
+    fontSize: editorType.size.label,
     fontWeight: '600',
   },
 });

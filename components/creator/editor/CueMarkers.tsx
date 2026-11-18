@@ -9,7 +9,7 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
-import { Smartphone } from 'lucide-react-native';
+import { Icon, type IconName } from '../../v2/Icon';
 
 import {
   pieceDurationMs,
@@ -19,7 +19,7 @@ import {
   type EditTimeline,
   type SlotCue,
 } from '../../../lib/video-edit';
-import { color, type } from '../../../theme/tokens';
+import { color, editor, editorType } from '../../../theme/v2';
 
 export const MIN_TEXT_HOLD_MS = 500;
 
@@ -222,7 +222,7 @@ const SlotCueMarkers = memo(function SlotCueMarkers(props: {
             selectedKind === 'media' && styles.selected,
           ]}
         >
-          <Smartphone size={12} color={color.white} strokeWidth={2.2} />
+          <Icon name="smartphone" size={12} color={color.white} />
         </CueHandle>
       ) : null}
     </>
@@ -324,16 +324,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 2,
   },
-  ai: { backgroundColor: 'rgba(255,255,255,0.22)' },
-  creator: { backgroundColor: color.accent },
+  ai: { backgroundColor: editor.w22 },
+  creator: { backgroundColor: color.blue },
   pending: { opacity: 0.5 },
   selected: { borderWidth: 1.5, borderColor: color.white, zIndex: 3 },
   chipText: {
     flex: 1,
     color: color.white,
-    fontSize: type.size.micro,
+    fontSize: editorType.size.micro,
     lineHeight: 12,
-    fontWeight: type.weight.semibold,
+    fontWeight: editorType.weight.semibold,
   },
   spinner: { transform: [{ scale: 0.5 }], marginRight: -2 },
 });

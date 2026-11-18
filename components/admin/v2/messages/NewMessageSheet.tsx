@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 
-import { color, text, type Tone } from '../../../../theme/v2';
+import { color, radius, text, type Tone } from '../../../../theme/v2';
 import { Avatar, Icon, Label, Press, Sheet } from '../../../v2';
 
 export type NewMessagePerson = { id: string; name: string; meta: string | null; kind: 'creator' | 'team'; photo: string | null; tone: Tone };
@@ -10,10 +10,12 @@ export interface NewMessageSheetProps {
   onClose: () => void;
   people: NewMessagePerson[];
   onPick: (p: NewMessagePerson) => void;
+  /** Shown as a row under the list (and as the empty state's action). */
+  onInvite?: () => void;
 }
 
 /** The pencil: pick a creator or a teammate and open that thread. */
-export function NewMessageSheet({ open, onClose, people, onPick }: NewMessageSheetProps) {
+export function NewMessageSheet({ open, onClose, people, onPick, onInvite }: NewMessageSheetProps) {
   const creators = people.filter((p) => p.kind === 'creator').sort((a, b) => a.name.localeCompare(b.name));
   const team = people.filter((p) => p.kind === 'team').sort((a, b) => a.name.localeCompare(b.name));
   const group = (label: string, rows: NewMessagePerson[]) =>
@@ -36,7 +38,15 @@ export function NewMessageSheet({ open, onClose, people, onPick }: NewMessageShe
     <Sheet open={open} onClose={onClose} title="New message">
       {group('Creators', creators)}
       {group('Team', team)}
-      {people.length === 0 ? <Text style={[text.body, { color: color.grey4, textAlign: 'center', paddingVertical: 16 }]}>Nothing here.</Text> : null}
+      {people.length === 0 ? <Text style={[text.body, { color: color.grey4, textAlign: 'center', paddingVertical: 12 }]}>No one to message yet. Invite a creator and their thread opens here.</Text> : null}
+      {onInvite ? (
+        <Press onPress={onInvite} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 }}>
+          <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="add" size={22} weight={700} color={color.blueDeep} />
+          </View>
+          <Text style={[text.row, { flex: 1, color: color.blueDeep }]}>Invite a creator</Text>
+        </Press>
+      ) : null}
     </Sheet>
   );
 }

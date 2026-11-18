@@ -17,9 +17,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { listMediaLibrary, type MediaLibraryItem } from '../../../../lib/media-library-api';
-import { color, radius, type } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
-import { PressableScale } from '../../../ui/PressableScale';
+import { toast } from '../../../v2/Toast';
+import { color, editor, editorType, radius } from '../../../../theme/v2';
+import { Icon, Press } from '../../../v2';
 
 export type PicturePick = {
   localUri: string | null;
@@ -47,9 +47,10 @@ export function PicturePickerSheet(props: {
       .then((all) => {
         if (!cancelled) setItems(all.filter((i) => i.kind === 'screenshot'));
       })
-      .catch((e: unknown) => {
-        console.warn('media library load failed', e);
-        if (!cancelled) setItems([]);
+      .catch(() => {
+        if (cancelled) return;
+        setItems([]);
+        toast.error("Could not load your team's pictures. Your camera roll still works.");
       });
     return () => {
       cancelled = true;
@@ -83,21 +84,21 @@ export function PicturePickerSheet(props: {
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Add a picture</Text>
-            <PressableScale accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={10} style={styles.headerBtn}>
-              <Icon name="x" size={20} color={color.white} />
-            </PressableScale>
+            <Press accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={10} style={styles.headerBtn}>
+              <Icon name="close" size={20} color={color.white} />
+            </Press>
           </View>
-          <PressableScale
+          <Press
             accessibilityRole="button"
             accessibilityLabel="Camera roll"
             onPress={() => void pickFromCameraRoll()}
             disabled={busy}
             style={styles.rowBtn}
           >
-            <Icon name="images" size={20} color={color.white} />
+            <Icon name="photo_library" size={20} color={color.white} />
             <Text style={styles.rowText}>Camera roll</Text>
-            {busy ? <ActivityIndicator color={color.white} /> : <Icon name="chevron-right" size={18} color={color.whiteA60} />}
-          </PressableScale>
+            {busy ? <ActivityIndicator color={color.white} /> : <Icon name="chevron_right" size={18} color={editor.w60} />}
+          </Press>
           <Text style={styles.sectionLabel}>Brand library</Text>
           {items === null ? (
             <ActivityIndicator color={color.white} style={styles.loader} />
@@ -112,7 +113,7 @@ export function PicturePickerSheet(props: {
               contentContainerStyle={styles.grid}
               style={styles.gridList}
               renderItem={({ item }) => (
-                <PressableScale
+                <Press
                   accessibilityRole="button"
                   accessibilityLabel={item.title ?? 'Screenshot'}
                   onPress={() =>
@@ -121,7 +122,7 @@ export function PicturePickerSheet(props: {
                   style={styles.tile}
                 >
                   <Image source={{ uri: item.previewUrl }} resizeMode="cover" style={styles.tileImage} />
-                </PressableScale>
+                </Press>
               )}
             />
           )}
@@ -138,10 +139,10 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: color.scrim,
+    backgroundColor: editor.k45,
   },
   panel: {
-    backgroundColor: '#111114',
+    backgroundColor: color.ink,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 12,
@@ -161,11 +162,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   title: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '700',
   },
   rowBtn: {
@@ -174,20 +175,20 @@ const styles = StyleSheet.create({
     gap: 10,
     height: 48,
     paddingHorizontal: 12,
-    borderRadius: radius.sm,
-    backgroundColor: '#1C1C1E',
+    borderRadius: radius.thumb,
+    backgroundColor: editor.control,
   },
   rowText: {
     flex: 1,
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '600',
   },
   sectionLabel: {
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
     fontWeight: '600',
-    letterSpacing: type.tracking.label,
+    letterSpacing: editorType.tracking.label,
     textTransform: 'uppercase',
     paddingTop: 4,
   },
@@ -195,8 +196,8 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   empty: {
-    color: color.whiteA60,
-    fontSize: type.size.meta,
+    color: editor.w60,
+    fontSize: editorType.size.meta,
     paddingVertical: 16,
   },
   gridList: {
@@ -211,9 +212,9 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     aspectRatio: 1,
-    borderRadius: radius.sm,
+    borderRadius: radius.thumb,
     overflow: 'hidden',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   tileImage: {
     width: '100%',

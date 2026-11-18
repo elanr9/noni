@@ -2,8 +2,9 @@ import { ScrollView, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 
-import { SAMPLE_LINK } from '../../../../lib/brief-ai';
-import { color, radius, shadow } from '../../../../theme/v2';
+import { linkFrom } from '../../../../lib/brief-ai';
+import { toast } from '../../../v2/Toast';
+import { briefs, color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Press, Toggle, tap } from '../../../v2';
 import { SpinIcon } from './GuidedForm';
 import { TitleInput } from './TitleInput';
@@ -35,10 +36,10 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting }: OutlineFor
     } catch {
       t = '';
     }
-    setTimeout(() => {
-      setPasting(false);
-      set({ link: t || SAMPLE_LINK });
-    }, 450);
+    setPasting(false);
+    const link = linkFrom(t);
+    if (link) set({ link });
+    else toast.show('Copy a TikTok, Instagram or YouTube link first, then tap Paste.');
   };
   return (
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24, gap: 12 }}>
@@ -63,7 +64,7 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting }: OutlineFor
         </View>
       )}
       {editingExisting ? null : (
-        <Press disabled={!canAi || ai} onPress={onFill} accessibilityRole="button" style={{ height: 52, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: canAi ? color.blue : color.grey1, boxShadow: canAi ? '0 6px 16px rgba(27,166,238,0.35)' : undefined }}>
+        <Press disabled={!canAi || ai} onPress={onFill} accessibilityRole="button" style={{ height: 52, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: canAi ? color.blue : color.grey1, boxShadow: canAi ? briefs.aiGlow : undefined }}>
           <SpinIcon spinning={ai} color={canAi ? color.white : color.grey3} />
           <Text style={{ fontSize: 15, fontWeight: '700', color: canAi ? color.white : color.grey3 }}>{ai ? 'Filling in' : st.filled ? 'Fill in again' : 'Fill in with AI'}</Text>
         </Press>

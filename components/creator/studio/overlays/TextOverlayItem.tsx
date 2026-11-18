@@ -12,7 +12,6 @@ import {
   MIN_BOX_SIZE,
   MIN_BOX_WIDTH,
 } from '../../../../lib/overlay-boxes';
-import { color } from '../../../../theme/tokens';
 import { OverlayTextBox, overlayMinWrapWidth, overlayWrapWidth } from '../../../ui/OverlayTextBox';
 import { useWidthDrag, type WidthDrag } from '../../slides/GestureItem';
 import {
@@ -25,6 +24,7 @@ import {
 import { useOverlayUi } from './overlay-ui-store';
 import { useStageGesture } from './useStageGesture';
 import { WidthHandles } from './WidthHandles';
+import { color, editor } from '../../../../theme/v2';
 
 const HIT_SLOP = 14;
 
@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     left: '50%',
     width: 1,
     marginLeft: -0.5,
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
   selectedOutline: {
     position: 'absolute',
@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
     right: -6,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: color.whiteA75,
+    borderColor: editor.w75,
     borderStyle: 'dashed',
   },
 });

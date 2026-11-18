@@ -42,15 +42,49 @@ export type AssignmentQueueItem = Assignment & {
   profiles: Pick<Profile, 'id' | 'full_name'> | null;
 };
 
-/** Submitted assignments joined to their brief and creator, newest first. */
-export async function listAssignmentQueue(): Promise<AssignmentQueueItem[]> {
-  const { data, error } = await supabase
+/**
+ * Submitted assignments joined to their brief and creator, newest first.
+ * Pass the active company to keep a manager of several companies on one.
+ */
+export async function listAssignmentQueue(companyId?: string): Promise<AssignmentQueueItem[]> {
+  let query = supabase
     .from('assignments')
     .select('*, briefs:brief_id (*), profiles:creator_id ( id, full_name )')
-    .eq('status', 'submitted')
-    .order('created_at', { ascending: false });
+    .eq('status', 'submitted');
+  if (companyId !== undefined) query = query.eq('company_id', companyId);
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as AssignmentQueueItem[];
+}
+
+/**
+ * Everything waiting on the manager in one company: submitted posts, songs
+ * marked added and not yet approved, and accounts pending review. Drives the
+ * Review tab badge.
+ */
+export async function countWaitingForReview(companyId: string): Promise<number> {
+  const [posts, music, accounts] = await Promise.all([
+    supabase
+      .from('assignments')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('status', 'submitted'),
+    supabase
+      .from('assignments')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .not('music_marked_by_creator_at', 'is', null)
+      .is('music_approved_at', null),
+    supabase
+      .from('creator_accounts')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('status', 'pending'),
+  ]);
+  if (posts.error) throw posts.error;
+  if (music.error) throw music.error;
+  if (accounts.error) throw accounts.error;
+  return (posts.count ?? 0) + (music.count ?? 0) + (accounts.count ?? 0);
 }
 
 /** Assignments scheduled inside a date window, for the calendar grid. */
@@ -443,7 +477,17 @@ export async function inviteCreator(
       },
     },
   );
-  if (error) throw error;
+  if (error) {
+    // Non-2xx (e.g. 402 plan cap, 403, 400): surface the function's own
+    // message instead of the client's generic non-2xx error.
+    const context = (error as { context?: unknown }).context;
+    const payload =
+      context instanceof Response
+        ? ((await context.json().catch(() => null)) as { error?: string } | null)
+        : null;
+    if (payload?.error) throw new Error(payload.error);
+    throw error;
+  }
   const result = data as { error?: string } | null;
   if (result?.error) throw new Error(result.error);
 }

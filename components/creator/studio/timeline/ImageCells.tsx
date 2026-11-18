@@ -6,6 +6,7 @@ import { Image, StyleSheet, View } from 'react-native';
 import { assetById, blockAt, type VideoDocument } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
 import { cellRect } from './geometry';
+import { editor } from '../../../../theme/v2';
 
 export function ImageCells(props: {
   doc: VideoDocument;
@@ -34,7 +35,7 @@ export function ImageCells(props: {
               width: rect.width,
               height: rect.height,
               overflow: 'hidden',
-              backgroundColor: '#000',
+              backgroundColor: editor.black,
             }}
           >
             <Image

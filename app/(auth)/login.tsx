@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +15,12 @@ import Svg, { Path } from 'react-native-svg';
 import { Screen } from '../../components/layout/Screen';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { BubbleMark } from '../../components/ui/Wordmark';
-import { routeAfterSignIn, signInWithGoogle } from '../../lib/auth-session';
+import {
+  appleSignInAvailable,
+  routeAfterSignIn,
+  signInWithApple,
+  signInWithGoogle,
+} from '../../lib/auth-session';
 import { color, radius, space, type } from '../../theme/tokens';
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
@@ -47,7 +53,19 @@ function GoogleMark({ size }: { size: number }) {
 
 export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
   const [introDone, setIntroDone] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void appleSignInAvailable().then((ok) => {
+      if (alive) setAppleAvailable(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const pop = useRef(new Animated.Value(0)).current;
   const flight = useRef(new Animated.Value(0)).current;
@@ -121,6 +139,25 @@ export default function LoginScreen() {
     }
   }
 
+  async function handleApple() {
+    if (busy || appleBusy) return;
+    setAppleBusy(true);
+    try {
+      // False means the user closed the Apple sheet: no message.
+      const signedIn = await signInWithApple();
+      if (signedIn) await routeAfterSignIn();
+    } catch (e) {
+      Alert.alert(
+        'Sign in failed',
+        e instanceof Error ? e.message : 'Could not sign in with Apple',
+      );
+    } finally {
+      setAppleBusy(false);
+    }
+  }
+
+  const anyBusy = busy || appleBusy;
+
   return (
     <View style={styles.root}>
       <Animated.View
@@ -141,16 +178,37 @@ export default function LoginScreen() {
             <Text style={styles.welcome}>Welcome to Noni!</Text>
             <Text style={styles.headline}>UGC Made Easy</Text>
             <Text style={styles.body}>
-              Sign in with the Google account your invite was sent to.
+              Sign in with the email address your invite was sent to.
             </Text>
           </View>
+
+          {appleAvailable ? (
+            <View
+              style={[styles.appleWrap, anyBusy && styles.btnDisabled]}
+              pointerEvents={anyBusy ? 'none' : 'auto'}
+            >
+              {appleBusy ? (
+                <View style={styles.appleBusy}>
+                  <ActivityIndicator color={color.white} />
+                </View>
+              ) : (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={26}
+                  style={styles.appleBtn}
+                  onPress={() => void handleApple()}
+                />
+              )}
+            </View>
+          ) : null}
 
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Continue with Google"
-            disabled={busy}
+            disabled={anyBusy}
             onPress={() => void handleGoogle()}
-            style={[styles.googleBtn, busy && styles.btnDisabled]}
+            style={[styles.googleBtn, anyBusy && styles.btnDisabled]}
           >
             {busy ? (
               <ActivityIndicator color={color.ink} />
@@ -250,6 +308,20 @@ const styles = StyleSheet.create({
     lineHeight: type.size.bodySm * type.leading.body,
     color: color.slate500,
     textAlign: 'center',
+  },
+  appleWrap: {
+    marginBottom: space[3],
+  },
+  appleBtn: {
+    width: '100%',
+    height: 52,
+  },
+  appleBusy: {
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000000',
   },
   googleBtn: {
     height: 52,

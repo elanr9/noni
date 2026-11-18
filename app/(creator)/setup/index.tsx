@@ -1,31 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Modal, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Redirect, useFocusEffect, useRouter, type Href } from 'expo-router';
+import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { Screen } from '../../../components/layout/Screen';
-import { Button } from '../../../components/ui/Button';
-import { Icon, type IconName } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { ProgressBar } from '../../../components/ui/ProgressBar';
-import { SkeletonLine } from '../../../components/ui/Skeleton';
-import { Wordmark } from '../../../components/ui/Wordmark';
-import {
-  retryAccountSubmission,
-  useAccountSubmission,
-} from '../../../lib/account-submission';
+import { LoadError } from '../../../components/creator/v2/LoadError';
+import { CompanyMark } from '../../../components/shared/CompanyMark';
+import { BellButton } from '../../../components/creator/v2/BellButton';
+import { ContextRow, ElsewhereStrip } from '../../../components/shared';
+import { Button, Card, Chip, Icon, Press, RootTitle, Screen, Sheet, Skeleton, type IconName } from '../../../components/v2';
+import { retryAccountSubmission, useAccountSubmission } from '../../../lib/account-submission';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { getCompany } from '../../../lib/onboarding';
 import { useSetupState, type SetupState, type SetupStepStatus } from '../../../lib/setup';
-import {
-  borderWidth,
-  color,
-  motion,
-  radius,
-  shadow,
-  space,
-  type,
-} from '../../../theme/tokens';
+import { color, motion, radius, shadow, space, text, type Tone } from '../../../theme/v2';
 
 function inviteSeenKey(creatorId: string): string {
   return `noni.inviteSeen.${creatorId}`;
@@ -67,12 +56,11 @@ function stepViews(state: SetupState, submitting: boolean): StepView[] {
       icon: 'link',
       title: 'Connect accounts',
       sub: connectSub(state),
-      status:
-        state.accounts === 'done' && state.connect === 'done' ? 'done' : 'todo',
+      status: state.accounts === 'done' && state.connect === 'done' ? 'done' : 'todo',
     },
     {
       key: 'warmup',
-      icon: 'zap',
+      icon: 'bolt',
       title: 'Warm up accounts',
       sub:
         warmup === 'in_review'
@@ -83,142 +71,70 @@ function stepViews(state: SetupState, submitting: boolean): StepView[] {
   ];
 }
 
-function StepPill({ status }: { status: SetupStepStatus }) {
-  const tone =
-    status === 'done'
-      ? { bg: color.greenSoft, fg: color.green, label: 'Done' }
-      : status === 'in_review'
-        ? { bg: color.amberSoft, fg: color.amber, label: 'In review' }
-        : { bg: color.blue100, fg: color.blue700, label: 'To do' };
+const STATUS: Record<SetupStepStatus, { tone: Tone; label: string }> = {
+  done: { tone: 'green', label: 'Done' },
+  in_review: { tone: 'amber', label: 'In review' },
+  todo: { tone: 'blue', label: 'To do' },
+};
+
+function StepCard({ step, index, onPress }: { step: StepView; index: number; onPress: () => void }) {
+  const s = STATUS[step.status];
+  const t = s.tone === 'green' ? color.green : s.tone === 'amber' ? color.amber : color.blueDeep;
+  const tint = s.tone === 'green' ? color.greenTint : s.tone === 'amber' ? color.amberTint : color.blueTint;
+  const icon: IconName = step.status === 'done' ? 'check' : step.status === 'in_review' ? 'schedule' : step.icon;
   return (
-    <View style={[styles.pill, { backgroundColor: tone.bg }]}>
-      <View style={[styles.pillDot, { backgroundColor: tone.fg }]} />
-      <Text style={[styles.pillText, { color: tone.fg }]}>{tone.label}</Text>
-    </View>
+    <Animated.View entering={FadeInDown.duration(260).delay(index * 60)}>
+      <Card onPress={onPress} accessibilityLabel={`${step.title}, ${s.label}`} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+        <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: tint, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={icon} size={20} color={t} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <Text style={text.row}>{step.title}</Text>
+          <Text style={text.meta}>{step.sub}</Text>
+        </View>
+        <Chip small tone={s.tone} label={s.label} />
+      </Card>
+    </Animated.View>
   );
 }
 
-function StepCard({
-  step,
-  onPress,
-}: {
-  step: StepView;
-  onPress: () => void;
-}) {
-  const done = step.status === 'done';
-  const inReview = step.status === 'in_review';
-  return (
-    <PressableScale
-      accessibilityRole="button"
-      accessibilityLabel={step.title}
-      onPress={onPress}
-      style={[styles.card, shadow.shadowCard]}
-    >
-      <View
-        style={[
-          styles.cardIcon,
-          done && { backgroundColor: color.greenSoft },
-          inReview && { backgroundColor: color.amberSoft },
-        ]}
-      >
-        <Icon
-          name={done ? 'check' : inReview ? 'clock' : step.icon}
-          size={17}
-          color={done ? color.green : inReview ? color.amber : color.blue700}
-        />
-      </View>
-      <View style={styles.cardText}>
-        <Text style={styles.cardTitle}>{step.title}</Text>
-        <Text style={styles.cardSub}>{step.sub}</Text>
-      </View>
-      <StepPill status={step.status} />
-    </PressableScale>
-  );
-}
-
-function InviteModal({
-  visible,
-  companyName,
-  onAccept,
-}: {
-  visible: boolean;
-  companyName: string;
-  onAccept: () => void;
-}) {
-  const enter = useRef(new Animated.Value(0)).current;
-
+function Progress({ value }: { value: number }) {
+  const w = useSharedValue(0);
   useEffect(() => {
-    if (!visible) return;
-    enter.setValue(0);
-    Animated.timing(enter, {
-      toValue: 1,
-      duration: motion.base,
-      easing: motion.easeOut,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, enter]);
-
+    w.set(withTiming(value, { duration: motion.underline, easing: motion.ease }));
+  }, [value, w]);
+  const fill = useAnimatedStyle(() => ({ width: `${w.get() * 100}%` }));
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.scrim}>
-        <Animated.View
-          style={[
-            styles.inviteCard,
-            shadow.shadowRaised,
-            {
-              opacity: enter,
-              transform: [
-                {
-                  translateY: enter.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [16, 0],
-                  }),
-                },
-                {
-                  scale: enter.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.97, 1],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <View style={styles.inviteTile}>
-            <Text style={styles.inviteTileText}>
-              {companyName.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <Text style={styles.inviteTitle}>
-            {`You've been invited to join ${companyName}'s team`}
-          </Text>
-          <Text style={styles.inviteBody}>
-            {`You record, ${companyName} handles editing and posting.`}
-          </Text>
-          <View style={styles.inviteCta}>
-            <Button size="lg" block onPress={onAccept}>
-              Accept invite
-            </Button>
-          </View>
-          <Text style={styles.inviteCaption}>Joining as a creator</Text>
-        </Animated.View>
-      </View>
-    </Modal>
+    <View style={{ flex: 1, height: 6, borderRadius: radius.pill, backgroundColor: color.grey2, overflow: 'hidden' }}>
+      <Animated.View style={[{ height: 6, borderRadius: radius.pill, backgroundColor: color.blue }, fill]} />
+    </View>
   );
 }
 
 export function CreatorSetupChecklist() {
   const router = useRouter();
   const { profile } = useAuth();
+  const { openNotifications, unreadNotifications } = useCompany();
   const { state, refresh } = useSetupState(profile);
   const submission = useAccountSubmission();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      await refresh();
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    }
+  }, [refresh]);
 
   useFocusEffect(
     useCallback(() => {
-      void refresh();
-    }, [refresh]),
+      void reload();
+    }, [reload]),
   );
 
   useEffect(() => {
@@ -236,7 +152,7 @@ export function CreatorSetupChecklist() {
   }, [profile?.active_company_id]);
 
   // F1: invites are claimed implicitly at sign-in (handle_new_user), so the
-  // accept modal shows once per creator on their first landing here.
+  // accept sheet shows once per creator on their first landing here.
   useEffect(() => {
     const creatorId = profile?.id;
     if (!creatorId) return;
@@ -254,112 +170,102 @@ export function CreatorSetupChecklist() {
   const acceptInvite = () => {
     setInviteOpen(false);
     if (profile) {
-      void AsyncStorage.setItem(inviteSeenKey(profile.id), 'true').catch(
-        () => undefined,
-      );
+      void AsyncStorage.setItem(inviteSeenKey(profile.id), 'true').catch(() => undefined);
     }
   };
 
   const stepAction = (key: StepKey): void => {
     if (state === null) return;
     if (key === 'accounts') {
-      router.push(
-        (state.accounts !== 'done'
-          ? '/(creator)/account-setup'
-          : '/(creator)/setup/connect') as Href,
-      );
+      router.push((state.accounts !== 'done' ? '/(creator)/account-setup' : '/(creator)/setup/connect') as Href);
       return;
     }
     router.push('/(creator)/setup/warmup' as Href);
   };
 
-  const steps =
-    state !== null ? stepViews(state, submission.status === 'sending') : [];
+  const steps = state !== null ? stepViews(state, submission.status === 'sending') : [];
   const doneCount = steps.filter((s) => s.status === 'done').length;
   const firstOpen = steps.find((s) => s.status === 'todo');
-
-  const footer =
-    firstOpen !== undefined ? (
-      <View style={styles.footerPad}>
-        <Button
-          size="lg"
-          block
-          icon={firstOpen.icon}
-          onPress={() => stepAction(firstOpen.key)}
-        >
-          {firstOpen.title}
-        </Button>
-      </View>
-    ) : undefined;
+  const company = companyName ?? 'Your company';
 
   return (
     <>
-      <Screen bg={color.offWhite} scroll contentStyle={styles.content} footer={footer}>
-        <View style={styles.headerRow}>
-          <Wordmark size={19} />
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Open messages"
-            onPress={() => router.push('/(creator)/chat' as Href)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon name="message-circle" size={23} color={color.ink} />
-          </PressableScale>
-        </View>
-
-        <View style={styles.header}>
-          <Text style={styles.title}>Get set up</Text>
-          <Text style={styles.subtitle}>Two steps and your queue unlocks.</Text>
-          <View style={styles.progressRow}>
-            <View style={styles.progressBar}>
-              <ProgressBar progress={doneCount / 2} />
-            </View>
-            <Text style={styles.progressLabel}>{doneCount} of 2</Text>
+      <Screen tabRoot>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: space[6] }}>
+          <ContextRow right={<BellButton count={unreadNotifications} onPress={openNotifications} />} />
+          <RootTitle
+            title="Get set up"
+            right={
+              <Press
+                accessibilityRole="button"
+                accessibilityLabel="Open messages"
+                onPress={() => router.push('/(creator)/chat' as Href)}
+                style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: color.card, alignItems: 'center', justifyContent: 'center', ...shadow.card }}
+              >
+                <Icon name="chat_bubble" size={19} color={color.ink} />
+              </Press>
+            }
+          />
+          <Text style={[text.body, { color: color.grey4, marginTop: -8 }]}>Two steps and your queue unlocks.</Text>
+          <ElsewhereStrip style={{ marginTop: space[3] }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: space[4], marginBottom: space[6] }}>
+            <Progress value={doneCount / 2} />
+            <Text style={[text.meta, { fontWeight: '700' }]}>{`${doneCount} of 2`}</Text>
           </View>
-        </View>
 
-        {submission.status === 'failed' && (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Retry sending your application"
-            onPress={retryAccountSubmission}
-            style={styles.failBanner}
-          >
-            <Icon name="circle-alert" size={17} color={color.danger} />
-            <View style={styles.failText}>
-              <Text style={styles.failTitle}>Your application did not send</Text>
-              <Text style={styles.failBody}>
-                {submission.error ?? 'Tap to try again.'}
-              </Text>
-            </View>
-            <Icon name="rotate-ccw" size={17} color={color.danger} />
-          </PressableScale>
-        )}
+          {submission.status === 'failed' ? (
+            <Animated.View entering={FadeIn.duration(200)}>
+              <Press
+                accessibilityRole="button"
+                accessibilityLabel="Retry sending your application"
+                onPress={retryAccountSubmission}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: space.cardGap, borderRadius: radius.card, backgroundColor: color.pinkTint }}
+              >
+                <Icon name="error" size={20} color={color.pink} />
+                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                  <Text style={[text.body, { fontWeight: '700', color: color.pink }]}>Your application did not send</Text>
+                  <Text style={[text.meta, { color: color.pink }]}>{submission.error ?? 'Tap to try again.'}</Text>
+                </View>
+                <Icon name="refresh" size={20} color={color.pink} />
+              </Press>
+            </Animated.View>
+          ) : null}
 
-        {state === null ? (
-          <View style={styles.list}>
-            {[0, 1].map((i) => (
-              <SkeletonLine key={i} width="100%" height={92} radius={radius.lg} />
-            ))}
-          </View>
-        ) : (
-          <View style={styles.list}>
-            {steps.map((step) => (
-              <StepCard
-                key={step.key}
-                step={step}
-                onPress={() => stepAction(step.key)}
+          {state === null ? (
+            failed ? (
+              <LoadError
+                title="Could not load your setup"
+                retrying={retrying}
+                onRetry={() => {
+                  setRetrying(true);
+                  void reload().finally(() => setRetrying(false));
+                }}
               />
-            ))}
-          </View>
-        )}
+            ) : (
+              <>
+                <Skeleton h={92} />
+                <Skeleton h={92} />
+              </>
+            )
+          ) : (
+            steps.map((step, i) => <StepCard key={step.key} step={step} index={i} onPress={() => stepAction(step.key)} />)
+          )}
+        </ScrollView>
+        {firstOpen !== undefined ? (
+          <Animated.View entering={FadeIn.duration(220)} style={{ flexDirection: 'row', paddingHorizontal: space.screen, paddingTop: space[2] }}>
+            <Button icon={firstOpen.icon} label={firstOpen.title} onPress={() => stepAction(firstOpen.key)} />
+          </Animated.View>
+        ) : null}
       </Screen>
 
-      <InviteModal
-        visible={inviteOpen}
-        companyName={companyName ?? 'Your company'}
-        onAccept={acceptInvite}
-      />
+      <Sheet open={inviteOpen} onClose={acceptInvite} footer={<Button label="Accept invite" onPress={acceptInvite} />}>
+        <View style={{ alignItems: 'center', paddingTop: 4 }}>
+          {profile ? <CompanyMark companyId={profile.active_company_id} name={company} size={64} /> : null}
+          <Text style={[text.card, { fontSize: 24, lineHeight: 30, textAlign: 'center', marginTop: space[4] }]}>{`You've been invited to join ${company}'s team`}</Text>
+          <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: space[2] }]}>{`You record, ${company} handles editing and posting.`}</Text>
+          <Text style={[text.meta, { marginTop: space[3] }]}>Joining as a creator</Text>
+        </View>
+      </Sheet>
     </>
   );
 }
@@ -367,184 +273,3 @@ export function CreatorSetupChecklist() {
 export default function SetupRoute() {
   return <Redirect href="/(creator)/(tabs)" />;
 }
-
-const styles = StyleSheet.create({
-  content: {
-    gap: space[6],
-    paddingTop: space[2],
-    paddingBottom: space[9],
-  },
-  footerPad: {
-    // Floating locked TabBar (~68) + bottom offset (22): CTA sits at ~96.
-    paddingBottom: space.tapMin + space[11] + space[2],
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  header: {
-    gap: space[2],
-  },
-  title: {
-    fontSize: type.size.title,
-    lineHeight: type.size.title * type.leading.title,
-    letterSpacing: type.tracking.title,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  subtitle: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-  },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.stackGap,
-    paddingTop: space[2],
-  },
-  progressBar: {
-    flex: 1,
-  },
-  progressLabel: {
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.slate500,
-  },
-  list: {
-    gap: space.stackGap,
-  },
-  failBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    padding: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.dangerSoft,
-  },
-  failText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  failTitle: {
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.danger,
-  },
-  failBody: {
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * type.leading.snug,
-    fontWeight: type.weight.regular,
-    color: color.danger,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space[4],
-    backgroundColor: color.white,
-    borderRadius: radius.lg,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    padding: space.cardPad,
-  },
-  cardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
-  },
-  cardTitle: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  cardSub: {
-    fontSize: type.size.meta,
-    lineHeight: type.size.meta * type.leading.snug,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-  },
-  pillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: radius.pill,
-  },
-  pillText: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.bold,
-  },
-  scrim: {
-    flex: 1,
-    backgroundColor: color.scrim,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: space.gutter,
-  },
-  inviteCard: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    backgroundColor: color.white,
-    borderRadius: radius['2xl'],
-    paddingTop: 30,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  inviteTile: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.xl,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inviteTileText: {
-    fontSize: 26,
-    fontWeight: type.weight.heavy,
-    color: color.blue700,
-  },
-  inviteTitle: {
-    marginTop: space[4],
-    fontSize: 24,
-    lineHeight: 24 * 1.2,
-    letterSpacing: -0.5,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-    textAlign: 'center',
-  },
-  inviteBody: {
-    marginTop: space[2],
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-    textAlign: 'center',
-  },
-  inviteCta: {
-    alignSelf: 'stretch',
-    marginTop: 22,
-  },
-  inviteCaption: {
-    marginTop: space[3],
-    fontSize: type.size.label,
-    fontWeight: type.weight.regular,
-    color: color.slate400,
-  },
-});

@@ -1,0 +1,226 @@
+/* Noni editing studio. Dark, instant, no render step: every edit mutates a small timeline model and the preview re-paints. */
+const ED = { bg: '#0F0F12', panel: '#17171C', line: 'rgba(255,255,255,0.08)', text: '#fff', dim: 'rgba(255,255,255,0.55)', blue: '#1BA6EE', purple: '#7E3BFF', yellow: '#FFD60A', chip: '#26262D' };
+const FONTS = [['Classic', 'var(--font)'], ['Serif', 'Georgia, serif'], ['Bold', '"Arial Black", Impact, sans-serif'], ['Typewriter', '"Courier New", Courier, monospace'], ['Round', '"Nunito", "Trebuchet MS", sans-serif']];
+const SWATCH = ['#FFFFFF', '#0B0B0C', '#FFD60A', '#FF8A00', '#FE2C55', '#FF2D78', '#7E3BFF', '#2BBF7A', '#1BA6EE'];
+const STYLES = [['none', 'None'], ['outline', 'Outline'], ['inv-outline', 'Inverted outline'], ['bg', 'Background'], ['inv-bg', 'Inverted background']];
+const DUR = 34, GUT = 120, MIN_LEN = 0.5;
+const uid = () => Math.random().toString(36).slice(2, 8);
+const mkText = (text, from, to) => ({ id: uid(), text, from, to, x: 50, y: 26, size: 20, font: 0, color: '#FFFFFF', align: 'center', style: 'none' });
+const initialDoc = (p, s) => ({
+  clips: [{ id: 'c1', start: 0, end: 9, src: 0 }, { id: 'c2', start: 9, end: 21, src: 1 }, { id: 'c3', start: 21, end: 34, src: 2 }],
+  texts: [mkText(p.title, 0, 5)].concat(s.points.slice(0, p.points).map((pt, i) => mkText(pt, 6 + i * 5.5, 10.5 + i * 5.5))),
+  overlays: [],
+  captions: true,
+});
+const ROLL_SEED = [['frames/f1.png', 'IMG_1880'], ['frames/f2.png', 'IMG_1881'], ['frames/f3.png', 'IMG_1882'], ['https://i.pravatar.cc/300?img=12', 'IMG_1883'], ['https://i.pravatar.cc/300?img=33', 'IMG_1884'], ['https://i.pravatar.cc/300?img=59', 'IMG_1885'], ['https://i.pravatar.cc/300?img=47', 'IMG_1886'], ['https://i.pravatar.cc/300?img=5', 'IMG_1887'], ['https://i.pravatar.cc/300?img=15', 'IMG_1888']];
+const ROLL = Array.from({ length: 48 }, (_, i) => { const [src, l] = ROLL_SEED[i % ROLL_SEED.length]; return [src, `IMG_${1880 + i}`, `${(i * 7) % 3}:${String((i * 13) % 60).padStart(2, '0')}`]; });
+const BRAND = [['grad', 'Logo on blue', 'linear-gradient(160deg,#1BA6EE,#0A4DA3)'], ['grad', 'App screen', 'linear-gradient(160deg,#2BBF7A,#1BA6EE)'], ['grad', 'Pass map', 'linear-gradient(160deg,#F6A23B,#E0457B)'], ['grad', 'Sprint chart', 'linear-gradient(160deg,#8E6CF0,#1BA6EE)'], ['grad', 'Product shot', 'linear-gradient(160deg,#26C6DA,#1BA6EE)'], ['grad', 'Tripod demo', 'linear-gradient(160deg,#F06292,#F6A23B)']];
+const textCss = (x, scale) => {
+  const inv = x.style.startsWith('inv'), base = { color: x.color, font: `600 ${x.size * scale}px/1.25 ${FONTS[x.font][1]}`, textAlign: x.align, padding: 0, borderRadius: 6 * scale, background: 'transparent', textShadow: 'none', WebkitTextStroke: '0' };
+  if (x.style === 'none') base.textShadow = '0 1px 2px rgba(0,0,0,0.6), 0 0 6px rgba(0,0,0,0.35)';
+  if (x.style === 'outline') base.WebkitTextStroke = `${1.2 * scale}px ${x.color === '#0B0B0C' ? '#fff' : '#0B0B0C'}`;
+  if (x.style === 'inv-outline') { base.color = x.color === '#0B0B0C' ? '#fff' : '#0B0B0C'; base.WebkitTextStroke = `${1.2 * scale}px ${x.color}`; }
+  if (x.style === 'bg') { base.background = x.color === '#FFFFFF' ? '#0B0B0C' : x.color === '#0B0B0C' ? '#fff' : '#0B0B0C'; base.color = x.color === '#0B0B0C' ? '#0B0B0C' : x.color; base.padding = `${4 * scale}px ${10 * scale}px`; if (x.color === '#0B0B0C') base.background = '#fff'; }
+  if (x.style === 'inv-bg') { base.background = x.color; base.color = x.color === '#FFFFFF' || x.color === '#FFD60A' ? '#0B0B0C' : '#fff'; base.padding = `${4 * scale}px ${10 * scale}px`; }
+  return base;
+};
+
+function EditorScreen({ id }) {
+  const nav = useNav();
+  const p = window.V2.queue.find((q) => q.id === id) || window.V2.cur.posts.find((q) => q.id === id) || window.V2.queue[0];
+  const s = window.V2.script;
+  const [hist, setHist] = React.useState(() => [initialDoc(p, s)]);
+  const [hi, setHi] = React.useState(0);
+  const doc = hist[hi];
+  const total = doc.clips.length ? doc.clips[doc.clips.length - 1].end : 0;
+  const commit = (next) => { setHist((h) => h.slice(0, hi + 1).concat([next])); setHi(hi + 1); };
+  const live = (next) => setHist((h) => { const c = h.slice(); c[hi] = next; return c; });
+  const [t, setT] = React.useState(0);
+  const [playing, setPlaying] = React.useState(false);
+  const [sel, setSel] = React.useState(null);
+  const [selClip, setSelClip] = React.useState(null);
+  const [picker, setPicker] = React.useState(false);
+  const [pickTab, setPickTab] = React.useState('roll');
+  const [cols, setCols] = React.useState(3);
+  const [colsF, setColsF] = React.useState(3);
+  const gridPtrs = React.useRef(new Map()), gridPinch = React.useRef(null);
+  const gDown = (e) => { gridPtrs.current.set(e.pointerId, e); if (gridPtrs.current.size === 2) { const [a, b] = [...gridPtrs.current.values()]; gridPinch.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), c: cols }; } };
+  const gMove = (e) => { if (!gridPtrs.current.has(e.pointerId)) return; gridPtrs.current.set(e.pointerId, e); if (gridPinch.current && gridPtrs.current.size === 2) { const [a, b] = [...gridPtrs.current.values()]; const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); const r = Math.pow(d / gridPinch.current.d, 0.6); const f = Math.max(2, Math.min(5, gridPinch.current.c / r)); setColsF(f); setCols(Math.round(f)); } };
+  const gUp = (e) => { gridPtrs.current.delete(e.pointerId); if (gridPtrs.current.size < 2) { gridPinch.current = null; setColsF(cols); } };
+  const gWheel = (e) => { if (e.ctrlKey) { e.preventDefault(); setCols((c) => { const n = Math.max(2, Math.min(5, c + (e.deltaY > 0 ? 1 : -1))); setColsF(n); return n; }); } };
+  const [selOv, setSelOv] = React.useState(null);
+  const selO = (doc.overlays || []).find((o) => o.id === selOv);
+  const addOverlay = (src, label) => { if (selO && picker) { commit({ ...doc, overlays: doc.overlays.map((o) => o.id === selOv ? { ...o, src, label } : o) }); setPicker(false); return; } const o = { id: uid(), src, label, from: Math.floor(t), to: Math.min(total, Math.floor(t) + 4), x: 50, y: 50, w: 58 }; commit({ ...doc, overlays: (doc.overlays || []).concat([o]) }); setPicker(false); setSelOv(o.id); setSel(null); setSelClip(null); };
+  const splitOv = () => { if (!selO || t <= selO.from + MIN_LEN || t >= selO.to - MIN_LEN) return; const b = { ...selO, id: uid(), from: t }; commit({ ...doc, overlays: doc.overlays.flatMap((o) => o.id === selOv ? [{ ...o, to: t }, b] : [o]) }); setSelOv(b.id); haptic(); };
+  const delOv = () => { commit({ ...doc, overlays: doc.overlays.filter((o) => o.id !== selOv) }); setSelOv(null); };
+  const ovPtrs = React.useRef(new Map());
+  const dragOv = (e, o) => { e.stopPropagation(); setSelOv(o.id); setSel(null); setSelClip(null); const r = prevRef.current.getBoundingClientRect(); const sx = e.clientX, sy = e.clientY, ox = o.x, oy = o.y, ow = o.w; let moved = false; ovPtrs.current.set(e.pointerId, e); let pinch0 = null;
+    const mv = (ev) => { if (ovPtrs.current.has(ev.pointerId)) ovPtrs.current.set(ev.pointerId, ev); if (ovPtrs.current.size >= 2) { const [a, b] = [...ovPtrs.current.values()]; const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); if (!pinch0) pinch0 = d; moved = true; const nw = Math.max(15, Math.min(100, ow * (d / pinch0))); setHist((h) => { const dd = h[hi]; const c = h.slice(); c[hi] = { ...dd, overlays: dd.overlays.map((x) => x.id === o.id ? { ...x, w: nw } : x) }; return c; }); return; } if (ev.pointerId !== e.pointerId) return; moved = true; const nx = Math.max(10, Math.min(90, ox + ((ev.clientX - sx) / r.width) * 100)), ny = Math.max(10, Math.min(90, oy + ((ev.clientY - sy) / r.height) * 100)); setHist((h) => { const d = h[hi]; const c = h.slice(); c[hi] = { ...d, overlays: d.overlays.map((x) => x.id === o.id ? { ...x, x: nx, y: ny } : x) }; return c; }); };
+    const dn = (ev) => { ovPtrs.current.set(ev.pointerId, ev); };
+    const up = (ev) => { ovPtrs.current.delete(ev.pointerId); if (ovPtrs.current.size) return; window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); window.removeEventListener('pointerdown', dn); if (moved) { setHist((h) => h.slice(0, hi + 1).concat([h[hi]])); setHi(hi + 1); } };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); window.addEventListener('pointerdown', dn); };
+  const [edit, setEdit] = React.useState(false);
+  const [tab, setTab] = React.useState('text');
+  const [zoom, setZoom] = React.useState(40);
+  const tlRef = React.useRef(null), prevRef = React.useRef(null), ptrs = React.useRef(new Map()), pinch = React.useRef(null), scrubbing = React.useRef(false), gesture = React.useRef(null);
+  const frames = ['frames/f1.png', 'frames/f2.png', 'frames/f3.png'];
+  React.useEffect(() => { if (!playing) return; let raf, last = performance.now(); const tick = (now) => { const dt = (now - last) / 1000; last = now; setT((x) => (x + dt >= total ? 0 : x + dt)); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf); }, [playing, total]);
+  React.useEffect(() => { const el = tlRef.current; if (el && !scrubbing.current && !gesture.current) el.scrollLeft = Math.max(0, t * zoom - el.clientWidth / 2 + GUT); }, [t, zoom]);
+  const clipAt = doc.clips.find((c) => t >= c.start && t < c.end) || doc.clips[doc.clips.length - 1] || { src: 0 };
+  const selC = doc.clips.find((c) => c.id === selClip);
+  const ripple = (clips) => { let at = 0; return clips.map((c) => { const len = c.end - c.start; const n = { ...c, start: at, end: at + len }; at += len; return n; }); };
+  const delClip = () => { if (doc.clips.length < 2) return; const clips = ripple(doc.clips.filter((c) => c.id !== selClip)); commit({ ...doc, clips, texts: doc.texts.filter((x) => x.from < clips[clips.length - 1].end) }); setSelClip(null); setT(0); };
+  const selT = doc.texts.find((x) => x.id === sel);
+  const clock = (x) => `00:${String(Math.floor(x)).padStart(2, '0')}`;
+  const capLines = React.useMemo(() => [s.hook].concat(s.points.slice(0, p.points), [s.close]).flatMap((l) => l.split(/(?<=[.?!])\s+/)).filter(Boolean), []);
+  const capAt = (x) => capLines[Math.min(capLines.length - 1, Math.floor((x / DUR) * capLines.length))];
+  const upd = (patch, hard = true) => (hard ? commit : live)({ ...doc, texts: doc.texts.map((x) => x.id === sel ? { ...x, ...patch } : x) });
+  const updOv = (id, patch) => live({ ...doc, overlays: doc.overlays.map((x) => x.id === id ? { ...x, ...patch } : x) });
+  const splitAt = () => {
+    const c = (selC && t > selC.start + 0.3 && t < selC.end - 0.3) ? selC : doc.clips.find((c) => t > c.start + 0.3 && t < c.end - 0.3); if (!c) return;
+    const b = { ...c, id: uid(), start: t };
+    commit({ ...doc, clips: doc.clips.flatMap((k) => k.id === c.id ? [{ ...k, end: t }, b] : [k]) }); setSelClip(b.id); haptic();
+  };
+  const pick = (x) => { setSel(x.id); setSelClip(null); if (t < x.from || t >= x.to) setT(x.from + 0.01); setPlaying(false); };
+  const addText = () => { const n = mkText('Your text', Math.floor(t), Math.min(DUR, Math.floor(t) + 4)); commit({ ...doc, texts: doc.texts.concat([n]) }); setSel(n.id); setEdit(true); setTab('text'); };
+  const dup = () => { if (!selT) return; const n = { ...selT, id: uid(), from: Math.min(DUR - MIN_LEN, selT.to), to: Math.min(DUR, selT.to + (selT.to - selT.from)) }; commit({ ...doc, texts: doc.texts.concat([n]) }); setSel(n.id); };
+  const del = () => { commit({ ...doc, texts: doc.texts.filter((x) => x.id !== sel) }); setSel(null); setEdit(false); };
+  const tlX = (e) => { const el = tlRef.current; const r = el.getBoundingClientRect(); return (e.clientX - r.left + el.scrollLeft - GUT) / zoom; };
+  const seek = (e) => setT(Math.max(0, Math.min(total, tlX(e))));
+  const tlDown = (e) => {
+    ptrs.current.set(e.pointerId, e);
+    if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; pinch.current = { d: Math.abs(a.clientX - b.clientX), z: zoom }; scrubbing.current = false; return; }
+    if (gesture.current) return;
+    scrubbing.current = true; e.currentTarget.setPointerCapture(e.pointerId); seek(e); setSel(null); setSelClip(null); setSelOv(null);
+  };
+  const tlMove = (e) => {
+    if (ptrs.current.has(e.pointerId)) ptrs.current.set(e.pointerId, e);
+    if (pinch.current && ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; const d = Math.abs(a.clientX - b.clientX); setZoom(Math.max(14, Math.min(160, pinch.current.z * (d / Math.max(20, pinch.current.d))))); return; }
+    const g = gesture.current;
+    if (g) { const x = tlX(e), d = x - g.x0; let patch = {}; if (Math.abs(d * zoom) < 4 && !g.moved) return; if (!g.moved) { g.moved = true; dragged.current = true; if (g.kind === 'move' && !g.ov && sel !== g.id) { setSel(g.id); return; } }
+      if (g.ov) { const o = doc.overlays.find((x) => x.id === g.id); const others = doc.overlays.filter((x) => x.id !== g.id); const lo = Math.max(0, ...others.filter((x) => x.to <= g.from + 0.001).map((x) => x.to)); const hb = Math.min(total, ...others.filter((x) => x.from >= g.to - 0.001).map((x) => x.from)); let pt = {};
+        if (g.kind === 'move') { const len = g.to - g.from; const f = Math.max(lo, Math.min(hb - len, g.from + d)); pt = { from: f, to: f + len }; }
+        if (g.kind === 'l') pt = { from: Math.max(lo, Math.min(g.to - MIN_LEN, g.from + d)) };
+        if (g.kind === 'r') pt = { to: Math.min(hb, Math.max(g.from + MIN_LEN, g.to + d)) };
+        updOv(g.id, pt); return; }
+      const others = doc.texts.filter((o) => o.id !== sel);
+      const lo = Math.max(0, ...others.filter((o) => o.to <= g.from + 0.001).map((o) => o.to));
+      const hiB = Math.min(DUR, ...others.filter((o) => o.from >= g.to - 0.001).map((o) => o.from));
+      if (g.kind === 'move') { const len = g.to - g.from; let f = Math.max(lo, Math.min(hiB - len, g.from + d)); patch = { from: f, to: f + len }; }
+      if (g.kind === 'l') patch = { from: Math.max(lo, Math.min(g.to - MIN_LEN, g.from + d)) };
+      if (g.kind === 'r') patch = { to: Math.min(hiB, Math.max(g.from + MIN_LEN, g.to + d)) };
+      if (g.kind === 'cl' || g.kind === 'cr') { const len = g.to - g.from; const nl = g.kind === 'cl' ? Math.max(MIN_LEN, Math.min(len + 4, len - d)) : Math.max(MIN_LEN, Math.min(len + 4, len + d)); live({ ...doc, clips: ripple(doc.clips.map((c) => c.id === g.id ? { ...c, end: c.start + nl } : c)) }); return; }
+      upd(patch, false); return; }
+    if (scrubbing.current) seek(e);
+  };
+  const tlUp = (e) => { ptrs.current.delete(e.pointerId); if (ptrs.current.size < 2) pinch.current = null; if (gesture.current) { const moved = gesture.current.moved; gesture.current = null; if (moved) { setHist((h) => h.slice(0, hi + 1).concat([h[hi]])); setHi(hi + 1); } } scrubbing.current = false; };
+  const startOv = (e, o, kind) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); dragged.current = false; setSelOv(o.id); setSel(null); setSelClip(null); gesture.current = { kind, ov: true, x0: tlX(e), from: o.from, to: o.to, id: o.id, moved: false }; };
+  const startGesture = (e, x, kind) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); dragged.current = false; if (kind === 'cl' || kind === 'cr') { gesture.current = { kind, x0: tlX(e), from: x.start, to: x.end, id: x.id, moved: false }; return; } if (kind !== 'move' || sel === x.id) setSel(x.id); gesture.current = { kind, x0: tlX(e), from: x.from, to: x.to, id: x.id, moved: false }; };
+  const onWheel = (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom((z) => Math.max(14, Math.min(160, z * (e.deltaY < 0 ? 1.08 : 0.92)))); } };
+  React.useEffect(() => { const el = tlRef.current; if (!el) return; el.addEventListener('wheel', onWheel, { passive: false }); return () => el.removeEventListener('wheel', onWheel); }, []);
+  const dragged = React.useRef(false);
+  const dragText = (e, tx) => {
+    e.stopPropagation(); dragged.current = false;
+    const r = prevRef.current.getBoundingClientRect(); const sx = e.clientX, sy = e.clientY, ox = tx.x, oy = tx.y; let moved = false;
+    const mv = (ev) => { if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 4 && !moved) return; moved = true; dragged.current = true; setSel(tx.id); const nx = Math.max(5, Math.min(95, ox + ((ev.clientX - sx) / r.width) * 100)), ny = Math.max(5, Math.min(95, oy + ((ev.clientY - sy) / r.height) * 100)); setHist((h) => { const d = h[hi]; const c = h.slice(); c[hi] = { ...d, texts: d.texts.map((x) => x.id === tx.id ? { ...x, x: nx, y: ny } : x) }; return c; }); };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); if (moved) { setHist((h) => h.slice(0, hi + 1).concat([h[hi]])); setHi(hi + 1); } };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
+  const rb = (name, label, onClick, on) => <button key={label} type="button" className="p" onClick={onClick} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 60, color: on ? ED.blue : ED.text }}><Icon name={name} size={24} color={on ? ED.blue : ED.text} /><span style={{ font: '500 11px/13px var(--font)', whiteSpace: 'nowrap' }}>{label}</span></button>;
+  const tb = (name, k) => <button key={k} type="button" className="p" onClick={() => setTab(k)} style={{ width: 44, height: 44, borderRadius: 12, background: tab === k ? '#fff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={name} size={22} color={tab === k ? '#000' : '#fff'} /></button>;
+  const W = GUT + Math.max(total, DUR) * zoom + 200;
+  return (
+    <div onClick={() => { if (!edit) { setSel(null); setSelClip(null); setSelOv(null); } }} style={{ position: 'absolute', inset: 0, background: ED.bg, color: ED.text, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font)' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ height: 96, padding: '52px 12px 0', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {edit ? <span style={{ flex: 1 }} /> : <>
+          <button type="button" className="p" onClick={nav.pop} style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={24} color={ED.text} /></button>
+          <span style={{ flex: 1, minWidth: 0, font: `600 ${p.title.length > 40 ? 12 : p.title.length > 28 ? 13 : 15}px/1.2 var(--font)`, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.title}</span></>}
+        <button type="button" className="p" onClick={() => edit ? setEdit(false) : nav.pop()} style={{ height: 36, padding: '0 16px', borderRadius: 999, background: edit ? ED.chip : ED.blue, color: '#fff', font: '700 14px/36px var(--font)', display: 'flex', alignItems: 'center' }}>{edit ? 'Done' : 'Save'}</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 0' }}>
+        <div ref={prevRef} onClick={() => { if (!edit) setSel(null); }} style={{ height: '100%', aspectRatio: '9 / 16', borderRadius: 12, overflow: 'hidden', position: 'relative', background: `url(${frames[clipAt.src % 3]}) center/cover`, userSelect: 'none' }}>
+          {doc.texts.filter((x) => t >= x.from && t < x.to).map((x) => {
+            const on = x.id === sel;
+            return <div key={x.id} onPointerDown={(e) => dragText(e, x)} onClick={(e) => { e.stopPropagation(); if (!dragged.current) pick(x); }} style={{ position: 'absolute', left: `${x.x}%`, top: `${x.y}%`, transform: 'translate(-50%,-50%)', maxWidth: '88%', outline: on ? `1.5px solid ${ED.yellow}` : 'none', outlineOffset: 6, cursor: 'grab', touchAction: 'none', whiteSpace: 'pre-wrap', ...textCss(x, 0.62) }}>{x.text}</div>;
+          })}
+          {(doc.overlays || []).filter((o) => t >= o.from && t < o.to).map((o) => <div key={o.id} onPointerDown={(e) => dragOv(e, o)} onClick={(e) => e.stopPropagation()} onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); commit({ ...doc, overlays: doc.overlays.map((x) => x.id === o.id ? { ...x, w: Math.max(15, Math.min(100, x.w * (e.deltaY < 0 ? 1.06 : 0.94))) } : x) }); } }} style={{ position: 'absolute', left: `${o.x}%`, top: `${o.y}%`, width: `${o.w}%`, aspectRatio: '4 / 5', transform: 'translate(-50%,-50%)', borderRadius: 0, overflow: 'hidden', background: o.src.startsWith('linear') ? o.src : `url(${o.src}) center/cover`, boxShadow: '0 6px 18px rgba(0,0,0,0.35)', outline: o.id === selOv ? `1.5px solid ${ED.yellow}` : 'none', outlineOffset: 4, cursor: 'grab', touchAction: 'none', display: 'flex', alignItems: 'flex-end', padding: 6 }}>{o.src.startsWith('linear') ? <span style={{ font: '700 9px/11px var(--font)', color: '#fff' }}>{o.label}</span> : null}</div>)}
+          {doc.captions ? <div style={{ position: 'absolute', left: '10%', right: '10%', bottom: '14%', textAlign: 'center', font: '500 12px/1.25 var(--font)', color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 6px rgba(0,0,0,0.35)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', pointerEvents: 'none' }}>{capAt(t)}</div> : null}
+          {!playing && !edit ? <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><span style={{ width: 48, height: 48, borderRadius: 999, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play_arrow" size={30} color="#fff" /></span></span> : null}
+        </div>
+      </div>
+      {edit && selT ? (
+        <div onClick={(e) => e.stopPropagation()} style={{ background: ED.panel, borderRadius: '20px 20px 0 0', padding: '8px 12px 34px', flexShrink: 0, minHeight: 250 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}><span style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' }} /></div>
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: 14 }}>{tb('edit', 'text')}{tb('text_fields', 'font')}{tb('palette', 'color')}{tb('format_align_center', 'align')}{tb('format_shapes', 'style')}</div>
+          {tab === 'text' ? <input autoFocus value={selT.text} onChange={(e) => upd({ text: e.target.value }, false)} onBlur={() => commit(doc)} style={{ width: '100%', height: 44, borderRadius: 12, border: 'none', background: ED.chip, color: '#fff', padding: '0 14px', font: '500 15px/44px var(--font)', outline: 'none' }} /> : null}
+          {tab === 'font' ? <><div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>{FONTS.map(([n, f], i) => <button key={n} type="button" className="p" onClick={() => upd({ font: i })} style={{ height: 44, padding: '0 14px', borderRadius: 12, background: selT.font === i ? '#fff' : ED.chip, color: selT.font === i ? '#000' : '#fff', font: `600 14px/44px ${f}`, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{n}</button>)}</div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 14 }}><span style={{ font: '500 12px/16px var(--font)', color: ED.dim }}>Size</span><input type="range" min={12} max={48} value={selT.size} onChange={(e) => upd({ size: +e.target.value }, false)} onPointerUp={() => commit(doc)} style={{ flex: 1, accentColor: '#fff' }} /><span style={{ font: '600 13px/16px "SF Mono", Menlo, monospace', width: 24, textAlign: 'right' }}>{selT.size}</span></div></> : null}
+          {tab === 'color' ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>{SWATCH.map((c) => <button key={c} type="button" className="p" onClick={() => upd({ color: c })} style={{ height: 44, borderRadius: 12, background: c, outline: selT.color === c ? '2.5px solid #fff' : 'none', outlineOffset: 3, boxShadow: c === '#0B0B0C' ? 'inset 0 0 0 1px rgba(255,255,255,0.2)' : 'none' }} />)}</div> : null}
+          {tab === 'align' ? <div style={{ display: 'flex', gap: 10 }}>{[['left', 'format_align_left'], ['center', 'format_align_center'], ['right', 'format_align_right']].map(([v, n]) => <button key={v} type="button" className="p" onClick={() => upd({ align: v })} style={{ flex: 1, height: 52, borderRadius: 12, background: selT.align === v ? '#fff' : ED.chip, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={n} size={24} color={selT.align === v ? '#000' : '#fff'} /></button>)}</div> : null}
+          {tab === 'style' ? <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>{STYLES.map(([k, l]) => <button key={k} type="button" className="p" onClick={() => upd({ style: k })} style={{ height: 56, borderRadius: 12, background: ED.chip, outline: selT.style === k ? '2px solid #fff' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}><span style={{ ...textCss({ ...selT, style: k, size: 15, color: k === 'none' && selT.color === '#0B0B0C' ? '#fff' : selT.color }, 1), font: `600 15px/1.2 ${FONTS[selT.font][1]}` }}>{l}</span></button>)}</div> : null}
+        </div>
+      ) : <>
+      <div onClick={(e) => e.stopPropagation()} style={{ height: 44, display: 'grid', gridTemplateColumns: '60px 1fr 60px 60px', alignItems: 'center', padding: '0 8px', flexShrink: 0 }}>
+        <button type="button" className="p" onClick={() => setPlaying((x) => !x)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={playing ? 'pause' : 'play_arrow'} size={28} color={ED.text} /></button>
+        <span style={{ textAlign: 'center', font: '600 13px/16px "SF Mono", Menlo, monospace' }}>{clock(t)}<span style={{ color: ED.dim }}> / {clock(total)}</span></span>
+        <button type="button" className="p" disabled={hi === 0} onClick={() => setHi((i) => Math.max(0, i - 1))} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hi === 0 ? 0.35 : 1 }}><Icon name="undo" size={24} color={ED.text} /></button>
+        <button type="button" className="p" disabled={hi >= hist.length - 1} onClick={() => setHi((i) => Math.min(hist.length - 1, i + 1))} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hi >= hist.length - 1 ? 0.35 : 1 }}><Icon name="redo" size={24} color={ED.text} /></button>
+      </div>
+      <div ref={tlRef} className="v2-scroll" onPointerDown={tlDown} onPointerMove={tlMove} onPointerUp={tlUp} onPointerCancel={tlUp} style={{ height: 186, overflowX: 'auto', overflowY: 'hidden', position: 'relative', flexShrink: 0, touchAction: 'none', cursor: 'col-resize' }}>
+        <div style={{ width: W, height: '100%', position: 'relative' }}>
+          {[[30, 34], [70, 28], [106, 56]].map(([top, h]) => <div key={top} style={{ position: 'absolute', left: 0, right: 0, top, height: h, background: '#1A1A1F' }} />)}
+          <div style={{ position: 'absolute', left: GUT, top: 0, right: 0, height: 22 }}>{Array.from({ length: Math.ceil(total) + 1 }, (_, i) => <span key={i} style={{ position: 'absolute', left: i * zoom, top: 0, font: '500 10px/12px "SF Mono", Menlo, monospace', color: ED.dim, transform: 'translateX(-50%)' }}>{zoom < 24 && i % 5 ? '' : `${i}s`}</span>)}</div>
+          <div style={{ position: 'absolute', left: GUT, top: 30, height: 34 }}>{doc.texts.map((x) => { const on = x.id === sel; return (
+            <div key={x.id} onPointerDown={(e) => startGesture(e, x, 'move')} onClick={(e) => { e.stopPropagation(); if (!dragged.current) pick(x); }} style={{ position: 'absolute', left: x.from * zoom, width: Math.max(8, (x.to - x.from) * zoom - 2), height: 34, borderRadius: 8, background: ED.purple, boxShadow: on ? `0 0 0 2px ${ED.yellow}` : 'none', font: '600 12px/34px var(--font)', color: '#fff', padding: on ? '0 22px' : '0 10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'grab', touchAction: 'none', zIndex: on ? 2 : 1 }}>
+              {x.text}
+              {on ? <><span onPointerDown={(e) => startGesture(e, x, 'l')} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 18, background: ED.yellow, borderRadius: '8px 0 0 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize' }}><span style={{ width: 3, height: 14, borderRadius: 2, background: '#0B0B0C' }} /></span>
+              <span onPointerDown={(e) => startGesture(e, x, 'r')} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 18, background: ED.yellow, borderRadius: '0 8px 8px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize' }}><span style={{ width: 3, height: 14, borderRadius: 2, background: '#0B0B0C' }} /></span></> : null}
+            </div>); })}</div>
+          <div style={{ position: 'absolute', left: GUT, top: 70, height: 28 }}>{(doc.overlays || []).map((o) => { const on = o.id === selOv; const w = Math.max(8, (o.to - o.from) * zoom - 2); return (
+            <div key={o.id} onPointerDown={(e) => startOv(e, o, 'move')} onClick={(e) => { e.stopPropagation(); if (!dragged.current) { setSelOv(o.id); setSel(null); setSelClip(null); if (t < o.from || t >= o.to) setT(o.from + 0.01); } }} style={{ position: 'absolute', left: o.from * zoom, width: w, height: 28, borderRadius: 6, overflow: 'hidden', display: 'flex', background: o.src.startsWith('linear') ? o.src : '#222', boxShadow: on ? `0 0 0 2px ${ED.yellow}` : 'none', cursor: 'grab', touchAction: 'none', zIndex: on ? 2 : 1 }}>
+              {o.src.startsWith('linear') ? <span style={{ font: '600 11px/28px var(--font)', color: '#fff', padding: '0 8px', whiteSpace: 'nowrap' }}>{o.label}</span> : Array.from({ length: Math.ceil(w / 28) }, (_, i) => <span key={i} style={{ width: 28, height: 28, flex: '0 0 auto', background: `url(${o.src}) center/cover` }} />)}
+              {on ? <><span onPointerDown={(e) => startOv(e, o, 'l')} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 14, background: ED.yellow, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize' }}><span style={{ width: 2, height: 12, borderRadius: 2, background: '#0B0B0C' }} /></span>
+              <span onPointerDown={(e) => startOv(e, o, 'r')} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 14, background: ED.yellow, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize' }}><span style={{ width: 2, height: 12, borderRadius: 2, background: '#0B0B0C' }} /></span></> : null}
+            </div>); })}</div>
+          <div style={{ position: 'absolute', left: GUT, top: 106, height: 56, display: 'flex' }}>{doc.clips.map((c) => { const on = c.id === selClip; const w = (c.end - c.start) * zoom; return (
+            <div key={c.id} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setSelClip(c.id); setSel(null); if (t < c.start || t >= c.end) setT(c.start + 0.01); }} style={{ position: 'relative', width: w, height: 56, marginRight: 3, borderRadius: 8, overflow: 'hidden', display: 'flex', background: '#222', boxShadow: on ? '0 0 0 2px #fff' : 'none', cursor: 'pointer', flex: '0 0 auto', zIndex: on ? 2 : 1 }}>
+              {Array.from({ length: Math.ceil(w / 36) }, (_, i) => <span key={i} style={{ width: 36, height: 56, flex: '0 0 auto', background: `url(${frames[c.src % 3]}) center/cover`, backgroundPositionY: `${(i * 17) % 60}%` }} />)}
+              <span style={{ position: 'absolute', left: 6, bottom: 4, font: '600 10px/12px "SF Mono", Menlo, monospace', color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>{(c.end - c.start).toFixed(1)}s</span>
+              {on ? <><span onPointerDown={(e) => startGesture(e, c, 'cl')} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 16, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize', touchAction: 'none' }}><span style={{ width: 3, height: 16, borderRadius: 2, background: '#0B0B0C' }} /></span>
+              <span onPointerDown={(e) => startGesture(e, c, 'cr')} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 16, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ew-resize', touchAction: 'none' }}><span style={{ width: 3, height: 16, borderRadius: 2, background: '#0B0B0C' }} /></span></> : null}
+            </div>); })}<button type="button" className="p" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} style={{ width: 44, height: 56, marginLeft: 6, borderRadius: 8, background: '#2A2A31', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="add" size={22} color="#fff" /></button></div>
+          <div style={{ position: 'absolute', left: GUT + t * zoom, top: 0, bottom: 0, width: 2, background: '#fff', pointerEvents: 'none', boxShadow: '0 0 0 1px rgba(0,0,0,0.4)', zIndex: 3 }}><span style={{ position: 'absolute', top: 18, left: -5, width: 12, height: 12, borderRadius: 3, background: '#fff', transform: 'rotate(45deg)' }} /></div>
+        </div>
+      </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ height: 94, background: ED.panel, borderTop: `1px solid ${ED.line}`, display: 'flex', alignItems: 'flex-start', paddingTop: 12, flexShrink: 0, overflowX: 'auto', justifyContent: selT || selC || selO ? 'flex-start' : 'space-around', padding: selT || selC || selO ? '12px 4px 0' : '12px 0 0', gap: selT || selC || selO ? 12 : 0 }}>
+        {selO ? <>
+          <button type="button" className="p" onClick={() => setSelOv(null)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="chevron_left" size={26} color="#fff" /></button>
+          {rb('content_cut', 'Split', splitOv)}{rb('swap_horiz', 'Replace', () => setPicker(true))}{rb('delete', 'Delete', delOv)}
+        </> : selC ? <>
+          <button type="button" className="p" onClick={() => setSelClip(null)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="chevron_left" size={26} color="#fff" /></button>
+          {rb('content_cut', 'Split', splitAt)}{rb('delete', 'Delete', delClip)}{rb('speed', 'Speed', () => haptic())}{rb('volume_up', 'Volume', () => haptic())}
+        </> : selT ? <>
+          <button type="button" className="p" onClick={() => setSel(null)} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="chevron_left" size={26} color="#fff" /></button>
+          {rb('edit', 'Edit', () => { setEdit(true); setTab('text'); setPlaying(false); })}{rb('delete', 'Delete', del)}
+        </> : <>
+          {rb('content_cut', 'Split', splitAt)}{rb('text_fields', 'Text', addText)}{rb('layers', 'Overlay', () => { setPicker(true); setPlaying(false); })}{rb('closed_caption', 'Captions', () => commit({ ...doc, captions: !doc.captions }), doc.captions)}
+        </>}
+      </div></>}
+      <div onClick={() => setPicker(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', opacity: picker ? 1 : 0, pointerEvents: picker ? 'auto' : 'none', transition: 'opacity 200ms', zIndex: 8 }} />
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '62%', background: ED.panel, borderRadius: '20px 20px 0 0', transform: picker ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 320ms cubic-bezier(.2,.8,.2,1)', zIndex: 9, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}><span style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' }} /></div>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '4px 16px 12px', gap: 8 }}>
+          <span style={{ display: 'flex', background: ED.chip, borderRadius: 999, padding: 3, flex: 1 }}>{[['roll', 'Camera roll'], ['brand', 'Noni media']].map(([k, l]) => <button key={k} type="button" className="p" onClick={() => setPickTab(k)} style={{ flex: 1, height: 32, borderRadius: 999, background: pickTab === k ? '#fff' : 'transparent', color: pickTab === k ? '#000' : '#fff', font: '600 13px/32px var(--font)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 10px' }}>{l}</button>)}</span>
+          <button type="button" className="p" onClick={() => setPicker(false)} style={{ width: 36, height: 36, borderRadius: 999, background: ED.chip, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={20} color="#fff" /></button>
+        </div>
+        <div className="v2-scroll" onPointerDown={gDown} onPointerMove={gMove} onPointerUp={gUp} onPointerCancel={gUp} onWheel={gWheel} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 2px 30px', touchAction: 'pan-y' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+            {pickTab === 'roll' ? ROLL.map(([src, l, d]) => <button key={l} type="button" className="p" onClick={() => addOverlay(src, l)} style={{ width: `calc(${100 / colsF}% - 2px)`, aspectRatio: '1', borderRadius: 0, background: `url(${src}) center/cover`, position: 'relative', overflow: 'hidden', transition: gridPinch.current ? 'none' : 'width 220ms cubic-bezier(.2,.8,.2,1)' }}><span style={{ position: 'absolute', right: 5, bottom: 3, font: '600 11px/13px var(--font)', color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>{d}</span></button>)
+              : BRAND.map(([, l, g]) => <button key={l} type="button" className="p" onClick={() => addOverlay(g, l)} style={{ width: 'calc(33.333% - 2px)', aspectRatio: '1', borderRadius: 0, background: g, display: 'flex', alignItems: 'flex-end', padding: 8, font: '700 12px/14px var(--font)', color: '#fff', textAlign: 'left' }}>{l}</button>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+Object.assign(window, { EditorScreen });

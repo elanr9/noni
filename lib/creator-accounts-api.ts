@@ -18,12 +18,19 @@ export type AccountDecision = {
   profile_matches_template: boolean;
 };
 
-export const DECISION_CHECKS: Array<{ key: keyof AccountDecision; label: string }> = [
-  { key: 'instagram_recording_ok', label: 'Instagram recording shows home, explore, reels' },
-  { key: 'tiktok_recording_ok', label: 'TikTok For You recording is 15s or longer' },
-  { key: 'feed_is_niche', label: 'Feed is college soccer and recruiting content' },
-  { key: 'profile_matches_template', label: 'Profiles match the account template' },
-];
+/** The approval checklist; the feed line names the company's niche (lib/company-copy feedCheckLabel). */
+export function decisionChecks(
+  feedLabel = "Feed matches the company's niche",
+): Array<{ key: keyof AccountDecision; label: string }> {
+  return [
+    { key: 'instagram_recording_ok', label: 'Instagram recording shows home, explore, reels' },
+    { key: 'tiktok_recording_ok', label: 'TikTok For You recording is 15s or longer' },
+    { key: 'feed_is_niche', label: feedLabel },
+    { key: 'profile_matches_template', label: 'Profiles match the account template' },
+  ];
+}
+
+export const DECISION_CHECKS = decisionChecks();
 
 export function parseDecision(value: Json | null): AccountDecision {
   const raw =

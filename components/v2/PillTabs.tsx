@@ -63,7 +63,7 @@ export function PillTabs<K extends string>({ items, value, onChange, style }: Pi
               const { x, width: w } = e.nativeEvent.layout;
               setBoxes((prev) => (prev[o.key]?.x === x && prev[o.key]?.w === w ? prev : { ...prev, [o.key]: { x, w } }));
             }}
-            style={{ flex: 1, height: 36, paddingHorizontal: 10, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}
+            style={{ flex: 1, height: 36, paddingHorizontal: 4, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' }}
           >
             <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: on ? '700' : '600', color: on ? color.white : color.ink }}>
               {o.label}

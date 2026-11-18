@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Redirect } from 'expo-router';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,7 +21,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 const SWATCHES = ['bg', 'ink', 'grey4', 'grey3', 'grey2', 'blue', 'blueDeep', 'blueTint', 'green', 'greenTint', 'amber', 'amberTint', 'purple', 'purpleTint', 'pink', 'pinkTint', 'tabActive'] as const;
 
-export default function V2KitScreen() {
+function V2KitScreen() {
   const insets = useSafeAreaInsets();
   const [lane, setLane] = useState<Lane>('posts');
   const [sheet, setSheet] = useState(false);
@@ -212,4 +213,10 @@ export default function V2KitScreen() {
       </Sheet>
     </View>
   );
+}
+
+/** Dev gallery only: production builds bounce to the Review tab. */
+export default function DevOnlyV2KitScreen() {
+  if (!__DEV__) return <Redirect href="/(admin)/(tabs)" />;
+  return <V2KitScreen />;
 }

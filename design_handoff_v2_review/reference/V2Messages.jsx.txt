@@ -1,0 +1,87 @@
+/* Messages tab: inbox cards and chat thread. */
+function MessagesScreen() {
+  const nav = useNav();
+  const loaded = useLoaded(350);
+  const [filter, setFilter] = React.useState('All');
+  const [q, setQ] = React.useState('');
+  const { dms, channels, queue } = window.V2;
+  const rows = dms.filter((d) => filter === 'All' || (filter === 'Unread' && d.unread) || (filter === 'Creators' && d.kind === 'creator') || (filter === 'Team' && d.kind === 'team')).filter((d) => !q || d.name.toLowerCase().includes(q.toLowerCase()));
+  const chans = channels.filter(() => filter === 'All' || filter === 'Channels').filter((c) => !q || c.name.includes(q.toLowerCase()));
+  const unread = dms.reduce((a, d) => a + d.unread, 0);
+  const person = (d) => d.who && window.V2.creator(d.who) ? window.V2.creator(d.who) : { name: d.name, photo: d.photo, tone: 'pink', online: false };
+  return (
+    <Screen title="Messages" sub={loaded ? <Chip tone="blue" icon="mark_chat_unread">{unread} unread</Chip> : <span style={{ height: 26 }} />} right={<IconButton name="edit" label="New message" onClick={() => nav.push('Chat', { id: 'd-fab' })} />}>
+      <Field value={q} onChange={setQ} placeholder="Search" right={<Icon name="search" size={20} color="var(--grey-3)" />} style={{ marginBottom: 12 }} />
+      <Chips options={['All', 'Unread', 'Creators', 'Team', 'Channels']} value={filter} onChange={setFilter} />
+      <div style={{ height: 12 }} />
+      {!loaded ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={76} />) : null}
+      {loaded && (filter === 'All' || filter === 'Unread') && queue.length ? (
+        <Card onClick={() => nav.setTab('review')} style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--blue)', boxShadow: '0 6px 16px rgba(27,166,238,0.3)' }}>
+          <span style={{ width: 48, height: 48, borderRadius: 999, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="inbox" size={24} color="#fff" /></span>
+          <span style={{ flex: 1 }}><span className="t-row" style={{ display: 'block', color: '#fff' }}>{queue.length} posts to review</span><span className="t-meta" style={{ color: 'rgba(255,255,255,0.8)' }}>{[...new Set(queue.map((p) => p.creatorName))].join(', ')}</span></span>
+          <Icon name="chevron_right" size={22} color="#fff" />
+        </Card>
+      ) : null}
+      {loaded && rows.length ? <Card pad={'4px 16px'}>{rows.map((d, i) => { const pr = person(d); return (
+        <Row key={d.id} last={i === rows.length - 1} onClick={() => nav.push('Chat', { id: d.id })}>
+          <Avatar name={pr.name} photo={pr.photo} tone={pr.tone} size={48} online={pr.online} />
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'baseline', gap: 8 }}><span className="t-row" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span><span className="t-meta" style={{ color: d.unread ? 'var(--blue)' : undefined, fontWeight: d.unread ? 600 : 400 }}>{d.at}</span></span>
+            <span className="t-body" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: d.unread ? 'var(--ink)' : 'var(--grey-4)', fontWeight: d.unread ? 600 : 400 }}>{d.last}</span>
+          </span>
+          {d.unread ? <span style={{ minWidth: 22, height: 22, padding: '0 7px', borderRadius: 999, background: 'var(--blue)', color: '#fff', font: '700 13px/22px var(--font)', textAlign: 'center' }}>{d.unread}</span> : null}
+        </Row>
+      ); })}</Card> : null}
+      {loaded && chans.length ? <><SectionTitle>Channels</SectionTitle><Card pad={'4px 16px'}>{chans.map((c, i) => (
+        <Row key={c.id} last={i === chans.length - 1} onClick={() => nav.push('Chat', { id: c.id })}>
+          <span style={{ width: 48, height: 48, borderRadius: 999, background: 'var(--purple-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 20px var(--font)', color: 'var(--purple)', flex: '0 0 auto' }}>#</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'baseline', gap: 8 }}><span className="t-row">{c.name}</span><span className="t-meta">{c.at}</span></span>
+            <span className="t-body" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--grey-4)' }}>{c.last}</span>
+          </span>
+        </Row>
+      ))}</Card></> : null}
+      {loaded && !rows.length && !chans.length ? <Empty>Nothing here.</Empty> : null}
+    </Screen>
+  );
+}
+
+function ChatScreen({ id }) {
+  const nav = useNav();
+  const d = window.V2.dms.find((x) => x.id === id) || window.V2.channels.find((x) => x.id === id) || { name: 'Chat' };
+  const creator = d.who ? window.V2.creator(d.who) : null;
+  const pr = creator || { name: d.name, photo: d.photo, tone: d.members ? 'purple' : 'pink' };
+  const [msgs, setMsgs] = React.useState(window.V2.thread);
+  const [text, setText] = React.useState('');
+  const ref = React.useRef(null);
+  React.useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [msgs]);
+  const send = () => { if (!text.trim()) return; haptic(); setMsgs((m) => [...m, { from: 'me', text, at: 'now' }]); setText(''); };
+  const post = window.V2.queue[0];
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', paddingTop: 54, background: 'var(--bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 56, padding: '0 8px 0 4px', flexShrink: 0, background: 'var(--card)', boxShadow: '0 1px 0 var(--grey-2)' }}>
+        <button type="button" className="p" aria-label="Back" onClick={nav.pop} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevron_left" size={32} color="var(--ink)" /></button>
+        <button type="button" className="p" onClick={() => creator && nav.push('Creator', { id: creator.id })} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+          {d.members ? <span style={{ width: 36, height: 36, borderRadius: 999, background: 'var(--purple-tint)', color: 'var(--purple)', font: '700 17px var(--font)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>#</span> : <Avatar name={pr.name} photo={pr.photo} tone={pr.tone} size={36} online={pr.online} />}
+          <span style={{ minWidth: 0 }}><span className="t-row" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span><span className="t-meta" style={{ display: 'block', whiteSpace: 'nowrap', color: creator?.online ? 'var(--green)' : undefined }}>{creator ? (creator.online ? 'Online now' : 'Last seen 2h ago') : d.members ? `${d.members} people` : 'FieldVision team'}</span></span>
+        </button>
+      </div>
+      <div ref={ref} className="v2-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {msgs.map((m, i) => { const me = m.from === 'me'; return (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start', marginTop: i > 0 && msgs[i - 1].from !== m.from ? 12 : 0 }}>
+            {m.post ? <button type="button" className="p card" onClick={() => nav.push('ReviewDetail', { id: post.id })} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, marginBottom: 6, maxWidth: 280, textAlign: 'left' }}><Thumb w={44} post={post} title={false} radius={8} /><span style={{ minWidth: 0, flex: 1 }}><span className="t-row" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.post}</span><span style={{ display: 'flex', gap: 6, marginTop: 4 }}><Chip tone="amber" style={{ height: 22, fontSize: 12 }}>Take 2</Chip><span className="t-meta">Tap to review</span></span></span></button> : null}
+            <div className="t-body" style={{ maxWidth: 280, padding: '10px 14px', borderRadius: 18, borderBottomRightRadius: me ? 6 : 18, borderBottomLeftRadius: me ? 18 : 6, background: me ? 'var(--blue)' : 'var(--card)', color: me ? '#fff' : 'var(--ink)', boxShadow: me ? 'none' : 'var(--shadow-card)' }}>{m.text}</div>
+            {i === msgs.length - 1 || msgs[i + 1].from !== m.from ? <span className="t-meta" style={{ marginTop: 4 }}>{m.at}</span> : null}
+          </div>
+        ); })}
+      </div>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px 34px', background: 'var(--card)', boxShadow: '0 -1px 0 var(--grey-2)' }}>
+        <button type="button" className="p" aria-label="Attach" style={{ width: 44, height: 44, borderRadius: 999, background: 'var(--blue-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="add" size={24} color="var(--blue-deep)" weight={600} /></button>
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Message" style={{ flex: 1, height: 44, borderRadius: 999, border: 'none', outline: 'none', background: 'var(--grey-1)', padding: '0 16px', font: '400 15px var(--font)', color: 'var(--ink)' }} />
+        <button type="button" className="p" aria-label="Send" onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: text ? 'var(--blue)' : 'var(--grey-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto', transition: 'background 160ms' }}><Icon name="arrow_upward" size={24} color="#fff" weight={700} /></button>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { MessagesScreen, ChatScreen });

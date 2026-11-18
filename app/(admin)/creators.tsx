@@ -1,18 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
-import { Alert, RefreshControl, View, StyleSheet } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { router, Stack, useFocusEffect } from "expo-router";
+import Animated, { FadeInDown, LinearTransition } from "react-native-reanimated";
 
-import {
-  CREATOR_CARD_HEIGHT,
-  CreatorCard,
-} from "../../components/admin/creator/CreatorCard";
-import { SortChips } from "../../components/admin/creator/SortChips";
-import {
-  AdminScreen,
-  PushHeader,
-  SkeletonCard,
-} from "../../components/admin/shared";
-import { EmptyState } from "../../components/ui/EmptyState";
+import { InviteCreatorsSheet } from "../../components/admin/v2/review/InviteCreatorsSheet";
+import { ErrorCard, StateCard } from "../../components/admin/v2/review/ReviewStates";
+import { Avatar, Button, Card, Icon, Press, Screen, Seg, Skeleton, TextButton } from "../../components/v2";
 import { useAuth } from "../../lib/auth";
 import {
   fetchCreatorLeaderboard,
@@ -21,7 +14,7 @@ import {
 } from "../../lib/admin-api";
 import { formatMetric } from "../../lib/analytics";
 import { supabase } from "../../lib/supabase";
-import { radiusAdmin } from "../../theme/tokens";
+import { color, text } from "../../theme/v2";
 
 type SortKey = "views" | "postsCompleted";
 
@@ -92,8 +85,10 @@ export default function CreatorsScreen() {
   const [extras, setExtras] = useState<Map<string, CreatorExtras>>(new Map());
   const [approvedIds, setApprovedIds] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("views");
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -105,16 +100,14 @@ export default function CreatorsScreen() {
       ]);
       setRows(next);
       setApprovedIds(new Set(approved.map((c) => c.id)));
-    } catch (e) {
-      Alert.alert(
-        "Could not load",
-        e instanceof Error ? e.message : "Try again",
-      );
+      setFailed(false);
+    } catch {
+      setFailed(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-    // Handles and photos arrive after the roster; cards fall back gracefully.
+    // Handles and photos arrive after the roster; rows fall back gracefully.
     void fetchCreatorExtras(profile.active_company_id)
       .then(setExtras)
       .catch(() => undefined);
@@ -126,92 +119,103 @@ export default function CreatorsScreen() {
     }, [load]),
   );
 
-  const sorts = ALL_SORTS;
-  const activeSort: SortKey = sortKey;
-
   // Only creators whose account passed review; the rest sit in the Review queue.
   const sorted = useMemo(
     () =>
       rows
         .filter((r) => approvedIds?.has(r.creatorId) ?? false)
-        .sort((a, b) => b[activeSort] - a[activeSort]),
-    [rows, approvedIds, activeSort],
+        .sort((a, b) => b[sortKey] - a[sortKey]),
+    [rows, approvedIds, sortKey],
   );
+  const canInvite = managerAccess.inviteCreators;
 
   return (
-    <AdminScreen
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            void load();
-          }}
-        />
-      }
+    <Screen
+      back
+      title="Creators"
+      right={canInvite ? <TextButton label="Invite" onPress={() => setInviteOpen(true)} /> : undefined}
     >
-      <PushHeader
-        title="Creators"
-        subtitle={loading ? undefined : `${sorted.length} approved`}
-        onBack={() => router.back()}
-      />
-
-      {!loading && sorted.length > 0 && (
-        <SortChips options={sorts} value={activeSort} onChange={setSortKey} />
-      )}
-
-      <View style={styles.list}>
-        {loading ? (
-          Array.from({ length: 4 }, (_, i) => (
-            <SkeletonCard
-              key={i}
-              height={CREATOR_CARD_HEIGHT}
-              radius={radiusAdmin.lg}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load();
+            }}
+          />
+        }
+      >
+        {!loading && sorted.length > 0 ? (
+          <>
+            <Text style={[text.meta, { marginBottom: 10 }]}>{`${sorted.length} approved`}</Text>
+            <Seg<SortKey>
+              style={{ marginBottom: 16 }}
+              value={sortKey}
+              onChange={setSortKey}
+              options={ALL_SORTS}
             />
-          ))
+          </>
+        ) : null}
+        {loading ? (
+          [0, 1, 2, 3].map((i) => <Skeleton key={i} h={72} />)
+        ) : failed && sorted.length === 0 ? (
+          <ErrorCard onRetry={() => {
+            setLoading(true);
+            void load();
+          }} />
         ) : sorted.length === 0 ? (
-          <EmptyState
-            icon="users"
+          <StateCard
+            icon="person"
             title="No creators yet"
             body={
-              managerAccess.inviteCreators
-                ? "Invite from Settings. They upload warm-up proof, you approve, then briefs start landing."
+              canInvite
+                ? "Invite your first creators. They sign in, set up their accounts, you approve them in Review, then briefs start landing."
                 : "Creators show up here once they join. They upload warm-up proof, you approve, then briefs start landing."
             }
-            style={styles.empty}
-          />
+          >
+            {canInvite ? (
+              <View style={{ flexDirection: "row" }}>
+                <Button label="Invite creators" icon="send" onPress={() => setInviteOpen(true)} />
+              </View>
+            ) : null}
+          </StateCard>
         ) : (
-          sorted.map((c) => {
-            const extra = extras.get(c.creatorId);
-            return (
-              <CreatorCard
-                key={c.creatorId}
-                name={c.creatorName}
-                handle={extra?.handle ?? null}
-                avatarUri={extra?.avatarUri ?? null}
-                posts={`${c.postsCompleted}`}
-                views={formatMetric(c.views)}
-                onPress={() =>
-                  router.push({
-                    pathname: "/(admin)/creator/[id]",
-                    params: { id: c.creatorId },
-                  })
-                }
-              />
-            );
-          })
+          <Card pad={0} style={{ paddingHorizontal: 16 }}>
+            {sorted.map((c, i) => {
+              const extra = extras.get(c.creatorId);
+              return (
+                <Animated.View key={c.creatorId} entering={FadeInDown.duration(240).delay(Math.min(i, 8) * 30)} layout={LinearTransition.duration(240)}>
+                  <Press
+                    accessibilityRole="button"
+                    accessibilityLabel={c.creatorName}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/(admin)/creator/[id]",
+                        params: { id: c.creatorId },
+                      })
+                    }
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 64, paddingVertical: 12, borderTopWidth: i ? 1 : 0, borderTopColor: color.grey1 }}
+                  >
+                    <Avatar name={c.creatorName} photo={extra?.avatarUri ?? null} size={44} ring={false} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={text.row}>{c.creatorName}</Text>
+                      <Text numberOfLines={1} style={text.meta}>
+                        {[extra?.handle ? `@${extra.handle.replace(/^@/, "")}` : null, `${c.postsCompleted} ${c.postsCompleted === 1 ? "post" : "posts"}`, `${formatMetric(c.views)} views`].filter(Boolean).join(" · ")}
+                      </Text>
+                    </View>
+                    <Icon name="chevron_right" size={20} color={color.grey3} />
+                  </Press>
+                </Animated.View>
+              );
+            })}
+          </Card>
         )}
-      </View>
-    </AdminScreen>
+      </ScrollView>
+      <InviteCreatorsSheet open={inviteOpen} companyId={profile?.active_company_id} onClose={() => setInviteOpen(false)} />
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  list: {
-    marginTop: 12,
-    gap: 10,
-  },
-  empty: {
-    marginTop: 40,
-  },
-});

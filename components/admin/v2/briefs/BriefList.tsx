@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 import { router } from 'expo-router';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 
 import { JUST_MADE_MS, freshJustMade, useLibStore } from '../../../../lib/brief-library-api';
 import { BRIEF_TYPES, TYPE_META, briefHay, type Brief, type BriefKind, type BriefType } from '../../../../lib/brief-library';
 import { color, motion, radius, shadow, space, text } from '../../../../theme/v2';
-import { Button, Chip, Empty, FilterButton, Icon, Label, Press, RootTitle, Seg, Sheet, useTabBarInset } from '../../../v2';
+import { Button, Chip, Empty, FilterButton, Icon, Label, Press, RootTitle, Seg, Sheet, Skeleton, useTabBarInset } from '../../../v2';
 import { BriefCard, markWords } from './BriefCard';
 import { TypeTile } from './TypeTile';
 
@@ -23,7 +23,8 @@ const KEYWORDS: Record<string, ['kind', BriefKind] | ['type', BriefType]> = {
 };
 
 export interface BriefListProps {
-  title: string;
+  /** Shown in the pushed header, or as the root title. Left out on the Briefs tab, where the company pill heads the screen. */
+  title?: string;
   right?: ReactNode;
   onOpen: (b: Brief) => void;
   /** Posts made per brief id, for the Most used sort. */
@@ -32,10 +33,14 @@ export interface BriefListProps {
   back?: boolean;
   /** Empty copy when nothing matches and there is no query. */
   empty?: string;
+  /** First load still running: skeleton cards in place of the empty copy. */
+  loading?: boolean;
+  /** A button under the empty copy (no query), e.g. a way to start without a brief. */
+  emptyAction?: { label: string; onPress: () => void };
 }
 
 /** Pinned title, search, Guided / Outlines Seg and filter; only the cards scroll. */
-export function BriefList({ title, right, onOpen, uses, back = false, empty }: BriefListProps) {
+export function BriefList({ title, right, onOpen, uses, back = false, empty, loading = false, emptyAction }: BriefListProps) {
   const briefs = useLibStore((s) => s.briefs);
   const justMadeRaw = useLibStore((s) => s.justMade);
   const clearJustMade = useLibStore((s) => s.clearJustMade);
@@ -128,9 +133,9 @@ export function BriefList({ title, right, onOpen, uses, back = false, empty }: B
             <Text style={[text.row, { flex: 1 }]}>{title}</Text>
             {right}
           </View>
-        ) : (
+        ) : title ? (
           <RootTitle title={title} right={right} />
-        )}
+        ) : null}
         <View style={{ marginBottom: 12, zIndex: 5 }}>
           <View style={{ height: 48, borderRadius: 16, backgroundColor: color.card, flexDirection: 'row', alignItems: 'center', paddingLeft: 14, paddingRight: 8, borderWidth: 2, borderColor: showPop ? color.blue : 'transparent', ...shadow.card }}>
             <Icon name="search" size={22} color={color.grey3} />
@@ -189,16 +194,25 @@ export function BriefList({ title, right, onOpen, uses, back = false, empty }: B
         </View>
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: space.screen, paddingBottom: 12 }}>
-        {list.length === 0 ? (
-          <Empty>{q ? 'No matches.' : (empty ?? `No ${effKind === 'Guided' ? 'guided posts' : 'outlines'} yet.`)}</Empty>
+        {list.length === 0 && loading && !q ? (
+          <>
+            <Skeleton h={132} />
+            <Skeleton h={132} />
+            <Skeleton h={132} />
+          </>
+        ) : list.length === 0 ? (
+          <Animated.View entering={FadeIn.duration(220)}>
+            <Empty>{q ? 'No matches.' : (empty ?? `No ${effKind === 'Guided' ? 'guided posts' : 'outlines'} yet.`)}</Empty>
+            {!q && emptyAction ? <Button label={emptyAction.label} icon="videocam" onPress={emptyAction.onPress} style={{ flex: 0, marginTop: 4 }} /> : null}
+          </Animated.View>
         ) : (
           list.map((b, i) => {
             const fresh = !!jm && jm.ids.includes(b.id);
             const card = <BriefCard b={b} onPress={() => onOpen(b)} words={free} />;
             return fresh ? (
-              <Animated.View key={b.id} entering={FadeIn.duration(520).delay(i * 90)} style={{ borderRadius: 20, marginBottom: 12, boxShadow: `0 0 0 2px ${color.blue}` }}>
+              <PopIn key={b.id} delay={i * 90} style={{ borderRadius: 20, marginBottom: 12, boxShadow: `0 0 0 2px ${color.blue}` }}>
                 <View style={{ marginBottom: -12 }}>{card}</View>
-              </Animated.View>
+              </PopIn>
             ) : (
               <View key={b.id}>{card}</View>
             );
@@ -233,3 +247,13 @@ export function BriefList({ title, right, onOpen, uses, back = false, empty }: B
 }
 
 export { motion as briefListMotion };
+
+/** pc-card: a just-made card rises 16px and grows from 0.96 as it fades in, 520ms on the tab-in curve. */
+function PopIn({ delay, style, children }: { delay: number; style?: StyleProp<ViewStyle>; children: ReactNode }) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.set(withDelay(delay, withTiming(1, { duration: 520, easing: motion.tabEase })));
+  }, [t, delay]);
+  const a = useAnimatedStyle(() => ({ opacity: t.get(), transform: [{ translateY: 16 * (1 - t.get()) }, { scale: 0.96 + 0.04 * t.get() }] }));
+  return <Animated.View style={[style, a]}>{children}</Animated.View>;
+}

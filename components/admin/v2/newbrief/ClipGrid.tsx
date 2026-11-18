@@ -4,12 +4,14 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming, type SharedValue } from 'react-native-reanimated';
 
 import { clipLabel, clipOverlays, clipTexts, shortLabel, type BriefClip, type BriefType, type GsMedia } from '../../../../lib/brief-library';
-import { color, motion, radius, shadow } from '../../../../theme/v2';
+import { briefs, color, editor, motion, radius, shadow } from '../../../../theme/v2';
 import { Icon, Press, tap } from '../../../v2';
 import { ClipFrame } from './ClipFrame';
 
 const GAP = 10;
 const SLIDE = Easing.bezier(0.2, 0.8, 0.2, 1);
+/** Small round action on a tile's frame, top right. */
+const DISC = { position: 'absolute', right: 6, width: 28, height: 28, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.25)' } as const;
 
 export interface ClipGridProps {
   clips: BriefClip[];
@@ -27,6 +29,8 @@ export interface ClipGridProps {
   onAdd?: () => void;
   onReorder: (from: number, to: number) => void;
   onToggleGreen?: (id: string) => void;
+  /** Per-clip green screen (whole-video background off): pick this clip's image or video. */
+  onPickBackground?: (id: string) => void;
   /** The list should stop scrolling while a tile is lifted. */
   onDragging?: (on: boolean) => void;
 }
@@ -34,7 +38,7 @@ export interface ClipGridProps {
 type DragSV = { dragIdx: SharedValue<number>; from: SharedValue<number>; over: SharedValue<number>; dx: SharedValue<number>; dy: SharedValue<number>; snap: SharedValue<number> };
 
 /** 3 columns (2 for Long Text), gap 10. Long-press 260ms lifts a tile; others slide out of the way; drop snaps. */
-export function ClipGrid({ clips, type, readOnly, isGreen, fullGreen, gsAll, pending, justFilled, onOpen, onAdd, onReorder, onToggleGreen, onDragging }: ClipGridProps) {
+export function ClipGrid({ clips, type, readOnly, isGreen, fullGreen, gsAll, pending, justFilled, onOpen, onAdd, onReorder, onToggleGreen, onPickBackground, onDragging }: ClipGridProps) {
   const long = type === 'Long Text';
   const slides = type === 'Slideshow';
   const cols = long ? 2 : 3;
@@ -94,6 +98,7 @@ export function ClipGrid({ clips, type, readOnly, isGreen, fullGreen, gsAll, pen
               onLayoutHeight={i === 0 ? setTileH : undefined}
               onOpen={() => onOpen(c.id)}
               onToggleGreen={onToggleGreen ? () => onToggleGreen(c.id) : undefined}
+              onPickBackground={onPickBackground ? () => onPickBackground(c.id) : undefined}
               begin={begin}
               moved={moved}
               end={end}
@@ -154,12 +159,13 @@ interface TileProps {
   onLayoutHeight?: (h: number) => void;
   onOpen: () => void;
   onToggleGreen?: () => void;
+  onPickBackground?: () => void;
   begin: (i: number) => void;
   moved: () => void;
   end: (from: number, over: number) => void;
 }
 
-function Tile({ c, i, n, cols, tileW, tileH, frameH, sv, label, sub, subEmpty, green, gs, greenToggle, lifted, pending, justFilled, canDrag, onLayoutHeight, onOpen, onToggleGreen, begin, moved, end }: TileProps) {
+function Tile({ c, i, n, cols, tileW, tileH, frameH, sv, label, sub, subEmpty, green, gs, greenToggle, lifted, pending, justFilled, canDrag, onLayoutHeight, onOpen, onToggleGreen, onPickBackground, begin, moved, end }: TileProps) {
   const pop = useSharedValue(1);
   useEffect(() => {
     if (!justFilled) return;
@@ -210,7 +216,7 @@ function Tile({ c, i, n, cols, tileW, tileH, frameH, sv, label, sub, subEmpty, g
     <GestureDetector gesture={pan}>
       <Animated.View
         onLayout={onLayoutHeight ? (e) => onLayoutHeight(e.nativeEvent.layout.height) : undefined}
-        style={[{ width: tileW, borderRadius: radius.card, backgroundColor: color.card, overflow: 'hidden', boxShadow: lifted ? '0 18px 40px rgba(16,24,40,0.28)' : shadow.card.boxShadow }, slot]}
+        style={[{ width: tileW, borderRadius: radius.card, backgroundColor: color.card, overflow: 'hidden', boxShadow: lifted ? briefs.liftShadow : shadow.card.boxShadow }, slot]}
       >
         <Press onPress={onOpen} accessibilityRole="button" accessibilityLabel={label}>
           <ClipFrame width={tileW} height={frameH} texts={clipTexts(c)} overlays={clipOverlays(c)} green={green} gs={gs} cta={c.cta} pending={pending} revealKey={justFilled ? 'fill' : undefined}>
@@ -220,9 +226,14 @@ function Tile({ c, i, n, cols, tileW, tileH, frameH, sv, label, sub, subEmpty, g
                 accessibilityLabel="Green screen"
                 accessibilityState={{ checked: c.green }}
                 onPress={onToggleGreen}
-                style={{ position: 'absolute', right: 6, top: 6, width: 28, height: 28, borderRadius: radius.pill, backgroundColor: c.green ? color.white : 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.25)' }}
+                style={[DISC, { top: 6, backgroundColor: c.green ? color.white : editor.k45 }]}
               >
-                <Icon name="wallpaper" size={16} color={c.green ? '#000000' : color.white} />
+                <Icon name="wallpaper" size={16} color={c.green ? editor.black : color.white} />
+              </Press>
+            ) : null}
+            {greenToggle && c.green && onPickBackground ? (
+              <Press accessibilityRole="button" accessibilityLabel={c.gs ? 'Change background' : 'Add background'} onPress={onPickBackground} style={[DISC, { top: 40, backgroundColor: color.white }]}>
+                <Icon name={c.gs ? 'swap_horiz' : 'add_photo_alternate'} size={16} color={editor.black} />
               </Press>
             ) : null}
           </ClipFrame>
@@ -245,7 +256,7 @@ function AddTile({ i, cols, tileW, tileH, sv, label, onPress }: { i: number; col
   return (
     <Animated.View style={[{ width: tileW, height: tileH }, slot]}>
       <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ flex: 1, borderRadius: radius.card, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        <View style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: color.blue, alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 14px rgba(27,166,238,0.3)' }}>
+        <View style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: color.blue, alignItems: 'center', justifyContent: 'center', boxShadow: briefs.addGlow }}>
           <Icon name="add" size={24} weight={700} color={color.white} />
         </View>
         <Text style={{ fontSize: 13, lineHeight: 16, fontWeight: '700', color: color.blueDeep }}>{label}</Text>

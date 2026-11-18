@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { color, space, type } from '../../../theme/tokens';
 import { Button } from '../../ui/Button';
 import { Icon, type IconName } from '../../ui/Icon';
+import { Press } from '../../v2/Press';
 
 export type ConfirmationTone = 'brand' | 'good' | 'warn' | 'danger';
 
@@ -53,7 +54,7 @@ export function ConfirmationTakeover({
   return (
     <View style={[StyleSheet.absoluteFill, styles.screen]}>
       {onBack !== undefined && (
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={4}
@@ -61,7 +62,7 @@ export function ConfirmationTakeover({
           style={[styles.back, { top: insets.top + 10 }]}
         >
           <Icon name="chevron-left" size={20} color={color.ink} />
-        </Pressable>
+        </Press>
       )}
 
       <View style={styles.center}>

@@ -210,13 +210,13 @@ export type Database = {
           bounty_amount_cents: number | null
           bounty_credited_at: string | null
           brief_id: string
-          library_brief_id: string | null
           campaign_id: string | null
           caption: string | null
           company_id: string
           created_at: string | null
           creator_id: string
           id: string
+          library_brief_id: string | null
           metrics: Json | null
           music_approved_at: string | null
           music_approved_by: string | null
@@ -238,13 +238,13 @@ export type Database = {
           bounty_amount_cents?: number | null
           bounty_credited_at?: string | null
           brief_id: string
-          library_brief_id?: string | null
           campaign_id?: string | null
           caption?: string | null
           company_id: string
           created_at?: string | null
           creator_id: string
           id?: string
+          library_brief_id?: string | null
           metrics?: Json | null
           music_approved_at?: string | null
           music_approved_by?: string | null
@@ -266,13 +266,13 @@ export type Database = {
           bounty_amount_cents?: number | null
           bounty_credited_at?: string | null
           brief_id?: string
-          library_brief_id?: string | null
           campaign_id?: string | null
           caption?: string | null
           company_id?: string
           created_at?: string | null
           creator_id?: string
           id?: string
+          library_brief_id?: string | null
           metrics?: Json | null
           music_approved_at?: string | null
           music_approved_by?: string | null
@@ -324,6 +324,13 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignments_library_brief_id_fkey"
+            columns: ["library_brief_id"]
+            isOneToOne: false
+            referencedRelation: "library_briefs"
             referencedColumns: ["id"]
           },
           {
@@ -2873,6 +2880,51 @@ export type Database = {
           },
         ]
       }
+      leads: {
+        Row: {
+          company: string | null
+          created_at: string
+          email: string
+          handled_at: string | null
+          id: string
+          kind: string
+          message: string | null
+          name: string
+          phone: string | null
+          source: string | null
+          user_agent: string | null
+          website: string | null
+        }
+        Insert: {
+          company?: string | null
+          created_at?: string
+          email: string
+          handled_at?: string | null
+          id?: string
+          kind: string
+          message?: string | null
+          name: string
+          phone?: string | null
+          source?: string | null
+          user_agent?: string | null
+          website?: string | null
+        }
+        Update: {
+          company?: string | null
+          created_at?: string
+          email?: string
+          handled_at?: string | null
+          id?: string
+          kind?: string
+          message?: string | null
+          name?: string
+          phone?: string | null
+          source?: string | null
+          user_agent?: string | null
+          website?: string | null
+        }
+        Relationships: []
+      }
       library_briefs: {
         Row: {
           audio: Json | null
@@ -2931,7 +2983,29 @@ export type Database = {
           type?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "library_briefs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_briefs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_briefs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       library_items: {
         Row: {
@@ -4088,6 +4162,7 @@ export type Database = {
           has_transformation: boolean
           id: string
           lives_the_identity: boolean
+          notification_prefs: Json
           on_camera_comfortable: boolean
           onboarded: boolean | null
           onboarding_answers: Json
@@ -4115,6 +4190,7 @@ export type Database = {
           has_transformation?: boolean
           id: string
           lives_the_identity?: boolean
+          notification_prefs?: Json
           on_camera_comfortable?: boolean
           onboarded?: boolean | null
           onboarding_answers?: Json
@@ -4142,6 +4218,7 @@ export type Database = {
           has_transformation?: boolean
           id?: string
           lives_the_identity?: boolean
+          notification_prefs?: Json
           on_camera_comfortable?: boolean
           onboarded?: boolean | null
           onboarding_answers?: Json
@@ -4520,6 +4597,74 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "source_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      source_posts: {
+        Row: {
+          caption: string
+          comments: number
+          company_id: string
+          external_id: string
+          fetched_at: string
+          format: string
+          handle: string
+          hook: string
+          id: string
+          likes: number
+          platform: string
+          score: number
+          shares: number
+          thumbnail_url: string
+          url: string
+          views: number
+          why: string
+        }
+        Insert: {
+          caption?: string
+          comments?: number
+          company_id: string
+          external_id: string
+          fetched_at?: string
+          format?: string
+          handle: string
+          hook?: string
+          id?: string
+          likes?: number
+          platform: string
+          score?: number
+          shares?: number
+          thumbnail_url?: string
+          url: string
+          views?: number
+          why?: string
+        }
+        Update: {
+          caption?: string
+          comments?: number
+          company_id?: string
+          external_id?: string
+          fetched_at?: string
+          format?: string
+          handle?: string
+          hook?: string
+          id?: string
+          likes?: number
+          platform?: string
+          score?: number
+          shares?: number
+          thumbnail_url?: string
+          url?: string
+          views?: number
+          why?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_posts_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -5160,6 +5305,7 @@ export type Database = {
           has_transformation: boolean
           id: string
           lives_the_identity: boolean
+          notification_prefs: Json
           on_camera_comfortable: boolean
           onboarded: boolean | null
           onboarding_answers: Json
@@ -5258,6 +5404,10 @@ export type Database = {
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       default_member_permissions: { Args: never; Returns: Json }
+      discard_creator_post: {
+        Args: { p_assignment_id: string }
+        Returns: undefined
+      }
       enable_creator_for_active_company: {
         Args: never
         Returns: {
@@ -5279,6 +5429,7 @@ export type Database = {
           has_transformation: boolean
           id: string
           lives_the_identity: boolean
+          notification_prefs: Json
           on_camera_comfortable: boolean
           onboarded: boolean | null
           onboarding_answers: Json
@@ -5384,6 +5535,7 @@ export type Database = {
         }
         Returns: string
       }
+      prepare_account_deletion: { Args: { p_user: string }; Returns: boolean }
       profile_in_company: {
         Args: { p_company_id: string; p_profile_id: string }
         Returns: boolean
@@ -5395,6 +5547,10 @@ export type Database = {
       record_streak_approval: {
         Args: { p_company: string; p_creator: string; p_day?: string }
         Returns: Json
+      }
+      rename_creator_post: {
+        Args: { p_assignment_id: string; p_title: string }
+        Returns: undefined
       }
       reset_broken_streaks: { Args: never; Returns: undefined }
       schedule_assignment_publish: {
@@ -5460,6 +5616,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_notification_pref: {
+        Args: { p_key: string; p_on: boolean }
+        Returns: Json
+      }
       shares_company_with: { Args: { p_profile_id: string }; Returns: boolean }
       slot_publish_time: {
         Args: { p_rank: number; p_total: number }
@@ -5480,6 +5640,48 @@ export type Database = {
         }
         Returns: Json
       }
+      start_creator_post: {
+        Args: {
+          p_company_id: string
+          p_format: string
+          p_library_brief_id?: string
+          p_title: string
+        }
+        Returns: {
+          bounty_amount_cents: number | null
+          bounty_credited_at: string | null
+          brief_id: string
+          campaign_id: string | null
+          caption: string | null
+          company_id: string
+          created_at: string | null
+          creator_id: string
+          id: string
+          library_brief_id: string | null
+          metrics: Json | null
+          music_approved_at: string | null
+          music_approved_by: string | null
+          music_marked_by_creator_at: string | null
+          post_url: string | null
+          publish_at: string | null
+          publish_attempts: number
+          publish_claimed_at: string | null
+          publish_error: string | null
+          scheduled_date: string
+          slides_variant: Json | null
+          slot_index: number
+          status: string
+          storage_cleaned_at: string | null
+          submission_id: string | null
+          task_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "assignments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       streak_bonus_cents: {
         Args: { p_days: number; p_settings: Json }
         Returns: number
@@ -5497,6 +5699,7 @@ export type Database = {
         }
         Returns: number
       }
+      signup_tracking_on: { Args: never; Returns: boolean }
       stripe_connected_at: { Args: never; Returns: string }
       switch_active_company: {
         Args: { p_company_id: string }
@@ -5519,6 +5722,7 @@ export type Database = {
           has_transformation: boolean
           id: string
           lives_the_identity: boolean
+          notification_prefs: Json
           on_camera_comfortable: boolean
           onboarded: boolean | null
           onboarding_answers: Json

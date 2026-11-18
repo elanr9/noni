@@ -18,6 +18,21 @@ export function money(cents: number): string {
   return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Sales from cents, short: "$840", "$1.2k", "$48.3k". Whole dollars under 1,000. */
+export function sales(cents: number): string {
+  return `$${fmt(cents / 100)}`;
+}
+
+/** A credited count, which a split can leave fractional: whole from 1 up, "<1" for a sliver, "0" for none. */
+export function credit(n: number): string {
+  return n > 0 && n < 1 ? '<1' : fmt(n);
+}
+
+/** "3 sign-ups", "1 sign-up", "<1 sign-up". */
+export function signupsLabel(n: number): string {
+  return `${credit(n)} ${n > 0 && Math.round(n) <= 1 ? 'sign-up' : 'sign-ups'}`;
+}
+
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
 export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 export const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;

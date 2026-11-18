@@ -1,74 +1,38 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
-import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../lib/auth';
 import { registerPushToken } from '../../lib/notifications';
-import { borderWidth, color, radius, space, type } from '../../theme/tokens';
-import { OnboardingShell } from './_shell';
+import { OnboardingShell, QuietButton, StepCard } from './_shell';
 
+/** Step 3: push, so a new brief or a review never waits on the creator opening the app. */
 export default function NotificationsScreen() {
   const { session } = useAuth();
   const [busy, setBusy] = useState(false);
+  const next = () => router.push('/(onboarding)/connect');
 
-  async function allow() {
+  const allow = async () => {
     setBusy(true);
+    // Never throws; a denied prompt just means no pushes until Settings.
     if (session) await registerPushToken(session.user.id);
     setBusy(false);
-    router.push('/(onboarding)/permissions');
-  }
+    next();
+  };
 
   return (
     <OnboardingShell
-      step={1}
-      total={3}
+      step={3}
+      onBack={() => router.back()}
       title="Turn on notifications"
-      subtitle="We ping you when a post is ready to record."
-      primaryLabel={busy ? 'One moment' : 'Allow notifications'}
-      primaryDisabled={busy}
+      subtitle="We tell you when there is something to record and when your team reviews a post."
+      primaryLabel="Allow notifications"
+      primaryBusy={busy}
       onPrimary={() => void allow()}
-      footerExtra={
-        <Button
-          size="md"
-          variant="ghost"
-          block
-          disabled={busy}
-          onPress={() => router.push('/(onboarding)/permissions')}
-        >
-          Not now
-        </Button>
-      }
+      footerExtra={<QuietButton label="Not now" disabled={busy} onPress={next} />}
     >
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Never miss a post</Text>
-        <Text style={styles.cardBody}>
-          Posts have deadlines. Notifications keep them on your radar without
-          you checking the app.
-        </Text>
-      </View>
+      <StepCard icon="inbox" label="New briefs" hint="A post is ready for you to record." />
+      <StepCard icon="mark_chat_unread" label="Reviews and messages" hint="Your post is approved, or your team asks for a change." />
+      <StepCard icon="trending_up" label="Going live" hint="Your post is up and earning views." />
     </OnboardingShell>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: color.fillQuiet,
-    borderRadius: radius.md,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    padding: space[7],
-    gap: space[2],
-    marginTop: space[2],
-  },
-  cardTitle: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  cardBody: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-    color: color.slate500,
-  },
-});

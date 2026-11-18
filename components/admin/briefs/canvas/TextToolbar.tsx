@@ -2,14 +2,13 @@
 // bar and, above it, the color rows. One font (TikTok Sans). On a box the
 // letter color and the box color are picked separately.
 
-import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeInLeft, runOnJS, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInLeft, runOnJS, useSharedValue, ZoomIn } from 'react-native-reanimated';
 
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { Icon } from '../../../ui/Icon';
-import { clamp, SWATCHES, type ResolvedTextStyle, type TextBg } from './layout';
+import { SWATCHES, type ResolvedTextStyle, type TextBg } from './layout';
 
 export type ToolPanel = 'color' | null;
 
@@ -111,13 +110,17 @@ export function TextToolbar({
 /** Vertical slider for the text box width, 0.3 to 0.95 of the frame. */
 export function WidthSlider({ value, H, onChange }: { value: number; H: number; onChange: (w: number) => void }) {
   const length = H * 0.36;
-  const [startValue, setStartValue] = useState(value);
+  // The drag runs on the UI thread, so everything it touches is a shared
+  // value or inline math; onChange hops back to JS.
+  const start = useSharedValue(value);
   const pan = Gesture.Pan()
     .onBegin(() => {
-      runOnJS(setStartValue)(value);
+      start.value = value;
     })
     .onChange((e) => {
-      runOnJS(onChange)(clamp(startValue - (e.translationY / length) * 0.65, 0.3, 0.95));
+      const next = start.value - (e.translationY / length) * 0.65;
+      const clamped = next < 0.3 ? 0.3 : next > 0.95 ? 0.95 : next;
+      runOnJS(onChange)(clamped);
     });
   const t = (value - 0.3) / 0.65;
   return (

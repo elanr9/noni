@@ -46,10 +46,10 @@ export function CreateSheet({ onPick, onClose }: CreateSheetProps) {
 
   return (
     <View style={StyleSheet.absoluteFill}>
-      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(16,24,40,0.45)' }, scrim]}>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: color.scrimDeep }, scrim]}>
         <Pressable accessibilityLabel="Close" style={{ flex: 1 }} onPress={() => leave(onClose)} />
       </Animated.View>
-      <Animated.View onLayout={(e) => setH(e.nativeEvent.layout.height)} style={[{ position: 'absolute', left: 12, right: 12, bottom: tabBarHeight(insets.bottom) + 44, gap: 10 }, sheet]}>
+      <Animated.View onLayout={(e) => setH(e.nativeEvent.layout.height)} style={[{ position: 'absolute', left: 12, right: 12, bottom: tabBarHeight(insets.bottom) + 12, gap: 10 }, sheet]}>
         {ROWS.map((r) => {
           const tn = tones[r.tone];
           return (

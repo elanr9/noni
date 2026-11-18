@@ -12,6 +12,7 @@ export default function CreatorOutline() {
   const companyId = profile?.active_company_id;
   const load = useLibStore((s) => s.load);
   const brief = useLibStore((s) => s.briefs.find((b) => b.id === id));
+  const loaded = useLibStore((s) => s.loaded && s.companyId === companyId);
 
   useEffect(() => {
     if (companyId) void load(companyId);
@@ -20,6 +21,7 @@ export default function CreatorOutline() {
   return (
     <OutlineScreen
       brief={brief}
+      loaded={loaded}
       onBack={() => router.back()}
       onRecord={(mode, myText) => router.push({ pathname: '/(creator)/capture', params: { mode, id: id ?? '', text: myText } })}
     />

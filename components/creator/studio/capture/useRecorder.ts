@@ -38,8 +38,8 @@ async function keepTake(uri: string): Promise<string> {
     const file = new File(uri);
     await file.move(dir);
     return file.uri;
-  } catch (e) {
-    console.warn('could not keep take', e);
+  } catch {
+    // The cache copy still works for this session; the upload reads it soon.
     return uri;
   }
 }

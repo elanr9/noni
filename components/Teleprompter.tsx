@@ -6,6 +6,7 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import { color } from '../theme/tokens';
@@ -38,7 +39,7 @@ export function Teleprompter({
   const { height: windowHeight } = useWindowDimensions();
   const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
   const [index, setIndex] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const contentHeight = useRef(0);
   const viewportHeight = useRef(0);
 

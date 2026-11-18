@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ChatThread } from '../../../components/shared/messages';
+import { chatPostRoute, chatPostState } from '../../../lib/admin-messages-extras';
 import { useAuth } from '../../../lib/auth';
 import { creatorById, useV2Data } from '../../../lib/v2-posts';
 
@@ -38,9 +39,12 @@ export default function AdminCreatorChat() {
       header={header}
       onBack={() => router.back()}
       onHeaderPress={() => router.push({ pathname: '/(admin)/creator/[id]', params: { id: creatorId } })}
-      onOpenPost={(p) => router.push({ pathname: '/(admin)/review/[id]', params: { id: p.assignmentId } })}
+      onOpenPost={(p) => router.push(chatPostRoute(p))}
+      describePost={chatPostState}
+      allowPostAttach
       initialPost={initialPost}
       placeholder={`Message ${(c?.name ?? 'creator').split(' ')[0]}`}
+      emptyText={`No messages with ${(c?.name ?? 'this creator').split(' ')[0]} yet. Posts you share and their takes show up here too.`}
     />
   );
 }

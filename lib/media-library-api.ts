@@ -336,6 +336,19 @@ export async function uploadSegmentMedia(params: {
   return path;
 }
 
+/**
+ * A picture from the manager's camera roll for one slide (BriefSlide.pics):
+ * re-encoded as a JPEG and stored under the brief, path returned. The path
+ * reads back through signedMediaUrl and bakes from brief-assets.
+ */
+export async function uploadBriefPicture(params: { companyId: string; briefId: string; uri: string }): Promise<string> {
+  assertUploadable(params.uri);
+  const prepared = await prepareLocal({ uri: params.uri, kind: 'screenshot', contentType: 'image/jpeg', durationMs: null, width: null, height: null });
+  const path = `${params.companyId}/briefs/${params.briefId}/pics/${Date.now().toString(36)}.jpg`;
+  await uploadFileToStorage({ bucket: BRIEF_ASSETS_BUCKET, path, localUri: prepared.uri, contentType: prepared.contentType, upsert: true });
+  return path;
+}
+
 /** Company Brain shots are public URLs in another bucket: fetch and re-upload as a JPEG. */
 export async function placeRemoteImageOnSegment(params: {
   companyId: string;
@@ -370,4 +383,24 @@ export async function placeLibraryItemOnSegment(params: {
   const { error } = await supabase.storage.from(BRIEF_ASSETS_BUCKET).copy(item.path, path);
   if (error) throw error;
   return path;
+}
+
+/** Brief media is read by creators long after the brief is saved: sign it for five years. */
+const BRIEF_MEDIA_TTL_S = 60 * 60 * 24 * 365 * 5;
+
+export async function longLivedMediaUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(BRIEF_ASSETS_BUCKET).createSignedUrl(path, BRIEF_MEDIA_TTL_S);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+/**
+ * Uploads a photo or video the manager picked on their phone for a brief (green
+ * screen backgrounds) and returns a URL every creator in the company can open.
+ */
+export async function uploadBriefMedia(companyId: string, localUri: string, video: boolean): Promise<string> {
+  const contentType = contentTypeForLocal(localUri, video ? 'recording' : 'screenshot');
+  const path = `${companyId}/briefs/media/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensionForContentType(contentType)}`;
+  await uploadFileToStorage({ bucket: BRIEF_ASSETS_BUCKET, path, localUri, contentType });
+  return longLivedMediaUrl(path);
 }

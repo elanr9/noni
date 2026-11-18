@@ -5,16 +5,16 @@
  */
 import type { AnalyticsDay } from './analytics-api';
 import { newClip, outlineTwinId, stText, type Brief, type BriefKind, type BriefType } from './brief-library';
-import { longTextPlan } from './brief-ai';
+
 import { useLibStore } from './brief-library-api';
 import { addDays, dayKey, today } from './v2-format';
 import { useV2Data, type V2Creator, type V2Post } from './v2-posts';
 
 const CREATORS: V2Creator[] = [
-  { id: 'fab', name: 'Fabrizio', handle: '@fabri.fv', photo: 'https://i.pravatar.cc/160?img=12', tone: 'blue', posts: 0, views: 0, earnedCents: 0 },
-  { id: 'elan', name: 'Elan', handle: '@elan.plays', photo: 'https://i.pravatar.cc/160?img=33', tone: 'purple', posts: 0, views: 0, earnedCents: 0 },
-  { id: 'jacob', name: 'Jacob', handle: '@jacobfilm', photo: 'https://i.pravatar.cc/160?img=59', tone: 'green', posts: 0, views: 0, earnedCents: 0 },
-  { id: 'maya', name: 'Maya', handle: '@maya.pitch', photo: 'https://i.pravatar.cc/160?img=47', tone: 'amber', posts: 0, views: 0, earnedCents: 0 },
+  { id: 'fab', name: 'Fabrizio', handle: '@fabri.fv', photo: null, tone: 'blue', posts: 0, views: 0, earnedCents: 0, code: null, signups: 0, salesCents: 0 },
+  { id: 'elan', name: 'Elan', handle: '@elan.plays', photo: null, tone: 'purple', posts: 0, views: 0, earnedCents: 0, code: null, signups: 0, salesCents: 0 },
+  { id: 'jacob', name: 'Jacob', handle: '@jacobfilm', photo: null, tone: 'green', posts: 0, views: 0, earnedCents: 0, code: null, signups: 0, salesCents: 0 },
+  { id: 'maya', name: 'Maya', handle: '@maya.pitch', photo: null, tone: 'amber', posts: 0, views: 0, earnedCents: 0, code: null, signups: 0, salesCents: 0 },
 ];
 
 const TITLES = [
@@ -80,6 +80,8 @@ function samplePosts(): V2Post[] {
         tiktok: stats(views, 0.62),
         instagram: stats(views, 0.38),
         postUrl: state === 'Posted' ? `https://www.tiktok.com/${c.handle}/video/${7200000000000 + i}` : null,
+        signups: state === 'Posted' ? Math.round(views / 900) / 10 : 0,
+        salesCents: state === 'Posted' ? Math.round(views / 40) * 10 : 0,
         earnedCents: state === 'Posted' ? 4000 : 0,
         mediaPath: null,
         mediaFormat: k === 2 ? 'photo_carousel' : 'video',
@@ -97,7 +99,7 @@ function sampleDays(posts: V2Post[]): AnalyticsDay[] {
     const key = dayKey(d);
     const ids = posts.filter((p) => p.state === 'Posted' && dayKey(p.date) === key).map((p) => p.id);
     const base = [48, 61, 54, 88, 72, 51, 38][d.getDay()] * 1000;
-    days.push({ day: key, views: Math.round(base * (0.6 + ((i * 7) % 5) * 0.12)), signups: 0, salesCents: 0, postIds: ids });
+    days.push({ day: key, views: Math.round(base * (0.6 + ((i * 7) % 5) * 0.12)), signups: 14 + (i % 9), salesCents: 42000 + (i % 7) * 6100, codedSignups: 3 + (i % 4), codedSalesCents: 9000 + (i % 5) * 2300, postIds: ids });
   }
   return days;
 }
@@ -121,7 +123,7 @@ function sampleBriefs(): Brief[] {
     if (kind === 'Guided') {
       const clips =
         type === 'Long Text'
-          ? [newClip('', { onScreen: longTextPlan(title) })]
+          ? [newClip('', { onScreen: `${title}\n\nA short story on screen for seven seconds.` })]
           : [SCRIPT.hook, ...SCRIPT.points.slice(0, 3), SCRIPT.close].map((text, k, a) => newClip(text, { onScreen: k === 0 ? title : k === a.length - 1 ? 'FieldVision scores your film' : `${k}. ${text}`, cta: k === a.length - 1 }));
       base.clips = type === 'Greenscreen' ? clips.map((c) => ({ ...c, green: true, gs: { src: 'gs-3', label: 'Heat map', kind: 'video', dur: 12 } })) : clips;
       base.audio = { mode: i === 1 ? 'pick' : 'creator', track: i === 1 ? { id: 't1', title: 'golden hour', artist: 'JVKE', dur: 212 } : null };
@@ -145,8 +147,8 @@ export function seedPreviewData(): void {
   const posts = samplePosts();
   const creators = CREATORS.map((c) => {
     const mine = posts.filter((p) => p.creatorId === c.id && p.state === 'Posted');
-    return { ...c, posts: mine.length, views: mine.reduce((n, p) => n + p.views, 0), earnedCents: mine.length * 4000 };
+    return { ...c, posts: mine.length, views: mine.reduce((n, p) => n + p.views, 0), earnedCents: mine.length * 4000, code: c.id === 'elan' ? null : `${c.name.toUpperCase()}10`, signups: Math.round(mine.reduce((n, p) => n + p.signups, 0)), salesCents: mine.reduce((n, p) => n + p.salesCents, 0) };
   });
-  useV2Data.getState().seed({ posts, creators, days: sampleDays(posts) });
+  useV2Data.getState().seed({ posts, creators, days: sampleDays(posts), stripeConnected: true });
   useLibStore.getState().seed(sampleBriefs());
 }

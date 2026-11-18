@@ -24,10 +24,10 @@ import {
   type VideoDocument,
 } from '../../../../lib/edit-document';
 import { isVideoEditorAvailable, speechBounds } from '../../../../modules/video-editor';
-import { color } from '../../../../theme/tokens';
 import { layoutOf, SLIDE_TEXT_SIZE } from '../model';
 import { freeClipItem, plugFirst, plugItem, PLUG_SAY, withPlug, type ReelPlanItem } from './plan';
 import type { CtaPlacement, WeekBrief } from '../../../../lib/briefs-api';
+import { color } from '../../../../theme/v2';
 
 const SPEECH_PAD_MS = 150;
 const HEX = /^#[0-9A-Fa-f]{6}$/;
@@ -205,6 +205,23 @@ export function syncPlanOverlays(
       next = addOverlay(next, overlayFor(item, range));
     }
 
+    // The manager's pictures ride along like the inset: one image overlay
+    // each, over the item's clips, from a brief-assets path the render signs.
+    for (const pic of item.pics ?? []) {
+      const oid = `pp-${item.id}-${pic.id}`;
+      const have = next.overlays.find((o) => o.id === oid);
+      if (have) {
+        if (moved(have, range)) next = updateOverlay(next, oid, range);
+        continue;
+      }
+      if (item.hidePics?.includes(pic.id)) continue;
+      const aid = `pic${pic.id.replace(/[^A-Za-z0-9]/g, '')}`;
+      if (!assetById(next, aid)) {
+        next = addAsset(next, { id: aid, kind: 'image', localUri: null, storagePath: pic.src, durationMs: null, width: null, height: null });
+      }
+      next = addOverlay(next, { kind: 'image', id: oid, assetId: aid, x: pic.box.x, y: pic.box.y, width: pic.box.w, startMs: range.startMs, endMs: range.endMs });
+    }
+
     const pid = insetIdFor(item);
     const inset = next.overlays.find((o) => o.id === pid);
     const asset = item.insetFeatureId ? insetAssets[item.insetFeatureId] : undefined;
@@ -262,10 +279,12 @@ export function trackPlanOverlayDeletes(prev: VideoDocument | null, doc: VideoDo
     };
     const hideText = flag(overlayIdFor(item), item.hideText);
     const hideInset = flag(insetIdFor(item), item.hideInset);
-    if (Boolean(hideText) === Boolean(item.hideText) && Boolean(hideInset) === Boolean(item.hideInset)) return item;
+    const hidePics = (item.pics ?? []).map((p) => p.id).filter((id) => flag(`pp-${item.id}-${id}`, item.hidePics?.includes(id)));
+    const samePics = hidePics.join() === (item.hidePics ?? []).join();
+    if (Boolean(hideText) === Boolean(item.hideText) && Boolean(hideInset) === Boolean(item.hideInset) && samePics) return item;
     changed = true;
-    const { hideText: _t, hideInset: _i, ...rest } = item;
-    return { ...rest, ...(hideText ? { hideText: true } : {}), ...(hideInset ? { hideInset: true } : {}) };
+    const { hideText: _t, hideInset: _i, hidePics: _p, ...rest } = item;
+    return { ...rest, ...(hideText ? { hideText: true } : {}), ...(hideInset ? { hideInset: true } : {}), ...(hidePics.length ? { hidePics } : {}) };
   });
   return changed ? out : items;
 }

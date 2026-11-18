@@ -12,9 +12,8 @@ import {
   View,
 } from 'react-native';
 
-import { color, type } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, Press } from '../../v2';
 
 export const TEXT_BOX_MAX_CHARS = 160;
 
@@ -47,17 +46,17 @@ export function TextEditSheet(props: {
         <Pressable accessibilityLabel="Close" style={styles.scrim} onPress={onCancel} />
         <View style={[styles.panel, { paddingBottom: Math.max(bottomInset, 12) }]}>
           <View style={styles.header}>
-            <PressableScale
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Cancel"
               onPress={onCancel}
               hitSlop={10}
               style={styles.headerBtn}
             >
-              <Icon name="x" size={20} color={color.white} />
-            </PressableScale>
+              <Icon name="close" size={20} color={color.white} />
+            </Press>
             <Text style={styles.title}>{title}</Text>
-            <PressableScale
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Done"
               onPress={() => onSave(trimmed)}
@@ -66,7 +65,7 @@ export function TextEditSheet(props: {
               style={[styles.headerBtn, !canSave && styles.headerBtnOff]}
             >
               <Icon name="check" size={20} color={color.white} />
-            </PressableScale>
+            </Press>
           </View>
           <TextInput
             value={text}
@@ -75,7 +74,7 @@ export function TextEditSheet(props: {
             autoFocus
             maxLength={TEXT_BOX_MAX_CHARS}
             placeholder="Type your text"
-            placeholderTextColor={color.whiteA45}
+            placeholderTextColor={editor.w45}
             selectionColor={color.white}
             keyboardAppearance="dark"
             accessibilityLabel="Text box words"
@@ -95,10 +94,10 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: editor.k20,
   },
   panel: {
-    backgroundColor: '#111114',
+    backgroundColor: color.ink,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 12,
@@ -117,32 +116,32 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   headerBtnOff: {
     opacity: 0.4,
   },
   title: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '700',
   },
   input: {
     minHeight: 96,
     maxHeight: 180,
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     lineHeight: 22,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
     textAlignVertical: 'top',
   },
   counter: {
     alignSelf: 'flex-end',
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
     fontVariant: ['tabular-nums'],
     paddingRight: 4,
   },

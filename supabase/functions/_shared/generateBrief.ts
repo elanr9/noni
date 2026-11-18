@@ -186,7 +186,7 @@ const JSON_CONTRACT =
 
 const KILL_RULE = `KILL ONLY AS LAST RESORT: almost never kill. If the topic is thin, still write the best concrete brief you can from product truth and audience. Do NOT kill because the topic is a competitor, a comparison, or feels awkward for a plug; pick the closest approved claim and angle the plug as what to do instead. Only answer {"kill_reason": string} if the search phrase is empty or pure gibberish with zero usable topic.`;
 
-const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, background claim, or playing history into the hook or any talking point. "As a former D1 player, here are five tips" is forbidden. One brief serves the whole roster; each creator's credential renders at record time from their profile, so a written one doubles up. Write the hook so it lands right after that credential line: the credential supplies the authority, the hook supplies the promise.`;
+const CREDENTIAL_RULE = `CREDENTIAL: never write a creator credential, background claim, or personal history into the hook or any talking point. "As a former nurse, here are five tips" is forbidden. One brief serves the whole roster; each creator's credential renders at record time from their profile, so a written one doubles up. Write the hook so it lands right after that credential line: the credential supplies the authority, the hook supplies the promise.`;
 
 const SECOND_PERSON_RULE = `SECOND PERSON: aim for 5 to 6 uses of "you" or "your" per 100 words. Every strong post talks straight at one person.`;
 
@@ -195,13 +195,13 @@ const EXPERT_CREATOR_RULE = `EXPERT CREATORS: every creator on the roster has li
 const CAPABILITY_RULE = (productName: string) =>
   `PRODUCT CAPABILITIES (hard allowlist): ${productName} may only be credited with capabilities written verbatim or near verbatim in the Product truth, the Approved claims or the Feature library in the message. Naming any capability not written there (a data source it pulls, a thing it tracks or analyzes, a result it produces) is a kill level failure, worse than a thin brief. When no sentence there fits the topic, take the closest capability sentence that does exist, keep its verb and its object, and angle the advice beat toward it instead of inventing a fit.`;
 
-const HOOK_CRAFT_RULE = `HOOK CRAFT: every hook is one complete grammatical sentence a real person would say out loud, at least 5 words and never over the 9 word cap. No sentence fragments stitched with commas (these fail: 'Send this email, get coaches to tell truth', 'Coaches reveal the real fit, right here, now'). Never 'these 5 things' or any hook with the word 'things', never 'here is why'. Every hook names a specific stake or detail from this industry and this audience (the roster spot, the person who reads the email, the deadline), never the general topic.`;
+const HOOK_CRAFT_RULE = `HOOK CRAFT: every hook is one complete grammatical sentence a real person would say out loud, at least 5 words and never over the 9 word cap. No sentence fragments stitched with commas (these fail: 'Send this email, get landlords to tell truth', 'Landlords reveal the real price, right here, now'). Never 'these 5 things' or any hook with the word 'things', never 'here is why'. Every hook names a specific stake or detail from this industry and this audience (the person who decides, the deadline, the money on the line), never the general topic.`;
 
 const HOOK_RULES = `HOOKS (write these LAST, against the finished talking points). The hook is the first line the creator says AND the title card on screen for the first two seconds, so it must read as a headline. hook_options is 8 to 10 variants, each 9 words or fewer (count them; 10 is a hard fail), and EVERY variant must:
-- name the viewer's specific high-stakes moment (the round, the deadline, the email, the tryout), never the general topic;
-- carry one specificity marker: a number, an absolute ("WILL", "never", "stop", "every"), or a named thing (the platform, the round, the person who judges you);
-- promise or threaten a concrete outcome for "you" (what you will be asked, why you got dropped, what you are doing wrong).
-Cover at least four of these angles across the set: FEAR OF LOSS ("why people get dropped during rush"), INSIDER GUARANTEE ("questions you WILL be asked"), CONTRARIAN ("stop applying on LinkedIn and Indeed"), CURIOSITY GAP ("the one email recruiters always answer"), COUNTED VALUE ("3 emails that got me asked back every day"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email a recruiter" is banned, "the 4 line email recruiters answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever. Hooks sound like a person saying something true and specific, never a headline generator: no perfect, ultimate, elite, killer, formula, secret, hack or game changer, and no line a viewer has seen on a hundred other posts.`;
+- name the viewer's specific high-stakes moment (the interview, the deadline, the first attempt, the big purchase), never the general topic;
+- carry one specificity marker: a number, an absolute ("WILL", "never", "stop", "every"), or a named thing (the platform, the step, the person who judges you);
+- promise or threaten a concrete outcome for "you" (what you will be asked, why it keeps failing, what you are doing wrong).
+Cover at least four of these angles across the set: FEAR OF LOSS ("why your first batch always goes flat"), INSIDER GUARANTEE ("questions the landlord WILL ask you"), CONTRARIAN ("stop tracking every calorie in an app"), CURIOSITY GAP ("the one message landlords always answer"), COUNTED VALUE ("3 swaps that cut my grocery bill every week"), and at least one that restates the search phrase so a searcher knows they landed right; that restatement still carries a marker ("how to email a landlord" is banned, "the 4 line email landlords answer" passes). Banned hook shapes, these fail validation: anything starting "how to", "tips for", "here is how", "let's talk about", "in this video", or anything a viewer could not screenshot as a title. Every hook reads as a grammatical headline a person would type; never bolt a keyword onto an existing line. Score each 0 to 100 for how hard it stops the viewer who typed the search phrase; do not reuse the same score. Single speaker only. No "Wait what?", no second voice, no dialogue, ever. Hooks sound like a person saying something true and specific, never a headline generator: no perfect, ultimate, elite, killer, formula, secret, hack or game changer, and no line a viewer has seen on a hundred other posts.`;
 
 function captionRules(requiresPlug: boolean): string {
   const product = requiresPlug
@@ -237,7 +237,7 @@ The plug point is spoken as the creator's own tool, first person. Three shapes t
 1. RESOURCE FRAMING, right after the hook: the creator names ${productName} as the tool they lean on, with one mechanism. Best for lists of mistakes or questions.
 2. I ASKED IT: the creator got the content of this post from ${productName}, then the content follows. Best for question or idea lists.
 3. THE FIX for a pain point: one action the viewer takes in ${productName} and the mechanism that follows. Best for contrarian or problem posts.
-The plug point is one of the counted items, numbered like the others (its overlay_label is numbered like the others and says what ${productName} does for the viewer, with the name), never an extra unnumbered beat squeezed between items. Its text opens with one advice beat of 8 to 15 words (the thing the viewer does) and ends with the plug sentence plus a short nudge on where to find it ("search ${productName}", "it is in my bio"); a plug point that is only the plug sentence fails validation. The whole point stays under 40 words and never carries a bracketed nudge. It is never an ad read on its own. Position: early, while retention is high, in the first half of the points and never the last point. Vague plugs are banned: "there are tools that help", "use a recruiting app", "check out the app" all fail. Never write "It is my biggest tip" or "I use it constantly"; those were examples, not lines.`;
+The plug point is one of the counted items, numbered like the others (its overlay_label is numbered like the others and says what ${productName} does for the viewer, with the name), never an extra unnumbered beat squeezed between items. Its text opens with one advice beat of 8 to 15 words (the thing the viewer does) and ends with the plug sentence plus a short nudge on where to find it ("search ${productName}", "it is in my bio"); a plug point that is only the plug sentence fails validation. The whole point stays under 40 words and never carries a bracketed nudge. It is never an ad read on its own. Position: early, while retention is high, in the first half of the points and never the last point. Vague plugs are banned: "there are tools that help", "use an app for this", "check out the app" all fail. Never write "It is my biggest tip" or "I use it constantly"; those were examples, not lines.`;
 }
 
 const POINT_COUNT_RULE =
@@ -282,22 +282,22 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
     case 'numbered_list':
     case 'numbered_tips':
       lines.push(
-        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic; e.g. "5 rush mistakes that get you dropped", "8 things I wish I knew before my first job hunt", "7 resume lines recruiters skip". Never paste the search phrase as the title.`,
+        `TITLE SHAPE: lead with point_count, then a list frame tied to the topic; e.g. "5 meal prep mistakes that waste your Sunday", "8 things I wish I knew before my first apartment", "7 budget lines most people forget". Swap in this brand's topic; never reuse these. Never paste the search phrase as the title.`,
       );
       break;
     case 'talking_head':
       lines.push(
-        `TITLE SHAPE: first-person or direct address story beat, e.g. "How I got my first job offer", "What recruiters reply to". Not a numbered list title.`,
+        `TITLE SHAPE: first-person or direct address story beat, e.g. "How I paid off my first card", "What landlords reply to". Swap in this brand's topic. Not a numbered list title.`,
       );
       break;
     case 'explainer':
       lines.push(
-        `TITLE SHAPE: why/how explainer, e.g. "Why recruiters skip your email", "How rush bids get decided". Clear and specific.`,
+        `TITLE SHAPE: why/how explainer, e.g. "Why landlords skip your email", "How gym prices get set". Swap in this brand's topic. Clear and specific.`,
       );
       break;
     case 'contrast':
       lines.push(
-        `TITLE SHAPE: two sides with "vs" or clear opposition, e.g. "First round vs final round", "10 interviews vs 0 interviews".`,
+        `TITLE SHAPE: two sides with "vs" or clear opposition, e.g. "Week one vs week ten", "10 tries vs 0 tries".`,
       );
       break;
     case 'replay_bait':
@@ -307,17 +307,17 @@ function postTypeBlock(postType: PostTypeRow | null, fallbackFormat: 'video' | '
       break;
     case 'seven_second':
       lines.push(
-        `TITLE SHAPE: the one idea as a blunt statement, under 8 words, e.g. "Recruiters decide in 8 seconds", "Your resume buries the lead".`,
+        `TITLE SHAPE: the one idea as a blunt statement, under 8 words, e.g. "Landlords decide in 8 seconds", "Your first line buries the lead".`,
       );
       break;
     case 'how_to':
       lines.push(
-        `TITLE SHAPE: how-to frame, e.g. "How to email a recruiter", "How to prep for rush week".`,
+        `TITLE SHAPE: how-to frame, e.g. "How to email a landlord", "How to prep for a first 5K".`,
       );
       break;
     case 'getting_started':
       lines.push(
-        `TITLE SHAPE: beginner start frame, e.g. "Start job hunting with zero connections", "First steps to get on a recruiter's radar".`,
+        `TITLE SHAPE: beginner start frame, e.g. "Start investing with $100", "First steps to cook five dinners a week".`,
       );
       break;
     default:
@@ -379,8 +379,8 @@ function briefSystemBlocks(
   return [
     preamble,
     KILL_RULE,
-    `Otherwise answer with a single JSON object, no markdown fences, no preamble. Inside string values use single quotes for any quoted phrase ('2026 center mid, 4.1 GPA'); an unescaped double quote breaks the JSON. Generate the keys IN THIS EXACT ORDER; the order is the method: the claim and search phrase anchor the body, the hooks are written last against the finished body, the caption after the hooks:\n${contract}`,
-    `EXAMPLES IN THESE RULES are from other niches (sorority rush, job hunting) and exist to show shape only. Never reuse an example line, hook, plug or moral from these rules in the brief, and never write anything about sororities or job boards unless the brand is in that niche.`,
+    `Otherwise answer with a single JSON object, no markdown fences, no preamble. Inside string values use single quotes for any quoted phrase ('2 bed, $1,800, near the train'); an unescaped double quote breaks the JSON. Generate the keys IN THIS EXACT ORDER; the order is the method: the claim and search phrase anchor the body, the hooks are written last against the finished body, the caption after the hooks:\n${contract}`,
+    `EXAMPLES IN THESE RULES come from a spread of niches (sorority rush, job hunting, renting, cooking, fitness, personal finance) and exist to show shape only. Never reuse an example line, hook, plug or moral from these rules in the brief, and never write about any of those topics unless the brand is in that niche; the topic always comes from this brand's docs.`,
     winningPattern(requiresPlug),
     postTypeBlock(postType, fallbackFormat),
     portRule,

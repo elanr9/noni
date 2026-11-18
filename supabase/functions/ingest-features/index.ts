@@ -46,7 +46,7 @@ source_ref    the image URL or page URL this came from (copy exactly from the in
 const EXTRACT_SOFTWARE = `${EXTRACT_SHARED}
 
 Concrete means: what happens when the user does something.
-  GOOD: "You hit send once and it goes out to fifty coaches."
+  GOOD: "You hit send once and it goes out to fifty clients."
 
 SCREENSHOTS / MARKETING CAROUSELS (critical):
 Read the product UI inside the image. IGNORE any headline, title, or
@@ -58,7 +58,7 @@ Worked example:
   slide headline: FOLLOW UPS THAT SEND THEMSELVES
   UI shows: "12 follow ups drafted for you", "No reply in a week",
             per school rows, Send 12 follow ups button
-  correct claim: If a coach doesn't reply in a week it drafts the
+  correct claim: If a client doesn't reply in a week it drafts the
                  follow up and sends it
 
 PAGES:

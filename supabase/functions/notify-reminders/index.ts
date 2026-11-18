@@ -1,11 +1,14 @@
 // Morning due-today pushes for creators. Hourly cron at :15; only
 // acts in America/New_York hour 8–9. Account warm-up pushes fire in hour 14
-// every 3 days starting 2026-09-28. Claims via creator_reminders insert so
-// concurrent runs cannot double-send. One push per creator per kind per day.
+// every 3 days starting 2026-09-28, only to creators whose warm-up is still
+// open (no creator_accounts row yet, or sent back), with each company's own
+// niche and search phrases in the body. Claims via creator_reminders insert
+// so concurrent runs cannot double-send. One push per creator per kind per day.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
 import { adminRecipients, creatorRecipients, sendPush } from '../_shared/push.ts';
 import { creatorLink, managerLink } from '../_shared/deep-link.ts';
+import { loadNiches, warmupPushBody } from '../_shared/brandVoice.ts';
 
 const INCOMPLETE = ['assigned', 'recorded', 'changes_requested'] as const;
 type ReminderKind = 'due_today' | 'overdue';
@@ -17,8 +20,6 @@ const SLOT_HOURS: Record<number, readonly number[]> = {
 };
 const WARMUP_START = '2026-09-28';
 const WARMUP_TITLE = 'Warm up account time!';
-const WARMUP_BODY =
-  'Search college soccer recruiting, like, comment, save, and scroll for 10-15 minutes.';
 
 function isWarmupDay(today: string): boolean {
   const [sy, sm, sd] = WARMUP_START.split('-').map(Number);
@@ -65,9 +66,26 @@ async function sendAccountWarmup(
     if (!data || data.length < pageSize) break;
   }
 
+  // Warm-up is done once the proof is in review or approved; only creators
+  // with no account row yet, or one sent back, still need the nudge.
+  const doneWarmup = new Set<string>();
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await admin
+      .from('creator_accounts')
+      .select('company_id, creator_id')
+      .in('status', ['pending', 'approved'])
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as { company_id: string; creator_id: string }[]) {
+      doneWarmup.add(`${row.company_id}:${row.creator_id}`);
+    }
+    if (!data || data.length < pageSize) break;
+  }
+
   const claimed = new Map<string, { profileId: string; token: string | null }[]>();
   let warmupClaimed = 0;
   for (const creator of creators) {
+    if (doneWarmup.has(`${creator.company_id}:${creator.id}`)) continue;
     const { error: claimError } = await admin.from('creator_reminders').insert({
       company_id: creator.company_id,
       creator_id: creator.id,
@@ -85,10 +103,13 @@ async function sendAccountWarmup(
   }
 
   let warmupPushes = 0;
+  const niches = await loadNiches(admin, [...claimed.keys()]);
   for (const [companyId, recipients] of claimed) {
+    const niche = niches.get(companyId);
+    if (!niche) continue;
     warmupPushes += await sendPush(admin, recipients, {
       title: WARMUP_TITLE,
-      body: WARMUP_BODY,
+      body: warmupPushBody(niche),
       data: {
         event: 'account_warmup',
         company_id: companyId,

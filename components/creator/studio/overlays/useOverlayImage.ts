@@ -50,7 +50,8 @@ export function useOverlayImage(asset: MediaAsset | null): OverlayImageSource {
       .then((url) => {
         if (!cancelled) setSigned({ path: storagePath, url });
       })
-      .catch((e: unknown) => console.warn('overlay image sign failed', e));
+      // The picture shows once it can be signed; the overlay stays in place meanwhile.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };

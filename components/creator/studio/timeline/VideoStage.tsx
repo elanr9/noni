@@ -7,13 +7,13 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { documentDurationMs, type VideoDocument } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
 import { isVideoEditorAvailable } from '../../../../modules/video-editor';
-import { color } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
 import { FrameFit } from '../../slides/FrameFit';
 import { FallbackStagePlayer } from './FallbackStagePlayer';
 import { ImageCells } from './ImageCells';
 import { NativeStagePlayer } from './NativeStagePlayer';
 import { clamp } from './geometry';
+import { color, editor } from '../../../../theme/v2';
+import { Icon } from '../../../v2';
 
 export type VideoStageHandle = { seekTo(ms: number): void };
 
@@ -67,7 +67,7 @@ export const VideoStage = forwardRef<VideoStageHandle, VideoStageProps>(function
         {!playing && totalMs > 0 ? (
           <View style={styles.playWrap} pointerEvents="none">
             <View style={styles.play}>
-              <Icon name="play" size={26} color={color.white} />
+              <Icon name="play_arrow" size={26} color={color.white} />
             </View>
           </View>
         ) : null}
@@ -78,7 +78,7 @@ export const VideoStage = forwardRef<VideoStageHandle, VideoStageProps>(function
 
 const styles = StyleSheet.create({
   area: { flex: 1, marginHorizontal: 16, marginBottom: 4 },
-  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#111' },
+  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: editor.stage },
   playWrap: {
     position: 'absolute',
     top: 0,
@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: color.scrim,
+    backgroundColor: editor.k45,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 4,

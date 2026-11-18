@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 
 import { LONG_TEXT_NOTES, longTextPlan } from '../../../../lib/brief-ai';
+import { toast } from '../../../v2/Toast';
 import { stText, type LongTextState, type StText } from '../../../../lib/brief-library';
-import { color, radius, shadow } from '../../../../theme/v2';
-import { Icon, Label, Press, tap } from '../../../v2';
+import { briefs, color, radius, shadow } from '../../../../theme/v2';
+import { Icon, Label, Press } from '../../../v2';
 import { ClipFrame, ShimmerLine } from './ClipFrame';
 import type { AiState } from './GuidedForm';
 import { SpinIcon } from './GuidedForm';
@@ -34,20 +35,27 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
     return () => list.forEach(clearTimeout);
   }, []);
   const typed = /\S/.test(lt.title);
-  const fill = () => {
+  const fill = async () => {
     if (!typed || ai) return;
-    tap();
-    const screen = longTextPlan(lt.title.trim());
     setAi({ stage: 'onScreen', i: 0, n: 2 });
+    let screen = '';
+    try {
+      screen = await longTextPlan(lt.title.trim());
+    } catch {
+      screen = '';
+    }
+    if (!screen) {
+      setAi(null);
+      toast.error("Couldn't write the text. Check your connection and try again.", { label: 'Retry', onPress: () => void fill() });
+      return;
+    }
+    set({ onScreen: lt.onScreen.trim() || screen, doc: null });
+    setAi({ stage: 'notes', i: 1, n: 2 });
     timers.current.push(
-      setTimeout(() => {
-        set({ onScreen: lt.onScreen.trim() || screen, doc: null });
-        setAi({ stage: 'notes', i: 1, n: 2 });
-      }, 900),
       setTimeout(() => {
         set({ notes: lt.notes.trim() || LONG_TEXT_NOTES });
         setAi(null);
-      }, 1700),
+      }, 700),
     );
   };
   const pend = (k: string) => !!ai && ai.stage === k;
@@ -59,12 +67,12 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12, gap: 10, flexGrow: 1 }}>
         {editingExisting ? null : <Text style={{ textAlign: 'center', fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.grey4 }}>Long Text post</Text>}
         {editingExisting ? null : (
-          <Press disabled={!typed || !!ai} onPress={fill} accessibilityRole="button" style={{ height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? '0 6px 16px rgba(27,166,238,0.35)' : undefined }}>
+          <Press disabled={!typed || !!ai} onPress={() => void fill()} accessibilityRole="button" style={{ height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? briefs.aiGlow : undefined }}>
             <SpinIcon spinning={!!ai} size={22} color={typed ? color.white : color.grey3} />
             <Text style={{ fontSize: 17, fontWeight: '700', color: typed ? color.white : color.grey3 }}>{ai ? 'Filling in' : 'Fill in with AI'}</Text>
           </Press>
         )}
-        <TitleInput value={lt.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} />
+        <TitleInput value={lt.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} type="Long Text" />
         <Press onPress={() => setEdit(true)} accessibilityRole="button" style={{ backgroundColor: color.card, borderRadius: radius.card, padding: 12, flexDirection: 'row', gap: 14, alignItems: 'center', ...shadow.card }}>
           <ClipFrame width={W} height={(W * 16) / 9} radius={12} texts={lt.onScreen ? [{ ...text, text: lt.onScreen }] : []} />
           <View style={{ flex: 1, minWidth: 0, gap: 4 }}>

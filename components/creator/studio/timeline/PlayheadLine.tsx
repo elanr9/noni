@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { color } from '../../../../theme/v2';
 
-import { color } from '../../../../theme/tokens';
 
 /** Fixed centre line the strip scrolls under. */
 export function PlayheadLine(props: { x: number; height: number }): JSX.Element {

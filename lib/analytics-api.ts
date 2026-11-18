@@ -1,6 +1,7 @@
 // Analytics explorer data. Engagement (views, likes, saves) comes from
 // post_metrics snapshots, sign-ups and sales from conversion_daily (synced
-// from the FieldVision product DB), per-post earnings from wallet_ledger
+// daily from the Stripe account the company connects on the web), per-post
+// earnings from wallet_ledger
 // bounty credits, paid-out totals from payouts. Sign-ups and sales only
 // count from the day the first campaign started on Noni. Money surfaces
 // are also gated in the UI by the Stripe connect date.
@@ -33,6 +34,9 @@ export type AnalyticsPost = {
   day: string;
   /** Total views across platforms, latest snapshots. */
   views: number;
+  /** Sign-ups and sales credited to this post: its creator's coded customers, split by the views each of the creator's posts was gaining. */
+  signups: number;
+  salesCents: number;
   earnedCents: number;
   tiktok: PlatformStats;
   instagram: PlatformStats;
@@ -45,8 +49,12 @@ export type AnalyticsDay = {
   /** Local calendar day, YYYY-MM-DD. */
   day: string;
   views: number;
+  /** Every sign-up and sale on the company's Stripe that day. */
   signups: number;
   salesCents: number;
+  /** The part that came in on a creator's code. */
+  codedSignups: number;
+  codedSalesCents: number;
   postIds: string[];
 };
 
@@ -64,11 +72,15 @@ export type PayoutDay = { day: string; amountCents: number };
 
 export type CompanyAnalytics = {
   posts: AnalyticsPost[];
-  /** Last 84 days ascending (covers every chart range and the calendar). */
+  /** Every day from the first activity (at least the last 84) to today, ascending. */
   days: AnalyticsDay[];
   totals: AnalyticsTotals;
   /** Completed creator payouts, ascending by day. */
   payouts: PayoutDay[];
+  /** Sign-ups and sales exist: the company linked Stripe on the web, or its own app reports sign-ups. */
+  stripeConnected: boolean;
+  /** Sign-ups and sales on each creator's code, by creator id. */
+  creatorSales: Map<string, { signups: number; salesCents: number }>;
 };
 
 // ————— Money gate —————
@@ -213,6 +225,7 @@ type PostRow = {
   assignment_id: string | null;
   task_id: string | null;
   assignments: {
+    company_id: string | null;
     creator_id: string | null;
     brief_id: string | null;
     library_brief_id: string | null;
@@ -220,6 +233,7 @@ type PostRow = {
     profiles: { full_name: string | null } | null;
   } | null;
   content_tasks: {
+    company_id: string | null;
     title: string | null;
     format: string | null;
     assigned_to: string | null;
@@ -229,6 +243,7 @@ type PostRow = {
 };
 
 type ConversionRow = {
+  creator_id: string | null;
   day: string;
   new_accounts: number;
   sales_cents: number;
@@ -250,7 +265,94 @@ function pctDelta(current: number, previous: number): number | null {
   return Math.round(((current - previous) / previous) * 100);
 }
 
+/** The day feed never starts later than this many days back. */
 const WINDOW_DAYS = 84;
+const PAGE = 500;
+
+/** Every row of a query, read a page at a time: PostgREST stops at 1000 rows per request. */
+export async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  size = PAGE,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += size) {
+    const { data, error } = await page(from, from + size - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as T[];
+    rows.push(...batch);
+    if (batch.length < size) return rows;
+  }
+}
+
+/**
+ * Views gained per local day, from cumulative snapshots. Each platform row
+ * keeps its own running high, so a snapshot that dips (a platform under-
+ * reporting for a poll) neither hides growth nor counts it twice when the
+ * number recovers. Gains land on the day of the snapshot that first saw them.
+ */
+export function viewsGainedByDay(posts: Pick<AnalyticsPost, 'series'>[]): Map<string, number> {
+  const byDay = new Map<string, number>();
+  for (const post of posts) {
+    for (const row of post.series) {
+      let high = 0;
+      for (const snap of row) {
+        if (snap.views <= high) continue;
+        const key = localDayKey(new Date(snap.t));
+        byDay.set(key, (byDay.get(key) ?? 0) + snap.views - high);
+        high = snap.views;
+      }
+    }
+  }
+  return byDay;
+}
+
+/** Views gained per local day for each post id (see viewsGainedByDay). */
+function gainsByPost(posts: AnalyticsPost[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const post of posts) out.set(post.id, viewsGainedByDay([post]));
+  return out;
+}
+
+const CREDIT_WINDOW_DAYS = 7;
+
+/**
+ * Credits each creator's coded sign-ups and sales to their posts. A day's
+ * credit is split by the views each of the creator's live posts gained over
+ * that day and the six before it (people buy a few days after watching); when
+ * none gained views it goes to the creator's newest post. Credit for a
+ * creator with no post yet stays on the creator only. Writes onto the posts.
+ */
+export function creditPosts(
+  posts: AnalyticsPost[],
+  creatorRows: { creator_id: string | null; day: string; new_accounts: number; sales_cents: number }[],
+): void {
+  const gains = gainsByPost(posts);
+  const byCreator = new Map<string, AnalyticsPost[]>();
+  for (const post of posts) {
+    if (!post.creatorId) continue;
+    const list = byCreator.get(post.creatorId) ?? [];
+    list.push(post);
+    byCreator.set(post.creatorId, list);
+  }
+  for (const row of creatorRows) {
+    if (!row.creator_id || (row.new_accounts <= 0 && row.sales_cents <= 0)) continue;
+    const live = (byCreator.get(row.creator_id) ?? []).filter((p) => p.day <= row.day);
+    if (live.length === 0) continue;
+    const [y, m, d] = row.day.split('-').map((n) => parseInt(n, 10));
+    const windowKeys = Array.from({ length: CREDIT_WINDOW_DAYS }, (_, i) => localDayKey(new Date(y, m - 1, d - i)));
+    let weights = live.map((p) => windowKeys.reduce((n, k) => n + (gains.get(p.id)?.get(k) ?? 0), 0));
+    let total = weights.reduce((n, w) => n + w, 0);
+    if (total <= 0) {
+      const newest = live.reduce((a, b) => (b.day > a.day ? b : a));
+      weights = live.map((p) => (p === newest ? 1 : 0));
+      total = 1;
+    }
+    live.forEach((post, i) => {
+      post.signups += (row.new_accounts * weights[i]) / total;
+      post.salesCents += (row.sales_cents * weights[i]) / total;
+    });
+  }
+}
 
 /** The day the company started its first campaign on Noni (YYYY-MM-DD). */
 export function firstCampaignDayOf(
@@ -280,29 +382,44 @@ export function firstPostDayOf(
 export async function fetchCompanyAnalytics(
   companyId: string,
 ): Promise<CompanyAnalytics> {
-  // Posts carry no date filter: old posts still accrue views inside the
-  // window. RLS scopes them to the caller's company.
-  const [postsRes, conversionsRes, ledgerRes, payoutsRes, campaignsRes] =
+  // Posts carry no date filter: old posts still accrue views. posts has no
+  // company column; RLS scopes it to the active company through the
+  // assignment or task, and rows are checked against companyId again below in
+  // case the active company changed mid-flight. Paged, because a busy company
+  // passes PostgREST's 1000-row cap.
+  const [postRows, conversionRows, ledgerRows, payoutsRes, campaignsRes, connectedRes, trackingRes] =
     await Promise.all([
-    supabase
-      .from('posts')
-      .select(
-        `id, platform, post_url, posted_at, status, assignment_id, task_id,
-         assignments:assignment_id ( creator_id, brief_id, library_brief_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) ),
-         content_tasks:task_id ( title, format, assigned_to, profiles!content_tasks_assigned_to_fkey ( full_name ) ),
-         post_metrics ( views, likes, saves, comments, shares, fetched_at )`,
-      )
-      .neq('status', 'failed'),
-    supabase
-      .from('conversion_daily')
-      .select('day, new_accounts, sales_cents')
-      .eq('company_id', companyId)
-      .is('creator_id', null),
-    supabase
-      .from('wallet_ledger')
-      .select('post_id, amount_cents')
-      .eq('company_id', companyId)
-      .eq('kind', 'bounty_credit'),
+    fetchAllRows<PostRow>((from, to) =>
+      supabase
+        .from('posts')
+        .select(
+          `id, platform, post_url, posted_at, status, assignment_id, task_id,
+           assignments:assignment_id ( company_id, creator_id, brief_id, library_brief_id, briefs:brief_id ( title, format ), profiles:creator_id ( full_name ) ),
+           content_tasks:task_id ( company_id, title, format, assigned_to, profiles!content_tasks_assigned_to_fkey ( full_name ) ),
+           post_metrics ( views, likes, saves, comments, shares, fetched_at )`,
+        )
+        .neq('status', 'failed')
+        .order('id')
+        .range(from, to),
+    ),
+    fetchAllRows<ConversionRow>((from, to) =>
+      supabase
+        .from('conversion_daily')
+        .select('id, creator_id, day, new_accounts, sales_cents')
+        .eq('company_id', companyId)
+        .order('day')
+        .order('id')
+        .range(from, to),
+    ),
+    fetchAllRows<{ post_id: string | null; amount_cents: number }>((from, to) =>
+      supabase
+        .from('wallet_ledger')
+        .select('id, post_id, amount_cents')
+        .eq('company_id', companyId)
+        .eq('kind', 'bounty_credit')
+        .order('id')
+        .range(from, to),
+    ),
     supabase
       .from('payouts')
       .select('amount_cents, created_at, completed_at')
@@ -312,23 +429,24 @@ export async function fetchCompanyAnalytics(
       .from('campaigns')
       .select('starts_on, created_at')
       .eq('company_id', companyId),
+    supabase.rpc('stripe_connected_at'),
+    supabase.rpc('signup_tracking_on'),
   ]);
-  if (postsRes.error) throw postsRes.error;
-  if (conversionsRes.error) throw conversionsRes.error;
-  if (ledgerRes.error) throw ledgerRes.error;
   if (payoutsRes.error) throw payoutsRes.error;
   if (campaignsRes.error) throw campaignsRes.error;
 
-  const rows = (postsRes.data ?? []) as unknown as PostRow[];
+  const rows = postRows.filter(
+    (r) => (r.assignments?.company_id ?? r.content_tasks?.company_id) === companyId,
+  );
 
   // Sign-ups and sales only count from the day the first post went live.
   const firstPostDay = firstPostDayOf(rows) ?? firstCampaignDayOf(campaignsRes.data ?? []);
-  const conversions = (
-    (conversionsRes.data ?? []) as ConversionRow[]
-  ).filter((r) => firstPostDay !== null && r.day >= firstPostDay);
+  const counted = conversionRows.filter((r) => firstPostDay !== null && r.day >= firstPostDay);
+  const conversions = counted.filter((r) => r.creator_id === null);
+  const creatorConversions = counted.filter((r) => r.creator_id !== null);
 
   const earnedByPostId = new Map<string, number>();
-  for (const entry of ledgerRes.data ?? []) {
+  for (const entry of ledgerRows) {
     if (entry.post_id === null) continue;
     earnedByPostId.set(
       entry.post_id,
@@ -408,6 +526,8 @@ export async function fetchCompanyAnalytics(
       format,
       day,
       views: tiktok.views + instagram.views,
+      signups: 0,
+      salesCents: 0,
       earnedCents: earned,
       tiktok,
       instagram,
@@ -419,6 +539,24 @@ export async function fetchCompanyAnalytics(
   const conversionByDay = new Map<string, ConversionRow>();
   for (const row of conversions) conversionByDay.set(row.day, row);
 
+  creditPosts(posts, creatorConversions);
+  for (const post of posts) {
+    post.signups = Math.round(post.signups * 10) / 10;
+    post.salesCents = Math.round(post.salesCents);
+  }
+  const codedByDay = new Map<string, { signups: number; salesCents: number }>();
+  const creatorSales = new Map<string, { signups: number; salesCents: number }>();
+  for (const row of creatorConversions) {
+    const day = codedByDay.get(row.day) ?? { signups: 0, salesCents: 0 };
+    day.signups += row.new_accounts;
+    day.salesCents += row.sales_cents;
+    codedByDay.set(row.day, day);
+    const who = creatorSales.get(row.creator_id ?? '') ?? { signups: 0, salesCents: 0 };
+    who.signups += row.new_accounts;
+    who.salesCents += row.sales_cents;
+    creatorSales.set(row.creator_id ?? '', who);
+  }
+
   const postIdsByDay = new Map<string, string[]>();
   for (const post of posts) {
     const list = postIdsByDay.get(post.day) ?? [];
@@ -426,31 +564,31 @@ export async function fetchCompanyAnalytics(
     postIdsByDay.set(post.day, list);
   }
 
-  const windowStart = new Date();
+  // The feed runs from the first day anything happened (never fewer than
+  // WINDOW_DAYS back) to today, so Month and All time add up over the whole
+  // history rather than a fixed window.
+  const gained = viewsGainedByDay(posts);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const windowStart = new Date(todayStart);
   windowStart.setDate(windowStart.getDate() - (WINDOW_DAYS - 1));
-  windowStart.setHours(0, 0, 0, 0);
+  let firstKey = localDayKey(windowStart);
+  for (const key of gained.keys()) if (key < firstKey) firstKey = key;
+  for (const post of posts) if (post.day < firstKey) firstKey = post.day;
+  for (const row of conversions) if (row.day < firstKey) firstKey = row.day;
+  const [fy, fm, fd] = firstKey.split('-').map((n) => parseInt(n, 10));
 
   const days: AnalyticsDay[] = [];
-  for (let i = 0; i < WINDOW_DAYS; i++) {
-    const date = new Date(windowStart);
-    date.setDate(windowStart.getDate() + i);
-    const nextDay = new Date(date);
-    nextDay.setDate(date.getDate() + 1);
-    const endOfDay = nextDay.getTime() - 1;
+  for (let date = new Date(fy, fm - 1, fd); date <= todayStart; date = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)) {
     const key = localDayKey(date);
-    let views = 0;
-    for (const post of posts) {
-      views += Math.max(
-        0,
-        viewsAt(post.series, endOfDay) - viewsAt(post.series, date.getTime() - 1),
-      );
-    }
     const conversion = conversionByDay.get(key);
     days.push({
       day: key,
-      views,
+      views: gained.get(key) ?? 0,
       signups: conversion?.new_accounts ?? 0,
       salesCents: conversion?.sales_cents ?? 0,
+      codedSignups: codedByDay.get(key)?.signups ?? 0,
+      codedSalesCents: codedByDay.get(key)?.salesCents ?? 0,
       postIds: postIdsByDay.get(key) ?? [],
     });
   }
@@ -483,5 +621,9 @@ export async function fetchCompanyAnalytics(
     }))
     .sort((a, b) => (a.day < b.day ? -1 : 1));
 
-  return { posts, days, totals, payouts };
+  // The connect date is a courtesy read: a failure hides sales, never the views.
+  // Either source counts: Stripe linked on the web, or the company's own app
+  // reporting sign-ups.
+  const stripeConnected = (!connectedRes.error && !!connectedRes.data) || (!trackingRes.error && trackingRes.data === true);
+  return { posts, days, totals, payouts, stripeConnected, creatorSales };
 }

@@ -8,9 +8,9 @@ import { color, radius } from '../../../../theme/v2';
 import { Avatar, Icon, Label, Press } from '../../../v2';
 import { PostFrame } from './PostFrame';
 
-/** State line under the creator: "Live · Oct 21", "In review", or the state. */
+/** State line under the creator: "Posted Oct 21", "In review", or the state. */
 export function postStateLine(p: V2Post): string {
-  if (p.state === 'Posted') return `Live · ${postDate(p.date)}`;
+  if (p.state === 'Posted') return `Posted ${postDate(p.date)}`;
   if (p.state === 'Waiting') return 'In review';
   return p.state;
 }

@@ -15,7 +15,9 @@ import type {
 } from '../../../lib/briefs-api';
 import type { PickedPhoto } from '../../../lib/submissions';
 import type { TaskStatus } from '../../../lib/tasks';
-import { color } from '../../../theme/tokens';
+
+/** Default letter color written into post documents. Stored data, not a theme color, so it never follows theme changes. */
+const STORED_WHITE = '#FFFFFF';
 
 /** Home and sent screen status buckets (SSCreator CREATOR_POSTS.status). */
 export type CreatorStatus = 'assigned' | 'review' | 'posted';
@@ -435,7 +437,7 @@ export function hexColor(value: string | undefined): string | null {
 export function textLook(tstyle: SlideTextStyle | undefined): { color: string; bg: boolean } {
   const bg = (tstyle?.bg ?? 'box') === 'box' || tstyle?.bg === 'soft';
   const pick = bg ? hexColor(tstyle?.bgColor) : hexColor(tstyle?.color);
-  return { color: pick ?? color.white, bg };
+  return { color: pick ?? STORED_WHITE, bg };
 }
 
 /** The slide text, plus the manager's extras, as the OverlayBoxes SlideStage draws and the render bakes. */

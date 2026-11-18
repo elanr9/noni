@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
-import { ConnectedCelebration } from '../../../components/creator/ConnectedCelebration';
-import { Screen } from '../../../components/layout/Screen';
-import { Button } from '../../../components/ui/Button';
-import { Icon, type IconName } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { SkeletonLine } from '../../../components/ui/Skeleton';
+import { ConnectedSheet } from '../../../components/creator/v2/setup/ConnectedSheet';
+import { PlatformBadge } from '../../../components/creator/v2/setup/PlatformBadge';
+import { Notice, SetupLabel } from '../../../components/creator/v2/setup/SetupParts';
+import { Button, Chip, Icon, Press, Screen, Sheet, Skeleton, type IconName } from '../../../components/v2';
+import { toast } from '../../../components/v2/Toast';
 import {
   disconnectSocialAccounts,
   getSocialConnectStatus,
@@ -22,23 +22,16 @@ import {
   socialAccountSummary,
   type SocialAccountInfo,
 } from '../../../lib/social-accounts';
-import {
-  borderWidth,
-  color,
-  radius,
-  shadow,
-  space,
-  type,
-} from '../../../theme/tokens';
+import { color, radius, shadow, space, text } from '../../../theme/v2';
 
-const PLATFORMS: { key: 'instagram' | 'tiktok'; label: string; icon: IconName }[] = [
-  { key: 'instagram', label: 'Instagram', icon: 'at-sign' },
-  { key: 'tiktok', label: 'TikTok', icon: 'music-2' },
+const PLATFORMS: { key: 'instagram' | 'tiktok'; label: string }[] = [
+  { key: 'instagram', label: 'Instagram' },
+  { key: 'tiktok', label: 'TikTok' },
 ];
 
 const HOW_IT_WORKS: { icon: IconName; text: string }[] = [
   {
-    icon: 'sparkles',
+    icon: 'auto_awesome',
     text: 'You record. Noni edits, captions, and schedules the post for you.',
   },
   {
@@ -46,7 +39,7 @@ const HOW_IT_WORKS: { icon: IconName; text: string }[] = [
     text: 'Nothing goes out until a campaign manager approves it.',
   },
   {
-    icon: 'key-round',
+    icon: 'info',
     text: 'We never see your password, and you can unlink whenever you want.',
   },
 ];
@@ -82,50 +75,37 @@ function accountsOf(
 }
 
 function PlatformCard({
+  platform,
   label,
-  icon,
   info,
   loading,
+  index,
 }: {
+  platform: 'instagram' | 'tiktok';
   label: string;
-  icon: IconName;
   info: SocialAccountInfo;
   loading: boolean;
+  index: number;
 }) {
   const done = info.connected;
   return (
-    <View
-      style={[
-        styles.platform,
-        shadow.shadowCard,
-        done && styles.platformDone,
-      ]}
+    <Animated.View
+      entering={FadeInDown.duration(260).delay(index * 60)}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, marginBottom: space.cardGap, borderRadius: radius.card, backgroundColor: color.card, ...shadow.card }}
     >
-      <View style={[styles.platformIcon, done && styles.platformIconDone]}>
-        <Icon name={icon} size={20} color={done ? color.green : color.blue700} />
-      </View>
-      <View style={styles.platformText}>
-        <Text style={styles.platformLabel}>{label}</Text>
+      <PlatformBadge platform={platform} size={44} />
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={text.row}>{label}</Text>
         {loading ? (
-          <SkeletonLine width={120} height={13} radius={6} />
+          <Skeleton w={120} h={14} r={7} style={{ marginBottom: 0, backgroundColor: color.grey1, boxShadow: 'none' }} />
         ) : (
-          <Text numberOfLines={1} style={styles.platformSub}>
+          <Text numberOfLines={1} style={text.meta}>
             {socialAccountSummary(info)}
           </Text>
         )}
       </View>
-      {!loading &&
-        (done ? (
-          <View style={styles.chipDone}>
-            <Icon name="check" size={13} color={color.green} strokeWidth={3} />
-            <Text style={styles.chipDoneText}>Linked</Text>
-          </View>
-        ) : (
-          <View style={styles.chipTodo}>
-            <Text style={styles.chipTodoText}>To do</Text>
-          </View>
-        ))}
-    </View>
+      {loading ? null : done ? <Chip small tone="green" icon="check" label="Linked" /> : <Chip small tone="blue" label="To do" />}
+    </Animated.View>
   );
 }
 
@@ -139,6 +119,7 @@ export default function ConnectAccountsScreen() {
   const [checking, setChecking] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const [unlinkOpen, setUnlinkOpen] = useState(false);
 
   const alive = useRef(true);
   const celebrated = useRef(false);
@@ -204,10 +185,7 @@ export default function ConnectAccountsScreen() {
       await WebBrowser.openAuthSessionAsync(url, RETURN_URL);
       await pollUntilLinked();
     } catch (e) {
-      Alert.alert(
-        'We could not open the link screen',
-        e instanceof Error ? e.message : 'Try again in a moment.',
-      );
+      toast.error(e instanceof Error && e.message ? e.message : 'We could not open the link screen. Try again in a moment.');
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -219,6 +197,8 @@ export default function ConnectAccountsScreen() {
     try {
       await disconnectSocialAccounts();
       if (!alive.current) return;
+      setUnlinkOpen(false);
+      toast.success('Accounts unlinked');
       celebrated.current = false;
       setAttempted(false);
       setStatus({ profile: null, social_accounts: {} });
@@ -226,24 +206,10 @@ export default function ConnectAccountsScreen() {
         void refreshSetupState(profile.active_company_id, profile.id).catch(() => undefined);
       }
     } catch (e) {
-      Alert.alert(
-        'We could not unlink your accounts',
-        e instanceof Error ? e.message : 'Try again in a moment.',
-      );
+      toast.error(e instanceof Error && e.message ? e.message : 'We could not unlink your accounts. Try again in a moment.');
     } finally {
       if (alive.current) setBusy(false);
     }
-  };
-
-  const confirmDisconnect = () => {
-    Alert.alert(
-      'Unlink your accounts?',
-      'Instagram and TikTok will be disconnected from Noni. You can link different accounts right after.',
-      [
-        { text: 'Keep linked', style: 'cancel' },
-        { text: 'Unlink', style: 'destructive', onPress: () => void disconnect() },
-      ],
-    );
   };
 
   const finishCelebration = () => {
@@ -251,123 +217,89 @@ export default function ConnectAccountsScreen() {
     router.back();
   };
 
+  const primaryLabel = busy
+    ? 'Opening'
+    : allConnected
+      ? 'Change accounts'
+      : connectedCount === 1
+        ? 'Connect the other one'
+        : 'Connect accounts';
+
   const footer = (
-    <>
-      <Button
-        size="lg"
-        block
-        icon={allConnected ? 'repeat' : 'link'}
-        disabled={busy || checking}
-        onPress={() => void connect()}
-      >
-        {busy
-          ? 'Opening…'
-          : allConnected
-            ? 'Change accounts'
-            : connectedCount === 1
-              ? 'Connect the other one'
-              : 'Connect accounts'}
-      </Button>
-      {connectedCount > 0 && !checking && (
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Unlink accounts"
-          disabled={busy}
-          onPress={confirmDisconnect}
-          style={styles.recheck}
-        >
-          <Text style={[styles.recheckText, styles.unlinkText]}>
-            Unlink and connect different accounts
-          </Text>
-        </PressableScale>
-      )}
-      {allConnected && (
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Back to setup"
-          onPress={() => router.back()}
-          style={styles.recheck}
-        >
-          <Text style={styles.recheckText}>Back to setup</Text>
-        </PressableScale>
-      )}
-      {!allConnected && attempted && !checking && (
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Check again"
-          onPress={() => void pollUntilLinked()}
-          style={styles.recheck}
-        >
-          <Text style={styles.recheckText}>Just linked it? Check again</Text>
-        </PressableScale>
-      )}
-    </>
+    <View style={{ flex: 1, gap: 4 }}>
+      <View style={{ flexDirection: 'row' }}>
+        <Button icon={allConnected ? 'swap_horiz' : 'link'} label={primaryLabel} disabled={busy || checking} onPress={() => void connect()} />
+      </View>
+      {!allConnected && attempted && !checking ? (
+        <LinkButton label="Just linked it? Check again" onPress={() => void pollUntilLinked()} />
+      ) : null}
+      {allConnected ? <LinkButton label="Back to setup" onPress={() => router.back()} /> : null}
+      {connectedCount > 0 && !checking ? (
+        <LinkButton label="Unlink and connect different accounts" danger disabled={busy} onPress={() => setUnlinkOpen(true)} />
+      ) : null}
+    </View>
   );
 
   return (
     <>
-      <Screen bg={color.offWhite} scroll contentStyle={styles.content} footer={footer}>
-        <View style={styles.hero}>
-          <View style={styles.heroIcon}>
-            <Icon name="link" size={24} color={color.blue700} />
+      <Screen back title="Connect accounts" scroll footer={footer}>
+        <Animated.View entering={FadeIn.duration(220)} style={{ paddingTop: space[2], paddingBottom: space[6], gap: space[2] }}>
+          <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center', marginBottom: space[2] }}>
+            <Icon name="link" size={26} color={color.blueDeep} />
           </View>
-          <Text style={styles.title}>Connect your accounts</Text>
-          <Text style={styles.subtitle}>
-            Link Instagram and TikTok once. After that every approved post
-            publishes on its own.
+          <Text style={text.title}>Connect your accounts</Text>
+          <Text style={[text.body, { color: color.grey4 }]}>
+            Link Instagram and TikTok once. After that every approved post publishes on its own.
           </Text>
-        </View>
+        </Animated.View>
 
-        <View style={styles.list}>
-          {PLATFORMS.map((platform) => (
-            <PlatformCard
-              key={platform.key}
-              label={platform.label}
-              icon={platform.icon}
-              info={accounts[platform.key]}
-              loading={loading}
-            />
+        {PLATFORMS.map((platform, i) => (
+          <PlatformCard key={platform.key} platform={platform.key} label={platform.label} info={accounts[platform.key]} loading={loading} index={i} />
+        ))}
+
+        {!loading && !accounts.instagram.connected ? (
+          <Notice
+            tone="amber"
+            icon="info"
+            title="Instagram needs a professional account"
+            body="In Instagram open Settings, then Account type and tools, then Switch to professional account and pick Creator."
+          />
+        ) : null}
+
+        {checking ? <Notice tone="blue" icon="schedule" title="Waiting for the link to come back from Instagram and TikTok" /> : null}
+
+        <SetupLabel>How it works</SetupLabel>
+        <View style={{ backgroundColor: color.card, borderRadius: radius.card, paddingHorizontal: 16, ...shadow.card }}>
+          {HOW_IT_WORKS.map((row, i) => (
+            <View
+              key={row.text}
+              style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 14, borderBottomWidth: i < HOW_IT_WORKS.length - 1 ? 1 : 0, borderBottomColor: color.grey1 }}
+            >
+              <Icon name={row.icon} size={20} color={color.blueDeep} />
+              <Text style={[text.body, { flex: 1 }]}>{row.text}</Text>
+            </View>
           ))}
-        </View>
-
-        {!loading && !accounts.instagram.connected && (
-          <View style={styles.notice}>
-            <Icon name="circle-alert" size={18} color={color.amber} />
-            <Text style={styles.noticeText}>
-              Instagram only allows linking from a professional account. In
-              Instagram open Settings, then Account type and tools, then Switch
-              to professional account and pick Creator.
-            </Text>
-          </View>
-        )}
-
-        {checking && (
-          <View style={styles.checking}>
-            <Icon name="clock" size={16} color={color.blue700} />
-            <Text style={styles.checkingText}>
-              Waiting for the link to come back from Instagram and TikTok…
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.info}>
-          <Text style={styles.infoLabel}>How it works</Text>
-          <View style={styles.infoCard}>
-            {HOW_IT_WORKS.map((row, i) => (
-              <View
-                key={row.text}
-                style={[styles.infoRow, i < HOW_IT_WORKS.length - 1 && styles.infoRowBorder]}
-              >
-                <Icon name={row.icon} size={17} color={color.blue700} />
-                <Text style={styles.infoText}>{row.text}</Text>
-              </View>
-            ))}
-          </View>
         </View>
       </Screen>
 
-      <ConnectedCelebration
-        visible={celebrating}
+      <Sheet
+        open={unlinkOpen}
+        onClose={busy ? () => undefined : () => setUnlinkOpen(false)}
+        title="Unlink your accounts?"
+        footer={
+          <>
+            <Button variant="quiet" label="Keep linked" disabled={busy} onPress={() => setUnlinkOpen(false)} />
+            <Button variant="ink" label={busy ? 'Unlinking' : 'Unlink'} disabled={busy} onPress={() => void disconnect()} />
+          </>
+        }
+      >
+        <Text style={[text.body, { color: color.grey4 }]}>
+          Instagram and TikTok will be disconnected from Noni. You can link different accounts right after.
+        </Text>
+      </Sheet>
+
+      <ConnectedSheet
+        open={celebrating}
         instagramHandle={accounts.instagram.handle}
         tiktokHandle={accounts.tiktok.handle}
         onDone={finishCelebration}
@@ -376,182 +308,16 @@ export default function ConnectAccountsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  content: {
-    gap: space[7],
-    paddingTop: space[3],
-  },
-  hero: {
-    gap: space[2],
-  },
-  heroIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: space[2],
-  },
-  title: {
-    fontSize: type.size.title,
-    lineHeight: type.size.title * type.leading.title,
-    letterSpacing: type.tracking.title,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  subtitle: {
-    fontSize: type.size.bodySm,
-    lineHeight: type.size.bodySm * type.leading.body,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-  },
-  list: {
-    gap: space.stackGap,
-  },
-  platform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[4],
-    backgroundColor: color.white,
-    borderRadius: radius.lg,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    padding: space.cardPad,
-  },
-  platformDone: {
-    borderColor: color.greenSoft,
-  },
-  platformIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  platformIconDone: {
-    backgroundColor: color.greenSoft,
-  },
-  platformText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  platformLabel: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  platformSub: {
-    fontSize: type.size.meta,
-    fontWeight: type.weight.regular,
-    color: color.slate500,
-  },
-  chipDone: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: radius.pill,
-    backgroundColor: color.greenSoft,
-  },
-  chipDoneText: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.green,
-  },
-  chipTodo: {
-    paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: radius.pill,
-    backgroundColor: color.blue100,
-  },
-  chipTodoText: {
-    fontSize: type.size.chip,
-    fontWeight: type.weight.bold,
-    color: color.blue700,
-  },
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space[3],
-    padding: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.amberSoft,
-    marginTop: -space[3],
-  },
-  noticeText: {
-    flex: 1,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * type.leading.snug,
-    fontWeight: type.weight.semibold,
-    color: color.ink,
-  },
-  checking: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    padding: space[4],
-    borderRadius: radius.md,
-    backgroundColor: color.blue100,
-    marginTop: -space[3],
-  },
-  checkingText: {
-    flex: 1,
-    fontSize: type.size.chip,
-    lineHeight: type.size.chip * type.leading.snug,
-    fontWeight: type.weight.semibold,
-    color: color.blue700,
-  },
-  info: {
-    gap: space[2],
-  },
-  infoLabel: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.heavy,
-    letterSpacing: type.tracking.label,
-    textTransform: 'uppercase',
-    color: color.slate400,
-    marginLeft: 2,
-  },
-  infoCard: {
-    backgroundColor: color.white,
-    borderRadius: radius.lg,
-    borderWidth: borderWidth.hair,
-    borderColor: color.line,
-    overflow: 'hidden',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space[3],
-    paddingVertical: space[4],
-    paddingHorizontal: space[4],
-  },
-  infoRowBorder: {
-    borderBottomWidth: borderWidth.hair,
-    borderBottomColor: color.line,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: type.size.meta,
-    lineHeight: type.size.meta * type.leading.snug,
-    fontWeight: type.weight.regular,
-    color: color.ink,
-  },
-  recheck: {
-    alignSelf: 'center',
-    paddingVertical: space[2],
-    paddingHorizontal: space[4],
-  },
-  recheckText: {
-    fontSize: type.size.meta,
-    fontWeight: type.weight.bold,
-    color: color.slate500,
-  },
-  unlinkText: {
-    color: color.danger,
-  },
-});
+function LinkButton({ label, onPress, danger, disabled }: { label: string; onPress: () => void; danger?: boolean; disabled?: boolean }) {
+  return (
+    <Press
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      onPress={onPress}
+      style={{ alignSelf: 'center', minHeight: 40, justifyContent: 'center', paddingHorizontal: 16, opacity: disabled ? 0.4 : 1 }}
+    >
+      <Text style={[text.meta, { fontWeight: '700', color: danger ? color.pink : color.grey4 }]}>{label}</Text>
+    </Press>
+  );
+}

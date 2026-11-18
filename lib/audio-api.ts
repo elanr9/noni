@@ -1,34 +1,43 @@
 /**
  * Sound search for the AudioSheet: the Instagram Audio API through the
- * audio-search function, scored and sectioned the same way as the local
- * sample library, which stands in whenever the function is unconfigured or
- * unreachable. Saved sounds live on the device.
+ * audio-search function. There is no local stand in: when the function is
+ * unconfigured or unreachable the sheet says so and offers a retry, it never
+ * shows made up tracks. Saved sounds live on the device, whole, so they show
+ * up again without a search.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { AUDIO_LIB, searchTracks, type LibraryTrack } from './audio-library';
+import type { LibraryTrack } from './audio-library';
 import { supabase } from './supabase';
 
-export type AudioSource = 'instagram' | 'local';
+export type AudioSource = 'instagram';
 
-const SAVED_KEY = 'noni.audio.saved';
+/** Why a search came back without tracks. */
+export type AudioSearchError = 'unconfigured' | 'unreachable';
 
-/** Remote tracks for a query (empty = trending), or null when the API is not answering. */
-export async function remoteTracks(q: string): Promise<LibraryTrack[] | null> {
+export type AudioSearchResult =
+  | { ok: true; tracks: LibraryTrack[]; source: AudioSource }
+  | { ok: false; error: AudioSearchError };
+
+const SAVED_KEY = 'noni.audio.saved.v2';
+
+/** Remote tracks for a query (empty = trending). */
+export async function searchAudio(q: string): Promise<AudioSearchResult> {
   try {
     const { data, error } = await supabase.functions.invoke<{ tracks: LibraryTrack[]; source: string }>('audio-search', { body: { q } });
-    if (error || !data || data.source === 'unconfigured') return null;
-    return data.tracks.map((t) => ({ ...t, c: coverFor(t.id) }));
+    if (error || !data) return { ok: false, error: 'unreachable' };
+    if (data.source === 'unconfigured') return { ok: false, error: 'unconfigured' };
+    const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+    return { ok: true, tracks: tracks.map((t) => ({ ...t, c: coverFor(t.id) })), source: 'instagram' };
   } catch {
-    return null;
+    return { ok: false, error: 'unreachable' };
   }
 }
 
-/** Search: Instagram when it answers, else the local library scored by title, artist and tags. */
-export async function searchAudio(q: string): Promise<{ tracks: LibraryTrack[]; source: AudioSource }> {
-  const remote = await remoteTracks(q);
-  if (remote) return { tracks: remote, source: 'instagram' };
-  return { tracks: q.trim() ? (searchTracks(q) ?? []) : AUDIO_LIB, source: 'local' };
+/** Remote tracks for a query, or null when sound search is not answering. */
+export async function remoteTracks(q: string): Promise<LibraryTrack[] | null> {
+  const res = await searchAudio(q);
+  return res.ok ? res.tracks : null;
 }
 
 function coverFor(id: string): [string, string] {
@@ -38,17 +47,25 @@ function coverFor(id: string): [string, string] {
   return pal[h % pal.length];
 }
 
-export async function loadSavedSounds(): Promise<Set<string>> {
+function isTrack(v: unknown): v is LibraryTrack {
+  if (!v || typeof v !== 'object') return false;
+  const t = v as Partial<LibraryTrack>;
+  return typeof t.id === 'string' && typeof t.title === 'string' && typeof t.artist === 'string' && typeof t.dur === 'number';
+}
+
+/** Saved sounds, newest first. */
+export async function loadSavedSounds(): Promise<LibraryTrack[]> {
   try {
     const raw = await AsyncStorage.getItem(SAVED_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : ['s2']);
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter(isTrack) : [];
   } catch {
-    return new Set(['s2']);
+    return [];
   }
 }
 
-export function storeSavedSounds(ids: Set<string>): void {
-  AsyncStorage.setItem(SAVED_KEY, JSON.stringify([...ids])).catch(() => undefined);
+export function storeSavedSounds(tracks: LibraryTrack[]): void {
+  AsyncStorage.setItem(SAVED_KEY, JSON.stringify(tracks)).catch(() => undefined);
 }
 
 /** "Golden Hour Drive Noa Vale": what the creator pastes into TikTok's sound search. */

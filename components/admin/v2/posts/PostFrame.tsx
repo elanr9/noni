@@ -4,7 +4,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { usePostFrame } from '../../../../lib/v2-media';
 import type { V2Post } from '../../../../lib/v2-posts';
-import { typeGradient } from '../../../../theme/v2';
+import { editor, typeGradient } from '../../../../theme/v2';
 
 /** Gradient seed when a post has no frame yet. */
 const SEEDS = Object.keys(typeGradient);
@@ -21,7 +21,7 @@ export function PostFrame({ post, width, height, radius = 10, style }: { post: P
   const id = useId();
   const [a, b] = seedFor(post.title);
   return (
-    <View style={[{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: '#1A1A1F' }, style]}>
+    <View style={[{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: editor.panel }, style]}>
       {uri ? (
         <Image source={{ uri }} resizeMode="cover" style={{ width: '100%', height: '100%' }} />
       ) : (

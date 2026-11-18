@@ -37,8 +37,9 @@ import type { CtaPlacement } from '../../../../lib/briefs-api';
 import { DEFAULT_SHOT_PLACEMENT } from '../../../../lib/media-library-api';
 import { CLASSIC_TEXT_COLOR } from '../../../../lib/overlay-boxes';
 import { onVideo, useStudioStore } from '../../../../lib/studio-store';
-import { color, type as typeToken } from '../../../../theme/tokens';
-import { Icon, type IconName } from '../../../ui/Icon';
+import { color, editor } from '../../../../theme/v2';
+import { Icon, type IconName } from '../../../v2/Icon';
+import { Press } from '../../../v2/Press';
 import { tap } from '../../../v2/haptics';
 import { OverlayLane, OverlayLayer } from '../../studio/overlays';
 import { beginGesture, selectOverlay, updateGesture } from '../../studio/overlays/overlay-actions';
@@ -102,21 +103,21 @@ function fmt(ms: number): string {
 }
 
 function ToolButton({ icon, label, on = false, dim = false, onPress }: { icon: IconName; label: string; on?: boolean; dim?: boolean; onPress: () => void }): JSX.Element {
-  const fg = on ? color.blue300 : dim ? color.whiteA28 : color.white;
+  const fg = on ? color.blue : dim ? editor.w28 : editor.white;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: dim, selected: on }} disabled={dim} onPress={onPress} style={styles.tool}>
-      <Icon name={icon} size={22} color={fg} />
+    <Press accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: dim, selected: on }} disabled={dim} onPress={onPress} style={styles.tool}>
+      <Icon name={icon} size={24} color={fg} />
       <Text style={[styles.toolText, { color: fg }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
 function ClipTool({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }): JSX.Element {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.clipTool}>
-      <Icon name={icon} size={21} color={color.white} />
+    <Press accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.clipTool}>
+      <Icon name={icon} size={23} color={editor.white} />
       <Text style={styles.clipToolText}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -148,16 +149,16 @@ function Transport({ total, canSwap, onSwap }: { total: number; canSwap: boolean
         <Text style={styles.timeTotal}>/{fmt(total)}</Text>
       </Text>
       <View style={styles.flexCenter}>
-        <Pressable accessibilityRole="button" accessibilityLabel={playing ? 'Pause' : 'Play'} onPress={togglePlay} style={styles.playBtn}>
-          <Icon name={playing ? 'pause' : 'play'} size={22} color={color.white} />
-        </Pressable>
+        <Press accessibilityRole="button" accessibilityLabel={playing ? 'Pause' : 'Play'} disabled={total === 0} onPress={togglePlay} style={[styles.playBtn, total === 0 ? styles.off : null]}>
+          <Icon name={playing ? 'pause' : 'play_arrow'} size={28} color={editor.white} />
+        </Press>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Undo" disabled={!canUndo} onPress={() => useStudioStore.getState().undo()} style={styles.miniBtn}>
-        <Icon name="rotate-ccw" size={18} color={canUndo ? color.white : color.whiteA45} />
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Swap" disabled={!canSwap} onPress={onSwap} style={styles.miniBtn}>
-        <Icon name="arrow-left-right" size={18} color={canSwap ? color.white : color.whiteA45} />
-      </Pressable>
+      <Press accessibilityRole="button" accessibilityLabel="Undo" disabled={!canUndo} onPress={() => useStudioStore.getState().undo()} style={styles.miniBtn}>
+        <Icon name="undo" size={22} color={canUndo ? editor.white : editor.w45} />
+      </Press>
+      <Press accessibilityRole="button" accessibilityLabel="Swap" disabled={!canSwap} onPress={onSwap} style={styles.miniBtn}>
+        <Icon name="swap_horiz" size={22} color={canSwap ? editor.white : editor.w45} />
+      </Press>
     </View>
   );
 }
@@ -166,7 +167,7 @@ function Transport({ total, canSwap, onSwap }: { total: number; canSwap: boolean
 function ScriptTool({ doc, scripts, onPress }: { doc: VideoDocument; scripts: Record<string, string>; onPress: () => void }): JSX.Element {
   const blockId = useStudioStore((s) => blockAt(doc, s.playheadMs)?.block.id ?? null);
   const on = !!(blockId && scripts[blockId]?.trim());
-  return <ToolButton icon="captions" label="Script" on={on} dim={!blockId} onPress={onPress} />;
+  return <ToolButton icon="subtitles" label="Script" on={on} dim={!blockId} onPress={onPress} />;
 }
 
 /** Dark bottom sheet: "Script for clip n", Teleprompter, a five line field, Done. The clip is the one under the playhead when it opened. */
@@ -197,13 +198,13 @@ function ScriptSheet({ doc, scripts, onScript, onClose }: { doc: VideoDocument; 
             value={value}
             onChangeText={(t) => blockId && onScript(blockId, t)}
             placeholder="What the creator reads, word for word"
-            placeholderTextColor={color.whiteA45}
+            placeholderTextColor={editor.w45}
             textAlignVertical="top"
             style={styles.scriptInput}
           />
-          <Pressable accessibilityRole="button" onPress={done} style={styles.sheetDone}>
+          <Press accessibilityRole="button" onPress={onClose} style={styles.sheetDone}>
             <Text style={styles.sheetDoneText}>Done</Text>
-          </Pressable>
+          </Press>
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -219,7 +220,7 @@ function SplitTool({ doc }: { doc: VideoDocument }): JSX.Element | null {
     store.commit(onVideo((d) => splitBlockAt(d, store.playheadMs)));
     store.select(null);
   };
-  return <ClipTool icon="arrow-left-right" label="Split" onPress={split} />;
+  return <ClipTool icon="content_cut" label="Split" onPress={split} />;
 }
 
 export function ReelEditor(props: ReelEditorProps): JSX.Element {
@@ -239,6 +240,8 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
     return () => clearTimeout(t);
   }, [snapHint]);
   const total = documentDurationMs(doc);
+  /** No clips yet: Next has nothing to send, so it waits for the first clip. */
+  const empty = !template && doc.blocks.length === 0;
   const store = useStudioStore.getState();
 
   const block = selection?.kind === 'block' ? (doc.blocks.find((b) => b.id === selection.blockId) ?? null) : null;
@@ -338,41 +341,32 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {template ? (
         <View style={styles.header}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            onPress={() => {
-              tap();
-              onClose?.();
-            }}
-            style={styles.headerBtn}
-          >
-            <Icon name="x" size={22} color={color.white} />
-          </Pressable>
+          <Press accessibilityRole="button" accessibilityLabel="Close" onPress={() => onClose?.()} style={styles.headerBtn}>
+            <Icon name="close" size={24} color={editor.white} />
+          </Press>
           <Text numberOfLines={2} style={[styles.titleText, { fontSize: titleSize }]}>
             {title}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Save"
-            onPress={() => {
-              tap();
-              onNext();
-            }}
-            style={styles.savePill}
-          >
+          <Press accessibilityRole="button" accessibilityLabel="Save" onPress={onNext} style={styles.savePill}>
             <Text style={styles.saveText}>Save</Text>
-          </Pressable>
+          </Press>
         </View>
       ) : (
         <View style={styles.header}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.headerBtn}>
-            <Icon name="chevron-left" size={22} color={color.white} />
-          </Pressable>
+          <Press accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.headerBtn}>
+            <Icon name="chevron_left" size={28} color={editor.white} />
+          </Press>
           <Text style={styles.headerText}>{status ?? (cuts ? `Auto cut \u00b7 ${cuts} pause${cuts === 1 ? '' : 's'} removed` : 'Auto cut on')}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Next" onPress={onNext} style={[styles.headerBtn, styles.headerNext]}>
-            <Icon name="arrow-right" size={22} color={color.white} />
-          </Pressable>
+          <Press
+            accessibilityRole="button"
+            accessibilityLabel={empty ? 'Next, record a clip first' : 'Next'}
+            accessibilityState={{ disabled: empty }}
+            disabled={empty}
+            onPress={onNext}
+            style={[styles.headerBtn, styles.headerNext, empty ? styles.off : null]}
+          >
+            <Icon name="arrow_forward" size={24} color={editor.white} />
+          </Press>
         </View>
       )}
 
@@ -385,10 +379,13 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
 
       <View style={styles.timeline}>
         {doc.blocks.length === 0 ? (
-          <Pressable accessibilityRole="button" onPress={onAddClip} style={styles.emptyClip}>
-            <Icon name={template ? 'plus' : 'video'} size={16} color={color.white} />
-            <Text style={styles.emptyClipText}>{template ? 'Add clip' : 'Record'}</Text>
-          </Pressable>
+          <View style={styles.emptyWrap}>
+            <Press accessibilityRole="button" accessibilityLabel={template ? 'Add clip' : 'Record a clip'} onPress={onAddClip} style={styles.emptyClip}>
+              <Icon name={template ? 'add' : 'videocam'} size={20} color={editor.white} />
+              <Text style={styles.emptyClipText}>{template ? 'Add clip' : 'Record'}</Text>
+            </Press>
+            <Text style={styles.emptyText}>{template ? 'No clips yet. Add one to start the template.' : 'No clips yet. Record one to build your post.'}</Text>
+          </View>
         ) : (
           <>
             <View style={styles.textLane}>
@@ -398,8 +395,8 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
           </>
         )}
         <View style={styles.captionsBar}>
-          <Icon name="layout-list" size={13} color={doc.subtitles.enabled ? color.white : color.whiteA45} />
-          <Text style={[styles.captionsText, { color: doc.subtitles.enabled ? color.white : color.whiteA45 }]}>
+          <Icon name="closed_caption" size={15} color={doc.subtitles.enabled ? editor.white : editor.w45} />
+          <Text style={[styles.captionsText, { color: doc.subtitles.enabled ? editor.white : editor.w45 }]}>
             {doc.subtitles.enabled ? 'Captions \u00b7 auto from your audio' : 'Captions off'}
           </Text>
         </View>
@@ -407,7 +404,7 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
 
       {snapHint || plugSelected ? (
         <View style={styles.hint} pointerEvents="none">
-          <Icon name="zap" size={13} color={color.blue300} />
+          <Icon name="bolt" size={15} color={color.blue} />
           <Text style={styles.hintText}>{plugHint(place)}</Text>
         </View>
       ) : null}
@@ -415,28 +412,28 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
       {trim && block ? (
         <View style={styles.trimBar}>
           <Text style={styles.trimLabel}>Clip length</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Shorter" onPress={() => trimBy(-TRIM_STEP_MS)} style={styles.trimBtn}>
+          <Press accessibilityRole="button" accessibilityLabel="Shorter" onPress={() => trimBy(-TRIM_STEP_MS)} style={styles.trimBtn}>
             <Text style={styles.trimSign}>-</Text>
-          </Pressable>
+          </Press>
           <Text style={styles.trimValue}>{selectedMs}s</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Longer" onPress={() => trimBy(TRIM_STEP_MS)} style={styles.trimBtn}>
+          <Press accessibilityRole="button" accessibilityLabel="Longer" onPress={() => trimBy(TRIM_STEP_MS)} style={styles.trimBtn}>
             <Text style={styles.trimSign}>+</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => setTrim(false)} style={styles.trimDone}>
+          </Press>
+          <Press accessibilityRole="button" onPress={() => setTrim(false)} style={styles.trimDone}>
             <Text style={styles.trimDoneText}>Done</Text>
-          </Pressable>
+          </Press>
         </View>
       ) : null}
 
       {block ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.clipTools, { paddingBottom: insets.bottom + 10 }]} style={styles.clipToolsScroll}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Done" onPress={() => { store.select(null); setTrim(false); }} style={styles.clipDone}>
-            <Icon name="chevron-down" size={20} color={color.white} />
-          </Pressable>
+          <Press accessibilityRole="button" accessibilityLabel="Done" onPress={() => { store.select(null); setTrim(false); }} style={styles.clipDone}>
+            <Icon name="keyboard_arrow_down" size={26} color={editor.white} />
+          </Press>
           <SplitTool doc={doc} />
-          <ClipTool icon="clock" label="Trim" onPress={() => setTrim(true)} />
-          {selectedItem && onRedoClip ? <ClipTool icon="video" label="Redo clip" onPress={() => onRedoClip(selectedItem)} /> : null}
-          {template && doc.blocks.length < 2 ? null : <ClipTool icon="trash-2" label="Delete" onPress={confirmDelete} />}
+          <ClipTool icon="schedule" label="Trim" onPress={() => setTrim(true)} />
+          {selectedItem && onRedoClip ? <ClipTool icon="videocam" label="Redo clip" onPress={() => onRedoClip(selectedItem)} /> : null}
+          {template && doc.blocks.length < 2 ? null : <ClipTool icon="delete" label="Delete" onPress={confirmDelete} />}
         </ScrollView>
       ) : (
         <View style={[styles.toolbar, { paddingBottom: insets.bottom + 8 }]}>
@@ -445,17 +442,16 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
               doc={doc}
               scripts={scripts}
               onPress={() => {
-                tap();
                 store.setPlaying(false);
                 setScriptOpen(true);
               }}
             />
           ) : null}
-          <ToolButton icon="pencil" label="Text" dim={!canAdd} onPress={addText} />
-          <ToolButton icon="image-plus" label="Image" dim={!canAdd} onPress={() => { store.setPlaying(false); setPicking(true); }} />
-          {soundMode !== 'none' ? <ToolButton icon="music-2" label="Sound" on={!!doc.audio} dim={total === 0} onPress={() => { tap(); store.setPlaying(false); setSoundOpen(true); }} /> : null}
-          <ToolButton icon="layout-list" label="Captions" on={doc.subtitles.enabled} onPress={toggleCaptions} />
-          {onAi ? <ToolButton icon="sparkles" label={aiLabel} onPress={onAi} /> : null}
+          <ToolButton icon="text_fields" label="Text" dim={!canAdd} onPress={addText} />
+          <ToolButton icon="add_photo_alternate" label="Image" dim={!canAdd} onPress={() => { store.setPlaying(false); setPicking(true); }} />
+          {soundMode !== 'none' ? <ToolButton icon="music_note" label="Sound" on={!!doc.audio} dim={total === 0} onPress={() => { store.setPlaying(false); setSoundOpen(true); }} /> : null}
+          <ToolButton icon="closed_caption" label="Captions" on={doc.subtitles.enabled} dim={total === 0} onPress={toggleCaptions} />
+          {onAi ? <ToolButton icon="auto_awesome" label={aiLabel} dim={total === 0} onPress={onAi} /> : null}
         </View>
       )}
 
@@ -475,51 +471,54 @@ export function ReelEditor(props: ReelEditorProps): JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.ink900 },
+  root: { flex: 1, backgroundColor: editor.black },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 6 },
-  headerBtn: { width: 44, height: 44, borderRadius: 999, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center' },
-  headerNext: { backgroundColor: color.blue500 },
-  headerText: { flex: 1, textAlign: 'center', fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '700', color: color.whiteA60 },
-  titleText: { flex: 1, minWidth: 0, marginHorizontal: 8, fontFamily: typeToken.font.ui, fontWeight: '600', lineHeight: 18, color: color.white },
-  savePill: { height: 36, paddingHorizontal: 16, borderRadius: 999, backgroundColor: color.blue500, alignItems: 'center', justifyContent: 'center' },
-  saveText: { fontFamily: typeToken.font.ui, fontSize: 14, fontWeight: '700', color: color.white },
+  headerBtn: { width: 44, height: 44, borderRadius: 999, backgroundColor: editor.w16, alignItems: 'center', justifyContent: 'center' },
+  headerNext: { backgroundColor: color.blue },
+  headerText: { flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '700', color: editor.w60 },
+  titleText: { flex: 1, minWidth: 0, marginHorizontal: 8, fontWeight: '600', lineHeight: 18, color: editor.white },
+  savePill: { height: 36, paddingHorizontal: 16, borderRadius: 999, backgroundColor: color.blue, alignItems: 'center', justifyContent: 'center' },
+  saveText: { fontSize: 14, fontWeight: '700', color: editor.white },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
-  sheetScrim: { backgroundColor: color.scrimStrong },
-  sheet: { backgroundColor: color.ink800, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 10 },
-  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: color.whiteA28, marginBottom: 10 },
+  sheetScrim: { backgroundColor: editor.k60 },
+  sheet: { backgroundColor: editor.sheet, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 10 },
+  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: editor.w28, marginBottom: 10 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  sheetTitle: { fontFamily: typeToken.font.ui, fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.white },
-  sheetMeta: { fontFamily: typeToken.font.ui, fontSize: 12, lineHeight: 16, fontWeight: '500', color: color.whiteA60 },
-  scriptInput: { height: 144, borderRadius: 14, backgroundColor: color.whiteA16, color: color.white, paddingHorizontal: 14, paddingVertical: 12, fontFamily: typeToken.font.ui, fontSize: 17, lineHeight: 24, fontWeight: '600' },
-  sheetDone: { marginTop: 12, height: 48, borderRadius: 999, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center' },
-  sheetDoneText: { fontFamily: typeToken.font.ui, fontSize: 15, fontWeight: '700', color: color.ink },
+  sheetTitle: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: editor.white },
+  sheetMeta: { fontSize: 12, lineHeight: 16, fontWeight: '500', color: editor.w60 },
+  scriptInput: { height: 144, borderRadius: 14, backgroundColor: editor.w16, color: editor.white, paddingHorizontal: 14, paddingVertical: 12, fontSize: 17, lineHeight: 24, fontWeight: '600' },
+  sheetDone: { marginTop: 12, height: 48, borderRadius: 999, backgroundColor: editor.white, alignItems: 'center', justifyContent: 'center' },
+  sheetDoneText: { fontSize: 15, fontWeight: '700', color: color.ink },
   transport: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 2 },
-  time: { fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '600', color: color.white, fontVariant: ['tabular-nums'] },
-  timeTotal: { color: color.whiteA45 },
+  time: { fontSize: 13, fontWeight: '600', color: editor.white, fontVariant: ['tabular-nums'] },
+  timeTotal: { color: editor.w45 },
   flexCenter: { flex: 1, alignItems: 'center' },
   playBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   miniBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   timeline: { flex: 1, minHeight: 0, justifyContent: 'flex-start' },
   textLane: { minHeight: 26, marginBottom: 4, overflow: 'hidden' },
-  emptyClip: { alignSelf: 'center', marginTop: 28, width: 120, height: 56, borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: color.whiteA45, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  emptyClipText: { fontFamily: typeToken.font.ui, fontSize: 10.5, fontWeight: '700', color: color.white },
-  captionsBar: { marginHorizontal: 16, marginTop: 6, height: 30, paddingHorizontal: 10, borderRadius: 6, backgroundColor: color.whiteA16, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  captionsText: { fontFamily: typeToken.font.ui, fontSize: 11.5, fontWeight: '700' },
-  hint: { marginHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: color.ink800 },
-  hintText: { flex: 1, fontFamily: typeToken.font.ui, fontSize: 12.5, fontWeight: '600', color: color.whiteA75 },
-  trimBar: { marginHorizontal: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: color.ink800 },
-  trimLabel: { flex: 1, fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '700', color: color.white },
-  trimBtn: { width: 44, height: 44, borderRadius: 999, borderWidth: 1, borderColor: color.whiteA28, alignItems: 'center', justifyContent: 'center' },
-  trimSign: { fontFamily: typeToken.font.ui, fontSize: 20, fontWeight: '600', color: color.white },
-  trimValue: { minWidth: 36, textAlign: 'center', fontFamily: typeToken.font.display, fontSize: 18, fontWeight: '800', color: color.white },
-  trimDone: { height: 44, paddingHorizontal: 14, borderRadius: 999, backgroundColor: color.white, justifyContent: 'center' },
-  trimDoneText: { fontFamily: typeToken.font.ui, fontSize: 13, fontWeight: '700', color: color.ink },
+  emptyWrap: { alignItems: 'center', marginTop: 28, gap: 10, paddingHorizontal: 24 },
+  emptyText: { fontSize: 13, lineHeight: 18, fontWeight: '500', color: editor.w60, textAlign: 'center' },
+  off: { opacity: 0.4 },
+  emptyClip: { width: 120, height: 56, borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: editor.w45, backgroundColor: editor.w16, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  emptyClipText: { fontSize: 12, fontWeight: '700', color: editor.white },
+  captionsBar: { marginHorizontal: 16, marginTop: 6, height: 30, paddingHorizontal: 10, borderRadius: 6, backgroundColor: editor.w16, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  captionsText: { fontSize: 11.5, fontWeight: '700' },
+  hint: { marginHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: editor.sheet },
+  hintText: { flex: 1, fontSize: 12.5, fontWeight: '600', color: editor.w75 },
+  trimBar: { marginHorizontal: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: editor.sheet },
+  trimLabel: { flex: 1, fontSize: 13, fontWeight: '700', color: editor.white },
+  trimBtn: { width: 44, height: 44, borderRadius: 999, borderWidth: 1, borderColor: editor.w28, alignItems: 'center', justifyContent: 'center' },
+  trimSign: { fontSize: 20, fontWeight: '600', color: editor.white },
+  trimValue: { minWidth: 36, textAlign: 'center', fontSize: 18, fontWeight: '800', color: editor.white },
+  trimDone: { height: 44, paddingHorizontal: 14, borderRadius: 999, backgroundColor: editor.white, justifyContent: 'center' },
+  trimDoneText: { fontSize: 13, fontWeight: '700', color: color.ink },
   clipToolsScroll: { flexGrow: 0 },
   clipTools: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
-  clipDone: { width: 52, height: 68, borderRadius: 14, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center' },
-  clipTool: { width: 68, height: 68, borderRadius: 14, backgroundColor: color.whiteA16, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  clipToolText: { fontFamily: typeToken.font.ui, fontSize: 11.5, fontWeight: '600', color: color.white },
+  clipDone: { width: 52, height: 68, borderRadius: 14, backgroundColor: editor.w16, alignItems: 'center', justifyContent: 'center' },
+  clipTool: { width: 68, height: 68, borderRadius: 14, backgroundColor: editor.w16, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  clipToolText: { fontSize: 11.5, fontWeight: '600', color: editor.white },
   toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 4 },
   tool: { flex: 1, alignItems: 'center', gap: 5, paddingVertical: 8, minHeight: 44 },
-  toolText: { fontFamily: typeToken.font.ui, fontSize: 11, fontWeight: '600' },
+  toolText: { fontSize: 11, fontWeight: '600' },
 });

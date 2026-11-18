@@ -1,0 +1,88 @@
+/* Analytics tab and settings. */
+function Bars({ days, unit }) {
+  const max = Math.max(...days.map((d) => d.v));
+  const [sel, setSel] = React.useState(3);
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, paddingBottom: 12 }}><span className="t-num-s">{days[sel].v}k</span><span className="t-meta" style={{ whiteSpace: 'nowrap' }}>{unit} on {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][sel]}</span></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8, alignItems: 'end', height: 120 }}>
+        {days.map((d, i) => <button key={d.d} type="button" className="p" onClick={() => { haptic(); setSel(i); }} style={{ height: `${(d.v / max) * 100}%`, borderRadius: 8, background: i === sel ? 'var(--blue)' : 'var(--blue-tint)', minHeight: 8, transition: 'background 160ms' }} />)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8, paddingTop: 8 }}>{days.map((d, i) => <span key={d.d} className="t-meta" style={{ textAlign: 'center', color: i === sel ? 'var(--blue-deep)' : undefined, fontWeight: i === sel ? 700 : 400 }}>{d.d}</span>)}</div>
+    </div>
+  );
+}
+
+function AnalyticsScreen() {
+  const nav = useNav();
+  const loaded = useLoaded(450);
+  const a = window.V2.analytics;
+  const { fmt, money, creators } = window.V2;
+  const [range, setRange] = React.useState('This week');
+  const [tab, setTab] = React.useState('Creators');
+  const up = Math.round(((a.week.views - a.week.prevViews) / a.week.prevViews) * 100);
+  const topCreators = creators.slice().sort((x, y) => y.views - x.views);
+  return (
+    <Screen title="Analytics" sub={loaded ? <Chip tone="green" icon="trending_up">Up {up}% this week</Chip> : <span style={{ height: 26 }} />} right={<IconButton name="settings" label="Settings" onClick={() => nav.push('Settings')} />}>
+      <Chips options={['This week', 'Last week', 'This month', 'All time']} value={range} onChange={setRange} />
+      <div style={{ height: 12 }} />
+      {!loaded ? <><Skeleton h={150} /><Skeleton h={220} /><Skeleton h={200} /></> : <>
+        <Card style={{ background: 'linear-gradient(140deg, #1BA6EE, #0A7FC2)', boxShadow: '0 8px 24px rgba(27,166,238,0.35)', color: '#fff' }}>
+          <div style={{ font: '600 15px/20px var(--font)', opacity: 0.9 }}>Your creators made</div>
+          <div style={{ font: '700 40px/46px var(--font)', letterSpacing: '-1px', marginTop: 2 }}>{money(a.week.sales)}</div>
+          <div style={{ font: '400 13px/18px var(--font)', opacity: 0.85, marginTop: 4 }}>{money(a.week.sales - a.week.prevSales)} more than last week · Stripe since {a.stripeSince}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingTop: 20 }}>
+            {[[fmt(a.week.views), 'views'], [a.week.posts, 'posts live'], [a.week.signups, 'sign ups']].map(([v, l]) => <div key={l}><div style={{ font: '700 22px/26px var(--font)' }}>{v}</div><div style={{ font: '400 13px/18px var(--font)', opacity: 0.85 }}>{l}</div></div>)}
+          </div>
+        </Card>
+        <Card><div className="t-card" style={{ marginBottom: 12 }}>Views by day</div><Bars days={a.days} unit="views" /></Card>
+        <Seg options={[{ label: 'Creators' }, { label: 'Posts' }, { label: 'Formats' }]} value={tab} onChange={setTab} style={{ marginBottom: 12 }} />
+        {tab === 'Creators' ? <Card pad={'4px 16px'}>{topCreators.map((c, i) => (
+          <Row key={c.id} last={i === topCreators.length - 1} chevron onClick={() => nav.push('Creator', { id: c.id })}>
+            <span className="t-meta" style={{ width: 14, fontWeight: 700, color: i === 0 ? 'var(--blue)' : undefined }}>{i + 1}</span><Avatar name={c.name} photo={c.photo} tone={c.tone} size={40} />
+            <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{c.name}</span><span className="t-meta">{c.posts} posts</span></span>
+            <Num small align="right" value={fmt(c.views)} label="views" /><Num small align="right" value={money(c.earned)} label="earned" tone="green" style={{ width: 64 }} />
+          </Row>
+        ))}</Card> : null}
+        {tab === 'Posts' ? <Card pad={'4px 16px'}>{a.topPosts.map((p, i) => (
+          <Row key={p.id} last={i === a.topPosts.length - 1} chevron onClick={() => nav.push('Brief', { id: p.id })}>
+            <span className="t-meta" style={{ width: 14, fontWeight: 700, color: i === 0 ? 'var(--blue)' : undefined }}>{i + 1}</span><Thumb w={40} post={p} title={false} radius={8} />
+            <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span><span className="t-meta">{p.creatorName} · {p.format}</span></span>
+            <Num small align="right" value={fmt(p.views)} label="views" /><Num small align="right" value={money(p.sales)} label="sales" tone="green" style={{ width: 48 }} />
+          </Row>
+        ))}</Card> : null}
+        {tab === 'Formats' ? <Card pad={'4px 16px'}>{a.formats.map((f, i) => (
+          <Row key={f.name} last={i === a.formats.length - 1}>
+            <span style={{ width: 40, height: 40, borderRadius: 12, background: TONES[FORMAT_TONE[f.name]][1], display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={f.name === 'Reel' ? 'movie' : 'photo_library'} size={22} color={TONES[FORMAT_TONE[f.name]][2]} /></span>
+            <span style={{ flex: 1 }}><span className="t-row" style={{ display: 'block' }}>{f.name}</span><span className="t-meta">{f.posts} posts</span></span>
+            <Num small align="right" value={fmt(f.views)} label="views" /><Num small align="right" value={money(f.sales)} label="sales" tone="green" style={{ width: 60 }} /><Num small align="right" value={fmt(Math.round(f.views / f.posts))} label="a post" style={{ width: 52 }} />
+          </Row>
+        ))}</Card> : null}
+      </>}
+    </Screen>
+  );
+}
+
+function SettingsScreen() {
+  const [notif, setNotif] = React.useState(true);
+  const Toggle = ({ on, onChange }) => <button type="button" className="p" role="switch" aria-checked={on} onClick={() => { haptic(); onChange(!on); }} style={{ width: 51, height: 31, borderRadius: 999, background: on ? 'var(--blue)' : 'var(--grey-2)', position: 'relative', flex: '0 0 auto', transition: 'background 160ms' }}><span style={{ position: 'absolute', top: 2, left: on ? 22 : 2, width: 27, height: 27, borderRadius: 999, background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left var(--t-press) var(--ease)' }} /></button>;
+  const groups = [
+    { title: 'FieldVision AI', icon: 'storefront', tone: 'blue', rows: [['Brand profile', 'Tone 3 of 5, football'], ['Posting accounts', 'TikTok, Instagram'], ['Creators', '4 active, 1 invited'], ['Weekly plan', '14 reels, 7 slideshows']] },
+    { title: 'Money', icon: 'payments', tone: 'green', rows: [['Stripe', 'Connected Aug 11'], ['Creator pay', '$40 a post, $0.50 a sale'], ['Invoices', 'Next on Nov 1']] },
+    { title: 'You', icon: 'person', tone: 'purple', rows: [['Email', 'sam@fieldvision.ai'], ['Team', '2 admins']] },
+  ];
+  return (
+    <Screen back title="Settings">
+      {groups.map((g) => <div key={g.title}><SectionTitle>{g.title}</SectionTitle><Card pad={'4px 16px'}>{g.rows.map(([l, m], i) => (
+        <Row key={l} last={i === g.rows.length - 1} chevron onClick={() => {}}>
+          <span style={{ flex: 1 }}><span className="t-row" style={{ display: 'block' }}>{l}</span><span className="t-meta">{m}</span></span>
+        </Row>
+      ))}</Card></div>)}
+      <SectionTitle>Notifications</SectionTitle>
+      <Card><Row last top={0} bottom={0} style={{ minHeight: 0 }}><span style={{ flex: 1 }}><span className="t-row" style={{ display: 'block' }}>Push when a post arrives</span><span className="t-meta">{notif ? 'On' : 'Off'}</span></span><Toggle on={notif} onChange={setNotif} /></Row></Card>
+      <div style={{ paddingTop: 12 }}><Button variant="quiet" onClick={() => {}} style={{ background: 'var(--card)', boxShadow: 'var(--shadow-card)' }}>Sign out</Button></div>
+    </Screen>
+  );
+}
+
+Object.assign(window, { AnalyticsScreen, SettingsScreen });

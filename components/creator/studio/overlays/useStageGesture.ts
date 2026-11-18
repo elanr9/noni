@@ -6,7 +6,7 @@
 // Reanimated pattern.
 /* eslint-disable react-hooks/refs, react-hooks/immutability */
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { Gesture, type ComposedGesture } from 'react-native-gesture-handler';
+import { Gesture } from 'react-native-gesture-handler';
 import {
   runOnJS,
   useAnimatedStyle,
@@ -38,7 +38,7 @@ export type StageGestureParams = {
 };
 
 export type StageGesture = {
-  gesture: ComposedGesture;
+  gesture: ReturnType<typeof Gesture.Race>;
   itemStyle: AnimatedStyle<ViewStyle>;
   guideStyle: AnimatedStyle<ViewStyle>;
   dragOutlineStyle: AnimatedStyle<ViewStyle>;

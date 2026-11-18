@@ -16,12 +16,85 @@ export const color = {
   pink: '#E0457B', pinkTint: '#FCE7EF',
   white: '#FFFFFF',
   scrim: 'rgba(17,17,20,0.4)',
+  /** Create sheet scrim, a touch deeper than scrim. */
+  scrimDeep: 'rgba(16,24,40,0.45)',
   /** Seg track. */
   segTrack: '#E6E7EB',
   /** Selected Seg count badge. */
   segBadgeOn: 'rgba(255,255,255,0.25)',
   tabActive: '#0A4DA3',
   tabInactive: '#8E8E99',
+} as const;
+
+/**
+ * Dark editor palette: camera, story, slideshow and reel editors draw white
+ * and black at fixed alphas over video and photos. `wNN` is white at NN%,
+ * `kNN` black at NN%. Swatch values are stored on posts, so never change them.
+ */
+export const editor = {
+  white: '#FFFFFF',
+  black: '#000000',
+  /** Editor sheets and the script field. */
+  sheet: '#17171C',
+  field: '#26262D',
+  /** Empty slide and frame: a gradient from panelTop down to panel. */
+  panel: '#1A1A1F',
+  panelTop: '#2B2B31',
+  /** Recorded clip tile with no frame yet. */
+  tile: '#222222',
+  /** Record button and the TikTok follow plus. */
+  tiktok: '#FE2C55',
+  /** Green screen placeholder gradient, blue to this. */
+  greenScreenDeep: '#0A4DA3',
+  /** Frosted bar behind the script card. */
+  glass: 'rgba(20,20,24,0.55)',
+  clear: 'rgba(0,0,0,0)',
+  w95: 'rgba(255,255,255,0.95)', w92: 'rgba(255,255,255,0.92)', w90: 'rgba(255,255,255,0.9)', w85: 'rgba(255,255,255,0.85)',
+  w75: 'rgba(255,255,255,0.75)', w70: 'rgba(255,255,255,0.7)', w60: 'rgba(255,255,255,0.6)', w55: 'rgba(255,255,255,0.55)',
+  w45: 'rgba(255,255,255,0.45)', w40: 'rgba(255,255,255,0.4)', w28: 'rgba(255,255,255,0.28)', w25: 'rgba(255,255,255,0.25)',
+  w22: 'rgba(255,255,255,0.22)', w20: 'rgba(255,255,255,0.2)', w18: 'rgba(255,255,255,0.18)', w16: 'rgba(255,255,255,0.16)',
+  w14: 'rgba(255,255,255,0.14)', w12: 'rgba(255,255,255,0.12)', w08: 'rgba(255,255,255,0.08)', w05: 'rgba(255,255,255,0.05)',
+  k75: 'rgba(0,0,0,0.75)', k70: 'rgba(0,0,0,0.7)', k60: 'rgba(0,0,0,0.6)', k55: 'rgba(0,0,0,0.55)', k50: 'rgba(0,0,0,0.5)',
+  k45: 'rgba(0,0,0,0.45)', k40: 'rgba(0,0,0,0.4)', k35: 'rgba(0,0,0,0.35)', k30: 'rgba(0,0,0,0.3)', k20: 'rgba(0,0,0,0.2)',
+  /** Story text colors, in picker order. Stored on the post as is. */
+  swatch: ['#FFFFFF', '#0B0B0C', '#1BA6EE', '#2BBF7A', '#FFD60A', '#FF8A00', '#FE2C55', '#FF2D78', '#7E3BFF'],
+  /** Video editor and studio chrome: the deep stage behind clips, raised rows on it, and its scrim. */
+  deep: '#0B0F14',
+  deepRaised: '#151D26',
+  deepA55: 'rgba(11,15,20,0.55)',
+  /** Raised controls on the editor (tool discs, sheet rows) and the frosted variant. */
+  control: '#1C1C1E',
+  controlGlass: 'rgba(30,30,32,0.96)',
+  stage: '#111111',
+  /** Clip with no frames yet on the editor timeline. */
+  frameEmpty: '#2A2F36',
+  k72: 'rgba(0,0,0,0.72)',
+  w50: 'rgba(255,255,255,0.5)',
+  tiktokA75: 'rgba(254,44,85,0.75)',
+  /** Overlay lane tints: text overlays and image overlays. */
+  laneText: '#1E88F5',
+  laneImage: '#8A4DFF',
+} as const;
+
+/** Names for the stored overlay text colors (TextColorPicker). Keys are stored on posts as is. */
+export const editorTextColorNames: Record<string, string> = {
+  '#FFFFFF': 'White',
+  '#000000': 'Black',
+  '#FE2C55': 'Red',
+  '#FF7A1A': 'Orange',
+  '#FFD23F': 'Yellow',
+  '#25D366': 'Green',
+  '#1E88F5': 'Blue',
+  '#8A4DFF': 'Purple',
+  '#EB4C89': 'Pink',
+};
+
+/** Type scale for the dark video editor and studio chrome (denser than the v2 text roles). */
+export const editorType = {
+  size: { card: 18, body: 16, bodySm: 15, meta: 14, chip: 13, label: 12, micro11: 11, micro: 10 },
+  weight: { medium: '500', semibold: '600', bold: '700', heavy: '800' },
+  leading: { body: 1.5 },
+  tracking: { label: 0.7 },
 } as const;
 
 /** Blue is the brand and primary action, green is live and earning, amber is waiting or changes requested, purple is slideshows, grey is open or neutral. */
@@ -73,6 +146,10 @@ export const shadow = {
   pushEdge: { boxShadow: '-8px 0 24px rgba(16,24,40,0.12)' },
   /** Hairline above a pinned footer. */
   footer: { boxShadow: '0 -1px 0 #E4E4E9' },
+  /** Tinted icon disc on a brief card. */
+  disc: { boxShadow: '0 6px 16px rgba(16,24,40,0.14)' },
+  /** Blue earnings hero. */
+  blueHero: { boxShadow: '0 8px 24px rgba(27,166,238,0.35)' },
 } as const satisfies Record<string, ViewStyle>;
 
 export const motion = {
@@ -102,3 +179,25 @@ export const screenTransition = {
 } as const;
 
 export const control = { button: 52, pill: 36, row: 56, tapMin: 44, seg: 36, chip: 26, chipSmall: 22 } as const;
+
+/** Briefs area: template frames, AI placeholder gradients, celebration confetti and the AI button glow. */
+export const briefs = {
+  /** Text on screen editor backdrop. */
+  editorBg: '#0F0F12',
+  /** Gradient placeholders for product overlays and green screen frames, top then bottom. */
+  grads: {
+    logo: ['#1BA6EE', '#0A4DA3'],
+    app: ['#2BBF7A', '#1BA6EE'],
+    pass: ['#F6A23B', '#E0457B'],
+    sprint: ['#8E6CF0', '#1BA6EE'],
+    product: ['#26C6DA', '#1BA6EE'],
+    tripod: ['#F06292', '#F6A23B'],
+  },
+  confetti: ['#FFFFFF', '#FFD60A', '#2BBF7A', '#FF2D78', '#7E3BFF'],
+  /** Fill in with AI, enabled. */
+  aiGlow: '0 6px 16px rgba(27,166,238,0.35)',
+  /** A lifted clip tile while dragging. */
+  liftShadow: '0 18px 40px rgba(16,24,40,0.28)',
+  addGlow: '0 6px 14px rgba(27,166,238,0.3)',
+  discShadow: '0 16px 40px rgba(0,0,0,0.18)',
+} as const;

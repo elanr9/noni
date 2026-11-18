@@ -22,6 +22,21 @@ import {
 import { supabase } from './supabase';
 import type { Database, Json } from './types';
 
+
+/** The `{ error }` message an edge function returned with a non-2xx status, else the transport message. */
+async function edgeError(error: unknown): Promise<Error> {
+  try {
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      const j = (await ctx.clone().json()) as { error?: string };
+      if (j?.error) return new Error(j.error);
+    }
+  } catch {
+    // fall through to the transport message
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export type { PostTypeShape, ReviewCheck, TalkingPoint };
 
 export type Brief = Database['public']['Tables']['briefs']['Row'];
@@ -1693,7 +1708,7 @@ export async function publishCampaignDays(
       days: days.map((d) => ({ date: d.date, brief_ids: d.briefIds })),
     },
   });
-  if (error) throw error;
+  if (error) throw await edgeError(error);
   const result = data as Partial<PublishResult> & { error?: string };
   if (result.error) throw new Error(result.error);
   return {
@@ -1744,7 +1759,7 @@ export async function publishCampaign(
       ...(options?.startDate ? { start_date: options.startDate } : {}),
     },
   });
-  if (error) throw error;
+  if (error) throw await edgeError(error);
   const result = data as Partial<PublishResult> & { error?: string };
   if (result.error) throw new Error(result.error);
   return {

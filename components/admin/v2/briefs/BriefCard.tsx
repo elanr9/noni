@@ -10,9 +10,11 @@ import { TypeTile } from './TypeTile';
 /** Title with the searched words marked in blue tint. */
 export function markWords(text: string, words: string[]): ReactNode {
   if (!words.length) return text;
-  const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'ig');
+  // One capture group: split puts every match at an odd index. (A global
+  // regex's .test() keeps lastIndex between calls, so it can't be reused.)
+  const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'i');
   return text.split(re).map((part, i) =>
-    part && re.test(part) ? (
+    part && i % 2 === 1 ? (
       <Text key={i} style={{ backgroundColor: color.blueTint, color: color.blueDeep }}>
         {part}
       </Text>

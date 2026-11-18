@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
+import { editor } from '../../../../theme/v2';
 import { clampCrop, type Slide, type SlideCrop } from './model';
 import { SlideFrame } from './SlideFrame';
 
@@ -43,14 +44,14 @@ export function CropFrame({ slide, width, height, onChange }: { slide: Slide; wi
   const lines = [1, 2];
   return (
     <GestureDetector gesture={gesture}>
-      <View style={{ width, height, backgroundColor: '#000' }}>
+      <View style={{ width, height, backgroundColor: editor.black }}>
         <SlideFrame slide={slide} width={width} height={height} />
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           {lines.map((i) => (
-            <View key={`h${i}`} style={{ position: 'absolute', left: 0, right: 0, top: (height * i) / 3, height: 1, backgroundColor: 'rgba(255,255,255,0.18)' }} />
+            <View key={`h${i}`} style={{ position: 'absolute', left: 0, right: 0, top: (height * i) / 3, height: 1, backgroundColor: editor.w18 }} />
           ))}
           {lines.map((i) => (
-            <View key={`v${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: (width * i) / 3, width: 1, backgroundColor: 'rgba(255,255,255,0.18)' }} />
+            <View key={`v${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: (width * i) / 3, width: 1, backgroundColor: editor.w18 }} />
           ))}
         </View>
       </View>

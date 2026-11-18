@@ -32,8 +32,9 @@ export type IdeasParams = {
   week?: string;
 };
 
+/** Reels first: a week and a brief open on reels unless the link says slideshow. */
 export function parseFormat(value: string | undefined): BriefMediaFormat {
-  return value === 'reel' ? 'reel' : 'slideshow';
+  return value === 'slideshow' ? 'slideshow' : 'reel';
 }
 
 export function parseKind(value: string | undefined): BriefKind | null {

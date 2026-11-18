@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Redirect } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -53,7 +54,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default function KitchenSink() {
+function KitchenSink() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState(0);
   const [reasons, setReasons] = useState<string[]>([REASONS[0]]);
@@ -349,3 +350,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 });
+
+/** Dev gallery only: production builds bounce to the Review tab. */
+export default function DevOnlyKitchenSink() {
+  if (!__DEV__) return <Redirect href="/(admin)/(tabs)" />;
+  return <KitchenSink />;
+}

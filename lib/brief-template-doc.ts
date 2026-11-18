@@ -46,8 +46,12 @@ function placeholderAsset(id: string, uri: string | null = null): MediaAsset {
   return { id, kind: 'image', localUri: uri, storagePath: null, durationMs: null, width: null, height: null };
 }
 
-function placeholderBlock(id: string, assetId: string, ms: number): Block {
-  return { id, layout: 'single', cells: [{ id: `cell-${id}`, assetId, inMs: 0, outMs: ms, speed: 1, muted: true, crop: null }] };
+function placeholderBlock(id: string, assetId: string, ms: number, inMs = 0): Block {
+  return { id, layout: 'single', cells: [{ id: `cell-${id}`, assetId, inMs, outMs: inMs + ms, speed: 1, muted: true, crop: null }] };
+}
+
+function videoAsset(id: string, uri: string, durMs: number): MediaAsset {
+  return { id, kind: 'video', localUri: uri, storagePath: null, durationMs: durMs, width: null, height: null };
 }
 
 export function toTextOverlay(t: StText, startMs: number, endMs: number): TextOverlay {
@@ -75,11 +79,24 @@ export function templateToDoc(g: GuidedState, type: BriefType): VideoDocument {
   const overlays: Overlay[] = [];
   let at = 0;
   for (const c of g.clips) {
-    const ms = Math.max(MIN_CLIP_S, clipSeconds(c, type)) * 1000;
-    const gs = type === 'Greenscreen' ? (g.fullGreen ? g.gs : c.gs) : null;
-    const asset = placeholderAsset(`a-${c.id}`, gs && gs.kind === 'image' ? fileUri(gs.src) : null);
-    assets.push(asset);
-    blocks.push(placeholderBlock(c.id, asset.id, ms));
+    let ms = Math.max(MIN_CLIP_S, clipSeconds(c, type)) * 1000;
+    const gs = type === 'Greenscreen' && (g.fullGreen || c.green) ? (g.fullGreen ? g.gs : c.gs) : null;
+    const uri = gs ? fileUri(gs.src) : null;
+    const durMs = gs && gs.kind === 'video' ? Math.round(gs.dur * 1000) : 0;
+    if (gs && gs.kind === 'video' && uri && durMs > 0) {
+      // A video background plays behind the clip: one shared video runs on
+      // across the clips while it lasts, a per-clip video starts at 0. A clip
+      // never outlasts its video.
+      const inMs = g.fullGreen && at + ms <= durMs ? at : 0;
+      ms = Math.min(ms, durMs - inMs);
+      const asset = videoAsset(`a-${c.id}`, uri, durMs);
+      assets.push(asset);
+      blocks.push(placeholderBlock(c.id, asset.id, ms, inMs));
+    } else {
+      const asset = placeholderAsset(`a-${c.id}`, gs && gs.kind === 'image' ? uri : null);
+      assets.push(asset);
+      blocks.push(placeholderBlock(c.id, asset.id, ms));
+    }
     for (const t of clipTexts(c)) overlays.push(toTextOverlay(t, at, at + ms));
     for (const o of clipOverlays(c)) {
       const pic = placeholderAsset(`a-${o.id}`, fileUri(o.src));

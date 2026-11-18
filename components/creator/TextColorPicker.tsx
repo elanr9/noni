@@ -9,25 +9,15 @@ import {
   overlayTextContrast,
   type OverlayBox,
 } from '../../lib/overlay-boxes';
-import { color, radius, type } from '../../theme/tokens';
-import { PressableScale } from '../ui/PressableScale';
+import { color, editor, editorTextColorNames, editorType, radius } from '../../theme/v2';
+import { Press } from '../v2';
 
 export type TextColorPick = { color: string; bg: boolean };
 
 const SWATCH = 32;
 const CHIP_LABEL_CHARS = 18;
 
-const COLOR_NAMES: Record<string, string> = {
-  '#FFFFFF': 'White',
-  '#000000': 'Black',
-  '#FE2C55': 'Red',
-  '#FF7A1A': 'Orange',
-  '#FFD23F': 'Yellow',
-  '#25D366': 'Green',
-  '#1E88F5': 'Blue',
-  '#8A4DFF': 'Purple',
-  '#EB4C89': 'Pink',
-};
+const COLOR_NAMES: Record<string, string> = editorTextColorNames;
 
 function pickLabel(pick: TextColorPick): string {
   const name = COLOR_NAMES[pick.color.toUpperCase()] ?? pick.color;
@@ -50,9 +40,9 @@ function Swatch(props: {
 }): JSX.Element {
   const { pick, selected, onPress } = props;
   const fill = pick.bg ? overlayBoxFill(pick.color) : pick.color;
-  const classicDark = !pick.bg && pick.color.toUpperCase() === '#000000';
+  const classicDark = !pick.bg && pick.color.toUpperCase() === editor.black;
   return (
-    <PressableScale
+    <Press
       accessibilityRole="button"
       accessibilityLabel={pickLabel(pick)}
       accessibilityState={{ selected }}
@@ -73,7 +63,7 @@ function Swatch(props: {
           ) : null}
         </View>
       </View>
-    </PressableScale>
+    </Press>
   );
 }
 
@@ -100,7 +90,7 @@ export function TextColorPicker(props: {
           {boxes.map((box) => {
             const on = box.id === selectedBox.id;
             return (
-              <PressableScale
+              <Press
                 key={box.id}
                 accessibilityRole="button"
                 accessibilityLabel={`Style text ${chipLabel(box)}`}
@@ -111,7 +101,7 @@ export function TextColorPicker(props: {
                 <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1}>
                   {chipLabel(box)}
                 </Text>
-              </PressableScale>
+              </Press>
             );
           })}
         </ScrollView>
@@ -147,7 +137,7 @@ const styles = StyleSheet.create({
     height: 28,
     paddingHorizontal: 12,
     borderRadius: radius.pill,
-    backgroundColor: color.whiteA16,
+    backgroundColor: editor.w16,
     alignItems: 'center',
     justifyContent: 'center',
     maxWidth: 180,
@@ -157,7 +147,7 @@ const styles = StyleSheet.create({
   },
   chipText: {
     color: color.white,
-    fontSize: type.size.label,
+    fontSize: editorType.size.label,
     fontWeight: '600',
   },
   chipTextOn: {
@@ -175,7 +165,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   outerRingOn: {
-    borderColor: color.whiteA45,
+    borderColor: editor.w45,
   },
   innerRing: {
     padding: 2,
@@ -195,15 +185,15 @@ const styles = StyleSheet.create({
   },
   classicLightRing: {
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.4)',
+    borderColor: editor.k40,
   },
   classicDarkRing: {
     borderWidth: 1,
-    borderColor: color.whiteA45,
+    borderColor: editor.w45,
   },
   bubbleRing: {
     borderWidth: 1,
-    borderColor: color.whiteA28,
+    borderColor: editor.w28,
   },
   glyph: {
     fontSize: 15,

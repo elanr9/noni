@@ -3,16 +3,17 @@ import { ScrollView, Text, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AI_FILL, planGuided } from '../../../../lib/brief-ai';
+import { planOutline } from '../../../../lib/brief-ai';
 import { clearDraft, loadDraft, saveDraft, WIZ_V, type WizardState } from '../../../../lib/brief-drafts';
 import { useLibStore } from '../../../../lib/brief-library-api';
 import { briefWord, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
 import { color, radius, shadow, text } from '../../../../theme/v2';
 import { postsForBrief, useV2Data } from '../../../../lib/v2-posts';
-import { Button, Icon, Press, TabPane, TextButton, UnderlineTabs, tap, type IconName } from '../../../v2';
+import { Button, Icon, Press, TabPane, TextButton, UnderlineTabs, type IconName } from '../../../v2';
 import { BriefPostsPanel } from '../posts/BriefPostsPanel';
 import { LongTextView, OutlineView, TemplateView } from './BriefViews';
+import { toast } from '../../../v2/Toast';
 import { Celebration } from './Celebration';
 import { GuidedForm, type AiState } from './GuidedForm';
 import { LongTextForm } from './LongTextForm';
@@ -106,7 +107,9 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const [oai, setOai] = useState(false);
   const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
   const [arm, setArm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const advancing = useRef(false);
   useEffect(() => {
     const list = timers.current;
     return () => list.forEach(clearTimeout);
@@ -118,7 +121,8 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
     void loadDraft(key).then((d) => {
       if (!live) return;
       const ex = useLibStore.getState().briefs.find((b) => b.id === slot);
-      const init: WizardState = draftOk(d, ex)
+      // A saved brief always opens as saved; only a new post resumes its draft.
+      const init: WizardState = !ex && draftOk(d, ex)
         ? d
         : ex
           ? { v: WIZ_V, step: 2, type: ex.type, kind: ex.type === 'Long Text' ? 'Long Text' : ex.kind, title: ex.title, notes: ex.notes, link: ex.link || '', music: !!ex.audio && ex.audio.mode !== 'none', g: null, lt: null, ...fromBrief(ex) }
@@ -152,7 +156,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const dots = longText ? [0, 2] : [0, 1, 2];
   const val = compose
     ? guided
-      ? /\S/.test(g.title) && g.clips.some((c) => /\S/.test(c.text))
+      ? /\S/.test(g.title) && g.clips.some((c) => /\S/.test(c.text) || /\S/.test(c.onScreen) || !!c.doc?.texts.some((t) => /\S/.test(t.text)))
       : isLong
         ? /\S/.test(lt.title) && /\S/.test(lt.onScreen)
         : /\S/.test(st.title || '')
@@ -165,10 +169,16 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
       return { ...x, step: Math.min(2, x.step + 1) as WizardState['step'] };
     });
   const pick = (v: string) => {
-    if (step.key === 'compose') return;
+    if (step.key === 'compose' || advancing.current) return;
     const k = step.key;
+    advancing.current = true;
     setSt((x) => (x ? { ...x, [k]: v as BriefType & BriefKind } : x));
-    timers.current.push(setTimeout(next, 340));
+    timers.current.push(
+      setTimeout(() => {
+        advancing.current = false;
+        next();
+      }, 340),
+    );
   };
   const back = () => {
     if (st.step === 0 || existing) {
@@ -178,25 +188,20 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
     setSt((x) => (x ? { ...x, step: (x.step === 2 && x.type === 'Long Text' ? 0 : x.step - 1) as WizardState['step'] } : x));
   };
 
-  const hasLink = /\S/.test(st.link || '');
-  const fillOutline = () => {
+  const fillOutline = async () => {
     if (oai) return;
-    tap();
     setOai(true);
-    timers.current.push(
-      setTimeout(() => {
-        setOai(false);
-        setSt((x) => {
-          if (!x) return x;
-          const f = hasLink ? AI_FILL.link : AI_FILL.title;
-          return { ...x, title: (x.title || '').trim() || f.title, notes: f.notes, filled: true };
-        });
-      }, 1400),
-    );
+    try {
+      const f = await planOutline({ title: st.title || '', link: st.link || '' });
+      setSt((x) => (x ? { ...x, title: (x.title || '').trim() || f.title, notes: f.notes || x.notes, filled: true } : x));
+    } catch {
+      toast.error("Couldn't write the outline. Check your connection and try again.", { label: 'Retry', onPress: () => void fillOutline() });
+    } finally {
+      setOai(false);
+    }
   };
 
   const celebrate = (id: string, twin: boolean) => {
-    tap();
     if (existing) {
       router.back();
       return;
@@ -215,13 +220,27 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
     );
   };
 
-  const finish = () => {
+  /** Waits for the server; a failed save stays queued on this device and offers a retry. */
+  const afterSave = async (synced: Promise<string | null>, id: string, twin: boolean) => {
+    setSaving(true);
+    const err = await synced;
+    setSaving(false);
+    if (err) {
+      toast.error("Couldn't save to your team yet. It's kept on this phone.", { label: 'Retry', onPress: () => void finish() });
+      return;
+    }
+    clearDraft(key);
+    celebrate(id, twin);
+  };
+
+  const finish = async () => {
+    if (saving) return;
     const by = { userId, name: 'You' };
     const id = existing ? existing.id : slot === 'new' ? uid() : slot;
     if (guided) {
-      const phrase = g.phrase || planGuided(g, type).phrase;
+      const phrase = (g.phrase || g.title).trim();
       const notes = (g.notes || '').trim() || [`Search: ${phrase}`].concat(g.clips.map((c, i) => `${type === 'Long Text' ? 'Clip' : i === 0 ? 'Hook' : `Clip ${i}`}: ${c.text}`)).filter(Boolean).join('\n');
-      saveBrief(
+      const { synced } = saveBrief(
         {
           id,
           type,
@@ -237,43 +256,44 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
         },
         by,
       );
-      clearDraft(key);
-      celebrate(id, true);
+      await afterSave(synced, id, true);
       return;
     }
     if (isLong) {
-      saveBrief({ id, type: 'Long Text', kind: 'Guided', noTwin: true, title: lt.title.trim(), notes: lt.notes || '', lt, clips: [newClip(lt.notes || '', { onScreen: lt.onScreen, doc: lt.doc || null })] }, by);
-      clearDraft(key);
-      celebrate(id, false);
+      const { synced } = saveBrief({ id, type: 'Long Text', kind: 'Guided', noTwin: true, title: lt.title.trim(), notes: lt.notes || '', lt, clips: [newClip(lt.notes || '', { onScreen: lt.onScreen, doc: lt.doc || null })] }, by);
+      await afterSave(synced, id, false);
       return;
     }
-    saveBrief(
+    // The music line is shown from audio.mode; strip any copy an older save appended to the notes.
+    const notes = (st.notes || '').replace(/\n?Music: pick a sound that fits and add it on Instagram and TikTok\./g, '').trim();
+    const { synced } = saveBrief(
       {
         id,
         type,
         kind: (st.kind ?? 'Outline') as BriefKind,
         title: (st.title || '').trim(),
-        notes: ((st.notes || '').trim() + (st.music ? '\nMusic: pick a sound that fits and add it on Instagram and TikTok.' : '')).trim(),
+        notes,
         audio: { mode: st.music ? 'creator' : 'none', track: null },
         link: (st.link || '').trim(),
       },
       by,
     );
-    clearDraft(key);
-    celebrate(id, false);
+    await afterSave(synced, id, false);
   };
 
   const del = () => {
     if (!existing) return;
     if (!arm) {
-      tap();
       setArm(true);
       timers.current.push(setTimeout(() => setArm(false), 2500));
       return;
     }
-    removeBrief(existing.id);
+    const { synced } = removeBrief(existing.id);
     clearDraft(key);
     router.back();
+    void synced.then((err) => {
+      if (err) toast.error("Deleted on this phone. We'll remove it for your team when you're back online.");
+    });
   };
 
   const word = existing ? briefWord(existing) : '';
@@ -283,12 +303,10 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const updateG = (fn: (cur: GuidedState) => GuidedState) => setSt((x) => (x ? { ...x, g: fn(x.g ?? emptyGuided()) } : x));
   const setLt = (p: Partial<LongTextState>) => setSt((x) => (x ? { ...x, lt: { ...(x.lt ?? emptyLongText()), ...p } } : x));
   const startEdit = () => {
-    tap();
     setEditMode(true);
   };
   /** The template in the creator's editor, playhead on the tapped clip. */
   const openEditor = (clipId: string | null) => {
-    tap();
     setEditor({ clip: clipId });
   };
 
@@ -354,7 +372,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
               st={{ title: st.title || '', notes: st.notes || '', link: st.link || '', music: !!st.music, filled: !!st.filled }}
               set={(p) => patch(p)}
               ai={oai}
-              onFill={fillOutline}
+              onFill={() => void fillOutline()}
               editingExisting={!!st.editingExisting}
             />
           )}
@@ -380,7 +398,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
               <Button variant="secondary" label="Edit" onPress={startEdit} />
             )
           ) : (
-            <Button disabled={!val || busy} onPress={finish} label={existing ? 'Save changes' : guided || isLong ? 'Save post' : 'Save outline'} />
+            <Button disabled={!val || busy || saving} onPress={() => void finish()} label={saving ? 'Saving…' : existing ? 'Save changes' : guided || isLong ? 'Save post' : 'Save outline'} />
           )}
         </View>
       ) : null}

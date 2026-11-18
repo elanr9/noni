@@ -52,7 +52,7 @@ export function DetailsStep({
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={styles.fill}>
+    <View style={[styles.fill, { paddingTop: insets.top }]}>
       <BriefHeader
         title="Details"
         onBack={onBack}

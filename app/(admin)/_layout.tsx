@@ -8,6 +8,7 @@ import {
   profileIsPlatformAdmin,
 } from '../../lib/active-mode';
 import { color } from '../../theme/tokens';
+import { color as v2 } from '../../theme/v2';
 
 export default function AdminLayout() {
   const { session, profile, loading, activeMode } = useAuth();
@@ -51,7 +52,10 @@ export default function AdminLayout() {
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="v2-kit" options={{ headerShown: false }} />
+      {/* Dev galleries; the screens themselves redirect in production builds. */}
+      {__DEV__ ? <Stack.Screen name="v2-kit" options={{ headerShown: false }} /> : null}
+      {__DEV__ ? <Stack.Screen name="kitchen-sink" options={{ headerShown: false }} /> : null}
+      <Stack.Screen name="settings" options={{ headerShown: false, contentStyle: { backgroundColor: v2.bg } }} />
       <Stack.Screen name="new-brief" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'slide_from_bottom', animationDuration: 240 }} />
       <Stack.Screen name="brief-post/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />

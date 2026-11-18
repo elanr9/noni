@@ -14,15 +14,15 @@ import {
   type Overlay,
 } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
-import { color, type } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
 import { beginGesture, endGesture, selectOverlay, updateGesture } from './overlay-actions';
+import { color, editor, editorType } from '../../../../theme/v2';
+import { Icon } from '../../../v2';
 
 export const BAR_HEIGHT = 26;
 const HANDLE_WIDTH = 12;
 const MIN_LABEL_WIDTH = 40;
-const TEXT_TINT = '#1E88F5';
-const IMAGE_TINT = '#8A4DFF';
+const TEXT_TINT = editor.laneText;
+const IMAGE_TINT = editor.laneImage;
 
 export type OverlayBarProps = {
   overlay: Overlay;
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   label: {
     flex: 1,
     color: color.white,
-    fontSize: type.size.micro11,
+    fontSize: editorType.size.micro11,
     fontWeight: '700',
   },
   handle: {
@@ -174,6 +174,6 @@ const styles = StyleSheet.create({
     width: 2,
     height: 10,
     borderRadius: 1,
-    backgroundColor: color.ink900,
+    backgroundColor: editor.deep,
   },
 });

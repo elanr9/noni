@@ -3,7 +3,7 @@
 import type { JSX } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { color } from '../../../theme/tokens';
+import { editor } from '../../../theme/v2';
 import { TIKTOK_CHROME } from './frame';
 
 const ACTION_COUNT = 5;
@@ -74,14 +74,14 @@ export function TikTokChrome(props: {
 const styles = StyleSheet.create({
   action: {
     position: 'absolute',
-    backgroundColor: color.whiteA28,
+    backgroundColor: editor.w28,
     borderWidth: 1,
-    borderColor: color.whiteA45,
+    borderColor: editor.w45,
   },
   caption: {
     position: 'absolute',
   },
   captionLine: {
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
 });

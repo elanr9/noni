@@ -2,7 +2,9 @@
 // TextEditPanel: edit the words (capped, with a counter), switch between
 // classic outlined letters and a bubble, pick the colour, or delete.
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View,
+  type TextInputInstance,
+} from 'react-native';
 
 import {
   CREATOR_TEXT_PALETTE,
@@ -26,7 +28,7 @@ export function EditTextPanel(props: {
   autoFocus?: boolean;
 }): JSX.Element {
   const { box, onChange, onDelete, onDone, autoFocus = false } = props;
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const [draft, setDraft] = useState(box.text.slice(0, MAX_BOX_TEXT_CHARS));
 
   useEffect(() => {

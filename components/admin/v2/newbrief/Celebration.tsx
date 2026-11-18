@@ -3,10 +3,10 @@ import { Text } from 'react-native';
 import Animated, { Easing, FadeIn, useAnimatedProps, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { color, motion } from '../../../../theme/v2';
+import { briefs, color, motion } from '../../../../theme/v2';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
-const CONFETTI = ['#FFFFFF', '#FFD60A', '#2BBF7A', '#FF2D78', '#7E3BFF'];
+const CONFETTI = briefs.confetti;
 const BURST = Easing.bezier(0.2, 0.8, 0.3, 1);
 
 /** Blue flood, white disc pops in, the check draws, 18 pieces burst, then the copy rises. */
@@ -30,7 +30,7 @@ export function Celebration({ twin }: { twin: boolean }) {
       {Array.from({ length: 18 }, (_, i) => (
         <Piece key={i} i={i} />
       ))}
-      <Animated.View style={[{ width: 112, height: 112, borderRadius: 999, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center', boxShadow: '0 16px 40px rgba(0,0,0,0.18)' }, disc]}>
+      <Animated.View style={[{ width: 112, height: 112, borderRadius: 999, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center', boxShadow: briefs.discShadow }, disc]}>
         <Svg width={64} height={64} viewBox="0 0 64 64" fill="none">
           <AnimatedPath d="M16 33 L27 44 L48 21" stroke={color.blue} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={60} animatedProps={check} />
         </Svg>

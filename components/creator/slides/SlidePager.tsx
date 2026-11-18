@@ -17,6 +17,7 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewInstance,
 } from 'react-native';
 
 export function SlidePager(props: {
@@ -28,7 +29,7 @@ export function SlidePager(props: {
   renderPage: (index: number, width: number, height: number) => ReactNode;
 }): JSX.Element {
   const { count, index, onIndex, scrollEnabled = true, renderPage } = props;
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   /** Page the scroll view is resting on, so a prop change only scrolls when it differs. */
   const settled = useRef(index);

@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ConfigErrorScreen } from '../components/Screen';
 import { ICON_FONT_FILES } from '../components/v2/Icon';
 import { CompanyOverlays } from '../components/shared';
+import { ToastHost } from '../components/v2/Toast';
 import { AuthProvider } from '../lib/auth';
 import { CompanyProvider } from '../lib/company-context';
 import {
@@ -83,6 +84,7 @@ function App() {
               }}
             />
             <CompanyOverlays />
+            <ToastHost />
           </CompanyProvider>
         </AuthProvider>
       </ShareIntentProvider>

@@ -43,7 +43,7 @@ export type IndustryPlaybook = {
 
 const PROFILE_SYSTEM = `You read a company's own website and profile its product for a research team. Answer with one JSON object and nothing else:
 {"product_name": string, "one_liner": string, "industry": string, "niche": string, "audience": [{"who": string, "situation": string}], "problems": string[], "features": [{"name": string, "what_it_does": string}], "pricing": string | null, "differentiators": string[], "research_questions": string[]}
-- industry is the broad market (for example "college athletic recruiting"); niche is the exact slice this product serves.
+- industry is the broad market (for example "small business accounting"); niche is the exact slice this product serves.
 - audience: the people who buy and the people who use, each with the situation that makes them look for help.
 - features: only what the site states, each as the concrete thing it does.
 - research_questions: 8 to 12 questions a researcher must answer to write expert content for this audience: the rules, calendar and deadlines of this world, what the gatekeepers actually look for, the numbers that matter, common mistakes, costs, and what people get wrong. Specific to this niche, never generic marketing questions.

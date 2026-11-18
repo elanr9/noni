@@ -9,11 +9,11 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { assetById, type VideoDocument } from '../../../../lib/edit-document';
 import { useStudioStore } from '../../../../lib/studio-store';
 import { formatSeconds } from '../../../../lib/video-edit';
-import { color, type } from '../../../../theme/tokens';
-import { Icon } from '../../../ui/Icon';
 import { BlockThumbs } from './BlockThumbs';
 import { BLOCK_RADIUS, LANE_GAP, TRACK_H, laneHeight, type BlockItem } from './layout';
 import { TrimHandles, type TrimStartInfo } from './TrimHandles';
+import { color, editor, editorType } from '../../../../theme/v2';
+import { Icon } from '../../../v2';
 
 const REORDER_HOLD_MS = 350;
 
@@ -104,7 +104,7 @@ export const BlockStrip = memo(function BlockStrip(props: {
                 <BlockThumbs asset={asset} clip={cell} width={item.width} height={laneH} msPerPx={msPerPx} />
                 {cell.muted && asset?.kind === 'video' ? (
                   <View style={[styles.muted, { top: Math.max(2, (laneH - 16) / 2) }]} pointerEvents="none">
-                    <Icon name="volume-x" size={10} color={color.white} />
+                    <Icon name="volume_off" size={10} color={color.white} />
                   </View>
                 ) : null}
               </View>
@@ -141,11 +141,11 @@ const styles = StyleSheet.create({
     marginRight: 1,
     borderRadius: BLOCK_RADIUS,
     overflow: 'hidden',
-    backgroundColor: color.ink800,
+    backgroundColor: editor.deepRaised,
   },
   blockSelected: { borderWidth: 2, borderColor: color.white },
-  lane: { position: 'absolute', left: 0, right: 0, overflow: 'hidden', backgroundColor: color.ink800 },
-  laneSelected: { borderWidth: 1.5, borderColor: color.accent },
+  lane: { position: 'absolute', left: 0, right: 0, overflow: 'hidden', backgroundColor: editor.deepRaised },
+  laneSelected: { borderWidth: 1.5, borderColor: color.blue },
   badge: {
     position: 'absolute',
     top: 4,
@@ -153,12 +153,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 6,
-    backgroundColor: color.inkA55,
+    backgroundColor: editor.deepA55,
   },
   badgeText: {
-    fontSize: type.size.micro11,
+    fontSize: editorType.size.micro11,
     lineHeight: 14,
-    fontWeight: type.weight.semibold,
+    fontWeight: editorType.weight.semibold,
     color: color.white,
     fontVariant: ['tabular-nums'],
   },
@@ -170,6 +170,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.inkA55,
+    backgroundColor: editor.deepA55,
   },
 });

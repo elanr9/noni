@@ -47,7 +47,8 @@ function usePlayableUri(localUri: string | null, storagePath: string | null): st
       .then((url) => {
         if (alive) setSigned({ path: remotePath, url });
       })
-      .catch((e: unknown) => console.warn('studio preview sign failed', e));
+      // No signed URL means no preview frame; the clip itself is untouched.
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -93,7 +94,7 @@ export function FallbackStagePlayer(props: { doc: VideoDocument }): JSX.Element 
         player.currentTime = (inMs + Math.max(0, offset) * speed) / 1000;
         if (useStudioStore.getState().playing) player.play();
       })
-      .catch((e: unknown) => console.warn('studio fallback preview', e));
+      .catch(() => undefined);
     return () => {
       alive = false;
     };

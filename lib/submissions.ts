@@ -3,15 +3,23 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { createVideoPlayer } from 'expo-video';
 
-import { cropPixels, type PhotoCrop, type SourceSize } from '../components/creator/slides/photo-crop';
+import { centeredCrop, cropPixels, type PhotoCrop, type SourceSize } from '../components/creator/slides/photo-crop';
 import {
   allAssetsUploaded,
   assetById,
   blockDurationMs,
   documentDurationMs,
+  EDIT_DOCUMENT_VERSION,
+  newId,
   serializeEditDocument,
   type EditDocument,
+  type MediaAsset,
+  type Slide as DocSlide,
+  type SlideImage,
+  type SlideshowDocument,
 } from './edit-document';
+import type { OverlayBox } from './overlay-boxes';
+import { saveProject } from './projects-api';
 import { uploadFileToStorage } from './storage-upload';
 import { supabase } from './supabase';
 import { transitionAssignment, transitionTask } from './tasks-api';
@@ -571,6 +579,102 @@ export async function submitAssignmentPhotos(params: {
     slideAspect: PLATFORM_SLIDE_ASPECT.tiktok,
     instagramPaths: instagramPaths.length > 0 ? instagramPaths : null,
   });
+}
+
+/** One slide of a creator slideshow: the photo with its crop, the words and the pictures placed on it. */
+export type SlideshowSlideInput = {
+  photo: PickedPhoto;
+  boxes: OverlayBox[];
+  /** Pictures on the slide; `path` is a storage path, an https URL or a local file to upload. */
+  pics: SlideImage[];
+};
+
+function isLocalFile(path: string): boolean {
+  return /^(file:|ph:|assets-library:|content:)/.test(path);
+}
+
+function pixelRect(crop: PhotoCrop, size: SourceSize): { x: number; y: number; width: number; height: number } {
+  const x = Math.max(0, Math.round(crop.x * size.width));
+  const y = Math.max(0, Math.round(crop.y * size.height));
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(size.width - x, Math.round(crop.width * size.width))),
+    height: Math.max(1, Math.min(size.height - y, Math.round(crop.height * size.height))),
+  };
+}
+
+/**
+ * Creator slideshow submit with the words on it: each photo uploads once
+ * (downscaled, never pre-cut), and the post goes in as a slideshow edit
+ * document whose slides carry the 9:16 and 4:5 crops plus the text boxes and
+ * pictures the creator checked. The render bakes them onto every slide, so
+ * the manager reviews and the platforms receive the slides with their text.
+ * `onProgress` reports uploads done out of the total.
+ */
+export async function submitSlideshow(params: {
+  assignment: Assignment;
+  companyId: string;
+  creatorId: string;
+  slides: SlideshowSlideInput[];
+  onProgress?: (done: number, total: number) => void;
+}): Promise<Assignment> {
+  const { assignment, companyId, creatorId, slides, onProgress } = params;
+  if (slides.length === 0) throw new Error('Add at least one photo');
+  const stamp = Date.now();
+  const folder = `${companyId}/${assignment.id}/slides`;
+  const localPics = slides.reduce((n, s) => n + s.pics.filter((p) => isLocalFile(p.path)).length, 0);
+  const total = slides.length + localPics;
+  let done = 0;
+  const tick = () => {
+    done += 1;
+    onProgress?.(done, total);
+  };
+  onProgress?.(0, total);
+
+  const assets: MediaAsset[] = [];
+  const docSlides: DocSlide[] = [];
+  for (let i = 0; i < slides.length; i++) {
+    const { photo, boxes, pics } = slides[i];
+    const wide = (photo.source?.width ?? 0) > MAX_SLIDE_UPLOAD_WIDTH;
+    const file = await ImageManipulator.manipulateAsync(photo.uri, wide ? [{ resize: { width: MAX_SLIDE_UPLOAD_WIDTH } }] : [], {
+      compress: 0.92,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    const size = { width: file.width, height: file.height };
+    const path = `${folder}/${stamp}-${i + 1}.jpg`;
+    await uploadFileToStorage({ bucket: 'videos', path, localUri: file.uri, contentType: 'image/jpeg' });
+    tick();
+    const asset: MediaAsset = { id: newId('a'), kind: 'image', localUri: photo.uri, storagePath: path, durationMs: null, width: size.width, height: size.height };
+    assets.push(asset);
+
+    const placed: SlideImage[] = [];
+    for (let k = 0; k < pics.length; k++) {
+      const pic = pics[k];
+      if (!isLocalFile(pic.path)) {
+        placed.push(pic);
+        continue;
+      }
+      const picPath = `${folder}/${stamp}-${i + 1}-pic${k + 1}.png`;
+      const png = await ImageManipulator.manipulateAsync(pic.path, [], { format: ImageManipulator.SaveFormat.PNG });
+      await uploadFileToStorage({ bucket: 'videos', path: picPath, localUri: png.uri, contentType: 'image/png' });
+      tick();
+      placed.push({ ...pic, path: picPath });
+    }
+
+    docSlides.push({
+      id: newId('s'),
+      assetId: asset.id,
+      crop: pixelRect(photo.crop ?? centeredCrop(size, SLIDE_ASPECT_RATIO['9:16']), size),
+      instagramCrop: pixelRect(photo.cropInstagram ?? centeredCrop(size, SLIDE_ASPECT_RATIO['4:5']), size),
+      boxes,
+      ...(placed.length ? { pics: placed } : {}),
+    });
+  }
+
+  const document: SlideshowDocument = { version: EDIT_DOCUMENT_VERSION, format: 'slideshow', aspect: '9:16', assets, slides: docSlides };
+  const projectId = await saveProject({ companyId, creatorId, assignmentId: assignment.id, document });
+  return submitProject({ assignment, companyId, creatorId, projectId, document });
 }
 
 /** The finished files for an assignment: the rendered video, or the baked slides. */

@@ -16,6 +16,7 @@ import {
   type VideoEditorPreviewHandle,
 } from '../../../../modules/video-editor';
 import { useJsClock, useThrottledValue } from './useJsClock';
+import { toast } from '../../../v2/Toast';
 
 const REBUILD_THROTTLE_MS = 80;
 /** Scrub seeks are imprecise; a frame accurate seek follows once the hand rests. */
@@ -34,6 +35,7 @@ export function NativeStagePlayer(props: { doc: VideoDocument }): JSX.Element | 
   useJsClock(!hasVideo, documentDurationMs(doc));
 
   const lastEmitted = useRef(-1);
+  const warned = useRef(false);
   const preciseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -61,7 +63,12 @@ export function NativeStagePlayer(props: { doc: VideoDocument }): JSX.Element | 
     lastEmitted.current = ms;
     setPlayhead(ms);
   };
-  const onError = (e: PreviewErrorEvent) => console.warn('studio preview', e.nativeEvent.message);
+  const onError = (_e: PreviewErrorEvent) => {
+    // One notice per editor visit; the timeline keeps working without the preview.
+    if (warned.current) return;
+    warned.current = true;
+    toast.error('The preview could not play this clip. Your edit is still saved.');
+  };
 
   return (
     <VideoEditorPreview

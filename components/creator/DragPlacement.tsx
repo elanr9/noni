@@ -11,8 +11,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { color, editor } from '../../theme/v2';
 
-import { color } from '../../theme/tokens';
 
 export type PlacementMove = (x: number, y: number) => void;
 
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     left: '50%',
     width: 1,
     marginLeft: -0.5,
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
   outline: {
     position: 'absolute',

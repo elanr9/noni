@@ -21,7 +21,7 @@ export type StRender = { text: TextStyle; box: { backgroundColor?: string; paddi
 export function stRender(x: Pick<StText, 'size' | 'color' | 'style' | 'align' | 'font'>, scale: number): StRender {
   const size = x.size * scale;
   const style: StTextStyle = x.style;
-  const base: TextStyle = { color: x.color, fontSize: size, lineHeight: Math.round(size * 1.2), fontWeight: '700', textAlign: x.align, letterSpacing: -0.2 * scale };
+  const base: { -readonly [K in keyof TextStyle]: TextStyle[K] } = { color: x.color, fontSize: size, lineHeight: Math.round(size * 1.2), fontWeight: '700', textAlign: x.align, letterSpacing: -0.2 * scale };
   if (x.font === 1) base.fontFamily = 'Georgia';
   if (x.font === 3) base.fontFamily = 'Courier New';
   const box: StRender['box'] = {};

@@ -13,10 +13,10 @@ import {
   type PanResponderInstance,
 } from 'react-native';
 
-import { color } from '../../../theme/tokens';
 import type { ShotPreview } from '../SegmentOverlayPreview';
 import { clamp } from '../slides/frame';
 import { useEvent } from './useEvent';
+import { color, editor } from '../../../theme/v2';
 
 /** Where the inset lands when nobody placed it (renderTimeline.ts IMAGE_*). */
 export const DEFAULT_INSET_X = 0.72;
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     right: -6,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: color.whiteA75,
+    borderColor: editor.w75,
     borderStyle: 'dashed',
   },
 });

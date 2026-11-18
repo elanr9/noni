@@ -4,7 +4,7 @@
 // the hook clip, free clips, then the plug (or hook, plug, then free clips
 // when the CTA is locked right after the hook). Freestyle: free clips, then
 // the plug. Long text: one 6 second clip with the text already on it.
-import type { BriefSlide, CtaPlacement, SlideBox, SlideRole, SlideTextStyle, WeekBrief } from '../../../../lib/briefs-api';
+import type { BriefSlide, CtaPlacement, SlideBox, SlidePic, SlideRole, SlideTextStyle, WeekBrief } from '../../../../lib/briefs-api';
 import type { Json } from '../../../../lib/types';
 import { ctaPlace, hashSeed, isOrderFree, renumber, seededRandom, withCtaAt } from '../model';
 
@@ -33,6 +33,10 @@ export type ReelPlanItem = {
   hideText?: boolean;
   /** The creator deleted the plug screenshot; the sync must not put it back. */
   hideInset?: boolean;
+  /** The manager's camera roll pictures on this clip (BriefSlide.pics). */
+  pics?: SlidePic[];
+  /** Picture ids the creator deleted; the sync must not put them back. */
+  hidePics?: string[];
 };
 
 export type ReelMeta = { caption: string; tags: string; search: string; cuts: number };
@@ -160,6 +164,7 @@ export function clipPlan(brief: WeekBrief, seed?: string): ReelPlanItem[] {
       ...(s.box ? { box: s.box } : {}),
       ...(s.inset_box ? { insetBox: s.inset_box } : {}),
       ...(s.tstyle ? { tstyle: s.tstyle } : {}),
+      ...(s.pics?.length ? { pics: s.pics } : {}),
       blockIds: [],
       slideIndex: index,
     }));
@@ -331,7 +336,13 @@ function parseItem(v: unknown): ReelPlanItem | null {
     ...(typeof v.slideIndex === 'number' ? { slideIndex: v.slideIndex } : {}),
     ...(v.hideText === true ? { hideText: true } : {}),
     ...(v.hideInset === true ? { hideInset: true } : {}),
+    ...(Array.isArray(v.pics) ? { pics: v.pics.filter(isPic) } : {}),
+    ...(Array.isArray(v.hidePics) ? { hidePics: v.hidePics.filter((x): x is string => typeof x === 'string') } : {}),
   };
+}
+
+function isPic(v: unknown): v is SlidePic {
+  return isObj(v) && typeof v.id === 'string' && typeof v.src === 'string' && isBox(v.box);
 }
 
 /** Every item gets its own id (a repeat gets a fresh one), so two items never share an overlay. */

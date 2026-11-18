@@ -1,12 +1,14 @@
 import { Redirect } from 'expo-router';
 
-import { LoadingScreen } from '../../components/layout/Screen';
+import { ActivityIndicator, View } from 'react-native';
+
+import { color } from '../../theme/v2';
 import { useAuth } from '../../lib/auth';
 
 export default function OnboardingIndex() {
   const { profile, loading } = useAuth();
 
-  if (loading) return <LoadingScreen />;
+  if (loading) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.bg }}><ActivityIndicator color={color.grey4} /></View>;
 
   // The layout already bounced missing sessions, missing profiles, and
   // onboarded users.
@@ -22,7 +24,7 @@ export default function OnboardingIndex() {
     return <Redirect href="/(onboarding)/manager" />;
   }
 
-  // Creators skip the questionnaire: permissions, then straight to the
-  // setup checklist.
-  return <Redirect href="/(onboarding)/notifications" />;
+  // Creators: name, camera and mic, notifications, connect, a practice take,
+  // then the finish screen.
+  return <Redirect href="/(onboarding)/name" />;
 }

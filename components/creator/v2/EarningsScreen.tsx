@@ -2,19 +2,20 @@
 // one creator) with payout figures in place of company money. Range pills,
 // the blue hero (views and paid out), the trend chart, Top posts, then the
 // payout card: allowed, pending, status, and the Payouts row.
-import { useId, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import type { AnalyticsDay } from '../../../lib/analytics-api';
 import { paidBetween, payoutSetupLabel, type PayoutSummary } from '../../../lib/payouts-api';
 import { dayKey, fmt, money, shortDate } from '../../../lib/v2-format';
 import type { V2Post } from '../../../lib/v2-posts';
-import { color, radius, text } from '../../../theme/v2';
+import { color, editor, radius, shadow, text } from '../../../theme/v2';
 import { byViews, chartPoints, firstDate, periodFor, postsBetween, RANGES, scopedPosts, viewsBetween, viewsByDay, type Range } from '../../admin/v2/analytics/periods';
 import { TrendChart } from '../../admin/v2/analytics/TrendChart';
+import { LoadError } from './LoadError';
 import { PostFrame } from '../../admin/v2/posts/PostFrame';
-import { Card, Chip, Icon, PillTabs, Press, Row, Screen, Skeleton, TabPane, tap } from '../../v2';
+import { ContextRow } from '../../shared';
+import { Card, Chip, Icon, PillTabs, Press, RootTitle, Row, Screen, Skeleton, TabPane, tap } from '../../v2';
 
 export interface EarningsScreenProps {
   /** Every post of this creator; the pane scopes to live ones. */
@@ -23,6 +24,9 @@ export interface EarningsScreenProps {
   summary: PayoutSummary | null;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** The posts failed to load and nothing is on screen: shows Retry in place of the pane. */
+  failed?: boolean;
+  onRetry?: () => void;
   onPost: (p: V2Post) => void;
   onPayouts: () => void;
 }
@@ -32,7 +36,7 @@ export function daysFromPosts(posts: V2Post[]): AnalyticsDay[] {
   const m = new Map<string, AnalyticsDay>();
   for (const p of posts) {
     const day = dayKey(p.date);
-    const d = m.get(day) ?? { day, views: 0, signups: 0, salesCents: 0, postIds: [] };
+    const d = m.get(day) ?? { day, views: 0, signups: 0, salesCents: 0, codedSignups: 0, codedSalesCents: 0, postIds: [] as string[] };
     d.views += p.views;
     d.postIds.push(p.id);
     m.set(day, d);
@@ -48,11 +52,10 @@ function Arrow({ dir, on, onPress }: { dir: 'left' | 'right'; on: boolean; onPre
   );
 }
 
-export function EarningsScreen({ posts, loaded, summary, refreshing = false, onRefresh, onPost, onPayouts }: EarningsScreenProps) {
+export function EarningsScreen({ posts, loaded, summary, refreshing = false, onRefresh, failed = false, onRetry, onPost, onPayouts }: EarningsScreenProps) {
   const [range, setRange] = useState<Range>('week');
   const [off, setOff] = useState(0);
   const [sel, setSel] = useState<number | null>(null);
-  const gradId = useId();
 
   const live = useMemo(() => scopedPosts(posts), [posts]);
   const days = useMemo(() => daysFromPosts(live), [live]);
@@ -79,32 +82,27 @@ export function EarningsScreen({ posts, loaded, summary, refreshing = false, onR
   };
 
   return (
-    <Screen title="Earnings" tabRoot>
+    <Screen tabRoot>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}
         showsVerticalScrollIndicator={false}
         refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.grey4} /> : undefined}
       >
+        <ContextRow />
+        <RootTitle title="Earnings" />
         {!loaded ? (
           <>
             <Skeleton h={44} />
             <Skeleton h={150} />
             <Skeleton h={220} />
           </>
+        ) : failed ? (
+          <LoadError title="Could not load your earnings" onRetry={() => (onRetry ?? onRefresh)?.()} retrying={refreshing} />
         ) : (
           <>
             <PillTabs items={RANGES} value={range} onChange={pickRange} style={{ marginBottom: 12 }} />
             <View style={styles.hero}>
-              <Svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 1 1" style={StyleSheet.absoluteFill}>
-                <Defs>
-                  <LinearGradient id={gradId} x1={0} y1={0} x2={0.77} y2={0.64}>
-                    <Stop offset="0" stopColor={color.blue} />
-                    <Stop offset="1" stopColor={color.blueDeep} />
-                  </LinearGradient>
-                </Defs>
-                <Rect width={1} height={1} fill={`url(#${gradId})`} />
-              </Svg>
               <View style={styles.heroTop}>
                 {range !== 'all' ? <Arrow dir="left" on={period.canBack} onPress={() => step(-1)} /> : <View style={{ width: 32 }} />}
                 <TabPane k={periodKey} duration={220} style={styles.heroLabel}>
@@ -126,7 +124,7 @@ export function EarningsScreen({ posts, loaded, summary, refreshing = false, onR
             </View>
 
             <Card style={{ paddingTop: 12, paddingHorizontal: 16, paddingBottom: 8 }}>
-              <TabPane k={periodKey} style={{ flex: 0 }}>
+              <TabPane k={periodKey} style={{ flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }}>
                 <TrendChart points={points} title={period.chartTitle} sel={sel} onSel={setSel} />
               </TabPane>
             </Card>
@@ -186,13 +184,13 @@ export function EarningsScreen({ posts, loaded, summary, refreshing = false, onR
 }
 
 const styles = StyleSheet.create({
-  hero: { borderRadius: radius.card, overflow: 'hidden', paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, marginBottom: 12, boxShadow: '0 8px 24px rgba(27,166,238,0.35)' },
+  hero: { borderRadius: radius.card, backgroundColor: color.blue, backgroundImage: `linear-gradient(140deg, ${color.blue} 0%, ${color.blueDeep} 100%)`, paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, marginBottom: 12, ...shadow.blueHero },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -6, marginHorizontal: -8 },
-  arrow: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
+  arrow: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: editor.w16 },
   heroLabel: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 8, minHeight: 0 },
   heroTitle: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.white },
   heroDates: { fontSize: 13, lineHeight: 20, fontWeight: '600', color: color.white, opacity: 0.85 },
-  heroNums: { flex: 0, flexDirection: 'row', gap: 12, paddingTop: 12 },
+  heroNums: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', flexDirection: 'row', gap: 12, paddingTop: 12 },
   big: { fontSize: 36, lineHeight: 40, fontWeight: '800', letterSpacing: -1, color: color.white, fontVariant: ['tabular-nums'] },
   bigLabel: { fontSize: 13, lineHeight: 18, fontWeight: '500', color: color.white, opacity: 0.85 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },

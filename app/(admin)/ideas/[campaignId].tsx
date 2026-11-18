@@ -6,7 +6,9 @@
 // dismisses a card and teaches the AI what this team does not want. Kept per
 // campaign on the device, card states included.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  type ScrollViewInstance,
+} from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import Animated, {
   FadeIn,
@@ -69,7 +71,7 @@ export default function IdeasScreen() {
   const { active } = useCompany();
   const insets = useSafeAreaInsets();
   const keyboardPadding = useKeyboardPadding();
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
   const req = useRef(0);
   const animateScroll = useRef(false);
 

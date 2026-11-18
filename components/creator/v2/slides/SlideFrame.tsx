@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { editor } from '../../../../theme/v2';
 import { GradientFill, MediaFill } from '../../../admin/v2/newbrief/ClipFrame';
 import { StTextView } from '../../../v2/StTextView';
 import { slideDoc, type Slide } from './model';
@@ -10,11 +11,11 @@ export function SlideFrame({ slide, width, height, radius = 0, texts = true, sty
   const c = slide.crop ?? { z: 1, x: 0, y: 0 };
   const doc = slideDoc(slide);
   return (
-    <View style={[{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: '#1A1A1F' }, style]}>
+    <View style={[{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: editor.panel }, style]}>
       {slide.photo ? (
         <Image source={{ uri: slide.photo.uri }} resizeMode="cover" style={[StyleSheet.absoluteFill, { transform: [{ translateX: (c.x / 100) * width }, { translateY: (c.y / 100) * height }, { scale: c.z }] }]} />
       ) : (
-        <GradientFill colors={['#2B2B31', '#1A1A1F']} deg={180} />
+        <GradientFill colors={[editor.panelTop, editor.panel]} deg={180} />
       )}
       {texts
         ? doc.overlays.map((o) => {

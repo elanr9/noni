@@ -2,11 +2,13 @@
 // Story, slideshow and reel: canvas steps, Details, Review, and the sheets.
 
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 
 import type { BriefKind, BriefMediaFormat, WeekBrief } from '../../../../lib/briefs-api';
 import { ctaPlaceOptions, ctaPosLabel, kindsFor, type PostTypeCopy } from '../../../../lib/brief-copy';
 import type { LibraryFeature } from '../../../../lib/library-api';
+import { uploadBriefPicture } from '../../../../lib/media-library-api';
 import { briefTone, color, type as typeToken } from '../../../../theme/tokens';
 import { SoftToast } from '../../../states/SoftToast';
 import { Icon } from '../../../ui/Icon';
@@ -19,12 +21,13 @@ import { CtaPlaceSheet } from '../sheets/CtaPlaceSheet';
 import { FeatureSheet } from '../sheets/FeatureSheet';
 import { GapSheet } from '../sheets/GapSheet';
 import { IdeasSheet } from '../sheets/IdeasSheet';
+import { MediaMenuSheet } from '../sheets/MediaMenuSheet';
 import { MediaSheet } from '../sheets/MediaSheet';
 import { ReviseSheet } from '../sheets/ReviseSheet';
 import { DetailsStep } from './DetailsStep';
 import { ReviewScreen } from './ReviewScreen';
 import type { DeckIdea } from '../../../../lib/deck-ai';
-import { useBriefEditor } from './useBriefEditor';
+import { slideFilled, useBriefEditor } from './useBriefEditor';
 
 export interface BriefEditorProps {
   briefId: string;
@@ -47,6 +50,7 @@ export function BriefEditor(props: BriefEditorProps) {
   const { format, kind, postType, features, companyName, onBack } = props;
   const E = useBriefEditor(props);
   const [media, setMedia] = useState(false);
+  const [mediaMenu, setMediaMenu] = useState(false);
   const kindName = kindsFor(format)[kind].name;
   const kindLabel = postType ? `${postType.name} \u00b7 ${kindName}` : kindName;
 
@@ -71,6 +75,22 @@ export function BriefEditor(props: BriefEditorProps) {
             : null;
 
   const toast = <SoftToast visible={E.error !== null} message={E.error ?? ''} tone="error" onHide={E.clearError} />;
+
+  /** A picture from the camera roll lands on the current slide as a movable sticker. */
+  const pickFromRoll = async () => {
+    const at = E.sel;
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9, allowsMultipleSelection: false });
+    if (res.canceled || !res.assets[0]) return;
+    try {
+      const src = await uploadBriefPicture({ companyId: props.companyId, briefId: props.briefId, uri: res.assets[0].uri });
+      const slide = E.slides[at];
+      const pics = slide?.pics ?? [];
+      E.patchAt(at, { pics: [...pics, { id: `p${Date.now().toString(36)}`, src, box: { x: 0.5, y: 0.62 - pics.length * 0.04, w: 0.5 } }] });
+    } catch (e) {
+      Alert.alert('Could not add the picture', e instanceof Error ? e.message : 'Try again.');
+    }
+  };
+
 
   if (E.step === 'review') {
     return (
@@ -163,7 +183,7 @@ export function BriefEditor(props: BriefEditorProps) {
           ? false
           : E.onLastPoint
             ? E.pointsOk
-            : Boolean(E.cur?.text.trim())
+            : Boolean(E.cur && slideFilled(E.cur))
         : E.step === 'cta'
           ? E.ctaOk && (!E.tipsStory || E.count != null)
           : true;
@@ -220,7 +240,7 @@ export function BriefEditor(props: BriefEditorProps) {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dots} style={styles.grow}>
           {E.slides.map((s, i) => {
             if (i === 0) return null;
-            const done = Boolean(s.text.trim());
+            const done = slideFilled(s);
             const on = E.sel === i;
             const c = s.role === 'cta';
             return (
@@ -229,6 +249,15 @@ export function BriefEditor(props: BriefEditorProps) {
                 accessibilityRole="button"
                 accessibilityLabel={c ? 'CTA slide' : `Slide ${i}`}
                 onPress={() => E.setSel(i)}
+                onLongPress={
+                  c
+                    ? undefined
+                    : () =>
+                        Alert.alert(`Delete clip ${i}?`, s.text.trim() ? `"${s.text.trim()}"` : undefined, [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => E.removePoint(i) },
+                        ])
+                }
                 disabled={locked}
                 hitSlop={5}
                 style={[
@@ -250,7 +279,7 @@ export function BriefEditor(props: BriefEditorProps) {
               </Pressable>
             );
           })}
-          <Pressable accessibilityRole="button" accessibilityLabel="Change count" disabled={locked} onPress={() => E.setSheet('count')} hitSlop={5} style={[styles.dot, styles.dotAdd]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Add a clip" disabled={locked} onPress={E.addPoint} hitSlop={5} style={[styles.dot, styles.dotAdd]}>
             <Icon name="plus" size={15} color={color.white} />
           </Pressable>
         </ScrollView>
@@ -299,7 +328,7 @@ export function BriefEditor(props: BriefEditorProps) {
         onWriteNote={E.reel && E.step === 'cover' ? () => void E.writeHook() : null}
         onRevise={() => E.setSheet('revise')}
         notes
-        onOpenMedia={() => setMedia(true)}
+        onOpenMedia={() => setMediaMenu(true)}
       />
       {E.sheet === 'intro' ? (
         <CtaIntro
@@ -333,6 +362,15 @@ export function BriefEditor(props: BriefEditorProps) {
           } else E.setCount(n);
         }}
         onClose={() => E.setSheet(null)}
+      />
+      <MediaMenuSheet
+        visible={mediaMenu}
+        reel={E.reel}
+        hasInset={Boolean(E.cur?.inset_feature_id)}
+        onLibrary={() => setMedia(true)}
+        onRoll={() => void pickFromRoll()}
+        onRemove={() => E.patchAt(E.sel, { inset_feature_id: null })}
+        onClose={() => setMediaMenu(false)}
       />
       <MediaSheet
         visible={media}
@@ -372,7 +410,7 @@ export function BriefEditor(props: BriefEditorProps) {
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: color.ink900 },
   grow: { flex: 1, minWidth: 0 },
-  dots: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 1 },
+  dots: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 1, paddingHorizontal: 4 },
   dot: { width: 34, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotAdd: { borderWidth: 1.5, borderStyle: 'dashed', borderColor: color.whiteA28 },
   dotText: { fontFamily: typeToken.font.ui, fontWeight: typeToken.weight.bold, fontSize: typeToken.size.chip },

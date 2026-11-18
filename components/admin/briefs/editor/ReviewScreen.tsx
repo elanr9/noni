@@ -203,7 +203,7 @@ export function ReviewScreen({
                     insetBox={s.inset_box}
                     tstyle={s.tstyle}
                     spans={s.spans}
-                    who={s.who ?? 'mixed'}
+                    who={reel && s.who !== 'creator' ? 'manager' : (s.who ?? 'mixed')}
                     label={s.label}
                     video={reel}
                     background={briefTone.reviewSlide}

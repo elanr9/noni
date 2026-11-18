@@ -9,6 +9,7 @@ import {
   StyleSheet,
   View,
   type GestureResponderEvent,
+  type HostInstance,
 } from 'react-native';
 
 import {
@@ -18,7 +19,6 @@ import {
   MIN_BOX_WIDTH,
   type OverlayBox,
 } from '../../../lib/overlay-boxes';
-import { color } from '../../../theme/tokens';
 import { OverlayTextBox, overlayMinWrapWidth, overlayWrapWidth } from '../../ui/OverlayTextBox';
 import {
   WidthHandles,
@@ -29,6 +29,7 @@ import {
   useWidthDrag,
   type Point,
 } from '../slides/GestureItem';
+import { color, editor } from '../../../theme/v2';
 
 /** Geometry a gesture commits; width only when a handle drag changed it. */
 export type BoxPlacement = { x: number; y: number; size: number; width?: number };
@@ -81,7 +82,7 @@ export const StageTextBox = memo(function StageTextBox(props: StageTextBoxProps)
   const [overlapOutline] = useState(() => new Animated.Value(0));
   const [selectedOutline] = useState(() => new Animated.Value(selected ? 1 : 0));
   const contentSize = useRef({ w: 0, h: 0 });
-  const layerRef = useRef<View>(null);
+  const layerRef = useRef<HostInstance>(null);
   const stageOrigin = useRef<Point>({ x: 0, y: 0 });
   const fontSize = stageWidth * box.size;
 
@@ -301,7 +302,7 @@ const styles = StyleSheet.create({
     right: -6,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: color.whiteA75,
+    borderColor: editor.w75,
     borderStyle: 'dashed',
   },
   overlapOutline: {
@@ -312,6 +313,6 @@ const styles = StyleSheet.create({
     right: -8,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: 'rgba(254,44,85,0.75)',
+    borderColor: editor.tiktokA75,
   },
 });

@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.fieldvision.noni",
+      "usesAppleSignIn": true,
       "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Noni uses the camera so you can record content for your assigned tasks.",
@@ -73,7 +74,8 @@
           ]
         }
       ],
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

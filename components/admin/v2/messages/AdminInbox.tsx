@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { useAuth } from '../../../../lib/auth';
 import { loadInbox, type Inbox } from '../../../../lib/inbox-api';
 import { getOrCreateDm } from '../../../../lib/manager-messages-api';
 import { subscribePresence } from '../../../../lib/presence';
 import { creatorById, useV2Data } from '../../../../lib/v2-posts';
+import { color, radius, text } from '../../../../theme/v2';
+import { ContextRow } from '../../../shared/ContextRow';
 import { InboxScreen, type InboxData } from '../../../shared/messages';
+import { Button, Card, Icon } from '../../../v2';
+import { toast } from '../../../v2/Toast';
+import { InviteCreatorsSheet } from '../review/InviteCreatorsSheet';
+import { NewChannelSheet } from './ChannelSheets';
 import { NewMessageSheet, type NewMessagePerson } from './NewMessageSheet';
 
 const POLL_MS = 20_000;
@@ -21,22 +29,32 @@ export function AdminInbox() {
   const creators = useV2Data((s) => s.creators);
   const loadData = useV2Data((s) => s.load);
 
-  const [inbox, setInbox] = useState<Inbox | null>(null);
+  // Keyed by company so a switch starts from skeletons, never the last company's threads.
+  const [loaded, setLoaded] = useState<{ companyId: string; inbox: Inbox | null; failed: boolean } | null>(null);
+  const inbox = loaded && loaded.companyId === companyId ? loaded.inbox : null;
+  const failed = loaded !== null && loaded.companyId === companyId && loaded.failed;
   const [online, setOnline] = useState<Set<string>>(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [channelOpen, setChannelOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [opening, setOpening] = useState(false);
   const seq = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (manual = false) => {
     if (!companyId || !meId) return;
     const mine = ++seq.current;
     try {
       const next = await loadInbox(companyId, meId);
-      if (mine === seq.current) setInbox(next);
+      if (mine !== seq.current) return;
+      setLoaded({ companyId, inbox: next, failed: false });
     } catch {
-      // Poll retries; keep what is on screen.
+      if (mine !== seq.current) return;
+      // With an inbox on screen the poll retries quietly; with none, show Retry.
+      setLoaded((prev) => ({ companyId, inbox: prev && prev.companyId === companyId ? prev.inbox : null, failed: true }));
+      if (manual) toast.error('Could not refresh messages. Check your connection.');
     } finally {
-      setRefreshing(false);
+      if (mine === seq.current) setRefreshing(false);
     }
   }, [companyId, meId]);
 
@@ -93,32 +111,96 @@ export function AdminInbox() {
   };
 
   const pickPerson = async (p: NewMessagePerson) => {
-    setNewOpen(false);
     if (p.kind === 'creator') {
+      setNewOpen(false);
       router.push({ pathname: '/(admin)/chat/[creatorId]', params: { creatorId: p.id } });
       return;
     }
-    if (!companyId || !meId) return;
-    const chatId = await getOrCreateDm(companyId, meId, p.id);
-    router.push({ pathname: '/(admin)/messages/[chatId]', params: { chatId } });
+    if (!companyId || !meId || opening) return;
+    setOpening(true);
+    try {
+      const chatId = await getOrCreateDm(companyId, meId, p.id);
+      setNewOpen(false);
+      router.push({ pathname: '/(admin)/messages/[chatId]', params: { chatId } });
+    } catch {
+      toast.error(`Could not open a chat with ${p.name.split(' ')[0]}. Try again.`, { label: 'Retry', onPress: () => void pickPerson(p) });
+    } finally {
+      setOpening(false);
+    }
   };
+
+  const noCreators = inbox !== null && inbox.approvedCreatorCount === 0 && inbox.dms.every((d) => d.kind === 'member');
+
+  const firstRun = (
+    <Animated.View entering={FadeIn.duration(260)}>
+      <Card style={{ gap: 12, paddingVertical: 20 }}>
+        <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="chat_bubble" size={26} color={color.blue} />
+        </View>
+        <Text style={text.card}>{noCreators ? 'Bring in your first creators' : 'No messages yet'}</Text>
+        <Text style={[text.body, { color: color.grey4 }]}>
+          {noCreators
+            ? 'Every creator you invite gets a thread here. Their posts, takes and your notes all land in it, so nothing gets lost.'
+            : 'Threads with creators open the moment a brief is assigned. Posts waiting on your review show up here first.'}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+          {noCreators ? <Button pill icon="add" label="Invite creators" onPress={() => setInviteOpen(true)} /> : null}
+          <Button pill variant="secondary" label="New message" onPress={() => setNewOpen(true)} />
+        </View>
+      </Card>
+    </Animated.View>
+  );
 
   return (
     <>
       <InboxScreen
-        data={data}
+        top={<ContextRow />}
+        data={failed && !inbox ? null : data}
+        error={failed && !inbox}
+        onRetry={() => {
+          setLoaded(null);
+          void load(true);
+        }}
         filters={FILTERS}
         refreshing={refreshing}
         onRefresh={() => {
           setRefreshing(true);
-          void load();
+          void load(true);
         }}
         onOpenReview={() => router.navigate('/(admin)/(tabs)')}
         onOpenDm={(d) => openDm(d.id)}
         onOpenChannel={(c) => router.push({ pathname: '/(admin)/messages/[chatId]', params: { chatId: c.id } })}
         onNew={() => setNewOpen(true)}
+        onNewChannel={() => setChannelOpen(true)}
+        firstRun={firstRun}
       />
-      <NewMessageSheet open={newOpen} onClose={() => setNewOpen(false)} people={people} onPick={(p) => void pickPerson(p)} />
+      <NewMessageSheet
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        people={people}
+        onPick={(p) => void pickPerson(p)}
+        onInvite={() => {
+          setNewOpen(false);
+          setInviteOpen(true);
+        }}
+      />
+      {companyId && meId ? (
+        <NewChannelSheet
+          open={channelOpen}
+          onClose={() => setChannelOpen(false)}
+          companyId={companyId}
+          meId={meId}
+          team={inbox?.team ?? []}
+          approvedCreatorCount={inbox?.approvedCreatorCount ?? 0}
+          onCreated={(chatId, slug) => {
+            setChannelOpen(false);
+            toast.success(`#${slug} is ready`);
+            void load();
+            router.push({ pathname: '/(admin)/messages/[chatId]', params: { chatId } });
+          }}
+        />
+      ) : null}
+      <InviteCreatorsSheet open={inviteOpen} companyId={companyId ?? undefined} onClose={() => setInviteOpen(false)} onSent={() => void load()} />
     </>
   );
 }

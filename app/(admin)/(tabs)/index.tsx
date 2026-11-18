@@ -1,302 +1,198 @@
-import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { RefreshControl, ScrollView, Text, View, type ScrollViewInstance } from 'react-native';
+import { useFocusEffect, useRouter, useScrollToTop } from 'expo-router';
+import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AccountRow } from '../../../components/admin/AccountRow';
-import { MusicApprovalRow } from '../../../components/admin/MusicApprovalRow';
-import {
-  AdminHeader,
-  AdminScreen,
-  SectionLabel,
-  Segmented,
-  SkeletonCard,
-  SkeletonLine,
-} from '../../../components/admin/shared';
-import { SubmissionRow } from '../../../components/admin/SubmissionRow';
-import { ContextRow, ElsewhereStrip, WaitBadge } from '../../../components/shared';
-import { EmptyState } from '../../../components/ui/EmptyState';
-import { Icon } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import {
-  latestSubmissionsByAssignment,
-  submissionThumbPath,
-  listAssignmentQueue,
-  listMusicApprovalQueue,
-  type MusicApprovalItem,
-} from '../../../lib/admin-api';
-import {
-  listAccountApprovalQueue,
-  type AccountApprovalItem,
-} from '../../../lib/creator-accounts-api';
+import { InviteCreatorsSheet } from '../../../components/admin/v2/review/InviteCreatorsSheet';
+import { AccountCard, CreatorQueueCard, MusicCard } from '../../../components/admin/v2/review/ReviewCards';
+import { ErrorCard, PostsEmpty, StateCard } from '../../../components/admin/v2/review/ReviewStates';
+import { ContextRow, ElsewhereStrip } from '../../../components/shared';
+import { Icon as LineIcon } from '../../../components/ui/Icon';
+import { Chip, Press, Seg, Skeleton, TabPane, useTabBarInset } from '../../../components/v2';
 import { useAuth } from '../../../lib/auth';
+import { groupByCreator, pendingAccounts, reviewTotal, useReviewQueue } from '../../../lib/admin-review-queue';
 import { useCompany } from '../../../lib/company-context';
-import { isEditing, toAssignmentQueueRow } from '../../../lib/admin-queue-map';
-import type { MockQueueItem } from '../../../lib/admin-review-types';
-import { color, radiusAdmin, shadow, space } from '../../../theme/tokens';
+import { isManagerSetupCompleteFlag } from '../../../lib/profile';
+import { color, radius, shadow, text } from '../../../theme/v2';
 
-/** Clears the floating tab bar (22 bottom + bar height). */
-const LIST_BOTTOM_PAD = 104;
+type Lane = 'posts' | 'music' | 'accounts';
+
+/** Spec: a short skeleton before content so the list never flashes in half loaded. */
+const SKELETON_MS = 500;
 
 function BellButton({ count, onPress }: { count: number; onPress: () => void }) {
   return (
-    <PressableScale
+    <Press
       accessibilityRole="button"
       accessibilityLabel={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
       onPress={onPress}
-      style={[styles.bell, shadow.shadowCard]}
+      style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: color.card, alignItems: 'center', justifyContent: 'center', ...shadow.card }}
     >
-      <Icon name="bell" size={19} color={color.ink} />
-      {count > 0 && (
-        <View style={styles.bellBadge}>
-          <WaitBadge count={count} size={18} />
+      <LineIcon name="bell" size={19} color={color.ink} />
+      {count > 0 ? (
+        <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: radius.pill, backgroundColor: color.blue, alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 0 2px ${color.bg}` }}>
+          <Text style={{ fontSize: 11, lineHeight: 14, fontWeight: '700', color: color.white }}>{count > 99 ? '99+' : count}</Text>
         </View>
-      )}
-    </PressableScale>
+      ) : null}
+    </Press>
   );
 }
 
-/** MockQueueItem plus the media-badge facts the row spec needs. */
-type SubmissionQueueRow = {
-  item: MockQueueItem;
-  /** submissions.version — attempt lives on the submission. */
-  attempt: number;
-  /** hook + points + outro, from the brief. Null when the brief has no count. */
-  unitCount: number | null;
-  /** Latest submission's first media path for the row thumb. */
-  mediaPath: string | null;
-};
-
-function useAdminQueue(companyId: string | undefined): {
-  posts: SubmissionQueueRow[];
-  music: MusicApprovalItem[];
-  /** assignment id -> slide 1 path, for music rows. */
-  musicMedia: Map<string, string>;
-  accounts: AccountApprovalItem[];
-  loading: boolean;
-} {
-  const [posts, setPosts] = useState<SubmissionQueueRow[]>([]);
-  const [music, setMusic] = useState<MusicApprovalItem[]>([]);
-  const [musicMedia, setMusicMedia] = useState<Map<string, string>>(new Map());
-  const [accounts, setAccounts] = useState<AccountApprovalItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    if (companyId === undefined) return;
-    try {
-      const [queue, musicQueue, accountQueue] = await Promise.all([
-        listAssignmentQueue(),
-        listMusicApprovalQueue(companyId),
-        listAccountApprovalQueue(companyId),
-      ]);
-      const subs = await latestSubmissionsByAssignment([
-        ...queue.map((a) => a.id),
-        ...musicQueue.map((m) => m.assignment.id),
-      ]);
-      setPosts(
-        // A post still in the edit pass has nothing to review yet; it shows
-        // up once the render lands.
-        queue.filter((a) => !isEditing(subs.get(a.id) ?? null)).map((a) => {
-          const submission = subs.get(a.id) ?? null;
-          return {
-            item: toAssignmentQueueRow(a, submission),
-            attempt: submission?.version ?? 1,
-            unitCount: a.briefs.point_count !== null ? a.briefs.point_count + 2 : null,
-            mediaPath: submission ? submissionThumbPath(submission) : null,
-          };
-        }),
-      );
-      setMusic(musicQueue);
-      setMusicMedia(
-        new Map(
-          musicQueue.flatMap((m) => {
-            const path = subs.get(m.assignment.id)?.video_path;
-            return path !== undefined ? [[m.assignment.id, path] as const] : [];
-          }),
-        ),
-      );
-      setAccounts(accountQueue);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      void load();
-    }, [load]),
+/** Wraps a list card: rises in, fades out when approved, neighbours slide up. */
+function Item({ children, index }: { children: React.ReactNode; index: number }) {
+  return (
+    <Animated.View entering={FadeInDown.duration(260).delay(Math.min(index, 6) * 40)} exiting={FadeOut.duration(180)} layout={LinearTransition.duration(240)}>
+      {children}
+    </Animated.View>
   );
-
-  return { posts, music, musicMedia, accounts, loading };
 }
 
 export default function ReviewScreen() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const insets = useSafeAreaInsets();
+  const bottom = useTabBarInset();
+  const { profile, managerAccess } = useAuth();
   const { openNotifications, unreadNotifications } = useCompany();
-  const { posts, music, musicMedia, accounts, loading } = useAdminQueue(profile?.active_company_id);
-  const [lane, setLane] = useState(0);
+  const companyId = profile?.active_company_id;
 
-  const pendingAccounts = accounts.filter((a) => a.status !== 'needs_changes');
-  const sentBackAccounts = accounts.filter((a) => a.status === 'needs_changes');
+  const status = useReviewQueue((s) => s.status);
+  const error = useReviewQueue((s) => s.error);
+  const posts = useReviewQueue((s) => s.posts);
+  const music = useReviewQueue((s) => s.music);
+  const accounts = useReviewQueue((s) => s.accounts);
+  const avatars = useReviewQueue((s) => s.avatars);
+  const creatorCount = useReviewQueue((s) => s.creatorCount);
+  const queueCompany = useReviewQueue((s) => s.companyId);
+  const load = useReviewQueue((s) => s.load);
 
-  const total = posts.length + music.length + pendingAccounts.length;
+  const [lane, setLane] = useState<Lane>('posts');
+  const [refreshing, setRefreshing] = useState(false);
+  const [held, setHeld] = useState(true);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
-  const openAccount = (accountId: string) =>
-    router.push({
-      pathname: '/(admin)/account-approval/[accountId]',
-      params: { accountId },
-    });
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  useScrollToTop(scrollRef);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!companyId) return;
+      const ready = useReviewQueue.getState().companyId === companyId && useReviewQueue.getState().status === 'ready';
+      void load(companyId, { quiet: ready });
+      if (ready) {
+        setHeld(false);
+        return;
+      }
+      setHeld(true);
+      const t = setTimeout(() => setHeld(false), SKELETON_MS);
+      return () => clearTimeout(t);
+    }, [companyId, load]),
+  );
+
+  const onRefresh = useCallback(async () => {
+    if (!companyId) return;
+    setRefreshing(true);
+    await load(companyId, { quiet: true });
+    setRefreshing(false);
+  }, [companyId, load]);
+
+  const groups = useMemo(() => groupByCreator(posts, avatars), [posts, avatars]);
+  const pending = pendingAccounts(accounts);
+  const total = reviewTotal({ posts, music, accounts });
+  const loading = queueCompany !== companyId || status === 'idle' || (status === 'loading' && !refreshing) || held;
+  const failed = status === 'error';
+
+  const openPost = (id: string, creatorId?: string) =>
+    router.push({ pathname: '/(admin)/review/[id]', params: creatorId ? { id, creator: creatorId } : { id } });
+  const openCreator = (creatorId: string) => router.push({ pathname: '/(admin)/review/creator/[creatorId]', params: { creatorId } });
+  const openCreators = () => router.push('/(admin)/creators');
+  const setupIncomplete = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers);
+
+  const body = () => {
+    if (loading && !failed) {
+      return [0, 1, 2, 3].map((i) => <Skeleton key={i} h={76} />);
+    }
+    if (failed && total === 0) {
+      return <ErrorCard message={error} onRetry={() => companyId && void load(companyId)} />;
+    }
+    if (lane === 'posts') {
+      if (groups.length === 0) {
+        return (
+          <PostsEmpty
+            noCreators={creatorCount === 0}
+            canInvite={managerAccess.inviteCreators}
+            onInvite={() => setInviteOpen(true)}
+            onCreators={openCreators}
+            onNewBrief={() => router.push({ pathname: '/(admin)/new-brief', params: { slot: 'new' } })}
+            onSetup={setupIncomplete ? () => router.push('/(admin)/(tabs)/setup') : undefined}
+          />
+        );
+      }
+      return groups.map((g, i) => (
+        <Item key={g.creatorId} index={i}>
+          <CreatorQueueCard group={g} onPress={() => openCreator(g.creatorId)} onPost={(id) => openPost(id, g.creatorId)} />
+        </Item>
+      ));
+    }
+    if (lane === 'music') {
+      if (music.length === 0) {
+        return <StateCard icon="music_note" tone="purple" title="No songs waiting." body="When a creator adds the sound to a live slideshow and marks it added, the song lands here for you to check." />;
+      }
+      return music.map((m, i) => (
+        <Item key={m.assignment.id} index={i}>
+          <MusicCard item={m} photo={avatars[m.assignment.creator_id] ?? null} onPress={() => router.push({ pathname: '/(admin)/music/[id]', params: { id: m.assignment.id } })} />
+        </Item>
+      ));
+    }
+    if (accounts.length === 0) {
+      return (
+        <StateCard
+          icon="person"
+          tone="amber"
+          title="No accounts waiting."
+          body={creatorCount === 0 ? 'Invited creators set up their TikTok and Instagram, then their accounts land here for you to approve.' : 'Every creator on the roster is linked.'}
+        />
+      );
+    }
+    return accounts.map((a, i) => (
+      <Item key={a.id} index={i}>
+        <AccountCard account={a} photo={avatars[a.creator_id] ?? null} onPress={() => router.push({ pathname: '/(admin)/account-approval/[accountId]', params: { accountId: a.id } })} />
+      </Item>
+    ));
+  };
 
   return (
-    <AdminScreen scroll={false} contentStyle={styles.screen}>
-      <View>
-        <ContextRow
-          right={<BellButton count={unreadNotifications} onPress={openNotifications} />}
-        />
-        <AdminHeader
-          title="Review"
-          pill={
-            loading
-              ? undefined
-              : total === 0
-                ? { label: 'All clear', tone: 'green' }
-                : { label: `${total} waiting`, tone: 'accent' }
-          }
-          trailing={loading ? <SkeletonLine width={84} height={30} /> : undefined}
-        />
-        <ElsewhereStrip style={styles.strip} />
-        <Segmented
-          options={[
-            { label: 'Posts', count: loading ? undefined : posts.length },
-            { label: 'Music', count: loading ? undefined : music.length },
-            { label: 'Accounts', count: loading ? undefined : pendingAccounts.length },
-          ]}
+    <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top }}>
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: bottom }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={color.grey3} />}
+      >
+        <ContextRow right={<BellButton count={unreadNotifications} onPress={openNotifications} />} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8, paddingBottom: 8 }}>
+          <Text style={text.title}>Review</Text>
+          {loading ? null : total > 0 ? <Chip icon="schedule" label={`${total} waiting`} /> : <Chip icon="check" tone="green" label="All clear" />}
+        </View>
+        <ElsewhereStrip style={{ marginTop: 4, marginBottom: 4 }} />
+        <Seg<Lane>
+          style={{ marginTop: 8, marginBottom: 16 }}
           value={lane}
           onChange={setLane}
+          options={[
+            { key: 'posts', label: 'Posts', count: loading ? undefined : posts.length, tone: 'blue' },
+            { key: 'music', label: 'Music', count: loading ? undefined : music.length, tone: 'purple' },
+            { key: 'accounts', label: 'Accounts', count: loading ? undefined : pending.length, tone: 'amber' },
+          ]}
         />
-      </View>
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? (
-          <>
-            <SkeletonCard height={96} radius={radiusAdmin.lg} />
-            <SkeletonCard height={96} radius={radiusAdmin.lg} />
-            <SkeletonCard height={96} radius={radiusAdmin.lg} />
-            <SkeletonCard height={96} radius={radiusAdmin.lg} />
-          </>
-        ) : lane === 0 ? (
-          posts.length === 0 ? (
-            <EmptyState
-              icon="inbox"
-              title="Nothing to review"
-              body="Nothing from your creators right now."
-              style={styles.empty}
-            />
-          ) : (
-            posts.map((row) => (
-              <SubmissionRow
-                key={row.item.id}
-                item={row.item}
-                attempt={row.attempt}
-                mediaPath={row.mediaPath}
-                unitCount={row.unitCount}
-                onPress={() => router.push(`/(admin)/review/${row.item.id}`)}
-              />
-            ))
-          )
-        ) : lane === 1 ? (
-          music.length === 0 ? (
-            <EmptyState
-              icon="music-2"
-              title="No songs waiting"
-              body="Nothing from your creators right now."
-              style={styles.empty}
-            />
-          ) : (
-            music.map((item) => (
-              <MusicApprovalRow
-                key={item.assignment.id}
-                item={item}
-                mediaPath={musicMedia.get(item.assignment.id) ?? null}
-                onPress={() => router.push(`/(admin)/music/${item.assignment.id}`)}
-              />
-            ))
-          )
-        ) : accounts.length === 0 ? (
-          <EmptyState
-            icon="circle-user-round"
-            title="No accounts to approve"
-            body="Every creator on the roster is linked."
-            style={styles.empty}
-          />
-        ) : (
-          <>
-            {pendingAccounts.map((account) => (
-              <AccountRow
-                key={account.id}
-                account={account}
-                onPress={() => openAccount(account.id)}
-              />
-            ))}
-            {sentBackAccounts.length > 0 && (
-              <>
-                <SectionLabel style={styles.sectionLabel}>Sent back</SectionLabel>
-                {sentBackAccounts.map((account) => (
-                  <AccountRow
-                    key={account.id}
-                    account={account}
-                    onPress={() => openAccount(account.id)}
-                  />
-                ))}
-              </>
-            )}
-          </>
-        )}
+        {failed && total > 0 ? (
+          <Press accessibilityRole="button" onPress={() => companyId && void load(companyId)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, marginBottom: 12, borderRadius: radius.option, backgroundColor: color.pinkTint }}>
+            <Text style={[text.meta, { flex: 1, color: color.pink }]}>Could not refresh. Showing the last list. Tap to retry.</Text>
+          </Press>
+        ) : null}
+        <TabPane k={loading ? 'loading' : lane}>{body()}</TabPane>
       </ScrollView>
-    </AdminScreen>
+      <InviteCreatorsSheet open={inviteOpen} companyId={companyId} onClose={() => setInviteOpen(false)} onSent={() => companyId && void load(companyId, { quiet: true })} />
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    paddingHorizontal: space.gutterAdmin,
-  },
-  strip: {
-    marginBottom: 14,
-  },
-  scroll: {
-    flex: 1,
-    marginTop: 14,
-    marginHorizontal: -space.gutterAdmin,
-  },
-  list: {
-    gap: 12,
-    paddingHorizontal: space.gutterAdmin,
-    paddingBottom: LIST_BOTTOM_PAD,
-  },
-  sectionLabel: {
-    marginTop: 10,
-    marginBottom: 2,
-  },
-  bell: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.white,
-  },
-  bellBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-  },
-  empty: {
-    marginTop: 30,
-  },
-});

@@ -3,6 +3,7 @@ import { Tabs, useFocusEffect, useRouter } from 'expo-router';
 
 import { TabBar, type TabBarEntry } from '../../../components/v2';
 import { useAuth } from '../../../lib/auth';
+import { useCompany } from '../../../lib/company-context';
 import { unreadCreatorDmCount } from '../../../lib/creator-inbox-api';
 import { color, screenTransition } from '../../../theme/v2';
 
@@ -24,6 +25,8 @@ export default function CreatorTabsLayout() {
   const companyId = profile?.active_company_id;
   const meId = profile?.id;
   const [unread, setUnread] = useState(0);
+  // Red dot on Home when another company (or the manager side) has something waiting.
+  const { elsewhereTotal } = useCompany();
 
   useFocusEffect(
     useCallback(() => {
@@ -39,7 +42,7 @@ export default function CreatorTabsLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <TabBar {...props} entries={ENTRIES} onCreate={() => router.push('/(creator)/create')} counts={{ messages: unread || undefined }} />}
+      tabBar={(props) => <TabBar {...props} entries={ENTRIES} onCreate={() => router.push('/(creator)/create')} counts={{ messages: unread || undefined }} dots={{ index: elsewhereTotal > 0 }} />}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: color.bg },

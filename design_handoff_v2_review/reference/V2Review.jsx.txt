@@ -1,0 +1,385 @@
+/* Review tab: one card per creator, creator queue, post review, creator profile, thread, music and account approvals. */
+const reviewStore = { queue: window.V2.queue.slice(), music: window.V2.music.slice(), accounts: window.V2.accounts.slice(), busy: false, listeners: new Set() };
+const setReview = (patch) => { Object.assign(reviewStore, patch); reviewStore.listeners.forEach((l) => l({})); };
+window.setBusy = (on) => setReview({ busy: on, queue: on ? window.V2.queue.concat(window.V2.busyQueue) : window.V2.queue.slice() });
+const useReview = () => { const [, tick] = React.useState({}); React.useEffect(() => { reviewStore.listeners.add(tick); return () => reviewStore.listeners.delete(tick); }, []); return reviewStore; };
+const useLoaded = (ms = 500) => { const [l, setL] = React.useState(false); React.useEffect(() => { const t = setTimeout(() => setL(true), ms); return () => clearTimeout(t); }, []); return l; };
+
+const statusLine = (posts) => {
+  const waiting = posts.filter((p) => p.state === 'Waiting').length, retakes = posts.filter((p) => p.take > 1).length;
+  const parts = []; if (waiting) parts.push(`${waiting} waiting`); if (retakes) parts.push(`${retakes} take 2`); if (!waiting && posts.length) parts.push(`${posts.length} back after changes`);
+  return parts.join(', ');
+};
+
+const countLine = (posts) => `${posts.length} ${posts.length === 1 ? 'post' : 'posts'}`;
+
+function CreatorCard({ c, posts, onClick, onPost }) {
+  return (
+    <Card onClick={onClick} pad={'14px 16px'} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <Avatar name={c.name} photo={c.photo} tone={c.tone} size={64} />
+      <span className="t-card" style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', fontSize: 22, lineHeight: '26px' }}>{c.name}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flex: '0 0 auto' }}>
+        <span style={{ whiteSpace: 'nowrap', font: '600 13px/18px var(--font)', color: 'var(--blue-deep)' }}>{countLine(posts)}</span>
+        <span style={{ display: 'flex', gap: 5, justifyContent: 'flex-end', maxWidth: 160, flexWrap: 'wrap' }}>
+          {posts.map((p) => <span key={p.id} role="button" className="p" onClick={(e) => { e.stopPropagation(); onPost(p); }} style={{ display: 'block' }}><Thumb w={26} post={p} title={false} radius={6} /></span>)}
+        </span>
+      </span>
+      <Icon name="chevron_right" size={20} color="var(--grey-3)" />
+    </Card>
+  );
+}
+
+function ReviewScreen() {
+  const nav = useNav();
+  const { queue, music, accounts, busy } = useReview();
+  const loaded = useLoaded();
+  const [lane, setLane] = React.useState('Posts');
+  const total = queue.length + music.length + accounts.length;
+  const groups = window.V2.creators.concat(busy ? window.V2.extraCreators : []).map((c) => ({ c, posts: queue.filter((p) => p.creator === c.id) })).filter((g) => g.posts.length);
+  return (
+    <Screen title="Review" sub={loaded ? (total ? <Chip tone="blue" icon="schedule">{total} waiting</Chip> : <Chip tone="green" icon="check">All clear</Chip>) : <span style={{ height: 26 }} />} right={null}>
+      <Seg options={[{ label: 'Posts', count: queue.length, tone: 'blue' }, { label: 'Music', count: music.length, tone: 'purple' }, { label: 'Accounts', count: accounts.length, tone: 'amber' }]} value={lane} onChange={setLane} style={{ marginBottom: 16 }} />
+      {!loaded ? [0, 1, 2, 3].map((i) => <Skeleton key={i} h={76} />) : null}
+      {loaded && lane === 'Posts' ? (groups.length === 0 ? <Empty>Nothing to review.</Empty> : groups.map((g) => <CreatorCard key={g.c.id} c={g.c} posts={g.posts} onClick={() => nav.push('CreatorQueue', { id: g.c.id })} onPost={(p) => nav.push('ReviewDetail', { id: p.id })} />)) : null}
+      {loaded && lane === 'Music' ? (music.length === 0 ? <Empty>No songs waiting.</Empty> : music.map((m) => { const c = window.V2.creator(m.creator); return (
+        <Card key={m.id} onClick={() => nav.push('Music', { id: m.id })} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--blue-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="music_note" size={28} color="var(--blue)" /></span>
+          <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{m.post}</span><span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}><Avatar name={c.name} photo={c.photo} tone={c.tone} size={28} ring={false} /><span className="t-meta" style={{ fontSize: 15 }}>{c.name} · {m.age} ago</span></span></span>
+          <Icon name="chevron_right" size={22} color="var(--grey-3)" />
+        </Card>
+      ); })) : null}
+      {loaded && lane === 'Accounts' ? (accounts.length === 0 ? <Empty>No accounts waiting.</Empty> : accounts.map((a) => { const c = window.V2.creator(a.creator); return (
+        <Card key={a.id} onClick={() => nav.push('Account', { id: a.id })} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <Avatar name={c.name} photo={c.photo} tone={c.tone} size={56} />
+          <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block' }}>{a.creatorName} · {a.platform}</span><span className="t-meta" style={{ display: 'block' }}>{a.handle}</span></span>
+          <span className="t-meta" style={{ whiteSpace: 'nowrap' }}>{a.age} ago</span>
+          <Icon name="chevron_right" size={22} color="var(--grey-3)" />
+        </Card>
+      ); })) : null}
+    </Screen>
+  );
+}
+
+function CreatorQueueScreen({ id }) {
+  const nav = useNav();
+  const { queue } = useReview();
+  const c = window.V2.creator(id);
+  const posts = queue.filter((p) => p.creator === id);
+  return (
+    <Screen back title={`${c.name}'s posts`}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '4px 4px 16px' }}>
+        <Avatar name={c.name} photo={c.photo} tone={c.tone} size={56} online={c.online} />
+        <div className="t-card" style={{ flex: 1, whiteSpace: 'nowrap' }}>{posts.length} to review</div>
+      </div>
+      {posts.length === 0 ? <Empty>All caught up with {c.name}.</Empty> : posts.map((p) => (
+        <Card key={p.id} onClick={() => nav.push('ReviewDetail', { id: p.id })} style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span style={{ position: 'relative', flex: '0 0 auto' }}><Thumb w={48} post={p} title={false} radius={10} />{p.take > 1 ? <span style={{ position: 'absolute', right: -6, top: -6, width: 20, height: 20, borderRadius: 999, background: 'var(--amber)', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="replay" size={12} weight={700} color="#fff" /></span> : null}</span>
+          <span className="t-row" style={{ flex: 1, minWidth: 0, font: `600 ${p.title.length > 56 ? 12 : p.title.length > 40 ? 14 : p.title.length > 28 ? 15 : 17}px/1.25 var(--font)`, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', alignSelf: 'center' }}>{p.title}</span>
+          <span className="t-meta" style={{ whiteSpace: 'nowrap', flex: '0 0 auto' }}>{p.age} ago</span>
+          <Icon name="chevron_right" size={20} color="var(--grey-3)" />
+        </Card>
+      ))}
+    </Screen>
+  );
+}
+
+const REASONS = ['Hook too long', 'Plug comes too late', 'Audio hard to hear', 'Off brief', 'Needs a reshoot'];
+
+function ReviewDetailScreen({ id }) {
+  const nav = useNav();
+  const { queue } = useReview();
+  const p = queue.find((q) => q.id === id) || window.V2.queue.find((q) => q.id === id);
+  const s = window.V2.script;
+  const [sheet, setSheet] = React.useState(false);
+  const [notes, setNotes] = React.useState([]);
+  const [draft, setDraft] = React.useState('');
+  const [pinned, setPinned] = React.useState(true);
+  const addNote = () => { if (!draft.trim()) return; setNotes((n) => [...n, { id: Date.now(), at: pinned ? Math.round(t) : null, text: draft.trim() }].sort((a, b) => (a.at ?? -1) - (b.at ?? -1))); setDraft(''); };
+  const openNotes = () => { setSheet(true); setPlaying(false); };
+  const [script, setScript] = React.useState(false);
+  const [why, setWhy] = React.useState([]);
+  const [note, setNote] = React.useState('');
+  const [playing, setPlaying] = React.useState(false);
+  const [t, setT] = React.useState(0);
+  const dragY = React.useRef(null);
+  const [fast, setFast] = React.useState(false);
+  const holdT = React.useRef(null), held = React.useRef(false);
+  React.useEffect(() => { if (!playing) return; const id = setInterval(() => setT((x) => (x >= 34 ? 0 : x + (fast ? 0.2 : 0.1))), 100); return () => clearInterval(id); }, [playing, fast]);
+  const holdStart = (e) => { held.current = false; const right = e.clientX > e.currentTarget.getBoundingClientRect().left + e.currentTarget.offsetWidth / 2; if (!right) return; holdT.current = setTimeout(() => { held.current = true; setFast(true); setPlaying(true); }, 300); };
+  const holdEnd = () => { clearTimeout(holdT.current); if (held.current) { setFast(false); held.current = false; } };
+  const togglePlay = () => { if (held.current) return; setPlaying((x) => !x); };
+  const [scrub, setScrub] = React.useState(false);
+  const wasPlaying = React.useRef(false);
+  const seekTo = (e) => { const r = e.currentTarget.getBoundingClientRect(); setT(Math.max(0, Math.min(34, ((e.clientX - r.left) / r.width) * 34))); };
+  const scrubStart = (e) => { e.currentTarget.setPointerCapture(e.pointerId); wasPlaying.current = playing; setPlaying(false); setScrub(true); seekTo(e); };
+  const scrubMove = (e) => { if (scrub) seekTo(e); };
+  const scrubEnd = () => { if (!scrub) return; setScrub(false); if (wasPlaying.current) setPlaying(true); };
+  const clock = (x) => `0:${String(Math.floor(x)).padStart(2, '0')}`;
+  const [approved, setApproved] = React.useState(null);
+  const approve = () => { const rest = reviewStore.queue.filter((q) => q.id !== id); setReview({ queue: rest }); setPlaying(false); setApproved({ left: rest.filter((q) => q.creator === p.creator).length }); };
+  const sendBack = () => { setSheet(false); const rest = reviewStore.queue.filter((q) => q.id !== id); setReview({ queue: rest }); setPlaying(false); setApproved({ sent: true, left: rest.filter((q) => q.creator === p.creator).length }); };
+  const NOTES_H = 320;
+  if (!p) return <Screen back title="Review" />;
+  const c = window.V2.creator(p.creator);
+  const sections = [{ k: 'Hook', v: s.hook }].concat(s.points.slice(0, p.points).map((pt, i) => ({ k: `${i + 1}`, v: pt, n: true }))).concat([{ k: 'CTA', v: s.close }]);
+  const seg = 34 / (p.points + 2), live = playing ? Math.min(p.points + 1, Math.floor(t / seg)) : -1;
+  const onDown = (e) => { dragY.current = e.clientY; };
+  const onUp = (open) => (e) => { if (dragY.current == null) return; const d = e.clientY - dragY.current; dragY.current = null; if (open && d > 40) setScript(false); if (!open && d < -20) setScript(true); };
+  const chip = { font: '600 12px/22px var(--font)', color: 'var(--blue-deep)', background: 'var(--blue-tint)', padding: '0 9px 0 7px', borderRadius: 999, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 };
+  const HEAD = 112, FOOT = 112;
+  const lbl = { font: '600 13px/16px var(--font)', color: 'var(--grey-4)', textTransform: 'uppercase', letterSpacing: 0.4 };
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: '#000', overflow: 'hidden' }}>
+      <button type="button" onClick={togglePlay} onPointerDown={holdStart} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} onContextMenu={(e) => e.preventDefault()} style={{ position: 'absolute', left: 0, right: 0, top: HEAD, bottom: FOOT, background: `url(${frameFor(p)}) center/cover`, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+        {fast ? <span style={{ position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)', font: '700 13px/26px var(--font)', color: '#fff', background: 'rgba(0,0,0,0.45)', padding: '0 10px', borderRadius: 999, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="fast_forward" size={16} color="#fff" />2x</span> : null}
+        {!playing ? <span style={{ width: 72, height: 72, borderRadius: 999, background: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-float)' }}><Icon name="play_arrow" size={40} color="var(--ink)" /></span> : null}
+        <span style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 70, background: 'linear-gradient(180deg, rgba(0,0,0,0.4), rgba(0,0,0,0))', pointerEvents: 'none' }} />
+        <span style={{ position: 'absolute', left: 0, right: 0, top: 12, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 24, pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.45)' }}>
+          <span style={{ font: '500 17px/22px var(--font)', color: 'rgba(255,255,255,0.72)', position: 'relative' }}>Following<span style={{ position: 'absolute', right: -9, top: 0, width: 7, height: 7, borderRadius: 999, background: '#FE2C55' }} /></span>
+          <span style={{ font: '700 17px/22px var(--font)', color: '#fff', position: 'relative' }}>For You<span style={{ position: 'absolute', left: '50%', bottom: -8, width: 22, height: 3, marginLeft: -11, borderRadius: 2, background: '#fff' }} /></span>
+        </span>
+        <span style={{ position: 'absolute', right: 16, top: 10, pointerEvents: 'none' }}><Icon name="search" size={28} color="#fff" weight={500} /></span>
+        <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 240, background: 'linear-gradient(0deg, rgba(0,0,0,0.55), rgba(0,0,0,0))', pointerEvents: 'none' }} />
+        <span style={{ position: 'absolute', right: 12, bottom: 52, width: 48, display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none', opacity: scrub ? 0 : 1, transition: 'opacity 150ms' }}>
+          <span style={{ position: 'relative', width: 48, height: 48, marginBottom: 26 }}><span style={{ display: 'flex', width: 48, height: 48, borderRadius: 999, border: '2px solid #fff', boxSizing: 'border-box', overflow: 'hidden' }}><Avatar name={c.name} photo={c.photo} tone={c.tone} size={44} ring={false} /></span><span style={{ position: 'absolute', left: '50%', bottom: -10, width: 20, height: 20, marginLeft: -10, borderRadius: 999, background: '#FE2C55', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="add" size={14} weight={700} color="#fff" /></span></span>
+          {[['favorite', '0'], ['mode_comment', '0'], ['bookmark', '0'], ['reply', '0']].map(([n, v]) => <span key={n} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, marginBottom: 18 }}><Icon name={n} size={34} color="#fff" weight={500} style={n === 'reply' ? { transform: 'scaleX(-1)' } : null} /><span style={{ font: '600 12px/16px var(--font)', color: '#fff' }}>{v}</span></span>)}
+          <span style={{ width: 40, height: 40, borderRadius: 999, background: 'conic-gradient(#333 0 25%, #111 0 50%, #333 0 75%, #111 0)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: playing ? 'v2-spin 4s linear infinite' : 'none' }}><span style={{ width: 22, height: 22, borderRadius: 999, overflow: 'hidden', display: 'flex' }}><Avatar name={c.name} photo={c.photo} tone={c.tone} size={22} ring={false} /></span></span>
+        </span>
+        <span style={{ position: 'absolute', left: 12, right: 76, bottom: 52, textAlign: 'left', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 2px rgba(0,0,0,0.4)', opacity: scrub ? 0 : 1, transition: 'opacity 150ms' }}>
+          <span style={{ display: 'block', font: '700 17px/22px var(--font)' }}>{c.handle}</span>
+          <span style={{ display: 'block', font: '400 15px/20px var(--font)', marginTop: 6 }}>{s.caption.length > 70 ? s.caption.slice(0, 68).replace(/\s+\S*$/, '') + '... ' : s.caption + ' '}<span style={{ fontWeight: 600 }}>more</span></span>
+        </span>
+      </button>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: HEAD, background: '#fff', zIndex: 1 }}>
+        <div style={{ position: 'absolute', left: 4, right: 16, top: 50, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <button type="button" className="p" aria-label="Back" onClick={nav.pop} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}><Icon name="chevron_left" size={32} color="var(--ink)" /></button>
+          <div style={{ flex: 1, minWidth: 0, paddingTop: 8, font: `700 ${p.title.length > 44 ? 17 : 20}px/1.2 var(--font)`, color: 'var(--ink)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', letterSpacing: -0.2 }}>{p.title}</div>
+          <button type="button" className="p" onClick={() => setScript(true)} style={{ marginTop: 10, height: 24, padding: '0 6px 0 10px', borderRadius: 999, background: 'var(--blue-tint)', display: 'flex', alignItems: 'center', gap: 2, font: '600 12px/24px var(--font)', color: 'var(--blue-deep)', flex: '0 0 auto' }}>View script<Icon name="keyboard_arrow_down" size={16} color="var(--blue-deep)" /></button>
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: FOOT, background: '#fff', zIndex: 1 }} />
+      <button type="button" className="p" onClick={() => nav.push('Editor', { id: p.id }, { modal: true })} style={{ position: 'absolute', left: '50%', bottom: FOOT + 10, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.5)', zIndex: 3, opacity: scrub || sheet ? 0 : 1, transition: 'opacity 150ms', pointerEvents: scrub || sheet ? 'none' : 'auto' }}><Icon name="keyboard_arrow_up" size={26} color="#fff" weight={700} /><span style={{ font: '700 13px/14px var(--font)' }}>Edit</span></button>
+      <div onPointerDown={scrubStart} onPointerMove={scrubMove} onPointerUp={scrubEnd} onPointerCancel={scrubEnd} style={{ position: 'absolute', left: 0, right: 0, bottom: FOOT - 14, height: 32, zIndex: 3, touchAction: 'none', cursor: 'pointer' }}>
+        {scrub ? <span style={{ position: 'absolute', left: '50%', bottom: 36, transform: 'translateX(-50%)', font: '700 15px/20px var(--font)', color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.5)', whiteSpace: 'nowrap' }}>{clock(t)} <span style={{ color: 'rgba(255,255,255,0.6)' }}>/ {clock(34)}</span></span> : null}
+        <span style={{ position: 'absolute', left: 0, right: 0, bottom: 14, height: scrub ? 6 : 3, background: 'rgba(255,255,255,0.35)', transition: 'height 120ms' }}><span style={{ display: 'block', width: `${(t / 34) * 100}%`, height: '100%', background: '#fff' }} /></span>
+        {notes.filter((n) => n.at != null).map((n) => <span key={n.id} role="button" onPointerDown={(e) => { e.stopPropagation(); setT(n.at); }} style={{ position: 'absolute', left: `${(n.at / 34) * 100}%`, bottom: 11, width: 12, height: 12, marginLeft: -6, borderRadius: 999, background: 'var(--amber)', border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', cursor: 'pointer' }} />)}
+        <span style={{ position: 'absolute', left: `${(t / 34) * 100}%`, bottom: 17, width: scrub ? 14 : 0, height: scrub ? 14 : 0, marginLeft: scrub ? -7 : 0, borderRadius: 999, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.3)', transition: 'width 120ms, height 120ms, margin 120ms' }} />
+      </div>
+      <div onClick={() => setScript(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', opacity: script ? 1 : 0, pointerEvents: script ? 'auto' : 'none', transition: 'opacity 220ms ease', zIndex: 2 }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: HEAD, bottom: FOOT, overflow: 'hidden', pointerEvents: 'none', zIndex: 2 }}><div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '100%', background: '#fff', borderRadius: '24px 24px 0 0', transform: script ? 'translateY(0)' : 'translateY(100%)', pointerEvents: script ? 'auto' : 'none', transition: 'transform 320ms cubic-bezier(.2,.8,.2,1)', display: 'flex', flexDirection: 'column' }}>
+        <div onPointerDown={onDown} onPointerUp={onUp(true)} style={{ padding: '10px 0 6px', display: 'flex', justifyContent: 'center', flexShrink: 0, touchAction: 'none' }}><span style={{ width: 40, height: 5, borderRadius: 999, background: 'var(--grey-2)' }} /></div>
+        <div className="v2-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 20px 20px' }}>
+          {sections.map((sec, i) => { const idx = i - 1; const hot = sec.n && idx === live; return (
+            <div key={i} style={{ padding: '7px 0', display: sec.n ? 'grid' : 'block', gridTemplateColumns: sec.n ? '28px 1fr' : undefined, gap: 10 }}>
+              {sec.n ? <span style={{ width: 24, height: 24, borderRadius: 999, background: hot ? 'var(--blue)' : 'var(--grey-1)', color: hot ? '#fff' : 'var(--grey-4)', font: '700 13px/24px var(--font)', textAlign: 'center' }}>{sec.k}</span> : <div style={lbl}>{sec.k}</div>}
+              <div style={{ font: '400 15px/21px var(--font)', color: hot ? 'var(--blue-deep)' : 'var(--ink)', fontWeight: hot ? 600 : 400, marginTop: sec.n ? 0 : 4, transition: 'color 200ms' }}>{sec.v}</div>
+            </div>
+          ); })}
+        </div>
+      </div></div>
+      <div style={{ position: 'absolute', left: 16, right: 16, bottom: 40, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, zIndex: 4, opacity: sheet ? 0 : 1, pointerEvents: sheet ? 'none' : 'auto', transition: 'opacity 150ms' }}>
+        <Button onClick={openNotes} style={{ height: 56, padding: '0 14px', background: 'var(--blue-tint)', color: 'var(--blue-deep)' }}><Icon name={notes.length ? 'edit_note' : 'close'} size={20} weight={700} color="var(--blue-deep)" />{notes.length ? `${notes.length} ${notes.length === 1 ? 'change' : 'changes'}` : 'Changes'}</Button>
+        {notes.length ? <Button onClick={sendBack} style={{ height: 56, padding: '0 14px' }}><Icon name="arrow_upward" size={20} weight={700} />Send changes</Button> : <Button onClick={approve} style={{ height: 56, padding: '0 14px' }}><Icon name="check" size={20} weight={700} />Approve</Button>}
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: NOTES_H, zIndex: 5, display: 'flex', flexDirection: 'column', padding: '12px 16px 34px', background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -8px 30px rgba(16,24,40,0.12)', transform: sheet ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 320ms cubic-bezier(.2,.8,.2,1)', pointerEvents: sheet ? 'auto' : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <button type="button" className="p" onClick={() => { setSheet(false); }} style={{ width: 32, height: 32, borderRadius: 999, background: 'var(--grey-1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={18} color="var(--ink)" /></button>
+          <span className="t-row" style={{ flex: 1 }}>Notes for {p.creatorName}</span>
+          <span style={{ display: 'flex', background: 'var(--grey-1)', borderRadius: 999, padding: 3 }}>
+            {[[true, `At ${clock(t)}`], [false, 'Whole video']].map(([v, l]) => <button key={l} type="button" className="p" onClick={() => setPinned(v)} style={{ height: 26, padding: '0 10px', borderRadius: 999, background: pinned === v ? '#fff' : 'transparent', boxShadow: pinned === v ? 'var(--shadow-card)' : 'none', font: '600 12px/26px var(--font)', color: pinned === v ? 'var(--ink)' : 'var(--grey-4)', whiteSpace: 'nowrap', minWidth: v ? 64 : undefined }}>{l}</button>)}
+          </span>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+          <div style={{ position: 'relative', flex: notes.length ? '0 0 auto' : 1, minHeight: 0 }}>
+            <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); } }} placeholder={pinned ? `Note at ${clock(t)}` : 'Note'} style={{ width: '100%', height: notes.length ? 64 : '100%', minHeight: 64, borderRadius: 14, border: 'none', background: 'var(--grey-1)', padding: '12px 56px 12px 14px', font: '400 15px/20px var(--font)', color: 'var(--ink)', outline: 'none', resize: 'none', display: 'block' }} />
+            <button type="button" className="p" onClick={addNote} disabled={!draft.trim()} style={{ position: 'absolute', right: 8, bottom: 8, width: 36, height: 36, borderRadius: 999, background: draft.trim() ? (pinned ? 'var(--amber)' : 'var(--blue)') : 'var(--grey-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={pinned ? 'push_pin' : 'add_comment'} size={18} color="#fff" weight={600} /></button>
+          </div>
+          {notes.length ? <div className="v2-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {notes.map((n) => (
+              <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                <button type="button" className="p" onClick={() => n.at != null && setT(n.at)} style={{ height: 24, padding: '0 8px', borderRadius: 999, background: n.at != null ? 'var(--amber-tint)' : 'var(--blue-tint)', color: n.at != null ? 'var(--amber)' : 'var(--blue-deep)', font: '700 12px/24px var(--font)', whiteSpace: 'nowrap', flex: '0 0 auto' }}>{n.at != null ? clock(n.at) : 'Whole'}</button>
+                <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{n.text}</span>
+                <button type="button" className="p" onClick={() => setNotes((x) => x.filter((y) => y.id !== n.id))} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={16} color="var(--grey-3)" /></button>
+              </div>
+            ))}
+          </div> : null}
+        </div>
+        <div style={{ display: 'flex', flexShrink: 0 }}><Button onClick={() => { addNote(); setSheet(false); }} disabled={!notes.length && !draft.trim()}>{(() => { const n = notes.length + (draft.trim() ? 1 : 0); return `Save ${n ? n + ' ' : ''}${n === 1 ? 'change' : 'changes'}`; })()}</Button></div>
+      </div>
+      {approved ? <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: '#fff', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', width: 1800, height: 1800, marginLeft: -900, marginTop: -900, borderRadius: 999, background: 'var(--blue)', transform: 'scale(0)', animation: 'ap-flood2 900ms cubic-bezier(.3,.7,.2,1) 1150ms forwards' }} />
+        <div style={{ position: 'absolute', left: '50%', top: '50%', width: 120, height: 120, marginLeft: -60, marginTop: -60, borderRadius: 999, background: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'ap-pop 500ms cubic-bezier(.2,.8,.2,1) both, ap-swap-out 300ms ease 950ms forwards' }}>
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="24" strokeDashoffset="24" style={{ animation: 'ap-draw 350ms ease-out 300ms forwards' }} /></svg>
+        </div>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', width: 96, height: 96, marginLeft: -48, marginTop: -48, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, animation: 'ap-fly 1100ms cubic-bezier(.4,0,.2,1) 1100ms forwards' }}>
+          <Icon name="rocket_launch" size={88} color="#fff" weight={500} style={{ transform: 'rotate(-45deg)', filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.18))' }} />
+        </div>
+        <div style={{ position: 'absolute', left: 32, right: 32, top: '50%', marginTop: -60, textAlign: 'center', color: '#fff', opacity: 0, animation: 'ap-rise 450ms ease-out 2000ms forwards' }}>
+          <div style={{ font: '800 30px/36px var(--font)', letterSpacing: -0.5 }}>{approved.sent ? 'Changes sent!' : 'Post approved!'}</div>
+          <div style={{ font: '400 16px/22px var(--font)', marginTop: 10, opacity: 0.92 }}>{approved.sent ? `${p.creatorName} will get your notes and send a new take.` : `We'll let ${p.creatorName} know and ping you both when it's up.`}</div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 28 }}><Button onClick={() => approved.left ? nav.pop() : nav.popAll()} style={{ background: '#fff', color: 'var(--blue-deep)', height: 52, flex: '0 0 auto', padding: '0 28px' }}>{approved.left ? `Return to ${p.creatorName}'s posts` : 'Return to review'}</Button></div>
+        </div>
+      </div> : null}
+    </div>
+  );
+}
+
+function CreatorScreen({ id }) {
+  const nav = useNav();
+  const c = window.V2.creator(id);
+  const posts = window.V2.cur.posts.filter((p) => p.creator === id);
+  const { fmt, money } = window.V2;
+  return (
+    <Screen back title={c.name} right={<TextButton onClick={() => nav.push('Chat', { id: 'd-' + id })}>Message</TextButton>}>
+      <Card style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Avatar name={c.name} photo={c.photo} tone={c.tone} size={64} online={c.online} />
+        <div style={{ flex: 1 }}><div className="t-card">{c.name}</div><div className="t-meta">{c.handle} · {c.online ? 'Online now' : 'Last seen 2h ago'}</div></div>
+      </Card>
+      <Card style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <Num value={money(c.earned)} label="earned this month" tone="green" /><Num value={fmt(c.views)} label="views" /><Num value={c.posts} label="posts" />
+      </Card>
+      <SectionTitle right={`${posts.filter((p) => p.state === 'Posted').length} of ${posts.length} posted`}>Week 4</SectionTitle>
+      <Card pad={'4px 16px'}>
+        {posts.map((p, i) => (
+          <Row key={p.id} last={i === posts.length - 1} chevron onClick={() => (p.state === 'Waiting' || p.state === 'Changes requested') ? nav.push('ReviewDetail', { id: p.id }) : nav.push('Brief', { id: p.id })}>
+            <Thumb w={40} post={p} title={false} radius={8} />
+            <span style={{ flex: 1, minWidth: 0 }}><span className="t-row" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span><span style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}><Chip tone={STATE_TONE[p.state]} style={{ height: 22, fontSize: 12 }}>{p.state}</Chip><span className="t-meta">Day {p.day}</span></span></span>
+            {p.state === 'Posted' ? <Num small align="right" value={fmt(p.views)} label="views" /> : null}
+          </Row>
+        ))}
+      </Card>
+    </Screen>
+  );
+}
+
+function ThreadScreen({ id }) {
+  const p = window.V2.queue.find((q) => q.id === id) || window.V2.cur.posts.find((q) => q.id === id);
+  return (
+    <Screen back title="Thread">
+      <Card style={{ display: 'flex', gap: 14, alignItems: 'center' }}><Thumb w={48} post={p} title={false} radius={8} /><span><span className="t-row" style={{ display: 'block' }}>{p?.title}</span><span className="t-meta">{p?.creatorName} · {p?.format}</span></span></Card>
+      <Card pad={'4px 16px'}>
+        {window.V2.events.map((e, i) => (
+          <Row key={i} last={i === window.V2.events.length - 1} style={{ minHeight: 48 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 999, background: i === window.V2.events.length - 1 ? 'var(--blue)' : 'var(--grey-2)', flex: '0 0 auto' }} />
+            <span style={{ flex: 1 }}><span className="t-body" style={{ display: 'block' }}>{e.text}</span><span className="t-meta">{e.at}</span></span>
+          </Row>
+        ))}
+      </Card>
+    </Screen>
+  );
+}
+
+function MusicScreen({ id }) {
+  const nav = useNav();
+  const m = window.V2.music.find((x) => x.id === id);
+  const c = window.V2.creator(m.creator);
+  const handle = (c.handle || '').replace(/^@/, '');
+  const [sheet, setSheet] = React.useState(false);
+  const [note, setNote] = React.useState('');
+  const [saved, setSaved] = React.useState('');
+  const done = () => { setReview({ music: reviewStore.music.filter((x) => x.id !== id) }); nav.pop(); };
+  const open = (url) => { haptic(); window.open(url, '_blank', 'noopener'); };
+  const card = { height: 118, background: 'var(--card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-start', padding: 14, textAlign: 'left' };
+  const disc = (bg) => ({ width: 40, height: 40, borderRadius: 999, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' });
+  const lbl = { display: 'block', font: '600 15px/19px var(--font)', color: 'var(--ink)' };
+  const sub = { display: 'block', font: '500 12px/16px var(--font)', color: 'var(--grey-4)', marginTop: 2 };
+  return (
+    <Screen back title={m.post} footer={saved ? <Button variant="amber" onClick={done}>Request changes</Button> : <><Button onClick={() => setSheet(true)} style={{ background: 'var(--blue-tint)', color: 'var(--blue-deep)' }}>Request changes</Button><Button onClick={done}>Approve</Button></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <button type="button" className="p card" onClick={() => open(`https://www.tiktok.com/@${handle}`)} style={card}>
+          <span style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}><span style={disc('#000')}><TikTokMark size={22} color="#fff" /></span><Icon name="open_in_new" size={18} color="var(--grey-3)" /></span>
+          <span><span style={lbl}>TikTok</span><span style={sub}>Open post</span></span>
+        </button>
+        <button type="button" className="p card" onClick={() => open(`https://www.instagram.com/${handle}`)} style={card}>
+          <span style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}><span style={disc('linear-gradient(45deg, #F9CE34, #EE2A7B, #6228D7)')}><InstagramMark size={22} color="#fff" /></span><Icon name="open_in_new" size={18} color="var(--grey-3)" /></span>
+          <span><span style={lbl}>Instagram</span><span style={sub}>Open post</span></span>
+        </button>
+      </div>
+      {saved ? <Card onClick={() => { setNote(saved); setSheet(true); }} style={{ background: 'var(--amber-tint)', boxShadow: 'none', display: 'flex', gap: 12, alignItems: 'center' }}><Icon name="edit_note" size={22} color="var(--amber)" /><span className="t-body" style={{ flex: 1, minWidth: 0 }}>{saved}</span><Icon name="chevron_right" size={20} color="var(--amber)" /></Card> : null}
+      <div onClick={() => setSheet(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', opacity: sheet ? 1 : 0, pointerEvents: sheet ? 'auto' : 'none', transition: 'opacity 220ms ease', zIndex: 5 }} />
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 16px 34px', background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -8px 30px rgba(16,24,40,0.12)', transform: sheet ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 320ms cubic-bezier(.2,.8,.2,1)', pointerEvents: sheet ? 'auto' : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" className="p" onClick={() => setSheet(false)} style={{ width: 32, height: 32, borderRadius: 999, background: 'var(--grey-1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={18} color="var(--ink)" /></button>
+          <span className="t-row">Notes for {c.name}</span>
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" style={{ width: '100%', height: 120, borderRadius: 14, border: 'none', background: 'var(--grey-1)', padding: '12px 14px', font: '400 15px/20px var(--font)', color: 'var(--ink)', outline: 'none', resize: 'none', display: 'block' }} />
+        <div style={{ display: 'flex' }}><Button onClick={() => { setSaved(note.trim()); setSheet(false); }} disabled={!note.trim()}>Save changes</Button></div>
+      </div>
+    </Screen>
+  );
+}
+
+/* Platform marks. */
+const TikTokMark = ({ size = 22, color = '#000' }) => <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true"><path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.6 2.6 0 0 1-2.6-2.6 2.6 2.6 0 0 1 3.4-2.47V9.66a5.7 5.7 0 0 0-.8-.06A5.72 5.72 0 0 0 4.14 15.3 5.72 5.72 0 0 0 9.86 21a5.72 5.72 0 0 0 5.72-5.7V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.3 4.3 0 0 1-3.28-1.48z" /></svg>;
+const InstagramMark = ({ size = 22, color = '#000' }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.3" cy="6.7" r="1" fill={color} stroke="none" /></svg>;
+
+/* Notes per account, keyed by account id. */
+const accountNotes = {};
+const ACCOUNT_CLIPS = { 'tt-scroll': { label: 'TikTok scroll', dur: 42 }, 'ig-scroll': { label: 'Instagram scroll', dur: 38 } };
+
+function AccountScreen({ id }) {
+  const nav = useNav();
+  useReview();
+  const a = window.V2.accounts.find((x) => x.id === id);
+  const notes = accountNotes[id] || {};
+  const [sheet, setSheet] = React.useState(false);
+  const [note, setNote] = React.useState(notes.general || '');
+  const saved = notes.general || '';
+  const count = Object.values(notes).reduce((n, l) => n + (Array.isArray(l) ? l.length : (l ? 1 : 0)), 0);
+  const handle = a.handle.replace(/^@/, '');
+  const done = () => { setReview({ accounts: reviewStore.accounts.filter((x) => x.id !== id) }); nav.pop(); };
+  const open = (url) => { haptic(); window.open(url, '_blank', 'noopener'); };
+  const card = (on) => ({ height: 118, background: on ? 'var(--amber-tint)' : 'var(--card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-start', padding: 14, textAlign: 'left' });
+  const disc = (bg) => ({ width: 40, height: 40, borderRadius: 999, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' });
+  const lbl = { display: 'block', font: '600 15px/19px var(--font)', color: 'var(--ink)' };
+  const sub = { display: 'block', font: '500 12px/16px var(--font)', color: 'var(--grey-4)', marginTop: 2 };
+  const [watch, setWatch] = React.useState(null);
+  const [playing, setPlaying] = React.useState(false);
+  const [t, setT] = React.useState(0);
+  React.useEffect(() => { if (!playing || !watch) return; const d = ACCOUNT_CLIPS[watch].dur; const h = setInterval(() => setT((x) => (x >= d ? 0 : x + 0.1)), 100); return () => clearInterval(h); }, [playing, watch]);
+  const openClip = (k) => { haptic(); setWatch(k); setT(0); setPlaying(true); };
+  const closeClip = () => { setPlaying(false); setWatch(null); };
+  const clock = (x) => `0:${String(Math.floor(x)).padStart(2, '0')}`;
+  const Clip = ({ k }) => { const frame = frameFor({ id: id + k }); return (
+    <button type="button" className="p card" onClick={() => openClip(k)} style={{ ...card(false), height: 'auto', padding: 0, overflow: 'hidden', position: 'relative', aspectRatio: '9 / 12', background: `url(${frame}) center/cover` }}>
+      <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.65))' }} />
+      <span style={{ position: 'absolute', left: '50%', top: '50%', width: 48, height: 48, marginLeft: -24, marginTop: -24, borderRadius: 999, background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-float)' }}><Icon name="play_arrow" size={28} color="var(--ink)" /></span>
+      <span style={{ position: 'absolute', left: 12, right: 12, bottom: 12 }}><span style={{ ...lbl, color: '#fff' }}>{ACCOUNT_CLIPS[k].label}</span><span style={{ ...sub, color: 'rgba(255,255,255,0.8)' }}>{clock(ACCOUNT_CLIPS[k].dur)}</span></span>
+    </button>
+  ); };
+  return (
+    <Screen back title={`${a.creatorName} · ${a.platform}`} footer={count ? <Button variant="amber" onClick={done}>Request changes</Button> : <><Button onClick={() => setSheet(true)} style={{ background: 'var(--blue-tint)', color: 'var(--blue-deep)' }}>Request changes</Button><Button onClick={done}>Approve</Button></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <button type="button" className="p card" onClick={() => open(`https://www.tiktok.com/@${handle}`)} style={card(false)}>
+          <span style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}><span style={disc('#000')}><TikTokMark size={22} color="#fff" /></span><Icon name="open_in_new" size={18} color="var(--grey-3)" /></span>
+          <span><span style={lbl}>TikTok</span><span style={sub}>@{handle}</span></span>
+        </button>
+        <button type="button" className="p card" onClick={() => open(`https://www.instagram.com/${handle}`)} style={card(false)}>
+          <span style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}><span style={disc('linear-gradient(45deg, #F9CE34, #EE2A7B, #6228D7)')}><InstagramMark size={22} color="#fff" /></span><Icon name="open_in_new" size={18} color="var(--grey-3)" /></span>
+          <span><span style={lbl}>Instagram</span><span style={sub}>@{handle}</span></span>
+        </button>
+        <Clip k="tt-scroll" /><Clip k="ig-scroll" />
+      </div>
+      <div onClick={closeClip} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', opacity: watch ? 1 : 0, pointerEvents: watch ? 'auto' : 'none', transition: 'opacity 220ms ease', zIndex: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '72px 24px 48px' }}>
+        {watch ? <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', width: '100%', maxWidth: 320, aspectRatio: '9 / 16', borderRadius: 20, overflow: 'hidden', background: `url(${frameFor({ id: id + watch })}) center/cover`, transform: watch ? 'scale(1)' : 'scale(0.94)', transition: 'transform 260ms cubic-bezier(.2,.8,.2,1)' }}>
+          <button type="button" onClick={() => setPlaying((x) => !x)} style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{!playing ? <span style={{ width: 64, height: 64, borderRadius: 999, background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="play_arrow" size={36} color="var(--ink)" /></span> : null}</button>
+          <span style={{ position: 'absolute', left: 14, top: 14, font: '700 14px/20px var(--font)', color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>{ACCOUNT_CLIPS[watch].label}</span>
+          <button type="button" className="p" aria-label="Close" onClick={closeClip} style={{ position: 'absolute', right: 10, top: 10, width: 36, height: 36, borderRadius: 999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={20} color="#fff" weight={600} /></button>
+          <span style={{ position: 'absolute', left: 14, right: 14, bottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ flex: 1, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.35)' }}><span style={{ display: 'block', width: `${(t / ACCOUNT_CLIPS[watch].dur) * 100}%`, height: '100%', borderRadius: 2, background: '#fff' }} /></span><span style={{ font: '600 12px/16px var(--font)', color: '#fff' }}>{clock(t)}</span></span>
+        </div> : null}
+      </div>
+      {saved ? <Card onClick={() => { setNote(saved); setSheet(true); }} style={{ background: 'var(--amber-tint)', boxShadow: 'none', display: 'flex', gap: 12, alignItems: 'center' }}><Icon name="edit_note" size={22} color="var(--amber)" /><span className="t-body" style={{ flex: 1, minWidth: 0 }}>{saved}</span><Icon name="chevron_right" size={20} color="var(--amber)" /></Card> : null}
+      <div onClick={() => setSheet(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', opacity: sheet ? 1 : 0, pointerEvents: sheet ? 'auto' : 'none', transition: 'opacity 220ms ease', zIndex: 5 }} />
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 16px 34px', background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -8px 30px rgba(16,24,40,0.12)', transform: sheet ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 320ms cubic-bezier(.2,.8,.2,1)', pointerEvents: sheet ? 'auto' : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" className="p" onClick={() => setSheet(false)} style={{ width: 32, height: 32, borderRadius: 999, background: 'var(--grey-1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={18} color="var(--ink)" /></button>
+          <span className="t-row">Notes for {a.creatorName}</span>
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" style={{ width: '100%', height: 120, borderRadius: 14, border: 'none', background: 'var(--grey-1)', padding: '12px 14px', font: '400 15px/20px var(--font)', color: 'var(--ink)', outline: 'none', resize: 'none', display: 'block' }} />
+        <div style={{ display: 'flex' }}><Button onClick={() => { accountNotes[id] = { ...(accountNotes[id] || {}), general: note.trim() }; setReview({}); setSheet(false); }} disabled={!note.trim()}>Save changes</Button></div>
+      </div>
+    </Screen>
+  );
+}
+
+Object.assign(window, { ReviewScreen, CreatorQueueScreen, ReviewDetailScreen, CreatorScreen, ThreadScreen, MusicScreen, AccountScreen, useLoaded, statusLine });

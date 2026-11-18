@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
-import { planGuided } from '../../../../lib/brief-ai';
+import { planGuided, type GuidedPlan } from '../../../../lib/brief-ai';
+import { toast } from '../../../v2/Toast';
 import { newClip, type AudioTrack, type BriefClip, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
-import { color, radius, shadow } from '../../../../theme/v2';
-import { Icon, Label, Option, Press, Sheet, Toggle, tap } from '../../../v2';
+import { briefs, color, editor, radius, shadow } from '../../../../theme/v2';
+import { Icon, Label, Option, Press, Sheet, Toggle } from '../../../v2';
 import { AudioCover } from '../audio/AudioCover';
 import { AudioSheet } from '../audio/AudioSheet';
+import { CaptionCard } from './CaptionCard';
 import { ClipGrid } from './ClipGrid';
 import { MediaFill, ShimmerLine } from './ClipFrame';
 import { LinkDialog } from './LinkDialog';
@@ -53,10 +55,17 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const typed = /\S/.test(g.title) || /\S/.test(g.link) || g.clips.some((c) => /\S/.test(c.text));
   const locked = !!(g.filled || ai) && !g.link;
 
-  const fill = () => {
+  const fill = async () => {
     if (!typed || ai) return;
-    tap();
-    const plan = planGuided(g, type);
+    setAi({ stage: 'title', i: 0, n: 1 });
+    let plan: GuidedPlan;
+    try {
+      plan = await planGuided(g, type);
+    } catch {
+      setAi(null);
+      toast.error("Couldn't write this one. Check your connection and try again.", { label: 'Retry', onPress: () => void fill() });
+      return;
+    }
     const steps: [string, () => void][] = [];
     steps.push(['title', () => set({ title: plan.title, phrase: plan.phrase })]);
     plan.clips.forEach((c, i) =>
@@ -79,14 +88,15 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
           }),
       ]),
     );
-    steps.push(['caption', () => set({ caption: plan.caption, tags: plan.tags, filled: true })]);
+    // A caption or tags typed before the fill stay; the AI only fills what is empty.
+    steps.push(['caption', () => update((cur) => ({ ...cur, caption: /\S/.test(cur.caption || '') ? cur.caption : plan.caption, tags: (cur.tags || []).length ? cur.tags : plan.tags, filled: true }))]);
     setAi({ stage: 'title', i: 0, n: steps.length });
     steps.forEach(([, run], i) =>
       timers.current.push(
         setTimeout(() => {
           run();
           setAi(i === steps.length - 1 ? null : { stage: steps[i + 1][0], i: i + 1, n: steps.length });
-        }, 600 + i * 520),
+        }, 200 + i * 420),
       ),
     );
   };
@@ -112,10 +122,10 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
                 {g.link ? 'Link added' : 'Add link'}
               </Text>
             </Press>
-            <Press disabled={!typed || !!ai} onPress={fill} accessibilityRole="button" style={[BIG, { backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? '0 6px 16px rgba(27,166,238,0.35)' : undefined }]}>
+            <Press disabled={!typed || !!ai} onPress={() => void fill()} accessibilityRole="button" style={[BIG, { backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? briefs.aiGlow : undefined }]}>
               <SpinIcon spinning={!!ai} color={typed ? color.white : color.grey3} />
               <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: typed ? color.white : color.grey3 }}>
-                {ai ? `Filling ${ai.i + 1} of ${ai.n}` : 'Fill in with AI'}
+                {ai ? (ai.n > 1 ? `Filling ${ai.i + 1} of ${ai.n}` : 'Writing it for your brand') : 'Fill in with AI'}
               </Text>
             </Press>
           </View>
@@ -136,7 +146,7 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
             <ShimmerLine />
           </View>
         ) : (
-          <TitleInput value={g.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} />
+          <TitleInput value={g.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} type={type} />
         )}
         <Press onPress={() => setSoundOpen(true)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 12, borderRadius: radius.card, backgroundColor: color.card, ...shadow.card }}>
           {au.mode === 'pick' && au.track ? (
@@ -174,7 +184,7 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
             <View style={{ width: 44, height: 58, borderRadius: 8, overflow: 'hidden' }}>
               <MediaFill src={g.gs?.src} />
               {g.gs && g.gs.kind === 'video' ? (
-                <Text style={{ position: 'absolute', right: 3, bottom: 3, height: 14, paddingHorizontal: 4, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.6)', color: color.white, fontSize: 9, lineHeight: 14, fontWeight: '700' }}>
+                <Text style={{ position: 'absolute', right: 3, bottom: 3, height: 14, paddingHorizontal: 4, borderRadius: 4, overflow: 'hidden', backgroundColor: editor.k60, color: color.white, fontSize: 9, lineHeight: 14, fontWeight: '700' }}>
                   {Math.floor(g.gs.dur / 60)}:{String(g.gs.dur % 60).padStart(2, '0')}
                 </Text>
               ) : null}
@@ -209,8 +219,10 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
             })
           }
           onToggleGreen={(id) => update((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === id ? { ...c, green: !c.green } : c)) }))}
+          onPickBackground={(id) => setGsPick(id)}
           onDragging={setDragging}
         />
+        <CaptionCard caption={g.caption || ''} tags={g.tags || []} onCaption={(t) => set({ caption: t })} onTags={(tags) => set({ tags })} pending={pend('caption')} />
       </ScrollView>
 
       <Sheet open={soundOpen} onClose={() => setSoundOpen(false)} title="Sound">
@@ -252,7 +264,7 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
         len={Math.max(6, g.clips.length * 6)}
         value={au.track ? { track: au.track, start: 0, vol: 100, voice: 100 } : null}
         onChange={(v) => {
-          const t: AudioTrack = { id: v.track.id, title: v.track.title, artist: v.track.artist, dur: v.track.dur, cover: v.track.cover ?? null };
+          const t: AudioTrack = { id: v.track.id, title: v.track.title, artist: v.track.artist, dur: v.track.dur, cover: v.track.cover ?? null, igAudioId: v.track.igAudioId ?? null, url: v.track.url ?? null, previewUrl: v.track.previewUrl ?? null };
           setAu({ mode: 'pick', track: t });
         }}
         title="Choose the sound"

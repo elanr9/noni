@@ -11,8 +11,8 @@ import {
 } from 'react-native';
 
 import { MAX_CROP_SCALE, type EditCrop } from '../../../lib/video-edit';
-import { color } from '../../../theme/tokens';
 import { useEvent } from './useEvent';
+import { editor } from '../../../theme/v2';
 
 export function clampCrop(crop: EditCrop): EditCrop {
   const scale = Math.max(1, Math.min(MAX_CROP_SCALE, crop.scale));
@@ -114,14 +114,14 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
   lineH: {
     position: 'absolute',
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
   third: { left: '33.33%' },
   twoThirds: { left: '66.66%' },

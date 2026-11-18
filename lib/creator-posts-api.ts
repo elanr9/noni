@@ -11,7 +11,7 @@ type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: un
 
 export type CreatorPostFormat = 'video' | 'photo_carousel';
 
-/** An assignment this creator already started from the same library brief and has not submitted. */
+/** An assignment this creator already started from the same library brief and has not sent (or was sent back). */
 export async function findOpenCreatorPost(companyId: string, creatorId: string, libraryBriefId: string): Promise<Assignment | null> {
   const { data, error } = await supabase
     .from('assignments')
@@ -19,7 +19,7 @@ export async function findOpenCreatorPost(companyId: string, creatorId: string, 
     .eq('company_id', companyId)
     .eq('creator_id', creatorId)
     .eq('library_brief_id', libraryBriefId)
-    .in('status', ['assigned', 'recorded'])
+    .in('status', ['assigned', 'recorded', 'changes_requested'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -45,4 +45,32 @@ export async function ensureCreatorPost(params: { companyId: string; creatorId: 
     if (open) return open;
   }
   return startCreatorPost(params);
+}
+
+/** The open post behind a draft, when it is still this creator's to work on. */
+export async function getOpenCreatorPost(companyId: string, creatorId: string, assignmentId: string): Promise<Assignment | null> {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('creator_id', creatorId)
+    .eq('id', assignmentId)
+    .in('status', ['assigned', 'recorded', 'changes_requested'])
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Assignment | null) ?? null;
+}
+
+/** Name a post the creator started (the title lives on its brief row; migration 125). */
+export async function renameCreatorPost(assignmentId: string, title: string): Promise<void> {
+  const rpc = (supabase as unknown as { rpc: Rpc }).rpc.bind(supabase);
+  const { error } = await rpc('rename_creator_post', { p_assignment_id: assignmentId, p_title: title });
+  if (error) throw new Error(error.message);
+}
+
+/** Throw away an unsent post the creator started, with its drafts (migration 125). */
+export async function discardCreatorPost(assignmentId: string): Promise<void> {
+  const rpc = (supabase as unknown as { rpc: Rpc }).rpc.bind(supabase);
+  const { error } = await rpc('discard_creator_post', { p_assignment_id: assignmentId });
+  if (error) throw new Error(error.message);
 }

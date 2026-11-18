@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  type ScrollViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -99,7 +100,7 @@ export function ReviseChatSheet({
   const [error, setError] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const [stage, setStage] = useState<string | null>(null);
-  const listRef = useRef<ScrollView>(null);
+  const listRef = useRef<ScrollViewInstance>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pendingNote = useRef('');
   const noteFrame = useRef<number | null>(null);

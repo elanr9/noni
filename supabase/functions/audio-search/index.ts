@@ -6,7 +6,7 @@
 // professional account) and IG_USER_ID. Without them the function answers
 // with no tracks and the app falls back to its local sample library.
 
-import { authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const FETCH_TIMEOUT_MS = 8000;
@@ -56,8 +56,8 @@ function toTrack(a: IgAudio): Track | null {
 Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
-  const auth = await authenticate(req);
-  if (auth instanceof Response) return auth;
+  const caller = await authenticate(req, adminClient());
+  if (!caller || caller.kind !== 'user') return jsonResponse({ error: 'unauthorized' }, 401);
 
   const token = Deno.env.get('IG_GRAPH_ACCESS_TOKEN');
   const igUser = Deno.env.get('IG_USER_ID');

@@ -13,6 +13,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
@@ -73,7 +74,7 @@ export function PointsEditor(props: {
   /** Fires while a card drags so the parent scroll can pause. */
   onDragStateChange: (dragging: boolean) => void;
   /** The parent scroll view, so a drag near the screen edge scrolls the list. */
-  scrollRef?: RefObject<ScrollView | null>;
+  scrollRef?: RefObject<ScrollViewInstance | null>;
   /** Live scroll metrics of that scroll view, kept current by the parent. */
   scrollMetrics?: RefObject<DragScrollMetrics>;
 }): JSX.Element {

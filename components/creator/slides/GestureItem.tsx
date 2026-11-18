@@ -23,10 +23,11 @@ import {
   type PanResponderGestureState,
   type StyleProp,
   type ViewStyle,
+  type HostInstance,
 } from 'react-native';
 
-import { color } from '../../../theme/tokens';
 import { CENTER_SNAP, PLACE_EDGE, clamp } from './frame';
+import { color, editor } from '../../../theme/v2';
 
 const TAP_MAX_MOVE = 6;
 const TAP_MAX_MS = 350;
@@ -431,7 +432,7 @@ function createItemGesture(initial: ItemProps) {
 
 export function GestureItem(props: ItemProps): JSX.Element {
   const { x, y, size, stageWidth, stageHeight, style, children } = props;
-  const layerRef = useRef<View>(null);
+  const layerRef = useRef<HostInstance>(null);
   const [item] = useState(() => createItemGesture(props));
 
   useEffect(() => {
@@ -487,7 +488,7 @@ const styles = StyleSheet.create({
     left: '50%',
     width: 1,
     marginLeft: -0.5,
-    backgroundColor: color.whiteA45,
+    backgroundColor: editor.w45,
   },
   outline: {
     position: 'absolute',
@@ -520,6 +521,6 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: color.white,
     borderWidth: 1,
-    borderColor: color.ink900,
+    borderColor: editor.deep,
   },
 });

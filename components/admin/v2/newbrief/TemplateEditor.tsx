@@ -13,6 +13,7 @@ import { onVideo, useStudioStore, useVideoDocument } from '../../../../lib/studi
 import { color, motion } from '../../../../theme/v2';
 import { ReelEditor } from '../../../creator/briefs/reel/ReelEditor';
 import { useOverlayUi } from '../../../creator/studio/overlays/overlay-ui-store';
+import { SlideTemplateEditor } from './SlideTemplateEditor';
 
 export interface TemplateEditorProps {
   g: GuidedState;
@@ -27,7 +28,12 @@ export interface TemplateEditorProps {
   onClose: () => void;
 }
 
-export function TemplateEditor({ g, type, startClipId, ownerId, companyId, onChange, onClose }: TemplateEditorProps) {
+/** Slideshows open the slide editor (BRIEFS.md 4a); every other type the reel editor. */
+export function TemplateEditor(props: TemplateEditorProps) {
+  return props.type === 'Slideshow' ? <SlideTemplateEditor {...props} /> : <ReelTemplateEditor {...props} />;
+}
+
+function ReelTemplateEditor({ g, type, startClipId, ownerId, companyId, onChange, onClose }: TemplateEditorProps) {
   // The timeline is built once from the template as it was when the editor opened; edits live in the studio store.
   const [init] = useState(() => ({ doc: templateToDoc(g, type), startClipId }));
   const [scripts, setScripts] = useState<Record<string, string>>(() => Object.fromEntries(g.clips.map((c) => [c.id, c.text])));

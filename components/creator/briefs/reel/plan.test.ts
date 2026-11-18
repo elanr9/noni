@@ -30,7 +30,7 @@ import {
   trackPlanOverlayDeletes,
 } from './sync';
 
-vi.mock('../../../../theme/tokens', () => ({ color: { white: '#FFFFFF' }, briefTone: {} }));
+vi.mock('../../../../theme/v2', () => ({ color: { white: '#FFFFFF' } }));
 vi.mock('../../../../modules/video-editor', () => ({ isVideoEditorAvailable: () => false, speechBounds: vi.fn() }));
 
 const slide = (role: BriefSlide['role'], text: string, shot: string, feature: string | null = null): BriefSlide => ({

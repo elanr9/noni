@@ -4,10 +4,11 @@ import {
   adminRecipients,
   creatorRecipients,
   mutedProfileIds,
-  sendPush,
+  sendPush as sendPushRaw,
   recipientsForProfiles,
   MANAGER_ROLES,
   type PushMessage,
+  type Recipient,
 } from '../_shared/push.ts';
 import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 import {
@@ -88,6 +89,58 @@ const SERVICE_EVENTS: NotifyEvent[] = [
 ];
 
 const ET = 'America/New_York';
+
+/** profiles.notification_prefs category per event; billing pushes always go out. */
+const PREF_CATEGORY: Partial<Record<string, string>> = {
+  submitted: 'submissions',
+  music_pending: 'submissions',
+  account_submitted: 'submissions',
+  approved: 'reviews',
+  changes_requested: 'reviews',
+  comment: 'reviews',
+  music_approved: 'reviews',
+  music_changes: 'reviews',
+  account_decided: 'reviews',
+  message: 'messages',
+  manager_message: 'messages',
+  post_live: 'live',
+  published: 'live',
+  streak_bonus: 'streaks',
+  streak_progress: 'streaks',
+};
+
+/**
+ * sendPush that respects each recipient's notification_prefs: everyone still
+ * gets the row in the in-app feed, but a recipient who turned the event's
+ * category off gets no push.
+ */
+async function sendPush(
+  admin: SupabaseClient,
+  recipients: Recipient[],
+  message: PushMessage,
+): Promise<number> {
+  const category = PREF_CATEGORY[message.data.event];
+  if (!category || recipients.length === 0) return await sendPushRaw(admin, recipients, message);
+  const ids = [...new Set(recipients.map((r) => r.profileId))];
+  const { data, error } = await admin.from('profiles').select('id, notification_prefs').in('id', ids);
+  if (error) {
+    console.error('notification prefs lookup failed', error.message);
+    return await sendPushRaw(admin, recipients, message);
+  }
+  const off = new Set(
+    (data ?? [])
+      .filter((p) => {
+        const prefs = p.notification_prefs as Record<string, unknown> | null;
+        return prefs !== null && typeof prefs === 'object' && prefs[category] === false;
+      })
+      .map((p) => p.id as string),
+  );
+  return await sendPushRaw(
+    admin,
+    recipients.map((r) => (off.has(r.profileId) ? { ...r, token: null } : r)),
+    message,
+  );
+}
 
 function formatCentsLabel(cents: number): string {
   const dollars = cents / 100;

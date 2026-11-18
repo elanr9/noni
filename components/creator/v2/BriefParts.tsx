@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { TYPE_META, stText, type Brief, type BriefClip } from '../../../lib/brief-library';
-import { color, radius, shadow, tone as tones } from '../../../theme/v2';
+import { color, editor, radius, shadow, tone as tones } from '../../../theme/v2';
 import { GradientFill } from '../../admin/v2/newbrief/ClipFrame';
 import { Chip, Icon, Label } from '../../v2';
 import { StTextView } from '../../v2/StTextView';
@@ -16,7 +16,7 @@ export function BriefHero({ b, chips }: { b: Pick<Brief, 'type' | 'title'>; chip
     <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
       <GradientFill colors={[t.tint, color.card]} deg={160} style={StyleSheet.absoluteFill} />
       <View style={{ paddingTop: 22, paddingHorizontal: 20, paddingBottom: 18, gap: 14 }}>
-        <View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: t.fg, alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(16,24,40,0.14)' }}>
+        <View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: t.fg, alignItems: 'center', justifyContent: 'center', ...shadow.disc }}>
           <Icon name={m.icon} size={28} weight={700} color={color.white} />
         </View>
         <Text style={{ fontSize: 24, lineHeight: 29, fontWeight: '700', letterSpacing: -0.3, color: color.ink }}>{b.title}</Text>
@@ -71,11 +71,11 @@ export function BriefBeats({ clips }: { clips: BriefClip[] }) {
 export function LongTextCard({ text: words }: { text: string }) {
   const W = 72;
   const H = 128;
-  const x = stText(words, { x: 50, y: 46, w: 88, size: 22, style: 'none', color: '#FFFFFF' });
+  const x = stText(words, { x: 50, y: 46, w: 88, size: 22, style: 'none', color: editor.white });
   return (
     <View style={[styles.card, { flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
-      <View style={{ width: W, height: H, borderRadius: 10, overflow: 'hidden', backgroundColor: '#1A1A1F' }}>
-        <GradientFill colors={['#2B2B31', '#1A1A1F']} deg={180} style={StyleSheet.absoluteFill} />
+      <View style={{ width: W, height: H, borderRadius: 10, overflow: 'hidden', backgroundColor: editor.panel }}>
+        <GradientFill colors={[editor.panelTop, editor.panel]} deg={180} style={StyleSheet.absoluteFill} />
         <StTextView x={x} width={W} height={H} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>

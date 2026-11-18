@@ -21,6 +21,7 @@
 
 import type { SupabaseClient, User } from 'npm:@supabase/supabase-js@2';
 import { adminClient, handleCors, hasPermission, jsonResponse } from '../_shared/wp8.ts';
+import { creatorInviteBlock, gateAudience } from '../_shared/plan.ts';
 
 const INVITE_BASE_URL = 'https://www.usenoni.app/invite/';
 const APP_STORE_URL = 'https://apps.apple.com/app/id6799189794';
@@ -250,6 +251,17 @@ async function handleInvite(
     return jsonResponse({ error: 'this person is already a member of this company' }, 400);
   }
 
+  /* Paywall and creator cap (noni-web creatorInviteBlock): creators need an
+     operable plan with room under its cap. Managers and admins do not count. */
+  if (role === 'creator') {
+    const block = await creatorInviteBlock(
+      admin,
+      body.company_id,
+      await gateAudience(admin, user.id, body.company_id),
+    );
+    if (block) return jsonResponse({ error: block.error, upgrade: true }, 402);
+  }
+
   const { data: invite, error } = await admin
     .from('company_invites')
     .insert({
@@ -267,7 +279,11 @@ async function handleInvite(
   return jsonResponse({ invite });
 }
 
-async function handleResend(admin: SupabaseClient, body: Body): Promise<Response> {
+async function handleResend(
+  admin: SupabaseClient,
+  user: User,
+  body: Body,
+): Promise<Response> {
   if (!body.invite_id) {
     return jsonResponse({ error: 'expected { invite_id }' }, 400);
   }
@@ -279,6 +295,17 @@ async function handleResend(admin: SupabaseClient, body: Body): Promise<Response
   if (!existing) return jsonResponse({ error: 'invite not found' }, 404);
   if ((existing as InviteRow).accepted_at) {
     return jsonResponse({ error: 'invite already accepted' }, 400);
+  }
+  /* Resending an expired creator invite revives a seat, so it passes the
+     same cap check as a new invite. Unexpired invites already count. */
+  const prior = existing as InviteRow;
+  if (prior.role === 'creator' && new Date(prior.expires_at).getTime() <= Date.now()) {
+    const block = await creatorInviteBlock(
+      admin,
+      prior.company_id,
+      await gateAudience(admin, user.id, prior.company_id),
+    );
+    if (block) return jsonResponse({ error: block.error, upgrade: true }, 402);
   }
 
   const { data: invite, error } = await admin
@@ -420,7 +447,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'invite') return await handleInvite(admin, user, body ?? {});
-    return await handleResend(admin, body ?? {});
+    return await handleResend(admin, user, body ?? {});
   } catch (e) {
     console.error('invite-campaign-manager failed', e);
     return jsonResponse({ error: e instanceof Error ? e.message : 'unknown' }, 500);

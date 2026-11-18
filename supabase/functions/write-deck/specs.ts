@@ -70,10 +70,10 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
   slideshow: {
     howto: {
       what: 'A how to slideshow: a reader who wants one specific outcome swipes through the steps in the order they do them. It earns saves because it is a reference they come back to.',
-      cover: 'The cover is the query the reader types, written as "How to <one specific outcome>", under 10 words. The outcome is narrow (email a college coach, film a highlight video on your phone), never broad (get recruited).',
+      cover: 'The cover is the query the reader types, written as "How to <one specific outcome>", under 10 words. The outcome is narrow (meal prep five lunches for $30, film a product demo on your phone), never broad (eat healthy, grow online).',
       body: 'Each body slide is one step, in the order the reader does it. A step is an action they can do tonight, short, one concrete detail max.',
       cta: 'The CTA slide is one of the steps: the step where the product does the work, written as the creator doing that step with it.',
-      slideShape: 'Line one: the step number and a short header naming the action, 2 to 6 words ("2. Lead with your grad year"). Line two: at most ONE short sentence on how, one concrete detail max. The whole slide stays under 18 words.',
+      slideShape: 'Line one: the step number and a short header naming the action, 2 to 6 words ("2. Lead with the one number"). Line two: at most ONE short sentence on how, one concrete detail max. The whole slide stays under 18 words.',
       kills: 'Steps out of order. Steps that are vague goals instead of actions. Two steps on one slide. A cover outcome so broad no slideshow could deliver it.',
       count: 5,
       numbered: true,
@@ -81,30 +81,30 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
     },
     tips: {
       what: 'A numbered tips slideshow: the count on the cover is the promise, one tip per slide. The cheapest format to make and the best for saves.',
-      cover: 'The cover leads with the exact number of body slides (the CTA slide counts) and names the specific thing the tips are for, under 10 words ("5 tips for a highlight video coaches finish").',
+      cover: 'The cover leads with the exact number of body slides (the CTA slide counts) and names the specific thing the tips are for, under 10 words ("5 tips for a first apartment walkthrough").',
       body: 'Each body slide is one tip a reader can act on, said short.',
       cta: 'The CTA slide is one of the numbered tips, where the tip is something the product does, said as the creator\'s own habit.',
-      slideShape: 'Line one: the tip number and a short header, 2 to 6 words ("3. Put your best clip first"). Line two: at most ONE short sentence on why or how, one concrete detail max. The whole slide stays under 18 words.',
-      kills: 'Tips any sport or any product could claim. Headers that name a topic instead of the move ("Film matters"). Body text over two lines. Explaining instead of telling. A count on the cover that does not match the slides.',
+      slideShape: 'Line one: the tip number and a short header, 2 to 6 words ("3. Put your best shot first"). Line two: at most ONE short sentence on why or how, one concrete detail max. The whole slide stays under 18 words.',
+      kills: 'Tips any niche or any product could claim. Headers that name a topic instead of the move ("Planning matters"). Body text over two lines. Explaining instead of telling. A count on the cover that does not match the slides.',
       count: 5,
       numbered: true,
       shape: SLIDESHOW_SHAPE,
     },
     start: {
       what: 'A getting started slideshow for someone at zero: the first steps in order, small enough to start this week. It works because the reader feels behind and this makes it doable.',
-      cover: 'The cover names the starting point the reader is in, under 10 words ("Starting recruiting as a sophomore with no film").',
+      cover: 'The cover names the starting point the reader is in, under 10 words ("Starting to invest at 22 with $100").',
       body: 'Each body slide is the next first step, in order, sized so a beginner can do it this week. Earlier steps are the easiest.',
       cta: 'The CTA slide is the step where the product removes the hardest part for a beginner, said as what the creator would do if they were starting over.',
-      slideShape: 'Line one: the step number and a short header, 2 to 6 words ("1. Pick 30 schools tonight"). Line two: at most ONE short sentence with the concrete how. The whole slide stays under 18 words.',
-      kills: 'Advanced moves a beginner cannot do yet. Steps with no size ("research schools" instead of "pick 30 schools"). Talking down to the reader.',
+      slideShape: 'Line one: the step number and a short header, 2 to 6 words ("1. Pick one account tonight"). Line two: at most ONE short sentence with the concrete how. The whole slide stays under 18 words.',
+      kills: 'Advanced moves a beginner cannot do yet. Steps with no size ("research options" instead of "pick 3 options"). Talking down to the reader.',
       count: 4,
       numbered: true,
       shape: SLIDESHOW_SHAPE,
     },
     myths: {
       what: 'A myths slideshow: each slide states a belief the reader actually holds, then kills it with a specific receipt and gives the real move. It gets shared because people send it to the friend who believes the myth.',
-      cover: 'The cover leads with the exact number of myths and the cost of believing them, under 10 words ("4 recruiting myths that cost you offers").',
-      body: 'Each body slide is one myth stated exactly the way players and parents say it, then the truth with one receipt (a number, a named rule, a firsthand result), short.',
+      cover: 'The cover leads with the exact number of myths and the cost of believing them, under 10 words ("4 budgeting myths that cost you money").',
+      body: 'Each body slide is one myth stated exactly the way the audience says it, then the truth with one receipt (a number, a named rule, a firsthand result), short.',
       cta: 'The CTA slide is one of the myths, where the truth is something the product makes easy, said as the creator\'s own experience.',
       slideShape: 'Two lines: "Myth: <the belief, in the words people use>" then "Truth: <the correction and the receipt, ONE short sentence>". Under 24 words in all.',
       kills: 'Myths nobody holds (strawmen). A truth that is an opinion with no receipt. A mocking tone toward people who believed it; the reader is one of them.',
@@ -130,8 +130,8 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
       cover: `${REEL_COVER} The title card leads with the exact number of points (the CTA counts).`,
       body: 'Each point is one numbered item said plainly, one concrete detail max.',
       cta: 'The CTA point is one of the numbered items, landing in the back half of the list, where the item is something the product does for the creator.',
-      slideShape: `${REEL_POINT} Labels start with their number ("3. Email before the ID camp").`,
-      kills: 'Items any sport could claim. A count in the hook that does not match the points. The product item placed first.',
+      slideShape: `${REEL_POINT} Labels start with their number ("3. Book before the price jumps").`,
+      kills: 'Items any niche could claim. A count in the hook that does not match the points. The product item placed first.',
       count: 5,
       numbered: true,
       shape: REEL_SHAPE,
@@ -141,7 +141,7 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
       cover: `${REEL_COVER} The title card is the outcome as the viewer would search it.`,
       body: 'Each point is one step, in order, short.',
       cta: 'The CTA point is the step the product does, said as the creator doing it.',
-      slideShape: `${REEL_POINT} Labels start with the step number ("2. Subject line with grad year").`,
+      slideShape: `${REEL_POINT} Labels start with the step number ("2. Subject line with the ask").`,
       kills: 'Steps out of order. Goals instead of actions. Steps that need a screen recording nobody can get.',
       count: 4,
       numbered: true,
@@ -149,7 +149,7 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
     },
     explainer: {
       what: 'An explainer: one question the audience keeps asking, answered start to finish from both sides of the creator\'s experience.',
-      cover: `${REEL_COVER} The title card is the question or the why ("Why coaches ignore your emails").`,
+      cover: `${REEL_COVER} The title card is the question or the why ("Why landlords ignore your emails").`,
       body: 'Each point is one beat of the answer and builds on the last: the reason, the proof, what to do about it. One line each.',
       cta: 'The CTA point is the beat where the fix is something the product does.',
       slideShape: `${REEL_POINT} Labels are not numbered; they read as the beat of the answer.`,
@@ -160,18 +160,18 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
     },
     storytime: {
       what: 'A storytime: a real first person story told in past tense with an open loop. Every creator has their own story, so the brief gives prompts, never invented biography.',
-      cover: `${REEL_COVER} The hook states the outcome or the worst moment first, never the chronological beginning ("I had zero offers in March of junior year").`,
-      body: 'The points are the story beats in order: the stakes, what went wrong, then where it landed. Each cue names the moment of their own story in one short line, with a bracket where their own detail goes ("The coach email nobody answered [month]"). Never state a fact about the creator\'s life; leave a bracket for it.',
+      cover: `${REEL_COVER} The hook states the outcome or the worst moment first, never the chronological beginning ("I had $40 left in March of my first year").`,
+      body: 'The points are the story beats in order: the stakes, what went wrong, then where it landed. Each cue names the moment of their own story in one short line, with a bracket where their own detail goes ("The email nobody answered [month]"). Never state a fact about the creator\'s life; leave a bracket for it.',
       cta: 'The CTA point is the turn of the story: the moment things changed, where the product is one detail of what they did, never the hero.',
-      slideShape: `${REEL_POINT} Labels name the beat ("The email nobody answered"). Cues may use one bracket like [your school] where the creator\'s own fact goes.`,
+      slideShape: `${REEL_POINT} Labels name the beat ("The email nobody answered"). Cues may use one bracket like [your city] where the creator\'s own fact goes.`,
       kills: 'Starting at the beginning. Invented facts about the creator. The product saving the day. Beats with no concrete detail.',
       count: 4,
       numbered: false,
       shape: { ...REEL_SHAPE, pointShot: [4, 14] },
     },
     green: {
-      what: 'A green screen react: the creator over a real screenshot (a coach reply, a comment on their post, a stat) giving their take. The screenshot does the hooking.',
-      cover: `${REEL_COVER} The title card names what is on screen and the tension in it ("Reacting to a real coach reply").`,
+      what: 'A green screen react: the creator over a real screenshot (a reply they got, a comment on their post, a stat) giving their take. The screenshot does the hooking.',
+      cover: `${REEL_COVER} The title card names what is on screen and the tension in it ("Reacting to a real reply I got").`,
       body: 'The first point\'s cue starts with "On screen:" and the kind of real screenshot to put behind them. Each point is one short beat of the take: what it means, what is wrong or right about it, what to do.',
       cta: 'The CTA point is the beat where what to do next is something the product does.',
       slideShape: `${REEL_POINT} Labels are short takes, not numbered.`,
@@ -182,7 +182,7 @@ export const SPECS: Record<Format, Record<string, TypeSpec>> = {
     },
     longtext: {
       what: 'A long text reel: a 6 second clip with more text on it than anyone can read in 6 seconds, so viewers pause or rewatch. Completion and rewatches carry it.',
-      cover: 'cover.text is the long block: 45 to 110 words, written like a player venting or advising in their notes app, a short first line that hooks, then line breaks between thoughts. No title, no hashtags. cover.shot is what the creator does on camera during the clip, one plain line (lacing boots in the car, juggling in the backyard).',
+      cover: 'cover.text is the long block: 45 to 110 words, written like someone from this audience venting or advising in their notes app, a short first line that hooks, then line breaks between thoughts. No title, no hashtags. cover.shot is what the creator does on camera during the clip, one plain line (making coffee, walking to the car, scrolling on the couch).',
       body: 'There are no body points.',
       cta: 'The CTA slide text is one short first person line, 6 to 16 words, that names the product, shown as the last line of the block.',
       slideShape: '',
@@ -239,23 +239,28 @@ export function storyShape(format: Format, base: Shape): Shape {
 export const PLATFORM_RULES = [
   'HOW SHORT FORM WORKS (never break these to be clever):',
   'The viewer decides in under two seconds whether to stay. The first frame is the hook: text on screen and value or tension right away, no intro, no throat clearing.',
-  'Completion, saves and shares carry distribution. Between two ideas, write the one someone would save or send to a teammate.',
-  'TikTok and Instagram are search engines. Spoken words, on screen text and the caption are all indexed, and slideshow text is indexed per slide, so slide headers read like things a player would type.',
-  'Native or nothing: it must read like a real player posted it from their phone, not like a brand.',
+  'Completion, saves and shares carry distribution. Between two ideas, write the one someone would save or send to a friend.',
+  'TikTok and Instagram are search engines. Spoken words, on screen text and the caption are all indexed, and slideshow text is indexed per slide, so slide headers read like things someone in this audience would type.',
+  'Native or nothing: it must read like a real person in this audience posted it from their phone, not like a brand.',
 ].join('\n');
 
-export const VOICE_RULES = (productName: string, format: Format) =>
+/**
+ * Voice lines for every writer prompt. audience is who the posts are for
+ * (brandAudience in _shared/brandVoice.ts: the brand profile's audience,
+ * else the vertical); null leans on the brand docs.
+ */
+export const VOICE_RULES = (productName: string, format: Format, audience: string | null = null) =>
   [
-    'VOICE: a real player who has been through recruiting talking to a younger player like a big brother. Blunt, specific, plain words, contractions fine. Hooks are flat statements of something useful; the specificity lives in the topic, never in clever wording. If a 17 year old would cringe saying it out loud, rewrite it. If the brand docs carry real creator transcripts, match their cadence, not a tone description.',
+    `VOICE: a real person from this audience${audience ? ` (${audience})` : ''} who has already been through the problem the post is about, talking to someone a step behind them like an older friend. Blunt, specific, plain words, contractions fine. Hooks are flat statements of something useful; the specificity lives in the topic, never in clever wording. If someone in this audience would cringe saying it out loud, rewrite it. If the brand docs carry real creator transcripts, match their cadence, not a tone description.`,
     'SHORT WINS: we want ideas, not explanations. Every line is the shortest version that still lands. One concrete detail max, short: a real number, a named rule or date, a named event or a moment only someone who lived it knows. Take facts from the brand docs and playbooks. Never invent a statistic, rule, date or result. Numbers beat adjectives.',
     'NO SETUP LINES: never "Here is why", "That is the real problem", "the real problem", "Say you used to", "Say what your old ... was", no stacked "and it ... every time" lists, no generic openers ("So,", "Hey guys", "Let\'s talk about", "Have you ever").',
-    'GENERIC TEST: if a line could sit unchanged in a post for any sport or any product ("stay consistent", "be professional", "start early", "work hard"), it fails. Write the specific move behind it and why it works.',
-    'BANNED: manufactured villains and insider bait ("your coach won\'t tell you", "what they don\'t want you to know", "the truth about", "secrets", "hacks"). Marketing words (elite, ultimate, unlock, level up, game changer, seamless, leverage, journey, crucial, essential, stand out, perfect). Colons in the cover. Balanced, symmetrical sentences. Three item lists inside one sentence. Any sentence that could sit on a landing page.',
+    'GENERIC TEST: if a line could sit unchanged in a post for any niche or any product ("stay consistent", "be professional", "start early", "work hard"), it fails. Write the specific move behind it and why it works.',
+    'BANNED: manufactured villains and insider bait ("nobody will tell you this", "what they don\'t want you to know", "the truth about", "secrets", "hacks"). Marketing words (elite, ultimate, unlock, level up, game changer, seamless, leverage, journey, crucial, essential, stand out, perfect). Colons in the cover. Balanced, symmetrical sentences. Three item lists inside one sentence. Any sentence that could sit on a landing page.',
     'No dashes of any kind and no semicolons. No hedge words (really, truly, actually, honestly, simply, literally, very). No emojis. No hashtags outside the hashtags field.',
     format === 'slideshow'
-      ? 'SLIDESHOW TEXT IS POSTED WORD FOR WORD by every creator on the roster, so never write a personal fact (a school they played at, an offer they got) that would be false for some of them. Write advice and observations any of them can stand behind. First person is fine on the CTA slide.'
-      : `REEL CUES ARE SPOKEN in each creator's own words over their own credential, so never state a creator's personal history as fact; leave a bracket where their own fact goes ("The first coach email I sent [month]"). Every cue is ONE line. ${CUE_RULE}`,
-    `THE PRODUCT IS ${productName}. Credit it only with what the Features list or the Product truth says it does, by mechanism (it writes the email, sends it, follows up), never by benefit (saves time, streamlines). Name it only on the CTA slide and once in the caption. Value before pitch: the post is worth saving even for someone who never opens ${productName}.`,
+      ? 'SLIDESHOW TEXT IS POSTED WORD FOR WORD by every creator on the roster, so never write a personal fact (a place they worked, a result they got, a number from their own life) that would be false for some of them. Write advice and observations any of them can stand behind. First person is fine on the CTA slide.'
+      : `REEL CUES ARE SPOKEN in each creator's own words over their own credential, so never state a creator's personal history as fact; leave a bracket where their own fact goes ("The first time I tried this [month]"). Every cue is ONE line. ${CUE_RULE}`,
+    `THE PRODUCT IS ${productName}. Credit it only with what the Features list or the Product truth says it does, by mechanism (what it makes, does or sends for you), never by benefit (saves time, streamlines). Name it only on the CTA slide and once in the caption. Value before pitch: the post is worth saving even for someone who never opens ${productName}.`,
     'Every slide is different from every other slide. No two make the same point.',
   ].join('\n');
 

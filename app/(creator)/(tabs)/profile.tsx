@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 
 import { CreatorScreen } from '../../../components/admin/v2/creator/CreatorScreen';
 import { useAuth } from '../../../lib/auth';
+import { postTapHref } from '../../../lib/creator-resume';
 import { useV2Data } from '../../../lib/v2-posts';
 
 /** Profile tab: the shared creator screen for me, with the settings disc. */
@@ -23,9 +24,8 @@ export default function CreatorProfile() {
       tabRoot
       onSettings={() => router.push('/(creator)/settings')}
       onPost={(p) => {
-        if (!p.assignmentId) return;
-        if (p.state === 'Posted' || p.state === 'Waiting' || p.state === 'Approved') router.push(`/(creator)/posts/${p.assignmentId}`);
-        else router.push({ pathname: '/(creator)/make/[id]', params: { id: p.assignmentId } });
+        const href = postTapHref(p);
+        if (href) router.push(href);
       }}
     />
   );

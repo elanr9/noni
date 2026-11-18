@@ -200,7 +200,7 @@ export function remixRules(productName: string, format: Format, direction: strin
   return [
     'REMIX RULES (they win over any post type rule above where the two disagree):',
     `- Keep the format (${format}). Keep the structure beat for beat: the same number of body ${unit}s as the source has items (the CTA counts as one of them only when the source's ask sits among its items; otherwise add it where the source asks), the same list shape (numbered or not, question list, steps, myth then truth), the same pacing and ${unit} text length, and the CTA in the same spot and the same style the source uses.`,
-    "- Keep the source's cover or hook template word for word and swap only the topic. Example: \"Questions to ask during your sorority interview\" with the direction \"first call with a college coach\" becomes \"Questions to ask on your first call with a college coach\". Fix the grammar where the swap needs it.",
+    "- Keep the source's cover or hook template word for word and swap only the topic. Example: \"Questions to ask during your sorority interview\" with the direction \"first call with a new client\" becomes \"Questions to ask on your first call with a new client\". Fix the grammar where the swap needs it.",
     direction
       ? `- THE DIRECTION from the manager sets the topic: ${direction}. Every ${unit} is about that.`
       : "- No direction was given: keep the source's topic angle, translated to this audience and this product's world.",
@@ -215,7 +215,7 @@ export function ideaRules(productName: string, idea: string, direction: string, 
   return [
     `THE IDEA from the manager: ${idea}`,
     direction ? `Their extra direction: ${direction}` : '',
-    'Treat the idea as the topic and the intent, never as a phrase to copy. Write the best possible post on it for this audience: the cleanest cover a player would stop on, a hook that earns the swipe, specific slides, and a CTA that plugs one real feature.',
+    'Treat the idea as the topic and the intent, never as a phrase to copy. Write the best possible post on it for this audience: the cleanest cover this audience would stop on, a hook that earns the swipe, specific slides, and a CTA that plugs one real feature.',
     pickFormat ? 'Pick the format that serves this idea best: slideshow for lists, steps and references people save; reel for advice that lands better said to camera or a story.' : '',
     pickType ? 'Pick the post type closest to the idea.' : '',
     `The CTA names ${productName} and one real feature from the Features list by what it does.`,

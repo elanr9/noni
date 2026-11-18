@@ -26,6 +26,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type PanResponderInstance,
+  type ScrollViewInstance,
 } from 'react-native';
 
 import {
@@ -38,8 +39,6 @@ import {
   type EditTimeline,
   type PieceRange,
 } from '../../../lib/video-edit';
-import { color, type } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
 import {
   CUE_ROW_GAP,
   CUE_ROW_H,
@@ -51,6 +50,8 @@ import {
 import type { Playhead } from './playhead';
 import { useClipFrames } from './useClipFrames';
 import { useEvent } from './useEvent';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, Press } from '../../v2';
 
 export type TrimEdges = { inMs?: number; outMs?: number };
 
@@ -186,7 +187,7 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
   const pxPerMs = pxPerSec / 1000;
   const layout = useMemo(() => buildLayout(timeline, pxPerMs), [timeline, pxPerMs]);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const interactingRef = useRef(false);
   const momentumRef = useRef(false);
   const settleFrameRef = useRef<number | null>(null);
@@ -390,15 +391,15 @@ export const Timeline = memo(function Timeline(props: TimelineProps): JSX.Elemen
   return (
     <View style={[styles.root, { height: TIMELINE_HEIGHT + laneH }]} {...pinch.panHandlers}>
       <View style={[styles.rail, { height: contentH, paddingTop: RULER_H + RULER_GAP + laneH }]}>
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel={allMuted ? 'Unmute all clips' : 'Mute all clips'}
           onPress={onToggleAllMuted}
           hitSlop={8}
           style={styles.speaker}
         >
-          <Icon name={allMuted ? 'volume-x' : 'volume-2'} size={18} color={color.whiteA60} />
-        </Pressable>
+          <Icon name={allMuted ? 'volume_off' : 'volume_up'} size={18} color={editor.w60} />
+        </Press>
       </View>
       <View
         style={[styles.scrollArea, { height: contentH }]}
@@ -554,7 +555,7 @@ const PieceStrip = memo(function PieceStrip(props: {
 
   return (
     <View style={[styles.pieceWrap, { left: x, width }, selected && styles.pieceWrapSelected]}>
-      <Pressable
+      <Press
         accessibilityRole="button"
         accessibilityLabel={`Clip ${index + 1} of ${count}, ${(durationMs / 1000).toFixed(1)} seconds`}
         accessibilityState={{ selected }}
@@ -574,10 +575,10 @@ const PieceStrip = memo(function PieceStrip(props: {
         </View>
         {piece.muted ? (
           <View style={styles.mutedBadge} pointerEvents="none">
-            <Icon name="volume-x" size={11} color={color.white} />
+            <Icon name="volume_off" size={11} color={color.white} />
           </View>
         ) : null}
-      </Pressable>
+      </Press>
       {selected
         ? (['left', 'right'] as const).map((side) => (
             <TrimHandle
@@ -749,7 +750,7 @@ function TrimHandle(props: TrimHandleProps): JSX.Element {
         { transform: [{ translateX: translate }] },
       ]}
     >
-      <Icon name={side === 'left' ? 'chevron-left' : 'chevron-right'} size={14} color={color.ink} />
+      <Icon name={side === 'left' ? 'chevron_left' : 'chevron_right'} size={14} color={color.ink} />
       {labelMs !== null ? (
         <View style={[styles.trimLabel, side === 'left' ? styles.trimLabelLeft : styles.trimLabelRight]} pointerEvents="none">
           <Text style={styles.trimLabelText}>{formatSeconds(labelMs)}</Text>
@@ -762,7 +763,7 @@ function TrimHandle(props: TrimHandleProps): JSX.Element {
 const styles = StyleSheet.create({
   root: {
     height: TIMELINE_HEIGHT,
-    backgroundColor: '#000',
+    backgroundColor: editor.black,
     flexDirection: 'row',
     paddingTop: PAD_TOP,
     paddingBottom: PAD_BOTTOM,
@@ -784,22 +785,22 @@ const styles = StyleSheet.create({
     top: 2,
     width: LABEL_W,
     textAlign: 'center',
-    fontSize: type.size.micro,
+    fontSize: editorType.size.micro,
     lineHeight: 12,
-    fontWeight: type.weight.medium,
-    color: color.whiteA60,
+    fontWeight: editorType.weight.medium,
+    color: editor.w60,
     fontVariant: ['tabular-nums'],
   },
-  rulerTick: { position: 'absolute', bottom: 2, width: 1, height: 4, backgroundColor: color.whiteA28 },
+  rulerTick: { position: 'absolute', bottom: 2, width: 1, height: 4, backgroundColor: editor.w28 },
   cueLane: { marginTop: RULER_GAP, width: '100%', zIndex: 2 },
   track: { marginTop: RULER_GAP, height: TRACK_H, width: '100%' },
   trackAfterLane: { marginTop: 0 },
   pieceWrap: { position: 'absolute', top: 0, height: TRACK_H },
   pieceWrapSelected: { zIndex: 2 },
-  piece: { flex: 1, borderRadius: PIECE_RADIUS, overflow: 'hidden', backgroundColor: color.ink800 },
+  piece: { flex: 1, borderRadius: PIECE_RADIUS, overflow: 'hidden', backgroundColor: editor.deepRaised },
   pieceSelected: { borderWidth: 2, borderColor: color.white },
   frameRow: { position: 'absolute', top: 0, height: TRACK_H, flexDirection: 'row' },
-  frameEmpty: { height: TRACK_H, backgroundColor: '#2A2F36' },
+  frameEmpty: { height: TRACK_H, backgroundColor: editor.frameEmpty },
   badge: {
     position: 'absolute',
     top: 4,
@@ -807,12 +808,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 6,
-    backgroundColor: color.inkA55,
+    backgroundColor: editor.deepA55,
   },
   badgeText: {
-    fontSize: type.size.micro11,
+    fontSize: editorType.size.micro11,
     lineHeight: 14,
-    fontWeight: type.weight.semibold,
+    fontWeight: editorType.weight.semibold,
     color: color.white,
     fontVariant: ['tabular-nums'],
   },
@@ -825,7 +826,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.inkA55,
+    backgroundColor: editor.deepA55,
   },
   handle: {
     position: 'absolute',
@@ -848,9 +849,9 @@ const styles = StyleSheet.create({
   trimLabelLeft: { left: 0 },
   trimLabelRight: { right: 0 },
   trimLabelText: {
-    fontSize: type.size.micro11,
+    fontSize: editorType.size.micro11,
     lineHeight: 14,
-    fontWeight: type.weight.semibold,
+    fontWeight: editorType.weight.semibold,
     color: color.ink,
     fontVariant: ['tabular-nums'],
   },

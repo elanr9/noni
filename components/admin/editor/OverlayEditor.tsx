@@ -18,6 +18,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Crypto from 'expo-crypto';
@@ -205,7 +206,7 @@ export function OverlayEditor(props: {
   } = props;
 
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const window = Dimensions.get('window');
   const [stage, setStage] = useState({ w: window.width, h: window.height });
   const stageRef = useRef(stage);

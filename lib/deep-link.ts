@@ -9,7 +9,7 @@ import type { AppMode } from './active-mode';
  *
  * role   creator | manager
  * screen creator: home | posts | chat | profile | earnings | assignment/<id> | post/<id>
- *                 | posts/<id> | channel/<id>
+ *                 | posts/<id> | channel/<id> | briefs[/<id>]
  *        manager: home | settings | analytics | briefs | review/<id>
  *                 | chat/<id> | messages/<id> | account-approval/<id>
  *                 | creator/<id> | music/<id>
@@ -55,13 +55,17 @@ export function routeForDeepLink(link: DeepLink): string {
     if ((screen === 'posts' && !id) || screen === 'profile') return `${CREATOR_ROOT}/(tabs)/profile`;
     if (screen === 'earnings') return `${CREATOR_ROOT}/(tabs)/earnings`;
     if (screen === 'chat') return `${CREATOR_ROOT}/chat`;
-    if (id && (screen === 'assignment' || screen === 'post' || screen === 'posts' || screen === 'channel')) {
+    if (screen === 'briefs') return id ? `${CREATOR_ROOT}/open-brief/${id}` : `${CREATOR_ROOT}/briefs`;
+    if (id && (screen === 'assignment' || screen === 'posts' || screen === 'channel')) {
       return `${CREATOR_ROOT}/${screen}/${id}`;
     }
+    // post/<id> is the legacy task link; the v2 post detail opens by assignment.
+    if (id && screen === 'post') return `${CREATOR_ROOT}/assignment/${id}`;
     return `${CREATOR_ROOT}/(tabs)`;
   }
   if (screen === 'home') return `${MANAGER_ROOT}/(tabs)`;
-  if (screen === 'settings' || screen === 'analytics' || screen === 'briefs') return `${MANAGER_ROOT}/(tabs)/${screen}`;
+  if (screen === 'settings') return `${MANAGER_ROOT}/settings`;
+  if (screen === 'analytics' || screen === 'briefs') return `${MANAGER_ROOT}/(tabs)/${screen}`;
   // Week links predate the Briefs library; they land on the tab.
   if (screen === 'week') return `${MANAGER_ROOT}/(tabs)/briefs`;
   if (

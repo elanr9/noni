@@ -6,7 +6,9 @@
 
 import { GradientFill as LinearGradient } from '../../../shared/briefs/GradientFill';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View,
+  type TextInputInstance,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInUp, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +27,7 @@ import { CenteredAt } from '../SlideCard';
 import { SlideText, slideInputInk, slideTextStyle } from '../SlideText';
 import { blockedFor, clamp, fontSizeFor, insetRect, layoutOf, overlaps, resolveTextStyle, serializeTextStyle, SLIDE_RATIO, textRect, zoneName, type Ghost, type Platform, type ResolvedTextStyle } from './layout';
 import { PlatformGhost } from './PlatformGhost';
+import { PicSticker } from '../media/PicSticker';
 import { Sticker, type Guides } from './Sticker';
 import { TextToolbar, WidthSlider, type ToolPanel } from './TextToolbar';
 import { BusyOverlay } from './BusyOverlay';
@@ -174,9 +177,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
   };
 
   // autoFocus is unreliable inside animated mounts, so focus by ref as well.
-  const textRef = useRef<TextInput>(null);
-  const shotRef = useRef<TextInput>(null);
-  const focusLater = useCallback((ref: React.RefObject<TextInput | null>) => {
+  const textRef = useRef<TextInputInstance>(null);
+  const shotRef = useRef<TextInputInstance>(null);
+  const focusLater = useCallback((ref: React.RefObject<TextInputInstance | null>) => {
     const t = setTimeout(() => ref.current?.focus(), 80);
     return () => clearTimeout(t);
   }, []);
@@ -316,6 +319,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 </Animated.View>
               </Sticker>
             ) : null}
+            {!editing
+              ? (cur.pics ?? []).map((pic) => (
+                  <PicSticker
+                    key={pic.id}
+                    pic={pic}
+                    W={W}
+                    H={H}
+                    onChange={(next) => patch({ pics: (cur.pics ?? []).map((p) => (p.id === next.id ? next : p)) })}
+                    onRemove={() => patch({ pics: (cur.pics ?? []).filter((p) => p.id !== pic.id) })}
+                  />
+                ))
+              : null}
             {cur.text && !editing ? (
               <Sticker
                 x={L.text.x}

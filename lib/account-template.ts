@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { forgetCompanyNiche } from './company-copy-api';
 import { VERIFICATION_BUCKET } from './creator-accounts-api';
 import type { Json } from './types';
 
@@ -14,69 +15,18 @@ export type AccountTemplate = {
   instagramLink: string;
   profilePicturePath: string | null;
   exampleScreenshotPath: string | null;
+  /**
+   * What a creator's feed should be about, e.g. "home workouts". Drives the
+   * suggested handles, warm-up steps, warm-up push and the feed check.
+   * Empty falls back to the company research profile, then neutral copy.
+   */
+  niche: string;
+  /** What creators type into TikTok and Instagram search while warming up. */
+  searchPhrases: string[];
 };
 
-export type AccountNameSuggestions = {
-  /** Profile display names, e.g. "Elan | College Soccer Recruiting". */
-  displayNames: string[];
-  /** @handles without the @, e.g. "elan.d1soccer". */
-  usernames: string[];
-};
-
-function handleToken(raw: string): string {
-  return raw
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-/**
- * Naming standard from live reference accounts: display name is the creator
- * plus College Soccer Recruiting; username mixes their name with recruiting
- * stems (d1soccer, d1recruit, recruiting, …).
- */
-export function suggestAccountNames(fullName: string): AccountNameSuggestions {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0] ?? 'creator';
-  const last = parts.length > 1 ? parts[parts.length - 1] : '';
-  const firstTok = handleToken(first) || 'creator';
-  const lastTok = handleToken(last);
-  const short = firstTok.slice(0, 12);
-
-  const displayNames = [
-    `${first} | College Soccer Recruiting`,
-    parts.length > 1
-      ? `${first} ${last} | College Soccer Recruiting`
-      : `${first} | College Recruiting Advice`,
-    `College Recruitment with ${first}`,
-  ];
-
-  const stems = [
-    'd1soccer',
-    'd1recruit',
-    'recruiting',
-    'collegerecruit',
-    'd1offers',
-  ];
-  const usernames = new Set<string>();
-  for (const stem of stems) {
-    usernames.add(`${short}.${stem}`);
-    usernames.add(`${short}${stem}`);
-  }
-  usernames.add(`d1with${short}`);
-  usernames.add(`${short}.d1`);
-  if (lastTok) {
-    usernames.add(`${short}.${lastTok}`);
-    usernames.add(`${lastTok}.d1soccer`);
-    usernames.add(`${short[0] ?? ''}${lastTok}.recruiting`);
-  }
-
-  return {
-    displayNames,
-    usernames: [...usernames].filter((u) => u.length >= 3 && u.length <= 30).slice(0, 10),
-  };
-}
+export type { AccountNameSuggestions } from './company-copy';
+export { suggestAccountNames } from './company-copy';
 
 export function parseAccountTemplate(settings: Json | null): AccountTemplate | null {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
@@ -95,6 +45,10 @@ export function parseAccountTemplate(settings: Json | null): AccountTemplate | n
       typeof t.profile_picture_path === 'string' ? t.profile_picture_path : null,
     exampleScreenshotPath:
       typeof t.example_screenshot_path === 'string' ? t.example_screenshot_path : null,
+    niche: typeof t.niche === 'string' ? t.niche : '',
+    searchPhrases: Array.isArray(t.search_phrases)
+      ? t.search_phrases.filter((x): x is string => typeof x === 'string')
+      : [],
   };
 }
 
@@ -132,6 +86,8 @@ export async function saveAccountTemplate(
       instagram_link: template.instagramLink,
       profile_picture_path: template.profilePicturePath,
       example_screenshot_path: template.exampleScreenshotPath,
+      niche: template.niche.trim(),
+      search_phrases: template.searchPhrases.map((p) => p.trim()).filter(Boolean),
     },
   };
   const { error } = await supabase
@@ -139,6 +95,7 @@ export async function saveAccountTemplate(
     .update({ settings })
     .eq('id', companyId);
   if (error) throw error;
+  forgetCompanyNiche(companyId);
 }
 
 export async function uploadTemplateAsset(

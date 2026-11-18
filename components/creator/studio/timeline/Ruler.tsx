@@ -2,9 +2,9 @@ import { memo, type JSX } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { formatClock } from '../../../../lib/video-edit';
-import { color, type } from '../../../../theme/tokens';
 import { RULER_H } from './layout';
 import { msToPx } from './scale';
+import { editor, editorType } from '../../../../theme/v2';
 
 const LABEL_W = 44;
 
@@ -34,11 +34,11 @@ const styles = StyleSheet.create({
     top: 0,
     width: LABEL_W,
     textAlign: 'center',
-    fontSize: type.size.micro,
+    fontSize: editorType.size.micro,
     lineHeight: 12,
-    fontWeight: type.weight.medium,
-    color: color.whiteA60,
+    fontWeight: editorType.weight.medium,
+    color: editor.w60,
     fontVariant: ['tabular-nums'],
   },
-  tick: { position: 'absolute', bottom: 2, width: 1, height: 4, backgroundColor: color.whiteA28 },
+  tick: { position: 'absolute', bottom: 2, width: 1, height: 4, backgroundColor: editor.w28 },
 });

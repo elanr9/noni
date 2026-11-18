@@ -5,8 +5,8 @@ import { useLayoutEffect, useRef, type JSX, type MutableRefObject } from 'react'
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-import { color } from '../../../../theme/tokens';
 import type { WidthDrag } from '../../slides/GestureItem';
+import { color, editor } from '../../../../theme/v2';
 
 const HANDLE_HIT = 28;
 
@@ -66,6 +66,6 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: color.white,
     borderWidth: 1,
-    borderColor: color.ink900,
+    borderColor: editor.deep,
   },
 });

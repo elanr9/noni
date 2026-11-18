@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -236,7 +237,7 @@ export default function PostEditorScreen() {
   const [savedFlash, setSavedFlash] = useState(false);
   /** True while a talking point card drags, so the page scroll pauses. */
   const [pointsDragging, setPointsDragging] = useState(false);
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
   const scrollMetrics = useRef<DragScrollMetrics>({ y: 0, viewportHeight: 0, contentHeight: 0 });
   const [shotBusyIndex, setShotBusyIndex] = useState<number | null>(null);
   /** Which point the camera roll sheet is picking for; null means closed. */

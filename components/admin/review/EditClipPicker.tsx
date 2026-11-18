@@ -1,7 +1,9 @@
 // Which clip or slide is on the stage: one pill per segment, the current one
 // lit and scrolled to the centre.
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { ScrollView, StyleSheet, Text,
+  type ScrollViewInstance,
+} from 'react-native';
 
 import { color, radiusAdmin, type } from '../../../theme/tokens';
 import { PressableScale } from '../../ui/PressableScale';
@@ -14,7 +16,7 @@ export function EditClipPicker(props: {
   onIndex: (index: number) => void;
 }): JSX.Element {
   const { labels, index, onIndex } = props;
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const frames = useRef(new Map<number, PillFrame>());
   const [viewport, setViewport] = useState(0);
 

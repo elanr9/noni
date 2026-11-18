@@ -19,6 +19,7 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewInstance,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -58,7 +59,7 @@ export function TimelineStrip(props: {
   const totalMs = documentDurationMs(doc);
   const totalWidth = msToPx(totalMs, msPerPx);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const interacting = useRef(false);
   const momentum = useRef(false);
   const offsetRef = useRef(0);

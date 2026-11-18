@@ -23,7 +23,7 @@ export default function PreviewChat() {
   const [messages, setMessages] = useState<ChatMessage[]>(SAMPLE);
   return (
     <ChatScreen
-      header={{ name: 'Fabrizio', meta: '@fabri.fv', photo: 'https://i.pravatar.cc/160?img=12', tone: 'blue', online: true }}
+      header={{ name: 'Fabrizio', meta: '@fabri.fv', photo: null, tone: 'blue', online: true }}
       messages={messages}
       onBack={() => router.back()}
       onHeaderPress={() => undefined}

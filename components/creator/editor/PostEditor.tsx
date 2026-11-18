@@ -41,9 +41,6 @@ import {
   type PreviewTimeEvent,
   type VideoEditorPreviewHandle,
 } from '../../../modules/video-editor';
-import { color, type } from '../../../theme/tokens';
-import { Icon } from '../../ui/Icon';
-import { PressableScale } from '../../ui/PressableScale';
 import type { ShotPreview } from '../SegmentOverlayPreview';
 import { TextColorPicker, type TextColorPick } from '../TextColorPicker';
 import { clampCrop } from './CropGesture';
@@ -79,6 +76,8 @@ import { GainFader, ToolPanel } from './ToolPanel';
 import { useEditHistory } from './useEditHistory';
 import { useEvent } from './useEvent';
 import { useSegmentPersistence, type SegmentWriter } from './useSegmentPersistence';
+import { color, editor, editorType } from '../../../theme/v2';
+import { Icon, Press } from '../../v2';
 
 export type EditorSlot = {
   slotIndex: number;
@@ -200,7 +199,7 @@ function cueStartMs(
 
 const NATIVE_MIN_GAP_MS = 80;
 const IDENTITY_CROP: EditCrop = { scale: 1, x: 0, y: 0 };
-const ARROW_RED = '#FE2C55';
+const ARROW_RED = editor.tiktok;
 
 function isIdentityCrop(crop: EditCrop): boolean {
   return crop.scale <= 1.001 && Math.abs(crop.x) < 0.001 && Math.abs(crop.y) < 0.001;
@@ -944,7 +943,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: top + 8 }]}>
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel={managerMode ? 'Cancel and discard edits' : 'Back to camera'}
           onPress={onBack}
@@ -954,15 +953,15 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           {managerMode ? (
             <Text style={styles.cancelText}>Cancel</Text>
           ) : (
-            <Icon name="chevron-left" size={22} color={color.white} />
+            <Icon name="chevron_left" size={22} color={color.white} />
           )}
-        </PressableScale>
+        </Press>
         {speechPill ? (
           <View style={styles.speechPill} pointerEvents="none">
             <Text style={styles.hintText}>Trimmed to speech</Text>
           </View>
         ) : null}
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel={managerMode ? 'Done editing' : 'Continue'}
           onPress={continueToSend}
@@ -975,9 +974,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           {managerMode ? (
             <Text style={styles.doneText}>Done</Text>
           ) : (
-            <Icon name="arrow-right" size={22} color={color.white} />
+            <Icon name="arrow_forward" size={22} color={color.white} />
           )}
-        </PressableScale>
+        </Press>
       </View>
 
       <View style={styles.stageWrap}>
@@ -1025,7 +1024,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           <Text style={styles.clockNow}>{formatClock(positionMs)}</Text>
           {`/${formatClock(durationMs)}`}
         </Text>
-        <PressableScale
+        <Press
           accessibilityRole="button"
           accessibilityLabel={playing ? 'Pause' : 'Play'}
           onPress={togglePlay}
@@ -1033,10 +1032,10 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           hitSlop={8}
           style={styles.playBtn}
         >
-          <Icon name={playing ? 'pause' : 'play'} size={22} color={color.white} />
-        </PressableScale>
+          <Icon name={playing ? 'pause' : 'play_arrow'} size={22} color={color.white} />
+        </Press>
         <View style={styles.historyBtns}>
-          <PressableScale
+          <Press
             accessibilityRole="button"
             accessibilityLabel="Undo"
             onPress={undo}
@@ -1044,9 +1043,9 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             hitSlop={8}
             style={[styles.iconBtn, (!history.canUndo || tool !== null) && styles.btnOff]}
           >
-            <Icon name="undo-2" size={20} color={color.white} />
-          </PressableScale>
-          <PressableScale
+            <Icon name="undo" size={20} color={color.white} />
+          </Press>
+          <Press
             accessibilityRole="button"
             accessibilityLabel="Redo"
             onPress={redo}
@@ -1054,8 +1053,8 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
             hitSlop={8}
             style={[styles.iconBtn, (!history.canRedo || tool !== null) && styles.btnOff]}
           >
-            <Icon name="redo-2" size={20} color={color.white} />
-          </PressableScale>
+            <Icon name="redo" size={20} color={color.white} />
+          </Press>
         </View>
       </View>
 
@@ -1091,15 +1090,15 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
         ) : tool === 'crop' ? (
           <ToolPanel title="Crop" onCancel={() => closeTool(false)} onDone={() => closeTool(true)}>
             <View style={styles.cropRow}>
-              <PressableScale
+              <Press
                 accessibilityRole="button"
                 accessibilityLabel="Reset crop"
                 onPress={() => setLiveCrop(IDENTITY_CROP)}
                 style={styles.resetBtn}
               >
-                <Icon name="rotate-ccw" size={16} color={color.white} />
+                <Icon name="replay" size={16} color={color.white} />
                 <Text style={styles.resetText}>Reset</Text>
-              </PressableScale>
+              </Press>
               <Text style={styles.cropZoom}>
                 {`${(liveCrop?.scale ?? 1).toFixed(1)}x`}
               </Text>
@@ -1166,14 +1165,14 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
           <Text style={styles.errorText} numberOfLines={2}>
             {error}
           </Text>
-          <PressableScale
+          <Press
             accessibilityRole="button"
             accessibilityLabel="Dismiss"
             onPress={() => setError(null)}
             hitSlop={8}
           >
-            <Icon name="x" size={16} color={color.white} />
-          </PressableScale>
+            <Icon name="close" size={16} color={color.white} />
+          </Press>
         </View>
       ) : null}
 
@@ -1190,7 +1189,7 @@ export function PostEditor(props: PostEditorProps): JSX.Element {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: editor.black,
   },
   header: {
     paddingHorizontal: 12,
@@ -1203,7 +1202,7 @@ const styles = StyleSheet.create({
     width: HEADER_H,
     height: HEADER_H,
     borderRadius: HEADER_H / 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: editor.w18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1216,9 +1215,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cancelText: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
+    color: editor.w75,
+    fontSize: editorType.size.bodySm,
+    fontWeight: editorType.weight.bold,
   },
   doneBtn: {
     minWidth: 64,
@@ -1231,8 +1230,8 @@ const styles = StyleSheet.create({
   },
   doneText: {
     color: color.ink,
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.bold,
+    fontSize: editorType.size.bodySm,
+    fontWeight: editorType.weight.bold,
   },
   btnOff: {
     opacity: 0.4,
@@ -1254,9 +1253,9 @@ const styles = StyleSheet.create({
   },
   hintText: {
     color: color.white,
-    fontSize: type.size.label,
+    fontSize: editorType.size.label,
     fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: editor.k55,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
@@ -1270,8 +1269,8 @@ const styles = StyleSheet.create({
   },
   clock: {
     flex: 1,
-    color: color.whiteA60,
-    fontSize: type.size.meta,
+    color: editor.w60,
+    fontSize: editorType.size.meta,
     fontVariant: ['tabular-nums'],
   },
   clockNow: {
@@ -1296,8 +1295,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   slotLabel: {
-    color: color.whiteA60,
-    fontSize: type.size.label,
+    color: editor.w60,
+    fontSize: editorType.size.label,
     fontWeight: '600',
     paddingHorizontal: 16,
     paddingBottom: 2,
@@ -1320,16 +1319,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: editor.control,
   },
   resetText: {
     color: color.white,
-    fontSize: type.size.meta,
+    fontSize: editorType.size.meta,
     fontWeight: '600',
   },
   cropZoom: {
-    color: color.whiteA60,
-    fontSize: type.size.meta,
+    color: editor.w60,
+    fontSize: editorType.size.meta,
     fontVariant: ['tabular-nums'],
   },
   errorBar: {
@@ -1339,7 +1338,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(30,30,32,0.96)',
+    backgroundColor: editor.controlGlass,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1347,7 +1346,7 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     color: color.white,
-    fontSize: type.size.chip,
+    fontSize: editorType.size.chip,
   },
   busy: {
     position: 'absolute',
@@ -1355,14 +1354,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: editor.k72,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 14,
   },
   busyText: {
     color: color.white,
-    fontSize: type.size.bodySm,
+    fontSize: editorType.size.bodySm,
     fontWeight: '600',
   },
 });

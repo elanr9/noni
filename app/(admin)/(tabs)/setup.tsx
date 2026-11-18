@@ -1,5 +1,5 @@
-// Temporary Onboarding tab for freshly invited campaign managers. Replaces
-// Creators on the left until the checklist is done, then Review takes over.
+// Onboarding checklist for freshly invited campaign managers. A hidden tab:
+// login lands here until it is done, and Review's first-run card links back.
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { SkeletonLine } from '../../../components/ui/Skeleton';
 import { StatusChip } from '../../../components/ui/StatusChip';
+import { useTabBarInset } from '../../../components/v2';
 import { inviteCreator } from '../../../lib/admin-api';
 import { useAuth } from '../../../lib/auth';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
@@ -75,6 +76,7 @@ function StepRow({
 
 export default function ManagerSetupScreen() {
   const router = useRouter();
+  const bottomInset = useTabBarInset();
   const { profile, managerAccess, refreshProfile, refreshManagerAccess } = useAuth();
   const [state, setState] = useState<ManagerSetupState | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -147,7 +149,7 @@ export default function ManagerSetupScreen() {
   if (complete) return null;
 
   return (
-    <Screen bg={color.offWhite} scroll contentStyle={styles.content}>
+    <Screen bg={color.offWhite} scroll contentStyle={[styles.content, { paddingBottom: bottomInset }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Get set up</Text>
         <Text style={styles.subtitle}>

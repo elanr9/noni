@@ -92,7 +92,7 @@ openai_api_key = "env(OPENAI_API_KEY)"
 
 # Email testing server. Emails sent with the local dev setup are not actually sent - rather, they
 # are monitored, and you can view the emails that would have been sent from the web interface.
-[inbucket]
+[local_smtp]
 enabled = true
 # Port to use for the email testing server web interface.
 port = 54324
@@ -489,3 +489,12 @@ verify_jwt = false
 # Both are called from the app with a real user session, so they keep the
 # default verify_jwt = true and get the platform JWT check on top of the
 # authenticate() call inside them.
+
+[functions.notify-brief]
+verify_jwt = false
+
+[functions.track-signup]
+verify_jwt = false
+
+[functions.notify-lead]
+verify_jwt = false

@@ -2,16 +2,20 @@
 // header block with the frame (tap for the preview modal), title and a
 // tappable creator line; for live posts the Total / TikTok / Instagram
 // toggle, the stats card keyed by platform and the Open on platform pill.
-import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import type { PlatformStats } from '../../../../lib/analytics-api';
-import { fmt, postDate } from '../../../../lib/v2-format';
+import { fmt, postDate, credit, signupsLabel, sales } from '../../../../lib/v2-format';
 import { creatorFor, platformStats, useV2Data, type V2Post } from '../../../../lib/v2-posts';
-import { color, motion, shadow, tone, type Tone } from '../../../../theme/v2';
-import { Avatar, Icon, InstagramFill, InstagramMark, Press, Screen, TikTokMark, tap, type IconName } from '../../../v2';
+import { color, editor, motion, shadow, tone, type Tone } from '../../../../theme/v2';
+import { Avatar, Icon, InstagramFill, InstagramMark, Press, Screen, Skeleton, TikTokMark, type IconName } from '../../../v2';
+import { usePresence } from '../newbrief/usePresence';
+import { LoadError, StateCard } from './LoadError';
+import { useV2Failed } from './useV2Refresh';
 import { PostFrame } from './PostFrame';
 
 type Platform = 'all' | 'tt' | 'ig';
@@ -27,18 +31,19 @@ const MINI: readonly { key: keyof PlatformStats; label: string; icon: IconName; 
   { key: 'saves', label: 'saves', icon: 'bookmark', tone: 'amber' },
 ];
 
-/** Links for a post: its own URL on the platform it was posted to, else the creator's profile. */
-export function postLinks(p: V2Post, handle: string | null): { tiktok: string; instagram: string } {
-  const h = (handle || '').replace(/^@/, '');
+export type PostLinks = { tiktok: string | null; instagram: string | null };
+
+/** Links for a post: its own URL on the platform it was posted to, else the creator's profile, else none. */
+export function postLinks(p: V2Post, handle: string | null): PostLinks {
+  const h = (handle || '').replace(/^@/, '').trim();
   const own = p.postUrl || '';
   return {
-    tiktok: /tiktok\.com/.test(own) ? own : `https://www.tiktok.com/@${h}`,
-    instagram: /instagram\.com/.test(own) ? own : `https://www.instagram.com/${h}`,
+    tiktok: /tiktok\.com/.test(own) ? own : h ? `https://www.tiktok.com/@${h}` : null,
+    instagram: /instagram\.com/.test(own) ? own : h ? `https://www.instagram.com/${h}` : null,
   };
 }
 
 function openUrl(url: string) {
-  tap();
   void Linking.openURL(url).catch(() => undefined);
 }
 
@@ -100,10 +105,16 @@ function Mini({ v, label, icon, t }: { v: string; label: string; icon: IconName;
   );
 }
 
-/** Black TikTok or Instagram gradient pill with the mark and a label. */
-function PlatformPill({ platform, label, height, url }: { platform: 'tt' | 'ig'; label: string; height: number; url: string }) {
+/** Black TikTok or Instagram gradient pill with the mark and a label. Dimmed and inert with no link. */
+function PlatformPill({ platform, label, height, url }: { platform: 'tt' | 'ig'; label: string; height: number; url: string | null }) {
   return (
-    <Press accessibilityRole="link" onPress={() => openUrl(url)} style={{ flex: 1, height, borderRadius: 999, overflow: 'hidden', backgroundColor: platform === 'tt' ? color.ink : 'transparent', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+    <Press
+      accessibilityRole="link"
+      accessibilityState={{ disabled: !url }}
+      disabled={!url}
+      onPress={() => url && openUrl(url)}
+      style={{ flex: 1, height, borderRadius: 999, overflow: 'hidden', opacity: url ? 1 : 0.4, backgroundColor: platform === 'tt' ? color.ink : 'transparent', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+    >
       {platform === 'ig' ? <InstagramFill style={StyleSheet.absoluteFill} /> : null}
       <Mark platform={platform} color={color.white} size={16} />
       <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.white }}>{label}</Text>
@@ -111,22 +122,42 @@ function PlatformPill({ platform, label, height, url }: { platform: 'tt' | 'ig';
   );
 }
 
-function PreviewModal({ p, links, onClose }: { p: V2Post; links: { tiktok: string; instagram: string }; onClose: () => void }) {
+/** Why an Open on platform button is dimmed. */
+function noLinkCopy(links: PostLinks, which: 'tt' | 'ig' | 'both'): string | null {
+  const tt = !links.tiktok, ig = !links.instagram;
+  if (which === 'tt') return tt ? "We don't have this post's TikTok link yet. It shows here once the creator's account is connected." : null;
+  if (which === 'ig') return ig ? "We don't have this post's Instagram link yet. It shows here once the creator's account is connected." : null;
+  if (tt && ig) return "We don't have links to this post yet. They show here once the creator's accounts are connected.";
+  if (tt) return "We don't have this post's TikTok link yet.";
+  if (ig) return "We don't have this post's Instagram link yet.";
+  return null;
+}
+
+function NoLink({ copy }: { copy: string | null }) {
+  if (!copy) return null;
+  return <Text style={{ marginTop: 8, fontSize: 13, lineHeight: 18, fontWeight: '500', color: color.grey4, textAlign: 'center' }}>{copy}</Text>;
+}
+
+function PreviewModal({ open, p, links, onClose }: { open: boolean; p: V2Post; links: PostLinks; onClose: () => void }) {
+  const { mounted, progress } = usePresence(open, 260, 200);
+  const scrim = useAnimatedStyle(() => ({ opacity: progress.get() }));
+  const card = useAnimatedStyle(() => ({ opacity: progress.get(), transform: [{ translateY: 16 * (1 - progress.get()) }, { scale: 0.96 + 0.04 * progress.get() }] }));
+  if (!mounted) return null;
   return (
     <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <Animated.View entering={FadeIn.duration(180)} style={StyleSheet.absoluteFill}>
+      <Animated.View style={[StyleSheet.absoluteFill, scrim]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Close preview" onPress={onClose} style={[StyleSheet.absoluteFill, { backgroundColor: color.ink, opacity: 0.6 }]} />
       </Animated.View>
-      <View pointerEvents="box-none" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Animated.View entering={FadeInDown.duration(260).easing(motion.tabEase)} style={styles.modalCard}>
+      <View pointerEvents={open ? 'box-none' : 'none'} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Animated.View style={[styles.modalCard, card]}>
           <View style={styles.frame}>
             <PostFrame post={p} width="100%" height={0} radius={0} style={{ height: '100%' }} />
             <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 100 }}>
               <Svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 1 1">
                 <Defs>
                   <LinearGradient id="v2-preview-fade" x1={0} y1={1} x2={0} y2={0}>
-                    <Stop offset="0" stopColor="#000000" stopOpacity={0.65} />
-                    <Stop offset="1" stopColor="#000000" stopOpacity={0} />
+                    <Stop offset="0" stopColor={editor.black} stopOpacity={0.65} />
+                    <Stop offset="1" stopColor={editor.black} stopOpacity={0} />
                   </LinearGradient>
                 </Defs>
                 <Rect width={1} height={1} fill="url(#v2-preview-fade)" />
@@ -141,6 +172,7 @@ function PreviewModal({ p, links, onClose }: { p: V2Post; links: { tiktok: strin
             <PlatformPill platform="tt" label="TikTok" height={50} url={links.tiktok} />
             <PlatformPill platform="ig" label="Instagram" height={50} url={links.instagram} />
           </View>
+          <NoLink copy={noLinkCopy(links, 'both')} />
         </Animated.View>
       </View>
     </Modal>
@@ -151,15 +183,55 @@ export interface BriefPostScreenProps {
   id: string;
   /** Pushes the creator profile from the creator line. */
   onCreator?: (creatorId: string) => void;
+  /** Pull to refresh. */
+  refreshing?: boolean;
+  onRefresh?: () => void;
+  /** Try again after a failed load. */
+  onRetry?: () => void;
 }
 
-export function BriefPostScreen({ id, onCreator }: BriefPostScreenProps) {
+export function BriefPostScreen({ id, onCreator, refreshing = false, onRefresh, onRetry }: BriefPostScreenProps) {
+  const insets = useSafeAreaInsets();
   const posts = useV2Data((s) => s.posts);
   const creators = useV2Data((s) => s.creators);
+  const loaded = useV2Data((s) => s.loaded);
+  const loading = useV2Data((s) => s.loading);
+  const failed = useV2Failed();
+  const stripeConnected = useV2Data((s) => s.stripeConnected);
   const [plat, setPlat] = useState<Platform>('all');
   const [modal, setModal] = useState(false);
   const p = posts.find((x) => x.id === id);
-  if (!p) return <Screen back title="Post" />;
+  const body = (children: ReactNode) => (
+    <Screen back title="Post">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: Math.max(insets.bottom, 24) + 16 }}
+        refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.grey4} colors={[color.blue]} /> : undefined}
+      >
+        {children}
+      </ScrollView>
+    </Screen>
+  );
+  if (!p) {
+    if (failed) return body(<LoadError onRetry={onRetry ?? (() => undefined)} what="this post" />);
+    if (!loaded || loading) {
+      return body(
+        <View style={{ gap: 14 }}>
+          <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+            <Skeleton w={72} h={99} r={12} />
+            <View style={{ flex: 1, gap: 10 }}>
+              <Skeleton h={22} />
+              <Skeleton h={18} w="60%" />
+            </View>
+          </View>
+          <Skeleton h={42} />
+          <Skeleton h={190} />
+        </View>,
+      );
+    }
+    return body(<StateCard icon="search" title="This post isn't here" body="It may have been removed, or it belongs to a different company. Pull down to check again." />);
+  }
   const c = creatorFor(creators, p);
   const posted = p.state === 'Posted';
   const links = postLinks(p, c.handle);
@@ -176,8 +248,8 @@ export function BriefPostScreen({ id, onCreator }: BriefPostScreenProps) {
     </>
   );
 
-  return (
-    <Screen back title="Post" scroll>
+  return body(
+    <>
       <View style={styles.head}>
         <Press accessibilityRole="button" accessibilityLabel="Preview" onPress={() => setModal(true)} style={{ borderRadius: 12 }}>
           <PostFrame post={p} width={72} height={99} radius={12} />
@@ -220,18 +292,32 @@ export function BriefPostScreen({ id, onCreator }: BriefPostScreenProps) {
                 <PlatformPill platform={plat} label={plat === 'tt' ? 'Open on TikTok' : 'Open on Instagram'} height={46} url={plat === 'tt' ? links.tiktok : links.instagram} />
               </View>
             ) : null}
+            {plat !== 'all' ? <NoLink copy={noLinkCopy(links, plat)} /> : null}
           </Animated.View>
+          {stripeConnected ? (
+            <View style={[styles.card, { marginTop: 12 }]}>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Mini v={sales(p.salesCents)} label="sales" icon="payments" t="green" />
+                <Mini v={credit(p.signups)} label="sign-ups" icon="person_add" t="green" />
+              </View>
+              <Text style={{ marginTop: 12, fontSize: 12, lineHeight: 17, fontWeight: '500', color: color.grey4 }}>
+                {c.code
+                  ? `From customers who used ${c.name.split(' ')[0]}'s code ${c.code}, shared across their posts by the views each was getting that week.`
+                  : `Give ${c.name.split(' ')[0]} a promo code on their profile to see the sales this post brings in.`}
+              </Text>
+            </View>
+          ) : null}
         </>
       ) : null}
 
-      {modal ? <PreviewModal p={p} links={links} onClose={() => setModal(false)} /> : null}
-    </Screen>
+      <PreviewModal open={modal} p={p} links={links} onClose={() => setModal(false)} />
+    </>,
   );
 }
 
 const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 2, paddingHorizontal: 2, paddingBottom: 16 },
-  playDisc: { width: 28, height: 28, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  playDisc: { width: 28, height: 28, borderRadius: 999, backgroundColor: editor.k45, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 18, lineHeight: 23, fontWeight: '800', letterSpacing: -0.3, color: color.ink },
   creator: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8, alignSelf: 'flex-start', maxWidth: '100%' },
   track: { flexDirection: 'row', backgroundColor: color.grey1, borderRadius: 999, padding: 3, marginBottom: 12, boxShadow: `inset 0 0 0 1px ${color.grey2}` },
@@ -241,5 +327,5 @@ const styles = StyleSheet.create({
   bigRow: { flexDirection: 'row', gap: 28, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: color.grey1 },
   modalCard: { width: '100%', backgroundColor: color.card, borderRadius: 24, padding: 14, ...shadow.float },
   frame: { aspectRatio: 9 / 13, borderRadius: 16, overflow: 'hidden', backgroundColor: color.ink },
-  closeDisc: { position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  closeDisc: { position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 999, backgroundColor: editor.k50, alignItems: 'center', justifyContent: 'center' },
 });

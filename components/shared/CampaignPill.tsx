@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
 
 import { useCompany } from '../../lib/company-context';
 import { sideLabel } from '../../lib/companies-api';
@@ -28,13 +28,13 @@ export function CampaignPill({ style }: CampaignPillProps) {
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={openSwitcher}
-      style={[styles.pill, shadow.shadowCard, style]}
+      style={[styles.pill, shadow.shadowCard, elsewhereTotal > 0 ? styles.waiting : null, style]}
     >
       <CompanyMark
         companyId={active.companyId}
         name={active.name}
         logoPath={active.logoPath}
-        size={22}
+        size={24}
       />
       <Text style={styles.name} numberOfLines={1}>
         {active.name}
@@ -44,9 +44,8 @@ export function CampaignPill({ style }: CampaignPillProps) {
           {activeSide === 'creator' ? 'Creator' : 'Manager'}
         </Text>
       )}
-      <Icon name="chevrons-up-down" size={15} color={color.slate400} />
-      <View style={styles.divider} />
-      <WaitBadge count={elsewhereTotal} size={20} />
+      <Icon name="chevron-down" size={16} color={color.slate400} />
+      {elsewhereTotal > 0 ? <WaitBadge count={elsewhereTotal} size={18} /> : null}
     </PressableScale>
   );
 }
@@ -55,32 +54,30 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    height: 34,
-    paddingLeft: 6,
-    paddingRight: 8,
+    gap: 6,
+    height: 40,
+    paddingLeft: 8,
+    paddingRight: 10,
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: color.line,
     backgroundColor: color.white,
     maxWidth: '100%',
     alignSelf: 'flex-start',
   },
+  waiting: {
+    paddingRight: 8,
+  },
   name: {
     flexShrink: 1,
-    fontSize: 14,
+    marginLeft: 2,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: -0.2,
     color: color.ink,
   },
   side: {
-    fontSize: 12,
-    fontWeight: '600',
+    flexShrink: 0,
+    fontSize: 13,
+    fontWeight: '500',
     color: color.slate500,
-  },
-  divider: {
-    width: 1,
-    height: 18,
-    backgroundColor: color.line,
   },
 });

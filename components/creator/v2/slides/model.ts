@@ -4,7 +4,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { shortLabel, stText, type Brief, type ClipDoc } from '../../../../lib/brief-library';
-import type { PickedPhoto } from '../../../../lib/submissions';
+import { toTextOverlay } from '../../../../lib/brief-template-doc';
+import type { SlideImage } from '../../../../lib/edit-document';
+import type { OverlayBox } from '../../../../lib/overlay-boxes';
+import type { PickedPhoto, SlideshowSlideInput } from '../../../../lib/submissions';
 import { centeredCrop, type PhotoCrop } from '../../slides/photo-crop';
 
 /** Zoom and pan as the crop step holds them: scale about the centre, then a translate in percent of the frame. */
@@ -76,4 +79,28 @@ export function photosForSubmit(slides: Slide[]): PickedPhoto[] {
     const crop = cropWindow(s.crop, s.photo.source);
     return [{ ...s.photo, crop, cropInstagram: s.photo.cropInstagram ?? centeredCrop(s.photo.source, 4 / 5) }];
   });
+}
+
+/** The slide's words as render boxes: same place, size and colors the Story editor shows. */
+export function slideBoxes(s: Slide): OverlayBox[] {
+  return slideDoc(s)
+    .texts.filter((t) => t.text.trim().length > 0)
+    .map((t) => {
+      const { kind: _kind, startMs: _s, endMs: _e, ...box } = toTextOverlay(t, 0, 0);
+      return box;
+    });
+}
+
+/** Pictures placed on the slide; brand gradients have no file and stay off. */
+export function slidePics(s: Slide): SlideImage[] {
+  return slideDoc(s)
+    .overlays.filter((o) => !!o.src && !/^grad:/.test(o.src))
+    .map((o) => ({ path: o.src, x: o.x / 100, y: o.y / 100, width: o.w / 100 }));
+}
+
+/** Every filled slide ready for submitSlideshow: the cropped photo, its words and pictures. */
+export function slidesForSubmit(slides: Slide[]): SlideshowSlideInput[] {
+  const photos = photosForSubmit(slides);
+  const filled = slides.filter((s) => s.photo);
+  return filled.map((s, i) => ({ photo: photos[i], boxes: slideBoxes(s), pics: slidePics(s) }));
 }

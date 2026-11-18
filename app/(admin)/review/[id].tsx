@@ -1,44 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+// Review detail (v2_review README 3.3): full-bleed post player between a white
+// header band (back, title, View script) and a white footer band (Changes /
+// Approve, or Send changes once notes exist). Opens any assignment by id, so
+// links from chat, profiles and pushes land on the right post in the right
+// state; live posts hand off to the post screen.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ApprovedOverlay } from '../../../components/admin/review/ApprovedOverlay';
-import {
-  ManagerVideoEditor,
-  type ManagerClip,
-} from '../../../components/admin/review/ManagerVideoEditor';
-import { ReelSurface, type ReelClip } from '../../../components/admin/review/ReelSurface';
-import {
-  ReviewEditMode,
-  type EditTarget,
-} from '../../../components/admin/review/ReviewEditMode';
-import { ReviewMetaOverlay } from '../../../components/admin/review/ReviewMetaOverlay';
-import { AudioChip } from '../../../components/admin/v2/audio/AudioChip';
-import { parsePostAudio } from '../../../lib/edit-document';
-import { ReviewTopBar } from '../../../components/admin/review/ReviewTopBar';
-import {
-  RevisionMode,
-  type RevisionSection,
-} from '../../../components/admin/review/RevisionMode';
-import { SentConfirmation } from '../../../components/admin/review/SentConfirmation';
+import { ManagerVideoEditor, type ManagerClip } from '../../../components/admin/review/ManagerVideoEditor';
+import { ReviewEditMode, type EditTarget } from '../../../components/admin/review/ReviewEditMode';
 import { SlideshowSurface } from '../../../components/admin/review/SlideshowSurface';
-import { SkeletonCard, SkeletonLine } from '../../../components/admin/shared';
-import { SoftToast } from '../../../components/states';
-import { Button } from '../../../components/ui/Button';
+import { AudioChip } from '../../../components/admin/v2/audio/AudioChip';
+import { Celebration } from '../../../components/admin/v2/review/detail/Celebration';
+import { FeedBand } from '../../../components/admin/v2/review/detail/FeedBand';
+import { NotesSheet } from '../../../components/admin/v2/review/detail/NotesSheet';
+import { fromPostNotes, sortNotes, toFlatNote, toPostNotes, type ReviewNote } from '../../../components/admin/v2/review/detail/notes';
+import { Scrubber } from '../../../components/admin/v2/review/detail/Scrubber';
+import { ScriptSheet, type ScriptSection } from '../../../components/admin/v2/review/detail/ScriptSheet';
+import { useReviewPlayer } from '../../../components/admin/v2/review/detail/useReviewPlayer';
+import { Button, Icon, Press, Skeleton } from '../../../components/v2';
+import { toast } from '../../../components/v2/Toast';
 import {
   getSubmissionRenderState,
-  latestSubmissionsByAssignment,
-  listAssignmentQueue,
   rerenderSubmission,
   restartRender,
   reviewAssignment,
@@ -47,24 +33,20 @@ import {
   type AssignmentQueueItem,
   type Submission,
 } from '../../../lib/admin-api';
-import {
-  scriptToLines,
-  slidesFromScript,
-  toAssignmentQueueRow,
-} from '../../../lib/admin-queue-map';
+import { getAssignmentForReview, latestSentBackNotes, listReviewSiblings } from '../../../lib/admin-review-api';
+import { useReviewQueue } from '../../../lib/admin-review-queue';
+import { scriptToLines, slidesFromScript, toAssignmentQueueRow } from '../../../lib/admin-queue-map';
 import {
   DEFAULT_SUBTITLES_Y,
   listBriefSegments,
-  listPostTypes,
   parseHookOptions,
   parseTalkingPoints,
   signedScreenshotUrl,
   type Brief,
   type BriefSegment,
 } from '../../../lib/briefs-api';
-import { parseEditDocument, type SlideshowDocument } from '../../../lib/edit-document';
+import { parseEditDocument, parsePostAudio, type SlideshowDocument } from '../../../lib/edit-document';
 import { parseOverlayBoxes, type OverlayBox } from '../../../lib/overlay-boxes';
-import { parseNotes } from '../../../lib/post-event-labels';
 import { getCreatorAccount } from '../../../lib/creator-accounts-api';
 import { useAuth } from '../../../lib/auth';
 import type { MockQueueItem } from '../../../lib/admin-review-types';
@@ -72,7 +54,13 @@ import { asSlideAspect, probeDurationMs } from '../../../lib/submissions';
 import type { Json } from '../../../lib/types';
 import type { PhotoCrop } from '../../../components/creator/slides/photo-crop';
 import { isVideoEditorAvailable } from '../../../modules/video-editor';
-import { borderWidth, color, type } from '../../../theme/tokens';
+import { color, radius, shadow, text } from '../../../theme/v2';
+
+/** One stitched clip of the finished edit: "Hook" / "Clip 3" / "Outro". */
+type ReelClip = { label: string; durationSec: number };
+
+/** One recorded clip matched to its brief segment, for the editors. */
+type RevisionSection = { key: string; label: string; text: string; clipUri?: string | null };
 
 type ReviewItem = {
   assignment: AssignmentQueueItem;
@@ -230,63 +218,77 @@ function clipSectionsFromSegments(
   return sections;
 }
 
+
+/** Hook, numbered points, CTA for a reel; one numbered row per slide for a slideshow. */
+function scriptSectionsFor(brief: Brief, isReel: boolean, slideTexts: string[]): ScriptSection[] {
+  if (!isReel) {
+    return slideTexts.map((t, i) => ({ kind: 'point' as const, n: i + 1, text: t })).filter((s) => s.text.trim());
+  }
+  const out: ScriptSection[] = [];
+  const hook = brief.hook?.trim() || parseHookOptions(brief.hook_options)[0]?.trim() || '';
+  if (hook) out.push({ kind: 'label', label: 'Hook', text: hook });
+  const points = parseTalkingPoints(brief.talking_points)
+    .map((p) => p.text?.trim() ?? '')
+    .filter(Boolean);
+  const lines = points.length > 0 ? points : scriptToLines(brief.script).map((l) => l.text.trim()).filter(Boolean);
+  lines.forEach((t, i) => out.push({ kind: 'point', n: i + 1, text: t }));
+  const cta = brief.cta?.trim() || '';
+  if (cta) out.push({ kind: 'label', label: 'CTA', text: cta });
+  return out;
+}
+
+type Decision = { kind: 'approved' | 'sent'; left: number };
+
 export default function ReviewScreen() {
-  const { id, creator, brief } = useLocalSearchParams<{
-    id: string;
-    creator?: string;
-    brief?: string;
-  }>();
+  const { id, creator, brief } = useLocalSearchParams<{ id: string; creator?: string; brief?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
 
-  const [queue, setQueue] = useState<ReviewItem[]>([]);
-  const [index, setIndex] = useState(0);
-  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [item, setItem] = useState<ReviewItem | null>(null);
+  const [creatorPhoto, setCreatorPhoto] = useState<string | null>(null);
+  /** Other submitted posts from this creator (and brief, when opened from one). */
+  const [siblings, setSiblings] = useState<AssignmentQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoFailed, setVideoFailed] = useState(false);
 
-  const [playing, setPlaying] = useState(false);
-  const [positionSec, setPositionSec] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
   const [briefSegments, setBriefSegments] = useState<BriefSegment[]>([]);
-  /** Signed URLs for the creator's submitted slide photos, slot order. */
   const [slidePhotos, setSlidePhotos] = useState<string[]>([]);
-  /** Originals behind baked slides, for the edit stage. */
   const [slideOriginals, setSlideOriginals] = useState<string[]>([]);
-  /** Signed URLs for the creator's raw clips, slot order. Revision mode only. */
   const [clipUris, setClipUris] = useState<string[]>([]);
-  /** Uploaded clip lengths in ms, slot order, for the manager's editor. */
   const [clipDurationsMs, setClipDurationsMs] = useState<number[]>([]);
-  /** Signed URLs for admin inset pictures, keyed by segment id. */
   const [slideInsetUrls, setSlideInsetUrls] = useState<Record<string, string>>({});
-  const [typeLabels, setTypeLabels] = useState<Map<string, string>>(new Map());
   const [handle, setHandle] = useState<string | null>(null);
 
-  const [revisionVisible, setRevisionVisible] = useState(false);
-  const [approvedVisible, setApprovedVisible] = useState(false);
-  const [sentVisible, setSentVisible] = useState(false);
+  const [notes, setNotes] = useState<ReviewNote[]>([]);
+  /** Notes already sent on a post waiting for its new take. */
+  const [sentNotes, setSentNotes] = useState<ReviewNote[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
+  const wasPlaying = useRef(false);
+  const [decision, setDecision] = useState<Decision | null>(null);
 
   const [editVisible, setEditVisible] = useState(false);
   const [editIndex, setEditIndex] = useState(0);
   const [subtitlesY, setSubtitlesY] = useState(DEFAULT_SUBTITLES_Y);
-  /** Submission whose re-render the manager asked for; gates Approve on slideshows too. */
   const [rerenderPending, setRerenderPending] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
 
-  /** Signed URLs by assignment id, so the next item starts instantly. */
   const urlCache = useRef(new Map<string, string>());
+  const noteSeq = useRef(0);
 
-  const signedUrlFor = useCallback(async (item: ReviewItem): Promise<string | null> => {
-    if (item.row.format !== 'video' || !item.submission) return null;
+  const signedUrlFor = useCallback(async (it: ReviewItem): Promise<string | null> => {
+    if (it.row.format !== 'video' || !it.submission) return null;
     // The finished edit is what gets reviewed. Until it is ready (or when it
     // failed) the first raw clip plays so the footage is still watchable.
-    const ready = item.submission.render_status === 'ready';
-    const path = ready
-      ? item.submission.video_path
-      : item.submission.segment_paths?.[0] ?? item.submission.video_path;
+    const ready = it.submission.render_status === 'ready';
+    const path = ready ? it.submission.video_path : it.submission.segment_paths?.[0] ?? it.submission.video_path;
     if (!path) return null;
-    const cacheKey = `${item.assignment.id}:${ready ? 'edit' : 'raw'}`;
+    const cacheKey = `${it.assignment.id}:${ready ? 'edit' : 'raw'}`;
     const cached = urlCache.current.get(cacheKey);
     if (cached !== undefined) return cached;
     const url = await signedVideoUrl(path);
@@ -294,124 +296,114 @@ export default function ReviewScreen() {
     return url;
   }, []);
 
-  // The `type` in the bottom scrim's `type · age` line.
-  useEffect(() => {
-    let cancelled = false;
-    void listPostTypes()
-      .then((rows) => {
-        if (!cancelled) setTypeLabels(new Map(rows.map((r) => [r.id, r.label])));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  // Load the exact assignment behind the link, whatever its status.
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    let redirected = false;
+    setLoading(true);
+    setLoadError(null);
     void (async () => {
       try {
-        const all = await listAssignmentQueue();
-        const filtered = all.filter(
-          (a) =>
-            (creator === undefined || a.creator_id === creator) &&
-            (brief === undefined || a.brief_id === brief),
-        );
-        const subs = await latestSubmissionsByAssignment(filtered.map((a) => a.id));
-        const items: ReviewItem[] = filtered.map((a) => ({
-          assignment: a,
-          row: toAssignmentQueueRow(a, subs.get(a.id) ?? null),
-          submission: subs.get(a.id) ?? null,
-        }));
+        const target = await getAssignmentForReview(id);
         if (cancelled) return;
-        const idx = items.findIndex((it) => it.assignment.id === id);
-        setQueue(items);
-        setIndex(idx >= 0 ? idx : 0);
-      } catch (e) {
-        if (!cancelled) {
-          Alert.alert('Could not load', e instanceof Error ? e.message : 'Try again');
+        if (!target) {
+          setItem(null);
+          return;
         }
+        const { assignment, submission } = target;
+        // Live posts have numbers, not a review: the post screen owns them.
+        if (assignment.status === 'posted' || (assignment.status === 'approved' && !!assignment.post_url)) {
+          redirected = true;
+          router.replace({ pathname: '/(admin)/brief-post/[id]', params: { id: assignment.id } });
+          return;
+        }
+        setItem({ assignment, submission, row: toAssignmentQueueRow(assignment, submission) });
+        setCreatorPhoto(target.creatorPhoto);
+        const isReel = assignment.briefs.format !== 'photo_carousel';
+        if (assignment.status === 'changes_requested' && submission) {
+          void latestSentBackNotes(submission.id)
+            .then((n) => {
+              if (!cancelled) setSentNotes(fromPostNotes(n, isReel));
+            })
+            .catch(() => undefined);
+        }
+        void listReviewSiblings({
+          companyId: assignment.company_id,
+          creatorId: creator ?? assignment.creator_id,
+          briefId: brief,
+        })
+          .then((rows) => {
+            if (!cancelled) setSiblings(rows.filter((r) => r.id !== assignment.id));
+          })
+          .catch(() => undefined);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Check your connection and try again.');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !redirected) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [id, creator, brief]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, creator, brief, reloadKey]);
 
-  const current = queue[index] as ReviewItem | undefined;
-  const currentId = current?.assignment.id;
-  const submissionId = current?.submission?.id;
-  // Reels and every studio submission (edit document, slideshows included)
-  // wait on the render: until it is ready the stored media is the untrimmed
-  // source with no text. Legacy slideshows only wait once the manager asked
-  // for a re-bake from edit mode.
+  const currentId = item?.assignment.id;
+  const submission = item?.submission ?? null;
+  const submissionId = submission?.id;
+  const isReel = item?.row.format === 'video';
+  // Reels and every studio submission wait on the render: until it is ready the
+  // stored media is the untrimmed source with no text. Legacy slideshows only
+  // wait once the manager asked for a re-bake from edit mode.
   const trackRender =
-    current?.row.format === 'video' ||
-    (current?.submission?.edit_document ?? null) !== null ||
-    (submissionId !== undefined && rerenderPending === submissionId);
-  const renderStatus = trackRender ? current?.submission?.render_status ?? 'ready' : 'ready';
+    isReel || (submission?.edit_document ?? null) !== null || (submissionId !== undefined && rerenderPending === submissionId);
+  const renderStatus = trackRender ? submission?.render_status ?? 'ready' : 'ready';
 
-  // The edit job runs right after the creator submits. While it is still
-  // going, poll until the finished video lands, then the load effect below
-  // picks it up.
+  const patchSubmission = useCallback((sid: string, patch: Partial<Submission>) => {
+    setItem((it) => (it && it.submission && it.submission.id === sid ? { ...it, submission: { ...it.submission, ...patch } } : it));
+  }, []);
+
+  // Poll the edit job until the finished file lands; the media effect then swaps it in.
   useEffect(() => {
     if (submissionId === undefined) return;
     if (renderStatus === 'ready' || renderStatus === 'failed') return;
     const timer = setInterval(() => {
       void getSubmissionRenderState(submissionId)
         .then((fresh) => {
-          if (!fresh) return;
-          setQueue((q) =>
-            q.map((it) =>
-              it.submission && it.submission.id === submissionId
-                ? { ...it, submission: { ...it.submission, ...fresh } }
-                : it,
-            ),
-          );
+          if (fresh) patchSubmission(submissionId, fresh);
         })
         .catch(() => undefined);
     }, 5000);
     return () => clearInterval(timer);
-  }, [submissionId, renderStatus]);
+  }, [submissionId, renderStatus, patchSubmission]);
 
   const restartEdit = useCallback(async () => {
     if (submissionId === undefined) return;
     try {
       await restartRender(submissionId);
-      setQueue((q) =>
-        q.map((it) =>
-          it.submission && it.submission.id === submissionId
-            ? {
-                ...it,
-                submission: {
-                  ...it.submission,
-                  render_status: 'rendering',
-                  render_error: null,
-                  render_claimed_at: new Date().toISOString(),
-                },
-              }
-            : it,
-        ),
-      );
+      patchSubmission(submissionId, { render_status: 'rendering', render_error: null, render_claimed_at: new Date().toISOString() });
     } catch (e) {
-      Alert.alert('Could not restart', e instanceof Error ? e.message : 'Try again');
+      toast.error(e instanceof Error ? `Could not restart the render. ${e.message}` : 'Could not restart the render.', {
+        label: 'Retry',
+        onPress: () => void restartEdit(),
+      });
     }
-  }, [submissionId]);
+  }, [submissionId, patchSubmission]);
 
-  // Load the current item's video and segments, autoplay, prefetch the next one.
-  // A render finishing on the same item swaps media in place: position, slide
-  // and the already loaded segments stay so nothing jumps.
+  const rp = useReviewPlayer(videoUri, submission?.duration_seconds ?? 0);
+  const { setPlaying } = rp;
+
+  // Load the item's media and segments. A render finishing on the same item
+  // swaps media in place: position and the loaded segments stay.
   const loadedId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (currentId === undefined || current === undefined) return;
+    if (currentId === undefined || item === null) return;
+    const current = item;
     let cancelled = false;
     const sameItem = loadedId.current === currentId;
     loadedId.current = currentId;
     if (!sameItem) {
-      setPositionSec(0);
       setSlideIndex(0);
       setBriefSegments([]);
       setSlidePhotos([]);
@@ -427,27 +419,23 @@ export default function ReviewScreen() {
         const url = await signedUrlFor(current);
         if (cancelled) return;
         setVideoUri(url);
-        setPlaying(url !== null);
+        setVideoFailed(false);
+        // Autoplay only what is still waiting on a decision.
+        setPlaying(url !== null && current.assignment.status === 'submitted');
       } catch {
-        if (!cancelled) setVideoUri(null);
+        if (!cancelled) {
+          setVideoUri(null);
+          setVideoFailed(true);
+        }
       }
       try {
-        const segments = await listBriefSegments(
-          current.assignment.brief_id,
-          current.assignment.id,
-        );
+        const segments = await listBriefSegments(current.assignment.brief_id, current.assignment.id);
         if (!cancelled) setBriefSegments(segments);
-        // Slideshows review the real thing: the creator's photos, plus the
-        // admin's inset pictures composited while the bake is still running.
         const paths = current.submission?.segment_paths ?? [];
-        const segmentUrls = await Promise.all(
-          paths.map((p) => signedVideoUrl(p).catch(() => '')),
-        );
+        const segmentUrls = await Promise.all(paths.map((p) => signedVideoUrl(p).catch(() => '')));
         if (cancelled) return;
         if (current.row.format === 'video') {
           setClipUris(segmentUrls);
-          // The manifest knows every uploaded clip's length once the edit ran;
-          // before that each clip is probed so the editor's timeline is honest.
           const known = timelineSourceDurationsMs(current.submission?.render_timeline ?? null);
           const durations = await Promise.all(
             segmentUrls.map((url, i) =>
@@ -460,124 +448,98 @@ export default function ReviewScreen() {
           );
           if (!cancelled) setClipDurationsMs(durations);
         } else {
-          // Studio slideshows: until the bake lands, segment_paths are the
-          // raw uploads, so the surface draws the document's own photos.
           const doc = slideshowDocumentOf(current.submission);
           if (doc && current.submission?.render_status !== 'ready') {
-            const originals = await Promise.all(
-              documentSlidePaths(doc).map((p) => (p ? signedVideoUrl(p).catch(() => '') : '')),
-            );
+            const originals = await Promise.all(documentSlidePaths(doc).map((p) => (p ? signedVideoUrl(p).catch(() => '') : '')));
             if (cancelled) return;
             setSlidePhotos([]);
             setSlideOriginals(originals);
           } else {
             setSlidePhotos(segmentUrls);
-            const originals = await Promise.all(
-              paths.map((p) => signedOriginalSlideUrl(p).catch(() => '')),
-            );
+            const originals = await Promise.all(paths.map((p) => signedOriginalSlideUrl(p).catch(() => '')));
             if (!cancelled) setSlideOriginals(originals);
           }
         }
-        // Inset pictures: composited on slides while the bake runs, and
-        // placed on either format in edit mode.
         for (const seg of segments) {
           if (!seg.screenshot_url) continue;
           void signedScreenshotUrl(seg.screenshot_url)
-            .then((url) => {
-              if (!cancelled) {
-                setSlideInsetUrls((prev) => ({ ...prev, [seg.id]: url }));
-              }
+            .then((u) => {
+              if (!cancelled) setSlideInsetUrls((prev) => ({ ...prev, [seg.id]: u }));
             })
             .catch(() => undefined);
         }
       } catch {
         if (!cancelled) setBriefSegments([]);
       }
-      if (profile) {
-        const account = await getCreatorAccount(
-          profile.active_company_id,
-          current.assignment.creator_id,
-        ).catch(() => null);
-        if (!cancelled) setHandle(account?.tiktok_handle ?? null);
-      }
-      const next = queue[index + 1];
-      if (next !== undefined) void signedUrlFor(next).catch(() => undefined);
+      const account = await getCreatorAccount(current.assignment.company_id, current.assignment.creator_id).catch(() => null);
+      if (!cancelled) setHandle(account?.tiktok_handle ?? account?.instagram_handle ?? null);
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, renderStatus]);
+  }, [currentId, renderStatus, reloadKey]);
 
-  const durationSec = current?.submission?.duration_seconds ?? 0;
+  const sortedNotes = useMemo(() => sortNotes(notes), [notes]);
 
-  useEffect(() => {
-    if (durationSec > 0 && positionSec >= durationSec) setPlaying(false);
-  }, [positionSec, durationSec]);
+  const HEAD = insets.top + 64;
+  const FOOT = 16 + 56 + Math.max(insets.bottom, 16) + 12;
 
   if (loading) {
     return (
-      <View style={[styles.fallbackScreen, { paddingTop: insets.top + 12 }]}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.skeletonBody}>
-          <SkeletonCard style={styles.skeletonMedia} />
-          <View style={styles.skeletonStrip}>
-            <SkeletonLine height={48} width="46%" radius={14} />
-            <SkeletonLine height={48} style={styles.skeletonGrow} radius={14} />
-          </View>
+      <View style={[styles.screen, { backgroundColor: color.bg, paddingTop: insets.top + 12, paddingHorizontal: 20, gap: 14 }]}>
+        <Stack.Screen options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Skeleton h={44} r={radius.pill} style={{ marginBottom: 0 }} />
+        <Skeleton h={0} style={{ flex: 1, marginBottom: 0 }} />
+        <View style={{ flexDirection: 'row', gap: 10, paddingBottom: Math.max(insets.bottom, 16) }}>
+          <Skeleton h={56} r={radius.pill} style={{ flex: 1, marginBottom: 0 }} />
+          <Skeleton h={56} r={radius.pill} style={{ flex: 1, marginBottom: 0 }} />
         </View>
       </View>
     );
   }
 
-  if (!current) {
+  if (!item) {
     return (
-      <View style={[styles.fallbackScreen, styles.centered, { paddingTop: insets.top }]}>
+      <View style={[styles.screen, styles.centered, { backgroundColor: color.bg, paddingTop: insets.top }]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.missing}>Nothing left to review.</Text>
-        <Button size="md" variant="outline" onPress={() => router.back()}>
-          Back
-        </Button>
+        <View style={styles.emptyDisc}>
+          <Icon name={loadError ? 'cloud_off' : 'inbox'} size={30} color={color.blue} />
+        </View>
+        <Text style={[text.card, { textAlign: 'center' }]}>{loadError ? 'Could not load this post' : 'This post is gone'}</Text>
+        <Text style={[text.body, { color: color.grey4, textAlign: 'center' }]}>
+          {loadError ?? 'It was removed or belongs to another company. Switch companies from the Review tab to see it.'}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 8 }}>
+          <Button label="Back" variant="quiet" onPress={() => router.back()} />
+          {loadError ? <Button label="Try again" icon="refresh" onPress={() => setReloadKey((k) => k + 1)} /> : null}
+        </View>
       </View>
     );
   }
 
-  const { assignment, row, submission } = current;
+  const { assignment, row } = item;
+  const status = assignment.status;
+  const reviewable = status === 'submitted' && submission !== null;
   const briefRow = assignment.briefs;
-  const isReel = row.format === 'video';
+  const creatorName = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
   const postAudio = parsePostAudio(submission?.audio);
   const slideAspect = asSlideAspect(submission?.slide_aspect);
   const editPending = trackRender && submission !== null && submission.render_status !== 'ready';
   const editStalled = editPending && submission !== null && renderStalled(submission);
   const editFailed = trackRender && submission?.render_status === 'failed';
   const slideDoc = isReel ? null : slideshowDocumentOf(submission);
-  const counterLabel = `${index + 1} of ${Math.max(queue.length, 1)}`;
   const caption = assignment.caption ?? briefRow.caption ?? '';
-  const captionPending = assignment.caption === null;
-  const attempt = submission?.version ?? 1;
-  const typeLabel =
-    briefRow.post_type_id !== null
-      ? typeLabels.get(briefRow.post_type_id) ?? null
-      : null;
 
-  const scriptTexts = isReel
-    ? scriptToLines(briefRow.script).map((line) => line.text)
-    : slidesFromScript(briefRow.script);
-  // Slides come from brief_segments (the render manifest). Once the bake is
-  // ready the photos already carry the text, so nothing composites twice.
+  const scriptTexts = isReel ? scriptToLines(briefRow.script).map((line) => line.text) : slidesFromScript(briefRow.script);
   const slideSegs = briefSegments.filter((s) => s.kind === 'slide');
-  // Baked files already carry the text and inset. While a re-bake runs the
-  // paths still point at the previous bake, so nothing composites twice.
   const slidePaths = submission?.segment_paths ?? [];
   const slidesBaked =
-    submission?.render_status === 'ready' ||
-    (slidePaths.length > 0 && slidePaths.every((p) => /-final\.(?:png|jpg)$/i.test(p)));
+    submission?.render_status === 'ready' || (slidePaths.length > 0 && slidePaths.every((p) => /-final\.(?:png|jpg)$/i.test(p)));
   const surfaceSlides = isReel
     ? []
     : slideDoc
       ? slideDoc.slides.map((slide, i) => {
-          // Ready: the baked files already carry the text. Before that the
-          // creator's boxes are drawn over the original photo, cropped as framed.
           const ready = submission?.render_status === 'ready';
           return {
             photoUri: (ready ? slidePhotos[i] : slideOriginals[i]) || undefined,
@@ -588,63 +550,29 @@ export default function ReviewScreen() {
           };
         })
       : slideSegs.length > 0
-      ? slideSegs.map((s, i) => {
-          const boxes = parseOverlayBoxes(s.overlay_style, {
-            text: s.overlay_text,
-            textY: s.text_y,
-          });
-          const insetUri = s.screenshot_url ? slideInsetUrls[s.id] : undefined;
-          return {
-            photoUri: slidePhotos[i] || undefined,
-            boxes: slidesBaked || !s.show_on_screen ? ([] as OverlayBox[]) : boxes,
-            inset:
-              slidesBaked || insetUri === undefined
-                ? undefined
-                : {
-                    uri: insetUri,
-                    x: s.screenshot_x,
-                    y: s.screenshot_y,
-                    width: s.screenshot_width,
-                  },
-            text:
-              boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') ||
-              scriptTexts[i] ||
-              '',
-          };
-        })
-      : Array.from(
-          { length: Math.max(scriptTexts.length, slidePhotos.length) },
-          (_, i) => ({
+        ? slideSegs.map((s, i) => {
+            const boxes = parseOverlayBoxes(s.overlay_style, { text: s.overlay_text, textY: s.text_y });
+            const insetUri = s.screenshot_url ? slideInsetUrls[s.id] : undefined;
+            return {
+              photoUri: slidePhotos[i] || undefined,
+              boxes: slidesBaked || !s.show_on_screen ? ([] as OverlayBox[]) : boxes,
+              inset:
+                slidesBaked || insetUri === undefined
+                  ? undefined
+                  : { uri: insetUri, x: s.screenshot_x, y: s.screenshot_y, width: s.screenshot_width },
+              text: boxes.map((b) => b.text.trim()).filter(Boolean).join('\n') || scriptTexts[i] || '',
+            };
+          })
+        : Array.from({ length: Math.max(scriptTexts.length, slidePhotos.length) }, (_, i) => ({
             photoUri: slidePhotos[i] || undefined,
             boxes: [] as OverlayBox[],
             inset: undefined,
             text: scriptTexts[i] ?? '',
-          }),
-        );
+          }));
 
-  const sectionTexts = isReel ? scriptTexts : surfaceSlides.map((s) => s.text);
-  // Spoken sections only. Captions come from the brief and are placed
-  // automatically, so revision mode never shows a caption card.
-  // Video briefs built from talking points have no script, so their sections
-  // come from the recorded clips (one per brief segment, slot order).
   const clipSections: RevisionSection[] = isReel
-    ? clipSectionsFromSegments(
-        briefRow,
-        briefSegments,
-        submission?.segment_paths ?? [],
-        clipUris,
-      )
+    ? clipSectionsFromSegments(briefRow, briefSegments, submission?.segment_paths ?? [], clipUris)
     : [];
-  const sections: RevisionSection[] =
-    clipSections.length > 0
-      ? clipSections
-      : sectionTexts.map((text, i) => ({
-          key: `segment-${i}`,
-          label: sectionLabel(i, sectionTexts.length, isReel),
-          text,
-          clipUri: isReel ? clipUris[i] || null : null,
-          slide: isReel ? undefined : surfaceSlides[i],
-        }));
   const reelClips: ReelClip[] =
     isReel && submission?.render_status === 'ready'
       ? timelineClipDurations(submission.render_timeline).map((durationSec, i) => ({
@@ -652,19 +580,10 @@ export default function ReviewScreen() {
           durationSec,
         }))
       : [];
-  const creatorShort = row.creator.name.trim().split(/\s+/)[0] ?? row.creator.name;
 
-  // Edit mode works one brief segment at a time: spoken clips for reels
-  // (slot order, matched to their recorded clip), slides for slideshows.
-  const spokenSegments = briefSegments
-    .filter((s) => s.kind !== 'slide')
-    .sort((a, b) => a.slot_index - b.slot_index);
-  // Background still: the raw clip at 0, falling back to the stitched edit at
-  // the clip start when the raw URL is missing or fails to load.
+  const spokenSegments = briefSegments.filter((s) => s.kind !== 'slide').sort((a, b) => a.slot_index - b.slot_index);
   const stitchedStill = (i: number) =>
-    videoUri !== null && submission?.render_status === 'ready'
-      ? { uri: videoUri, atSec: clipStartSec(reelClips, i) }
-      : undefined;
+    videoUri !== null && submission?.render_status === 'ready' ? { uri: videoUri, atSec: clipStartSec(reelClips, i) } : undefined;
   const editTargets: EditTarget[] = isReel
     ? spokenSegments.flatMap((s, i) => {
         const section = clipSections.find((c) => c.key === `segment-${s.slot_index}`);
@@ -687,9 +606,6 @@ export default function ReviewScreen() {
         background: { kind: 'photo' as const, uri: slideOriginals[i] || slidePhotos[i] || undefined },
         insetUri: s.screenshot_url ? slideInsetUrls[s.id] : undefined,
       }));
-
-  // The manager's video editor plays the uploaded clips themselves, in slot
-  // order, matched to their brief segment like the revision sections are.
   const managerClips: ManagerClip[] = isReel
     ? spokenSegments.flatMap((s, i) => {
         const section = clipSections.find((c) => c.key === `segment-${s.slot_index}`);
@@ -698,282 +614,326 @@ export default function ReviewScreen() {
         const uriIndex = clipUris.indexOf(uri);
         const durationMs = clipDurationsMs[uriIndex >= 0 ? uriIndex : i] ?? 0;
         if (durationMs <= 0) return [];
-        return [
-          {
-            slotIndex: s.slot_index,
-            label: section?.label ?? sectionLabel(i, spokenSegments.length, true),
-            uri,
-            durationMs,
-            segment: s,
-          },
-        ];
+        return [{ slotIndex: s.slot_index, label: section?.label ?? sectionLabel(i, spokenSegments.length, true), uri, durationMs, segment: s }];
       })
     : [];
   const fullEditor = isReel && FULL_EDITOR && managerClips.length > 0;
+  const canEdit = reviewable && submission !== null && submission.edit_document === null && (fullEditor || editTargets.length > 0);
+
+  const scriptSections = scriptSectionsFor(briefRow, isReel, surfaceSlides.map((s) => s.text));
+  const pointIdx = scriptSections.map((s, i) => (s.kind === 'point' ? i : -1)).filter((i) => i >= 0);
+  let live = -1;
+  if (!isReel) {
+    live = pointIdx[slideIndex] ?? -1;
+  } else if (rp.playing && rp.duration > 0 && scriptSections.length > 0) {
+    // Sections line up with the stitched clips (hook, points, outro) when the
+    // counts match; otherwise the post is split evenly.
+    const at =
+      reelClips.length === scriptSections.length
+        ? clipIndexAt(reelClips, rp.time)
+        : Math.min(scriptSections.length - 1, Math.floor((rp.time / rp.duration) * scriptSections.length));
+    live = scriptSections[at]?.kind === 'point' ? at : -1;
+  }
+
+  const shownNotes = reviewable ? sortedNotes : sentNotes;
+  const markers = isReel ? shownNotes.flatMap((n) => (n.at !== null ? [n.at] : [])) : [];
+  const pinAt = isReel ? Math.round(rp.time) : slideIndex;
+  const left = siblings.length;
+
+  const seekNote = (at: number) => {
+    if (isReel) rp.seek(at);
+    else setSlideIndex(Math.min(at, Math.max(surfaceSlides.length - 1, 0)));
+  };
 
   const openEdit = () => {
     if (submission === null) return;
     setPlaying(false);
-    setEditIndex(isReel ? clipIndexAt(reelClips, positionSec) : slideIndex);
+    setEditIndex(isReel ? clipIndexAt(reelClips, rp.time) : slideIndex);
     setEditVisible(true);
   };
 
-  // Edit mode keeps its spinner up until this resolves; a throw keeps it open
-  // with a Retry.
+  // Edit mode keeps its spinner up until this resolves; a throw keeps it open with a Retry.
   const finishEdit = async (changed: boolean) => {
     if (!changed || submissionId === undefined) {
       setEditVisible(false);
       return;
     }
     await rerenderSubmission(submissionId);
-    // The finished file lands on the same path; a fresh signed URL makes the
-    // player reload it instead of replaying the cached cut.
     urlCache.current.delete(`${assignment.id}:edit`);
     setRerenderPending(submissionId);
-    setQueue((q) =>
-      q.map((it) =>
-        it.submission && it.submission.id === submissionId
-          ? {
-              ...it,
-              submission: {
-                ...it.submission,
-                render_status: 'rendering',
-                render_error: null,
-                render_claimed_at: new Date().toISOString(),
-              },
-            }
-          : it,
-      ),
-    );
+    patchSubmission(submissionId, { render_status: 'rendering', render_error: null, render_claimed_at: new Date().toISOString() });
     setEditVisible(false);
-    setToast(isReel ? 'Re-editing the video…' : 'Re-editing the slides…');
+    toast.show(isReel ? 'Re-editing the video. Approve once it lands.' : 'Re-editing the slides. Approve once they land.');
   };
 
-  // Touched rows are already restored server side; pick up the truth again.
   const cancelEdit = async () => {
     try {
-      const fresh = await listBriefSegments(assignment.brief_id, assignment.id);
-      setBriefSegments(fresh);
+      setBriefSegments(await listBriefSegments(assignment.brief_id, assignment.id));
     } catch {
-      // The load effect refetches on the next status change; local state is
-      // restored below either way.
+      // The media effect refetches on the next status change.
     }
     setSubtitlesY(briefRow.subtitles_y ?? DEFAULT_SUBTITLES_Y);
     setEditVisible(false);
   };
 
-  const togglePlay = () => {
-    if (!playing && durationSec > 0 && positionSec >= durationSec) setPositionSec(0);
-    setPlaying((p) => !p);
-  };
-
-  function advance() {
-    const rest = queue.filter((_, i) => i !== index);
-    if (rest.length === 0) {
-      router.back();
+  // Optimistic: the celebration starts at once; a failure takes it down, keeps
+  // the notes and offers a retry.
+  const decide = async (action: 'approved' | 'changes_requested') => {
+    if (!profile || submission === null) return;
+    if (action === 'approved' && editPending) {
+      toast.show(
+        editFailed || editStalled
+          ? `The final ${isReel ? 'video' : 'slides'} did not render. Retry the render, then approve.`
+          : `The final ${isReel ? 'video is' : 'slides are'} still rendering. Approve once ${isReel ? 'it lands' : 'they land'}.`,
+      );
       return;
     }
-    setVideoUri(null);
+    const postNotes = action === 'changes_requested' ? toPostNotes(notes, isReel) : null;
     setPlaying(false);
-    setQueue(rest);
-    setIndex(Math.min(index, rest.length - 1));
-  }
-
-  async function runReview(
-    action: 'approved' | 'changes_requested',
-    note: string | null,
-  ): Promise<boolean> {
-    if (!profile || !current) return false;
-    if (!current.submission) {
-      Alert.alert('Missing submission', 'This post has no video to review yet.');
-      return false;
-    }
-    if (action === 'approved' && editPending) {
-      const what = current.row.format === 'video' ? 'video' : 'slides';
-      Alert.alert(
-        editFailed || editStalled ? 'Render needs a retry' : 'Still rendering',
-        editFailed || editStalled
-          ? `The final ${what} did not render. Tap Retry render, then approve once it is ready.`
-          : `The final ${what} is not ready yet. Approve once the render finishes.`,
-      );
-      return false;
-    }
-    setBusy(true);
+    setNotesOpen(false);
+    setScriptOpen(false);
+    setDecision({ kind: action === 'approved' ? 'approved' : 'sent', left });
+    // The Review root and creator queue drop the post at once; restored on failure.
+    const restore = useReviewQueue.getState().removePost(assignment.id);
     try {
       await reviewAssignment({
-        assignment: current.assignment,
-        submissionId: current.submission.id,
+        assignment,
+        submissionId: submission.id,
         reviewerId: profile.id,
         action,
-        note,
-        notes: action === 'changes_requested' ? parseNotes(note) : null,
+        note: postNotes ? toFlatNote(postNotes) : null,
+        notes: postNotes,
       });
-      return true;
     } catch (e) {
-      Alert.alert(
-        action === 'approved' ? "Couldn't approve" : "Couldn't send back",
-        e instanceof Error ? e.message : 'Check your connection and try again.',
-      );
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const approve = async () => {
-    const ok = await runReview('approved', null);
-    if (ok) {
-      setPlaying(false);
-      setApprovedVisible(true);
+      restore();
+      setDecision(null);
+      const why = e instanceof Error && e.message ? ` ${e.message}` : '';
+      toast.error(`${action === 'approved' ? "Couldn't approve." : "Couldn't send your changes."}${why}`, {
+        label: 'Retry',
+        onPress: () => void decide(action),
+      });
     }
   };
 
-  const sendBack = async (note: string) => {
-    const ok = await runReview('changes_requested', note);
-    if (ok) {
-      setPlaying(false);
-      setRevisionVisible(false);
-      setSentVisible(true);
-    }
+  const returnFromDecision = () => {
+    if (decision && decision.left > 0) router.back();
+    else router.dismissTo('/(admin)/(tabs)');
   };
 
-  const closeAndAdvance = () => {
-    setApprovedVisible(false);
-    setSentVisible(false);
-    advance();
-  };
+  const openChat = () =>
+    router.push({ pathname: '/(admin)/chat/[creatorId]', params: { creatorId: assignment.creator_id, assignment: assignment.id } });
 
-  const openThread = () => {
-    if (!current) return;
-    const assignmentId = current.assignment.id;
-    closeAndAdvance();
-    router.push({
-      pathname: '/(admin)/post-thread/[assignmentId]',
-      params: { assignmentId },
-    });
-  };
+  const stateBanner =
+    status === 'approved'
+      ? { icon: 'check' as const, label: `Approved. ${creatorName} posts it next.`, tone: color.green }
+      : status === 'changes_requested'
+        ? { icon: 'edit_note' as const, label: `Changes sent. Waiting on ${creatorName}'s new take.`, tone: color.amber }
+        : status === 'assigned' || status === 'recorded'
+          ? { icon: 'schedule' as const, label: submission ? `Old take. ${creatorName} is recording a new one.` : `${creatorName} has not sent this yet.`, tone: color.blue }
+          : null;
+
+  const hasMedia = submission !== null;
+  const titleSize = row.title.length > 44 ? 17 : 20;
+  const showEditHandle = canEdit && !scrubbing && !notesOpen && !scriptOpen;
 
   return (
-    <View style={styles.screen}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="light" />
+    <View style={[styles.screen, { backgroundColor: color.ink }]}>
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: !notesOpen && decision === null }} />
+      <StatusBar style="dark" />
 
-      <View style={styles.media}>
-        {isReel ? (
-          <ReelSurface
-            key={assignment.id}
-            videoUri={videoUri}
-            playing={playing}
-            onTogglePlay={togglePlay}
-            positionSec={positionSec}
-            durationSec={durationSec}
-            onPositionSec={setPositionSec}
-            clips={reelClips}
-            chipTop={insets.top + 56}
-          />
-        ) : (
-          <SlideshowSurface
-            slides={surfaceSlides}
-            aspect={slideAspect}
-            index={slideIndex}
-            onIndex={setSlideIndex}
-          />
-        )}
-
-        {editPending && (
-          <View style={styles.editPillRow} pointerEvents="box-none">
-            {editFailed || editStalled ? (
-              <View style={styles.editFailedStack}>
-                <Pressable
-                  onPress={() => void restartEdit()}
-                  style={[styles.editPill, styles.editPillFailed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Retry render"
-                >
-                  <Text style={styles.editPillText}>
-                    {editFailed ? 'Render failed' : 'Render stalled'}
-                  </Text>
-                  <Text style={styles.editPillAction}>Retry render</Text>
-                </Pressable>
-                {editFailed && submission?.render_error ? (
-                  <Text style={styles.editErrorDetail} numberOfLines={3}>
-                    {submission.render_error}
-                  </Text>
-                ) : null}
-              </View>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: HEAD, bottom: FOOT, overflow: 'hidden' }}>
+        {hasMedia ? (
+          <FeedBand
+            player={isReel ? rp.player : null}
+            hasVideo={isReel && videoUri !== null}
+            playing={rp.playing}
+            fast={rp.fast}
+            scrubbing={scrubbing}
+            onToggle={rp.toggle}
+            onFast={(on) => {
+              rp.setFast(on);
+              if (on) setPlaying(true);
+            }}
+            creatorName={row.creator.name}
+            creatorPhoto={creatorPhoto}
+            handle={handle}
+            caption={caption}
+          >
+            {isReel ? (
+              videoUri === null ? (
+                <View style={[StyleSheet.absoluteFill, styles.centered]}>
+                  {videoFailed ? (
+                    <>
+                      <Text style={[text.row, { color: color.white, textAlign: 'center' }]}>The video did not load</Text>
+                      <Button pill variant="secondary" icon="refresh" label="Try again" onPress={() => setReloadKey((k) => k + 1)} />
+                    </>
+                  ) : (
+                    <ActivityIndicator color={color.white} />
+                  )}
+                </View>
+              ) : null
             ) : (
-              <View style={styles.editPill} accessibilityRole="progressbar">
-                <ActivityIndicator size="small" color={color.white} />
-                <Text style={styles.editPillText}>
-                  {isReel ? 'Rendering final video' : 'Rendering final slides'}
-                </Text>
-              </View>
+              <SlideshowSurface slides={surfaceSlides} aspect={slideAspect} index={slideIndex} onIndex={setSlideIndex} />
             )}
+          </FeedBand>
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.centered, { backgroundColor: color.bg }]}>
+            <View style={styles.emptyDisc}>
+              <Icon name="videocam" size={30} color={color.blue} />
+            </View>
+            <Text style={[text.card, { textAlign: 'center' }]}>Nothing to watch yet</Text>
+            <Text style={[text.body, { color: color.grey4, textAlign: 'center' }]}>
+              {creatorName} has not sent a take of this post. You will get a push the moment it lands.
+            </Text>
           </View>
         )}
 
-        <ReviewMetaOverlay
-          creatorName={row.creator.name}
-          handle={handle}
-          typeLabel={typeLabel}
-          ageLabel={row.ageLabel}
-          format={row.format}
-          caption={caption}
-          hashtags={briefRow.hashtags}
-          slideCount={isReel ? 0 : surfaceSlides.length}
-          slideIndex={slideIndex}
-          sound={postAudio ? `${postAudio.track.title} \u00b7 ${postAudio.track.artist}` : null}
-        />
-        {postAudio ? <AudioChip audio={postAudio} style={{ position: 'absolute', left: 12, top: insets.top + 100 }} /> : null}
-        <ReviewTopBar
-          topInset={insets.top}
-          counterLabel={counterLabel}
-          takeLabel={attempt > 1 ? `Take ${attempt}` : undefined}
-          onBack={() => router.back()}
-          onEdit={
-            submission !== null &&
-            submission.edit_document === null &&
-            (fullEditor || editTargets.length > 0)
-              ? openEdit
-              : undefined
-          }
-          onChat={() =>
-            router.push({
-              pathname: '/(admin)/chat/[creatorId]',
-              params: { creatorId: assignment.creator_id, assignment: assignment.id },
-            })
-          }
-        />
+        {postAudio ? <AudioChip audio={postAudio} style={{ position: 'absolute', left: 12, top: stateBanner || (reviewable && editPending) ? 92 : 52 }} /> : null}
+
+        {stateBanner ? (
+          <View pointerEvents="none" style={styles.bannerRow}>
+            <View style={styles.banner}>
+              <Icon name={stateBanner.icon} size={16} color={stateBanner.tone} />
+              <Text style={styles.bannerText} numberOfLines={1}>
+                {stateBanner.label}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {reviewable && editPending ? (
+          <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(160)} style={styles.bannerRow} pointerEvents="box-none">
+            {editFailed || editStalled ? (
+              <Press accessibilityRole="button" accessibilityLabel="Retry render" onPress={() => void restartEdit()} style={[styles.banner, { backgroundColor: color.pinkTint }]}>
+                <Icon name="refresh" size={16} color={color.pink} />
+                <Text style={[styles.bannerText, { color: color.pink }]} numberOfLines={1}>
+                  {editFailed ? 'Render failed. Tap to retry' : 'Render stalled. Tap to retry'}
+                </Text>
+              </Press>
+            ) : (
+              <View style={styles.banner} accessibilityRole="progressbar">
+                <ActivityIndicator size="small" color={color.blue} />
+                <Text style={styles.bannerText}>{isReel ? 'Rendering the final video' : 'Rendering the final slides'}</Text>
+              </View>
+            )}
+          </Animated.View>
+        ) : null}
+
+        <ScriptSheet open={scriptOpen} onClose={() => setScriptOpen(false)} sections={scriptSections} live={live} />
       </View>
 
-      {captionPending && (
-        <View style={styles.captionNoteWrap}>
-          <Text style={styles.captionNote}>
-            This creator will get their own wording of this caption before it posts.
-          </Text>
-        </View>
-      )}
-      <View style={[styles.actionStrip, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <Button
-          variant="outline"
-          size="md"
-          disabled={busy}
-          style={styles.request}
-          onPress={() => setRevisionVisible(true)}
+      {/* Header band */}
+      <View style={[styles.head, { height: HEAD, paddingTop: insets.top + 4 }]}>
+        <Press accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.back}>
+          <Icon name="chevron_left" size={32} color={color.ink} />
+        </Press>
+        <Text numberOfLines={2} style={[styles.title, { fontSize: titleSize, lineHeight: titleSize * 1.2 }]}>
+          {row.title}
+        </Text>
+        <Press
+          accessibilityRole="button"
+          accessibilityLabel={scriptOpen ? 'Hide script' : 'View script'}
+          onPress={() => {
+            setNotesOpen(false);
+            setScriptOpen((o) => !o);
+          }}
+          style={styles.scriptPill}
         >
-          Request changes
-        </Button>
-        <Button
-          variant="primary"
-          size="md"
-          icon="check"
-          disabled={busy || editPending}
-          style={styles.approve}
-          onPress={() => void approve()}
-        >
-          Approve
-        </Button>
+          <Text style={styles.scriptText}>{scriptOpen ? 'Hide script' : 'View script'}</Text>
+          <Icon name={scriptOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down'} size={16} color={color.blueDeep} />
+        </Press>
       </View>
+
+      {/* Footer band */}
+      <View style={[styles.foot, { height: FOOT }]} />
+
+      {showEditHandle ? (
+        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={[styles.editRow, { bottom: FOOT + 22 }]} pointerEvents="box-none">
+          <Press accessibilityRole="button" accessibilityLabel="Edit this post" onPress={openEdit} style={styles.editHandle}>
+            <Icon name="keyboard_arrow_up" size={26} weight={700} color={color.white} style={styles.editShadow} />
+            <Text style={[styles.editText, styles.editShadow]}>Edit</Text>
+          </Press>
+        </Animated.View>
+      ) : null}
+
+      {isReel && hasMedia && videoUri !== null && !scriptOpen ? (
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: FOOT - 14, zIndex: 3 }}>
+          <Scrubber
+            time={rp.time}
+            duration={rp.duration}
+            markers={markers}
+            scrubbing={scrubbing}
+            onScrubStart={() => {
+              wasPlaying.current = rp.playing;
+              setPlaying(false);
+              setScrubbing(true);
+            }}
+            onSeek={rp.seek}
+            onScrubEnd={() => {
+              setScrubbing(false);
+              if (wasPlaying.current) setPlaying(true);
+            }}
+          />
+        </View>
+      ) : null}
+
+      {/* Footer buttons */}
+      <View style={[styles.actions, { bottom: Math.max(insets.bottom, 16) + 12, opacity: notesOpen ? 0 : 1 }]} pointerEvents={notesOpen ? 'none' : 'auto'}>
+        {reviewable ? (
+          <>
+            <Button
+              variant="secondary"
+              icon={notes.length ? 'edit_note' : 'close'}
+              label={notes.length ? `${notes.length} ${notes.length === 1 ? 'change' : 'changes'}` : 'Changes'}
+              onPress={() => {
+                setPlaying(false);
+                setScriptOpen(false);
+                setNotesOpen(true);
+              }}
+              style={styles.btn}
+            />
+            {notes.length ? (
+              <Button icon="arrow_upward" label="Send changes" onPress={() => void decide('changes_requested')} style={styles.btn} />
+            ) : (
+              <Button icon="check" label="Approve" disabled={editPending && !(editFailed || editStalled)} onPress={() => void decide('approved')} style={styles.btn} />
+            )}
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" icon="chat_bubble" label={`Message ${creatorName}`} onPress={openChat} style={styles.btn} />
+            {status === 'changes_requested' && sentNotes.length > 0 ? (
+              <Button
+                variant="amber"
+                icon="edit_note"
+                label={`${sentNotes.length} ${sentNotes.length === 1 ? 'change' : 'changes'} sent`}
+                onPress={() => {
+                  setPlaying(false);
+                  setNotesOpen(true);
+                }}
+                style={styles.btn}
+              />
+            ) : status === 'approved' ? (
+              <Button icon="open_in_new" label="Open post" onPress={() => router.push({ pathname: '/(admin)/brief-post/[id]', params: { id: assignment.id } })} style={styles.btn} />
+            ) : null}
+          </>
+        )}
+      </View>
+
+      <NotesSheet
+        open={notesOpen}
+        onClose={() => setNotesOpen(false)}
+        creatorName={creatorName}
+        isReel={isReel}
+        notes={shownNotes}
+        pinAt={pinAt}
+        readOnly={!reviewable}
+        onAdd={(n) => {
+          noteSeq.current += 1;
+          setNotes((prev) => [...prev, { id: `n${noteSeq.current}`, at: n.at, text: n.text }]);
+        }}
+        onDelete={(nid) => setNotes((prev) => prev.filter((n) => n.id !== nid))}
+        onSeek={seekNote}
+      />
 
       {editVisible && fullEditor && submission !== null && (
         <ManagerVideoEditor
@@ -1005,156 +965,34 @@ export default function ReviewScreen() {
           index={editIndex}
           onIndex={setEditIndex}
           onSegments={setBriefSegments}
-          subtitles={
-            isReel && briefRow.subtitles === true
-              ? { y: subtitlesY, onChange: setSubtitlesY }
-              : null
-          }
+          subtitles={isReel && briefRow.subtitles === true ? { y: subtitlesY, onChange: setSubtitlesY } : null}
           onDone={finishEdit}
           onCancel={cancelEdit}
         />
       )}
-      {revisionVisible && (
-        <RevisionMode
-          creatorShort={creatorShort}
-          postTitle={row.title}
-          format={row.format}
-          sections={sections}
-          busy={busy}
-          onCancel={() => setRevisionVisible(false)}
-          onSend={(note) => void sendBack(note)}
-        />
-      )}
-      {approvedVisible && (
-        <ApprovedOverlay
-          title={row.title}
-          format={row.format}
-          creatorShort={creatorShort}
-          onNext={closeAndAdvance}
-          onOpenThread={openThread}
-        />
-      )}
-      {sentVisible && (
-        <SentConfirmation
-          creatorShort={creatorShort}
-          onNext={closeAndAdvance}
-          onOpenThread={openThread}
-        />
-      )}
-      <SoftToast
-        visible={toast !== null}
-        message={toast ?? ''}
-        tone="info"
-        onHide={() => setToast(null)}
-      />
+
+      {decision ? <Celebration kind={decision.kind} creatorName={creatorName} left={decision.left} onReturn={returnFromDecision} /> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: color.ink900,
-  },
-  fallbackScreen: {
-    flex: 1,
-    backgroundColor: color.offWhite,
-  },
-  centered: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  skeletonBody: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 14,
-  },
-  skeletonMedia: {
-    flex: 1,
-  },
-  skeletonStrip: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  skeletonGrow: {
-    flex: 1,
-    width: 'auto',
-  },
-  missing: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
-    color: color.slate500,
-  },
-  media: {
-    flex: 1,
-    overflow: 'hidden',
-  },
-  editPillRow: {
-    position: 'absolute',
-    top: 104,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  editPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10, 10, 14, 0.6)',
-  },
-  editPillFailed: {
-    backgroundColor: 'rgba(200, 40, 40, 0.85)',
-  },
-  editFailedStack: {
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 24,
-  },
-  editErrorDetail: {
-    fontSize: type.size.label,
-    color: color.white,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowRadius: 4,
-  },
-  editPillText: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
-    color: color.white,
-  },
-  editPillAction: {
-    fontSize: type.size.bodySm,
-    fontWeight: type.weight.semibold,
-    color: color.white,
-    textDecorationLine: 'underline',
-  },
-  captionNoteWrap: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: color.white,
-  },
-  captionNote: {
-    fontSize: type.size.micro,
-    color: color.slate400,
-  },
-  actionStrip: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    borderTopWidth: borderWidth.hair,
-    borderTopColor: color.line,
-    backgroundColor: color.white,
-  },
-  request: {
-    flex: 46,
-  },
-  approve: {
-    flex: 54,
-  },
+  screen: { flex: 1 },
+  centered: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 32 },
+  emptyDisc: { width: 64, height: 64, borderRadius: radius.pill, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  head: { position: 'absolute', left: 0, right: 0, top: 0, zIndex: 1, backgroundColor: color.card, flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingLeft: 4, paddingRight: 16 },
+  back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, minWidth: 0, paddingTop: 8, fontWeight: '700', letterSpacing: -0.2, color: color.ink },
+  scriptPill: { marginTop: 10, height: 24, paddingLeft: 10, paddingRight: 6, borderRadius: radius.pill, backgroundColor: color.blueTint, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  scriptText: { fontSize: 12, fontWeight: '600', color: color.blueDeep },
+  foot: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1, backgroundColor: color.card },
+  editRow: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 3 },
+  editHandle: { alignItems: 'center', gap: 2, paddingHorizontal: 16, paddingVertical: 4 },
+  editText: { fontSize: 13, lineHeight: 14, fontWeight: '700', color: color.white },
+  editShadow: { textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
+  actions: { position: 'absolute', left: 16, right: 16, zIndex: 4, flexDirection: 'row', gap: 10 },
+  btn: { height: 56, paddingHorizontal: 14 },
+  bannerRow: { position: 'absolute', top: 52, left: 0, right: 0, alignItems: 'center', paddingHorizontal: 16 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: color.card, maxWidth: '100%', ...shadow.float },
+  bannerText: { fontSize: 13, fontWeight: '700', color: color.ink, flexShrink: 1 },
 });

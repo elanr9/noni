@@ -1,232 +1,58 @@
-import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import {
-  Stack,
-  useFocusEffect,
-  useLocalSearchParams,
-  useRouter,
-} from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+// A creator's post that is not live yet (v2): status, the sent media, the
+// manager's notes and the next step. Live posts hand over to posts/[id].
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { FormatTag, TypeTag } from '../../../components/creator/Chips';
-import { makeHref } from '../../../components/creator/briefs/reel/routes';
-import { parseChangesNote } from '../../../components/ReviewThread';
-import {
-  estimateDurationLabel,
-  exampleHandle,
-  scriptBlocks,
-  usePostTypeMeta,
-} from '../../../components/creator/PostCard';
-import { SlideNav } from '../../../components/creator/SlideNav';
-import { DetailSkeleton } from '../../../components/states';
-import { Button } from '../../../components/ui/Button';
-import { Icon } from '../../../components/ui/Icon';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { StatusChip } from '../../../components/ui/StatusChip';
+import { forgetPostDrafts } from '../../../components/creator/v2/record/model';
+import { PostDetailScreen } from '../../../components/creator/v2/PostDetailScreen';
+import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
-import {
-  countOnDate,
-  publishTimeLabel,
-  useCreatorQueue,
-} from '../../../lib/creator-queue';
-import {
-  latestChangesNote,
-  listAssignmentReviewEvents,
-} from '../../../lib/review-events';
-import {
-  getAssignment,
-  type AssignmentWithBrief,
-} from '../../../lib/tasks-api';
-import { color, radius, shadow, type } from '../../../theme/tokens';
+import { loadCreatorPostDetail, type CreatorPostDetail } from '../../../lib/creator-post-detail';
+import { discardCreatorPost } from '../../../lib/creator-posts-api';
+import { useV2Data } from '../../../lib/v2-posts';
 
-function formatSeconds(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-/** linear-gradient(160deg, blue100, lineStrong) idle frame, as on MediaCard. */
-function IdleGradient() {
-  return (
-    <Svg style={StyleSheet.absoluteFill}>
-      <Defs>
-        <LinearGradient id="taskIdleGrad" x1="0%" y1="0%" x2="34%" y2="94%">
-          <Stop offset="0" stopColor={color.blue100} />
-          <Stop offset="1" stopColor={color.lineStrong} />
-        </LinearGradient>
-      </Defs>
-      <Rect x="0" y="0" width="100%" height="100%" fill="url(#taskIdleGrad)" />
-    </Svg>
-  );
-}
-
-function ExamplePlayer({ assignment }: { assignment: AssignmentWithBrief }) {
-  const brief = assignment.briefs;
-  const slideshow = brief.format === 'photo_carousel';
-  const aspect = slideshow ? 4 / 5 : 9 / 16;
-
-  const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [started, setStarted] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [durationSec, setDurationSec] = useState<number | null>(null);
-
-  const videoSource = !slideshow ? brief.example_url : null;
-  const player = useVideoPlayer(videoSource, (p) => {
-    p.loop = true;
-  });
-
-  useEffect(() => {
-    if (!playing || slideshow) return;
-    const t = setInterval(() => {
-      if (player.duration > 0) {
-        setDurationSec(player.duration);
-        setProgress(Math.min(player.currentTime / player.duration, 1));
-      }
-    }, 250);
-    return () => clearInterval(t);
-  }, [playing, slideshow, player]);
-
-  const togglePlay = () => {
-    if (slideshow || videoSource === null) return;
-    if (playing) {
-      player.pause();
-      setPlaying(false);
-    } else {
-      player.play();
-      setPlaying(true);
-      setStarted(true);
-    }
-  };
-
-  const handle = exampleHandle(brief.example_url);
-  const durationLabel =
-    durationSec !== null
-      ? formatSeconds(durationSec)
-      : estimateDurationLabel(brief);
-
-  // True post dimensions inside the remaining space: fit the aspect box to
-  // the measured frame.
-  let mediaW = 0;
-  let mediaH = 0;
-  if (frame !== null) {
-    mediaH = frame.h;
-    mediaW = mediaH * aspect;
-    if (mediaW > frame.w) {
-      mediaW = frame.w;
-      mediaH = mediaW / aspect;
-    }
-  }
-
-  return (
-    <View
-      style={styles.playerFrame}
-      onLayout={(e) =>
-        setFrame({
-          w: e.nativeEvent.layout.width,
-          h: e.nativeEvent.layout.height,
-        })
-      }
-    >
-      {frame !== null && mediaW > 0 ? (
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel={
-            slideshow ? 'Example slideshow' : playing ? 'Pause example' : 'Play example'
-          }
-          onPress={togglePlay}
-          style={[
-            styles.media,
-            shadow.shadowMedia,
-            { width: mediaW, height: mediaH },
-            playing && styles.mediaPlaying,
-          ]}
-        >
-          {slideshow ? (
-            <SlideNav
-              variant="dark"
-              slides={scriptBlocks(brief.script).map((text) => ({ text }))}
-              style={StyleSheet.absoluteFill}
-              swipe
-            />
-          ) : (
-            <>
-              {!started ? <IdleGradient /> : null}
-              {started && videoSource !== null ? (
-                <VideoView
-                  style={StyleSheet.absoluteFill}
-                  player={player}
-                  contentFit="cover"
-                  nativeControls={false}
-                />
-              ) : null}
-              {!playing ? (
-                <View style={styles.playCenter} pointerEvents="none">
-                  <View style={styles.playCircle}>
-                    <Icon name="play" size={22} color={color.ink} />
-                  </View>
-                </View>
-              ) : null}
-              {started ? (
-                <View style={styles.progressRow} pointerEvents="none">
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { flex: Math.max(progress, 0.001) },
-                      ]}
-                    />
-                    <View style={{ flex: Math.max(1 - progress, 0.001) }} />
-                  </View>
-                  {durationLabel !== undefined ? (
-                    <Text style={styles.progressTime}>{durationLabel}</Text>
-                  ) : null}
-                </View>
-              ) : null}
-            </>
-          )}
-
-          {handle !== null ? (
-            <View style={styles.sourcePill} pointerEvents="none">
-              <Icon name="music-2" size={12} color={color.ink} />
-              <Text style={styles.sourceText} numberOfLines={1}>
-                {handle}
-              </Text>
-            </View>
-          ) : null}
-        </PressableScale>
-      ) : null}
-    </View>
-  );
-}
-
-export default function AssignmentDetailScreen() {
+export default function CreatorPostDetailRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { profile } = useAuth();
-  const queue = useCreatorQueue();
-  const [assignment, setAssignment] = useState<AssignmentWithBrief | null>(null);
-  const [loading, setLoading] = useState(true);
-  const typeMeta = usePostTypeMeta(assignment?.briefs.post_type_id ?? null);
+  const companyId = profile?.active_company_id ?? null;
+  const [detail, setDetail] = useState<CreatorPostDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const seq = useRef(0);
+  const shown = useRef(false);
+  const retry = useRef<() => void>(() => undefined);
 
-  const load = useCallback(async () => {
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-    if (!profile?.active_company_id) return;
-    try {
-      setAssignment(await getAssignment(profile.active_company_id, id));
-    } catch {
-      setAssignment(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, profile?.active_company_id]);
+  const load = useCallback(
+    async (manual = false) => {
+      if (!companyId || !id) return;
+      const mine = ++seq.current;
+      try {
+        const next = await loadCreatorPostDetail(companyId, id);
+        if (mine !== seq.current) return;
+        if (!next) {
+          setDetail(null);
+          setError('missing');
+          return;
+        }
+        setError(null);
+        shown.current = true;
+        setDetail(next);
+      } catch {
+        if (mine !== seq.current) return;
+        // Keep what is on screen; only an empty screen turns into the error state.
+        if (!shown.current) setError('failed');
+        else if (manual) toast.error('Could not refresh this post.', { label: 'Retry', onPress: () => retry.current() });
+      } finally {
+        if (mine === seq.current) setRefreshing(false);
+      }
+    },
+    [companyId, id],
+  );
+
+  useEffect(() => {
+    retry.current = () => void load(true);
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -234,259 +60,33 @@ export default function AssignmentDetailScreen() {
     }, [load]),
   );
 
-  if (loading) {
-    return (
-      <>
-        <Stack.Screen options={{ headerShown: false }} />
-        <DetailSkeleton />
-      </>
-    );
-  }
-
-  if (!assignment) {
-    return (
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.nav}>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            onPress={() => router.back()}
-            style={styles.backBtn}
-          >
-            <Icon name="chevron-left" size={20} color={color.ink} />
-          </PressableScale>
-          <Text style={styles.navTitle}>Task</Text>
-          <View style={styles.navSpacer} />
-        </View>
-        <Text style={styles.missing}>Post not found.</Text>
-      </View>
-    );
-  }
-
-  const brief = assignment.briefs;
-  const isVideo = brief.format !== 'photo_carousel';
-  const canRecord =
-    assignment.status === 'assigned' ||
-    assignment.status === 'changes_requested' ||
-    assignment.status === 'recorded';
-  // Legacy carousels (null post_type_id) still record their script as video.
-  const usesUpload = !isVideo && brief.post_type_id !== null;
-
-  async function onRecord() {
-    if (!assignment) return;
-    const a = assignment;
-    const changes = a.status === 'changes_requested';
-    // New style briefs run in the make flow; changes requested on a reel
-    // reopen its clips with the flagged ones first.
-    let flags: string[] = [];
-    if (changes && a.briefs.format !== 'photo_carousel') {
-      const events = await listAssignmentReviewEvents(a.id).catch(() => []);
-      const note = latestChangesNote(events);
-      flags =
-        note !== null
-          ? parseChangesNote(note)
-              .map((s) => s.label)
-              .filter((l): l is string => l !== null)
-          : [];
-    }
-    const make = makeHref(a.briefs, a.id, { changes, flags });
-    if (make !== null) {
-      router.push(make);
-      return;
-    }
-    router.push(`/(creator)/studio/${a.id}`);
-  }
-
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={styles.nav}>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          onPress={() => router.back()}
-          style={styles.backBtn}
-        >
-          <Icon name="chevron-left" size={20} color={color.ink} />
-        </PressableScale>
-        <Text style={styles.navTitle}>Task</Text>
-        <View style={styles.navSpacer} />
-      </View>
-
-      <View style={styles.column}>
-        <View style={styles.chipRow}>
-          <StatusChip status={assignment.status} />
-          <FormatTag format={brief.format} />
-          {typeMeta !== null ? (
-            <TypeTag label={typeMeta.label} typeKey={typeMeta.key} />
-          ) : null}
-          <Text style={styles.postsAt}>
-            Posts{' '}
-            {publishTimeLabel(
-              assignment,
-              countOnDate(queue.assignments, assignment.scheduled_date),
-            )}
-          </Text>
-        </View>
-
-        <Text style={styles.title}>{brief.title}</Text>
-
-        <ExamplePlayer assignment={assignment} />
-
-        {canRecord ? (
-          <View
-            style={[
-              styles.cta,
-              { paddingBottom: Math.max(16, insets.bottom + 4) },
-            ]}
-          >
-            <Button
-              variant="primary"
-              size="lg"
-              block
-              icon={usesUpload ? 'images' : 'video'}
-              onPress={() => void onRecord()}
-            >
-              {usesUpload ? 'Create slides' : 'Record'}
-            </Button>
-          </View>
-        ) : null}
-      </View>
-    </View>
+    <PostDetailScreen
+      detail={detail}
+      error={error}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        void load(true);
+      }}
+      onRetry={() => {
+        setError(null);
+        void load();
+      }}
+      onContinue={() => {
+        if (id) router.push({ pathname: '/(creator)/resume/[id]', params: { id } });
+      }}
+      onStats={() => {
+        if (id) router.replace({ pathname: '/(creator)/posts/[id]', params: { id } });
+      }}
+      onDiscard={async () => {
+        if (!id || !detail) return;
+        await discardCreatorPost(id);
+        await forgetPostDrafts(id, detail.assignment.library_brief_id ?? null);
+        if (companyId) void useV2Data.getState().load(companyId, true);
+        toast.success('Post discarded');
+        router.back();
+      }}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: color.white,
-  },
-  missing: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    fontSize: type.size.bodySm,
-    color: color.textMuted,
-  },
-  nav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 6,
-    minHeight: 46,
-  },
-  navTitle: {
-    fontSize: type.size.action,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  navSpacer: {
-    width: 34,
-    height: 34,
-  },
-  backBtn: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  column: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 6,
-    gap: 12,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  postsAt: {
-    fontSize: type.size.chip,
-    color: color.slate400,
-  },
-  title: {
-    fontSize: 24,
-    lineHeight: 24 * 1.18,
-    fontWeight: type.weight.bold,
-    letterSpacing: -0.5,
-    color: color.ink,
-  },
-  playerFrame: {
-    flex: 1,
-    minHeight: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  media: {
-    borderRadius: radius['2xl'],
-    backgroundColor: color.blue100,
-    overflow: 'hidden',
-  },
-  mediaPlaying: {
-    backgroundColor: color.ink900,
-  },
-  playCenter: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA92,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sourcePill: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA92,
-    maxWidth: '85%',
-  },
-  sourceText: {
-    fontSize: type.size.label,
-    fontWeight: type.weight.bold,
-    color: color.ink,
-  },
-  progressRow: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  progressTrack: {
-    flex: 1,
-    height: 3,
-    borderRadius: radius.pill,
-    backgroundColor: color.whiteA28,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    backgroundColor: color.white,
-    borderRadius: radius.pill,
-  },
-  progressTime: {
-    fontSize: type.size.micro11,
-    fontWeight: type.weight.bold,
-    color: color.whiteA90,
-  },
-  cta: {
-    paddingTop: 2,
-  },
-});

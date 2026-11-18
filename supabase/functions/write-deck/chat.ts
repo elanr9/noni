@@ -83,7 +83,7 @@ export function chatTask(productName: string): string {
     `ANSWER with one JSON object and nothing else: {"reply": string, "ideas": [{"format": "slideshow" | "reel", "post_type_id": string, "kind": "handheld" | "story", "cover": string, "say": string, "count": number, "angle": string, "preview": string[]}], "chips": string[]}.`,
     'reply: 1 to 3 short sentences to the manager. Never list or restate the ideas (they show as cards) and never say how many there are.',
     'cover follows that post type\'s COVER rule. say: for reels the first line the creator says out loud, 5 to 12 words (for Long text, what the creator does on camera); for slideshows an empty string. count: body slides including the CTA, inside that type\'s range; when the cover names a number, count is that number; 0 for story kind and Long text. angle: one plain sentence to the manager on why it earns saves or sends, naming the detail it hinges on. preview: the first 3 slide headers (slideshows) or beats (reels), 2 to 8 words each, in order, numbered types without the number.',
-    `chips: 2 to 4 follow ups the manager might tap next, 2 to 6 words each, said as the manager talking to you ("Make it more contrarian", "Give me a reel version", "Something for younger players"). Never a chip that only ${productName} staff would understand.`,
+    `chips: 2 to 4 follow ups the manager might tap next, 2 to 6 words each, said as the manager talking to you ("Make it more contrarian", "Give me a reel version", "Something for beginners"). Never a chip that only ${productName} staff would understand.`,
   ].join('\n');
 }
 
