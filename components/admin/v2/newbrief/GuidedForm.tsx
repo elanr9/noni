@@ -2,21 +2,23 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
-import { planGuided, type GuidedPlan } from '../../../../lib/brief-ai';
+import { planGuided, referenceWithin, type Declined, type GuidedPlan } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
-import { newClip, type AudioTrack, type BriefClip, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
+import { newClip, type AudioTrack, type BriefClip, type BriefHook, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
 import { briefs, color, editor, radius, shadow } from '../../../../theme/v2';
 import { Icon, Label, Option, Press, Sheet, Toggle } from '../../../v2';
 import { AudioCover } from '../audio/AudioCover';
 import { AudioSheet } from '../audio/AudioSheet';
+import { AiNote } from './AiNote';
 import { CaptionCard } from './CaptionCard';
 import { ClipGrid } from './ClipGrid';
 import { MediaFill, ShimmerLine } from './ClipFrame';
 import { LinkDialog } from './LinkDialog';
 import { MediaPickerSheet } from './MediaPickerSheet';
 import { FIELD, TitleInput } from './TitleInput';
+import { useReference } from './useReference';
 
-/** Where the staged fill is: `title`, `clip0..n`, `caption`. */
+/** Where the staged fill is: `reference` while the link is read, then `title`, `clip0..n`, `caption`. */
 export type AiState = { stage: string; i: number; n: number };
 
 export interface GuidedFormProps {
@@ -31,6 +33,11 @@ export interface GuidedFormProps {
   onOpenClip: (id: string) => void;
 }
 
+/** How long Fill in with AI waits on a link that is still being read before the writer takes over. */
+const REFERENCE_WAIT_MS = 90_000;
+/** The writer can take two minutes; after this the button says it is still at it. */
+const SLOW_MS = 45_000;
+
 const BIG = { height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, flex: 1, minWidth: 0 } as const;
 
 /** Guided compose: pinned Add link / Fill in with AI, then title, sound, notes and the clip grid. */
@@ -42,6 +49,12 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const [soundPick, setSoundPick] = useState(false);
   const [gsPick, setGsPick] = useState<'all' | string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [hookOpen, setHookOpen] = useState(false);
+  const [declined, setDeclined] = useState<Declined | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [run, setRun] = useState(0);
+  const [slowRun, setSlowRun] = useState(-1);
+  const reference = useReference(editingExisting ? '' : g.link);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
     const list = timers.current;
@@ -55,8 +68,23 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const typed = /\S/.test(g.title) || /\S/.test(g.link) || g.clips.some((c) => /\S/.test(c.text));
   const locked = !!(g.filled || ai) && !g.link;
 
+  const writing = !!ai && ai.n === 1 && ai.stage !== 'reference';
+  useEffect(() => {
+    if (!writing) return;
+    const t = setTimeout(() => setSlowRun(run), SLOW_MS);
+    return () => clearTimeout(t);
+  }, [writing, run]);
+
   const fill = async () => {
     if (!typed || ai) return;
+    setDeclined(null);
+    setWarnings([]);
+    setRun((r) => r + 1);
+    // The post behind the link is read from the moment it is added; wait for it when it is not done yet.
+    if (g.link && reference.status === 'pending') {
+      setAi({ stage: 'reference', i: 0, n: 1 });
+      await referenceWithin(g.link, REFERENCE_WAIT_MS);
+    }
     setAi({ stage: 'title', i: 0, n: 1 });
     let plan: GuidedPlan;
     try {
@@ -66,8 +94,14 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
       toast.error("Couldn't write this one. Check your connection and try again.", { label: 'Retry', onPress: () => void fill() });
       return;
     }
+    if (plan.declined) {
+      setAi(null);
+      setDeclined(plan.declined);
+      return;
+    }
+    setWarnings(plan.ai.warnings);
     const steps: [string, () => void][] = [];
-    steps.push(['title', () => set({ title: plan.title, phrase: plan.phrase })]);
+    steps.push(['title', () => set({ title: plan.title, phrase: plan.phrase, angle: plan.angle, ai: plan.ai })]);
     plan.clips.forEach((c, i) =>
       steps.push([
         `clip${i}`,
@@ -81,6 +115,7 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
               text: c.text,
               onScreen: c.onScreen,
               cta: c.cta,
+              ...(c.shot ? { shot: c.shot } : {}),
               doc: prev?.doc ?? c.doc ?? null,
               ...(type === 'Greenscreen' && !cur.fullGreen ? { green: c.green, gs: prev?.gs || c.gs } : {}),
             };
@@ -103,6 +138,21 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const pend = (k: string) => !!ai && (ai.stage === k || (k.startsWith('clip') && ai.stage.startsWith('clip') && +ai.stage.slice(4) <= +k.slice(4)));
   const justFilled = (i: number) => !!ai && (ai.stage === `clip${i + 1}` || (ai.stage === 'caption' && i === g.clips.length - 1));
 
+  // The other openings the fill offered for clip 1. Long Text has one clip and no hook to swap.
+  const hooks: BriefHook[] = !editingExisting && !long && g.ai?.hooks && g.ai.hooks.length > 1 ? g.ai.hooks : [];
+  const first = g.clips[0];
+  const hookOn = (h: BriefHook) => !!first && (h.say && !slides ? first.text.trim() === h.say : first.onScreen.trim() === h.onScreen);
+  const hookNow = hooks.find(hookOn);
+  const swapHook = (h: BriefHook) =>
+    update((cur) => {
+      const c = cur.clips[0];
+      if (!c) return cur;
+      const doc = c.doc && c.doc.texts.length ? { ...c.doc, texts: c.doc.texts.map((t, i) => (i === 0 ? { ...t, text: h.onScreen } : t)) } : c.doc;
+      return { ...cur, clips: [{ ...c, text: slides ? '' : h.say, onScreen: h.onScreen, doc, ...(h.visual ? { shot: h.visual } : {}) }, ...cur.clips.slice(1)] };
+    });
+  const referenceNote = !g.link ? null : (declined?.referenceNote ?? g.ai?.referenceNote ?? (reference.status === 'failed' ? (reference.reason ?? null) : null));
+  const fillLabel = !ai ? 'Fill in with AI' : ai.stage === 'reference' ? 'Reading the reference' : ai.n > 1 ? `Filling ${ai.i + 1} of ${ai.n}` : slowRun === run ? 'Still writing' : 'Writing it for your brand';
+
   const gsLabel = g.gs ? (g.gs.kind === 'video' ? `Video, ${g.gs.dur}s. Creators record to its length` : 'Image, untimed') : 'Add an image or video';
 
   return (
@@ -119,13 +169,13 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
             >
               <Icon name={g.link ? 'link' : locked ? 'link_off' : 'link'} size={20} color={g.link ? color.blueDeep : locked ? color.grey3 : color.grey4} />
               <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: g.link ? color.blueDeep : locked ? color.grey3 : color.ink }}>
-                {g.link ? 'Link added' : 'Add link'}
+                {g.link ? (reference.status === 'pending' ? 'Reading link' : 'Link added') : 'Add link'}
               </Text>
             </Press>
             <Press disabled={!typed || !!ai} onPress={() => void fill()} accessibilityRole="button" style={[BIG, { backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? briefs.aiGlow : undefined }]}>
               <SpinIcon spinning={!!ai} color={typed ? color.white : color.grey3} />
               <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: typed ? color.white : color.grey3 }}>
-                {ai ? (ai.n > 1 ? `Filling ${ai.i + 1} of ${ai.n}` : 'Writing it for your brand') : 'Fill in with AI'}
+                {fillLabel}
               </Text>
             </Press>
           </View>
@@ -141,6 +191,9 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
         </View>
       )}
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} scrollEnabled={!dragging} style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 2, paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
+        {declined ? <AiNote body={declined.reason} lines={declined.questions} /> : null}
+        {referenceNote && !editingExisting ? <AiNote icon="link_off" body={referenceNote} /> : null}
+        {warnings.length && !ai ? <AiNote title="To check" lines={warnings} /> : null}
         {pend('title') ? (
           <View style={[FIELD, { paddingVertical: 13, paddingHorizontal: 16 }]}>
             <ShimmerLine />
@@ -194,6 +247,20 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
               <Text style={{ fontSize: 13, lineHeight: 16, color: g.gs ? color.grey4 : color.grey3 }}>{gsLabel}</Text>
             </View>
             <Icon name={g.gs ? 'swap_horiz' : 'add'} size={22} color={color.grey3} />
+          </Press>
+        ) : null}
+        {hooks.length ? (
+          <Press onPress={() => setHookOpen(true)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 12, borderRadius: radius.card, backgroundColor: color.card, ...shadow.card }}>
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: color.blueTint, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="swap_horiz" size={20} color={color.blueDeep} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '700', color: color.ink }}>Hook</Text>
+              <Text numberOfLines={1} style={{ fontSize: 13, lineHeight: 16, color: color.grey4 }}>
+                {hookNow?.archetype || `${hooks.length} options`}
+              </Text>
+            </View>
+            <Icon name="chevron_right" size={22} color={color.grey3} />
           </Press>
         ) : null}
         <ClipGrid
@@ -257,6 +324,21 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
         >
           Creator picks a sound
         </Option>
+      </Sheet>
+      <Sheet open={hookOpen} onClose={() => setHookOpen(false)} title="Hook">
+        {hooks.map((h) => (
+          <Option
+            key={`${h.say}|${h.onScreen}`}
+            on={hookOn(h)}
+            meta={h.archetype || undefined}
+            onPress={() => {
+              swapHook(h);
+              setHookOpen(false);
+            }}
+          >
+            {(slides ? h.onScreen : h.say) || h.onScreen}
+          </Option>
+        ))}
       </Sheet>
       <AudioSheet
         open={soundPick}

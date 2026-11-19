@@ -62,6 +62,16 @@ function monthRows(m: Date): (Date | null)[][] {
   return rows;
 }
 
+/** Months from the month holding `now` to the one holding `d`. */
+function monthIndex(d: Date, now: Date): number {
+  return (d.getFullYear() - now.getFullYear()) * 12 + d.getMonth() - now.getMonth();
+}
+
+/** The first day of the month `m` months from the one holding `now`. */
+function monthAt(m: number, now: Date): Date {
+  return new Date(now.getFullYear(), now.getMonth() + m, 1);
+}
+
 export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPost, refreshing = false, onRefresh, onRetry }: CreatorScreenProps) {
   const insets = useSafeAreaInsets();
   const posts = useV2Data((s) => s.posts);
@@ -125,6 +135,17 @@ export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPo
     setSel(sameDay(sel, d) ? null : d);
     setK(weekOffset(d, now));
     setGrid(false);
+  };
+
+  // Months the calendar reaches: those holding the middle of its first and last week.
+  const minMonth = monthIndex(weekDays(MIN_WEEK)[3], now);
+  const maxMonth = monthIndex(weekDays(MAX_WEEK)[3], now);
+  // Paging the month grid lands on the week holding the 15th, or the nearest week the calendar reaches.
+  const pickMonth = (m: number) => {
+    const mid = monthAt(m, now);
+    mid.setDate(15);
+    setSel(null);
+    setK(Math.min(MAX_WEEK, Math.max(MIN_WEEK, weekOffset(mid, now))));
   };
 
   const right = onSettings ? (
@@ -226,17 +247,32 @@ export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPo
         </View>
         {mode === 'cal' ? (
           <View style={{ marginBottom: 14 }}>
-            <WeekCard week={k} onWeek={setK} minWeek={MIN_WEEK} maxWeek={MAX_WEEK} selected={sel} onSelect={setSel} marks={marks}>
-              {grid ? (
-                <TabPane k={`${month.getFullYear()}-${month.getMonth()}`} duration={160} style={{ flex: 0 }}>
-                  {monthRows(month).map((row, r) => (
-                    <View key={r} style={{ flexDirection: 'row' }}>
-                      {row.map((d, i) => (d ? <DayCell key={d.getTime()} day={d} compact selected={!!sel && sameDay(sel, d)} mark={marks(d)} onPress={() => pickGridDay(d)} /> : <View key={`e${i}`} style={{ flex: 1 }} />))}
-                    </View>
-                  ))}
-                </TabPane>
-              ) : undefined}
-            </WeekCard>
+            <WeekCard
+              week={k}
+              onWeek={setK}
+              minWeek={MIN_WEEK}
+              maxWeek={MAX_WEEK}
+              selected={sel}
+              onSelect={setSel}
+              marks={marks}
+              months={
+                grid
+                  ? {
+                      month: Math.min(maxMonth, Math.max(minMonth, monthIndex(month, now))),
+                      onMonth: pickMonth,
+                      minMonth,
+                      maxMonth,
+                      rows: (m) => monthRows(monthAt(m, now)).length,
+                      render: (m) =>
+                        monthRows(monthAt(m, now)).map((row, r) => (
+                          <View key={r} style={{ flexDirection: 'row' }}>
+                            {row.map((d, i) => (d ? <DayCell key={d.getTime()} day={d} compact selected={!!sel && sameDay(sel, d)} mark={marks(d)} onPress={() => pickGridDay(d)} /> : <View key={`e${i}`} style={{ flex: 1 }} />))}
+                          </View>
+                        )),
+                    }
+                  : undefined
+              }
+            />
           </View>
         ) : null}
       </View>

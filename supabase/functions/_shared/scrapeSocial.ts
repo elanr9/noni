@@ -11,7 +11,37 @@ export type SourcePost = {
   transcript_url: string | null;
   image_urls: string[];
   format: 'video' | 'photo_carousel';
+  /** What the actor reported about the post itself. Absent on reads that predate it. */
+  meta?: PostMeta;
 };
+
+/** Post metadata as the Apify actors return it. Null where the platform or actor gives nothing. */
+export type PostMeta = {
+  author: string | null;
+  author_followers: number | null;
+  duration_ms: number | null;
+  posted_at: string | null;
+  hashtags: string[];
+  cover_url: string | null;
+  sound_title: string | null;
+  sound_original: boolean | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+};
+
+/** A count the actor reported, or null. Instagram reports -1 for hidden likes. */
+function count(n: unknown): number | null {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+function isoDate(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw) return null;
+  const t = Date.parse(raw);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
 
 // Ten covers almost every slideshow, so a remix can keep the slide count.
 const MAX_OCR_SLIDES = 10;
@@ -41,11 +71,22 @@ type SubtitleLink = {
 type TikTokItem = {
   text?: string;
   mediaUrls?: string[];
-  musicMeta?: { playUrl?: string };
+  createTimeISO?: string;
+  playCount?: number;
+  diggCount?: number;
+  commentCount?: number;
+  shareCount?: number;
+  collectCount?: number;
+  hashtags?: Array<{ name?: string }>;
+  authorMeta?: { name?: string; fans?: number };
+  musicMeta?: { playUrl?: string; musicName?: string; musicOriginal?: boolean };
   videoMeta?: {
     transcriptionLink?: string;
     downloadAddr?: string;
     subtitleLinks?: SubtitleLink[];
+    duration?: number;
+    coverUrl?: string;
+    originalCoverUrl?: string;
   };
   imagePost?: { images?: Array<{ imageURL?: { urlList?: string[] } }> };
   slideshowImageLinks?: Array<{ downloadLink?: string }>;
@@ -69,12 +110,16 @@ function pickSubtitle(links: SubtitleLink[] | undefined): string | null {
   return scored[0]?.link ?? null;
 }
 
-async function scrapeTikTok(url: string): Promise<SourcePost | null> {
+async function scrapeTikTok(url: string, options: ScrapeOptions = {}): Promise<SourcePost | null> {
   const items = (await apifyRun('clockworks~tiktok-scraper', {
     postURLs: [url],
     // Always transcribe. A video that already has a foreign machine
     // translation would otherwise come back with no English speech.
     downloadSubtitlesOptions: 'TRANSCRIBE_ALL_VIDEOS',
+    // A charged add-on: the actor copies the video into its key-value store
+    // and returns that link in mediaUrls. TikTok's own CDN links need the
+    // scraper's cookies, so this is the only video URL another service can fetch.
+    ...(options.downloadVideo ? { shouldDownloadVideos: true, shouldDownloadCovers: true } : {}),
   })) as TikTokItem[];
   const i = items[0];
   if (!i) return null;
@@ -97,6 +142,24 @@ async function scrapeTikTok(url: string): Promise<SourcePost | null> {
     transcript_url: isCarousel ? null : transcript,
     image_urls: imageUrls,
     format: isCarousel ? 'photo_carousel' : 'video',
+    meta: {
+      author: i.authorMeta?.name?.replace(/^@/, '') || null,
+      author_followers: count(i.authorMeta?.fans),
+      duration_ms:
+        !isCarousel && typeof i.videoMeta?.duration === 'number' && i.videoMeta.duration > 0
+          ? Math.round(i.videoMeta.duration * 1000)
+          : null,
+      posted_at: isoDate(i.createTimeISO),
+      hashtags: (i.hashtags ?? []).map((h) => h.name ?? '').filter(Boolean),
+      cover_url: i.videoMeta?.coverUrl ?? i.videoMeta?.originalCoverUrl ?? imageUrls[0] ?? null,
+      sound_title: i.musicMeta?.musicName || null,
+      sound_original: typeof i.musicMeta?.musicOriginal === 'boolean' ? i.musicMeta.musicOriginal : null,
+      views: count(i.playCount),
+      likes: count(i.diggCount),
+      comments: count(i.commentCount),
+      shares: count(i.shareCount),
+      saves: count(i.collectCount),
+    },
   };
 }
 
@@ -105,6 +168,16 @@ type InstagramItem = {
   caption?: string;
   videoUrl?: string;
   images?: string[];
+  displayUrl?: string;
+  timestamp?: string;
+  hashtags?: string[];
+  ownerUsername?: string;
+  videoDuration?: number;
+  videoViewCount?: number;
+  videoPlayCount?: number;
+  likesCount?: number;
+  commentsCount?: number;
+  musicInfo?: { song_name?: string; uses_original_audio?: boolean };
 };
 
 async function scrapeInstagram(url: string): Promise<SourcePost | null> {
@@ -123,7 +196,100 @@ async function scrapeInstagram(url: string): Promise<SourcePost | null> {
     transcript_url: null,
     image_urls: isCarousel ? (i.images ?? []) : [],
     format: isCarousel ? 'photo_carousel' : 'video',
+    meta: {
+      author: i.ownerUsername || null,
+      author_followers: null,
+      duration_ms:
+        !isCarousel && typeof i.videoDuration === 'number' && i.videoDuration > 0
+          ? Math.round(i.videoDuration * 1000)
+          : null,
+      posted_at: isoDate(i.timestamp),
+      hashtags: (i.hashtags ?? []).filter((h) => typeof h === 'string' && h.length > 0),
+      cover_url: i.displayUrl ?? i.images?.[0] ?? null,
+      sound_title: i.musicInfo?.song_name || null,
+      sound_original:
+        typeof i.musicInfo?.uses_original_audio === 'boolean' ? i.musicInfo.uses_original_audio : null,
+      views: count(i.videoPlayCount) ?? count(i.videoViewCount),
+      likes: count(i.likesCount),
+      comments: count(i.commentsCount),
+      // The actor does not return shares or saves for Instagram.
+      shares: null,
+      saves: null,
+    },
   };
+}
+
+export type ScrapeOptions = {
+  /** TikTok only: have the actor store the video so its link can be fetched by other services. */
+  downloadVideo?: boolean;
+};
+
+/** The scrape alone, with metadata: no transcription and no OCR. Null when the post cannot be read. */
+export async function scrapeSocialPost(url: string, options: ScrapeOptions = {}): Promise<SourcePost | null> {
+  const host = socialHost(url);
+  if (!host) return null;
+  return host === 'tiktok' ? await scrapeTikTok(url, options) : await scrapeInstagram(url);
+}
+
+/** An Apify storage link with the account token added, which private stores need. Other hosts pass through. */
+export function withApifyToken(url: string): string {
+  const token = Deno.env.get('APIFY_API_TOKEN');
+  try {
+    const parsed = new URL(url);
+    if (token && /(^|\.)apify\.com$/i.test(parsed.hostname)) {
+      parsed.searchParams.set('token', token);
+      return parsed.href;
+    }
+  } catch {
+    // Not a URL; the caller's fetch will fail on it.
+  }
+  return url;
+}
+
+export type SubtitleCue = { text: string; start_ms: number; end_ms: number };
+
+function cueTimeMs(raw: string): number | null {
+  const m = raw.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/);
+  if (!m) return null;
+  return (Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000 + Number(m[4].padEnd(3, '0'));
+}
+
+/** WebVTT or SRT down to timed cues. Empty for a plain transcript. */
+export function parseSubtitleCues(raw: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  let open: SubtitleCue | null = null;
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t.includes('-->')) {
+      const [from, to] = t.split('-->');
+      const start = cueTimeMs(from);
+      const end = cueTimeMs((to ?? '').trim().split(/\s+/)[0] ?? '');
+      open = start !== null && end !== null ? { text: '', start_ms: start, end_ms: end } : null;
+      if (open) cues.push(open);
+    } else if (!t) {
+      open = null;
+    } else if (open) {
+      const text = t.replace(/<[^>]+>/g, '').trim();
+      if (text) open.text = open.text ? `${open.text} ${text}` : text;
+    }
+  }
+  return cues.filter((c) => c.text.length > 0 && c.end_ms >= c.start_ms);
+}
+
+/**
+ * The actor's subtitle file: the spoken text, plus timed cues when the file
+ * is WebVTT or SRT (cue level timing, not word level). Null when unreadable.
+ */
+export async function fetchApifySubtitles(url: string): Promise<{ text: string; cues: SubtitleCue[] } | null> {
+  try {
+    const res = await fetch(withApifyToken(url), { signal: AbortSignal.timeout(30000) });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const text = subtitleToText(raw);
+    return text ? { text, cues: parseSubtitleCues(raw) } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** WebVTT and SRT cues down to the spoken line. Plain transcripts pass through. */
@@ -169,7 +335,15 @@ async function fetchApifyTranscript(url: string): Promise<string | null> {
   }
 }
 
-async function transcribe(mediaUrl: string): Promise<string | null> {
+export type TimedTranscript = {
+  transcript: string;
+  /** Deepgram's words with punctuation, times in ms from the start of the media. */
+  words: Array<{ w: string; s: number; e: number }>;
+  duration_ms: number | null;
+};
+
+/** Deepgram on a remote media URL, keeping the word timestamps. Null when it cannot be transcribed. */
+export async function transcribeTimed(mediaUrl: string): Promise<TimedTranscript | null> {
   const key = Deno.env.get('DEEPGRAM_API_KEY');
   if (!key) return null;
   try {
@@ -187,17 +361,40 @@ async function transcribe(mediaUrl: string): Promise<string | null> {
     );
     if (!res.ok) return null;
     const data = (await res.json()) as {
+      metadata?: { duration?: number };
       results?: {
-        channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>;
+        channels?: Array<{
+          alternatives?: Array<{
+            transcript?: string;
+            words?: Array<{ word?: string; punctuated_word?: string; start?: number; end?: number }>;
+          }>;
+        }>;
       };
     };
-    return data.results?.channels?.[0]?.alternatives?.[0]?.transcript || null;
+    const alt = data.results?.channels?.[0]?.alternatives?.[0];
+    if (!alt?.transcript) return null;
+    const words: TimedTranscript['words'] = [];
+    for (const item of alt.words ?? []) {
+      const w = item.punctuated_word ?? item.word;
+      if (!w || typeof item.start !== 'number' || typeof item.end !== 'number') continue;
+      words.push({ w, s: Math.round(item.start * 1000), e: Math.round(item.end * 1000) });
+    }
+    const duration = data.metadata?.duration;
+    return {
+      transcript: alt.transcript,
+      words,
+      duration_ms: typeof duration === 'number' && duration > 0 ? Math.round(duration * 1000) : null,
+    };
   } catch {
     return null;
   }
 }
 
-async function ocrSlides(imageUrls: string[]): Promise<string[] | null> {
+async function transcribe(mediaUrl: string): Promise<string | null> {
+  return (await transcribeTimed(mediaUrl))?.transcript ?? null;
+}
+
+export async function ocrSlides(imageUrls: string[]): Promise<string[] | null> {
   try {
     const urls = imageUrls.slice(0, MAX_OCR_SLIDES);
     const system = `You transcribe the text on social media slideshow images. Answer with a single JSON object: {"slides": string[]}, one string per image in order. Each string is all readable overlay/design text on that slide, cleaned up. Use "" for a slide with no text.`;

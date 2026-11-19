@@ -40,6 +40,7 @@ export function TemplateView({ g, type, onOpenClip }: { g: GuidedState; type: Br
           </Press>
         ))}
       </View>
+      {g.angle ? <NotesCard label="Angle" body={g.angle} /> : null}
       {g.notes ? <NotesCard label="Notes" body={g.notes} /> : null}
       {g.caption ? <NotesCard label="Caption" body={g.caption} tags={g.tags} /> : null}
     </ScrollView>

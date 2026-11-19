@@ -26,7 +26,7 @@ type Body = {
   force?: boolean;
 };
 
-type AssignmentRow = { id: string; creator_id: string; brief_id: string; caption: string | null };
+type AssignmentRow = { id: string; creator_id: string; brief_id: string; caption: string | null; library_brief_id?: string | null };
 
 type BriefRow = {
   id: string;
@@ -322,7 +322,27 @@ async function varyBrief(
   const existingCaptions = all.flatMap((a) =>
     !pendingIds.has(a.id) && a.caption !== null && a.caption.trim().length > 0 ? [a.caption] : [],
   );
-  const taken = [original, ...existingCaptions];
+  // A creator-started post has its own briefs row, so the other creators
+  // filming the same library brief are not in `all`. Their captions are
+  // taken too, or two accounts could post the same rewrite.
+  const libraryIds = [...new Set(all.flatMap((a) => (a.library_brief_id ? [a.library_brief_id] : [])))];
+  const siblingCaptions: string[] = [];
+  if (libraryIds.length > 0) {
+    const { data: siblings, error: siblingError } = await admin
+      .from('assignments')
+      .select('id, caption')
+      .eq('company_id', brief.company_id)
+      .in('library_brief_id', libraryIds)
+      .not('caption', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(40);
+    if (siblingError) console.error('vary-copy sibling captions failed:', brief.id, siblingError.message);
+    const own = new Set(all.map((a) => a.id));
+    for (const row of (siblings ?? []) as { id: string; caption: string | null }[]) {
+      if (!own.has(row.id) && row.caption && row.caption.trim().length > 0) siblingCaptions.push(row.caption);
+    }
+  }
+  const taken = [original, ...existingCaptions, ...siblingCaptions];
 
   const accepted: Array<{ assignment: AssignmentRow; variant: Variant }> = [];
   const failed: string[] = [];
@@ -504,7 +524,7 @@ Deno.serve(async (req) => {
       }
       const { data: assignmentData, error } = await admin
         .from('assignments')
-        .select('id, creator_id, brief_id, caption')
+        .select('id, creator_id, brief_id, caption, library_brief_id')
         .eq('brief_id', briefRow.id)
         .eq('company_id', briefRow.company_id)
         .order('created_at');
@@ -531,7 +551,7 @@ Deno.serve(async (req) => {
       }
       const { data: assignmentData, error } = await admin
         .from('assignments')
-        .select('id, creator_id, brief_id, caption')
+        .select('id, creator_id, brief_id, caption, library_brief_id')
         .eq('campaign_id', campaign.id)
         .eq('company_id', campaign.company_id)
         .order('created_at');

@@ -8,10 +8,12 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 
 import { useAuth } from '../../../../lib/auth';
+import { appliedEdit, applyEditPlan, autoFeatures, logEditPlanDelta, readAutoEdit, requestEditPlan, timelineTakes, undoEditPlan } from '../../../../lib/auto-edit';
 import { renameCreatorPost } from '../../../../lib/creator-posts-api';
+import { listLibraryFeatures } from '../../../../lib/library-api';
 import { loadProject, saveProject } from '../../../../lib/projects-api';
 import { clearDraft } from '../../../../lib/recording-drafts';
-import { useProjectAutosave, useStudioStore } from '../../../../lib/studio-store';
+import { onVideo, useProjectAutosave, useStudioStore } from '../../../../lib/studio-store';
 import { useStudioUploads } from '../../../../lib/studio-uploads';
 import { submitProject } from '../../../../lib/submissions';
 import { getAssignment, type AssignmentWithBrief } from '../../../../lib/tasks-api';
@@ -58,6 +60,9 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
   const [uploadTotal, setUploadTotal] = useState(0);
   /** The sound on the sent post; the TikTok copy and search sheet shows before leaving. */
   const [tiktok, setTiktok] = useState<PostAudio | null>(null);
+  /** Auto edit: the call is running; the sheet with what it did is open, and whether it just ran. */
+  const [editing, setEditing] = useState(false);
+  const [editSheet, setEditSheet] = useState<'closed' | 'fresh' | 'again'>('closed');
   useProjectAutosave(scope);
   const uploads = useStudioUploads(scope);
 
@@ -127,6 +132,8 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
       setPhase('sending');
       const fresh = (await getAssignment(scope.companyId, assignmentId)) ?? assignment;
       await submitProject({ assignment: fresh, companyId: scope.companyId, creatorId: scope.creatorId, projectId: pid, document: current });
+      // What the creator changed after the edit plan teaches the planner.
+      logEditPlanDelta(assignmentId, current);
       await clearDraft(scope.companyId, assignmentId).catch(() => undefined);
       if (handoff?.draftKey) clearRecordDraft(handoff.draftKey);
       void useV2Data.getState().load(scope.companyId, true);
@@ -142,6 +149,56 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
       setSendError(e instanceof Error ? `Could not send. ${e.message}` : 'Could not send. Try again.');
     }
   }, [scope, assignment, name, assignmentId, projectId, handoff, done]);
+
+  const runAutoEdit = useCallback(async () => {
+    if (!scope) return;
+    const current = useStudioStore.getState().document;
+    if (!current || current.format !== 'video') return;
+    const takes = timelineTakes(current);
+    if (takes.length === 0) return;
+    const heard = readAutoEdit(current)?.words ?? {};
+    if (takes.some((t) => !t.storagePath && !(t.id in heard))) {
+      if (uploads.failed > 0) uploads.retry();
+      toast.show('Clips are still uploading');
+      return;
+    }
+    setEditing(true);
+    useStudioStore.getState().setPlaying(false);
+    try {
+      const features = autoFeatures(await listLibraryFeatures(scope.companyId).catch(() => []));
+      const reply = await requestEditPlan({ assignmentId, doc: current, takes, features });
+      const store = useStudioStore.getState();
+      if (store.ownerId !== assignmentId) return;
+      store.commit(
+        onVideo((d) =>
+          applyEditPlan(d, reply.plan, takes, {
+            media: reply.media,
+            replaceOverlayIds: reply.replaceOverlayIds,
+            soundTrack: reply.soundTrack,
+            words: reply.takes,
+            unheard: reply.unheard,
+            fallbackReason: reply.fallbackReason,
+            runId: reply.runId,
+          }),
+        ),
+      );
+      store.select(null);
+      store.setPlayhead(0);
+      setEditSheet('fresh');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Auto edit failed. Try again.');
+    } finally {
+      setEditing(false);
+    }
+  }, [scope, assignmentId, uploads]);
+
+  const undoAutoEdit = () => {
+    useStudioStore.getState().commit(onVideo(undoEditPlan));
+    useStudioStore.getState().select(null);
+    useStudioStore.getState().setPlayhead(0);
+    setEditSheet('closed');
+    toast.show('Edit undone');
+  };
 
   // Uploading: wait for every clip to land, then save and send.
   useEffect(() => {
@@ -192,7 +249,21 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
       </View>
     );
   }
-  const scripts = handoff.scripts;
+  const applied = appliedEdit(doc);
+  // Auto edit cuts new blocks from the takes; a take's script follows it onto them.
+  const scripts = { ...handoff.scripts };
+  if (applied) {
+    const byTake = new Map<string, string>();
+    for (const b of applied.before.blocks) {
+      const said = handoff.scripts[b.id];
+      const takeId = b.cells[0]?.assetId;
+      if (said && takeId && !byTake.has(takeId)) byTake.set(takeId, said);
+    }
+    for (const b of doc.blocks) {
+      const said = byTake.get(b.cells[0]?.assetId ?? '');
+      if (said && scripts[b.id] === undefined) scripts[b.id] = said;
+    }
+  }
   const hasScripts = Object.keys(scripts).length > 0;
   const creatorStarted = assignment?.briefs?.created_by === scope.creatorId;
   return (
@@ -217,7 +288,44 @@ export function EditorScreen({ assignmentId }: { assignmentId: string }) {
         onScript={hasScripts ? (blockId, t) => setHandoff((h) => (h ? { ...h, scripts: { ...h.scripts, [blockId]: t } } : h)) : undefined}
         soundMode={handoff.soundMode ?? null}
         talkingHead={!!handoff.talkingHead}
+        onAi={() => {
+          if (editing) return;
+          if (applied) setEditSheet('again');
+          else void runAutoEdit();
+        }}
+        aiLabel={editing ? 'Editing' : 'Auto edit'}
+        captions={!!readAutoEdit(doc)}
       />
+      <Sheet
+        open={editSheet !== 'closed' && applied !== null}
+        onClose={() => setEditSheet('closed')}
+        title={applied?.plan.ai === false ? 'Pauses trimmed only' : 'Auto edit'}
+        footer={
+          <>
+            <Button variant="quiet" icon="undo" label="Undo edit" onPress={undoAutoEdit} />
+            {editSheet === 'again' || applied?.plan.ai === false ? (
+              <Button
+                icon="auto_awesome"
+                label={applied?.plan.ai === false ? 'Try again' : 'Edit again'}
+                onPress={() => {
+                  setEditSheet('closed');
+                  void runAutoEdit();
+                }}
+              />
+            ) : (
+              <Button label="Done" onPress={() => setEditSheet('closed')} />
+            )}
+          </>
+        }
+      >
+        <View style={{ gap: 8 }}>
+          {(applied?.plan.summary ?? []).map((line, i) => (
+            <Text key={i} style={text.body}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      </Sheet>
       <SendSheet
         open={sendOpen}
         onClose={() => setSendOpen(false)}

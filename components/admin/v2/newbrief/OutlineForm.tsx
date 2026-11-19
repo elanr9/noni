@@ -2,12 +2,14 @@ import { ScrollView, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 
-import { linkFrom } from '../../../../lib/brief-ai';
+import { linkFrom, type Declined } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
 import { briefs, color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Press, Toggle, tap } from '../../../v2';
+import { AiNote } from './AiNote';
 import { SpinIcon } from './GuidedForm';
 import { TitleInput } from './TitleInput';
+import { useReference } from './useReference';
 
 export type OutlineFields = { title: string; notes: string; link: string; music: boolean; filled: boolean };
 
@@ -18,14 +20,21 @@ export interface OutlineFormProps {
   ai: boolean;
   onFill: () => void;
   editingExisting?: boolean;
+  /** The last fill was declined: the reason shows where the outline would have gone. */
+  declined?: Declined | null;
+  /** What the last fill could not read from the link. */
+  referenceNote?: string | null;
 }
 
 const FIELD = { backgroundColor: color.card, borderRadius: radius.card, ...shadow.card } as const;
 
 /** Outline compose: link row, Fill in with AI, title, Add music toggle, notes. */
-export function OutlineForm({ st, set, ai, onFill, editingExisting }: OutlineFormProps) {
+export function OutlineForm({ st, set, ai, onFill, editingExisting, declined, referenceNote }: OutlineFormProps) {
   const [pasting, setPasting] = useState(false);
   const hasLink = /\S/.test(st.link);
+  // The post behind the link is read as soon as it is pasted, so the fill does not wait on it.
+  const reference = useReference(editingExisting ? '' : st.link);
+  const note = !hasLink ? null : (declined?.referenceNote ?? referenceNote ?? (reference.status === 'failed' ? (reference.reason ?? null) : null));
   const canAi = hasLink || /\S/.test(st.title);
   const paste = async () => {
     tap();
@@ -69,6 +78,8 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting }: OutlineFor
           <Text style={{ fontSize: 15, fontWeight: '700', color: canAi ? color.white : color.grey3 }}>{ai ? 'Filling in' : st.filled ? 'Fill in again' : 'Fill in with AI'}</Text>
         </Press>
       )}
+      {declined ? <AiNote body={declined.reason} lines={declined.questions} /> : null}
+      {note && !editingExisting ? <AiNote icon="link_off" body={note} /> : null}
       <TitleInput value={st.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} />
       <View style={[FIELD, { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16 }]}>
         <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: st.music ? color.blueTint : color.grey1, alignItems: 'center', justifyContent: 'center' }}>

@@ -1,0 +1,1100 @@
+{
+ "version": 1,
+ "note": "Fictional companies. None of this is run automatically; see README.md.",
+ "cases": [
+  {
+   "id": "01-ai-recipe-talking-head",
+   "company": {
+    "product_name": "Pantry Lens",
+    "category": "consumer AI app",
+    "product": "Phone app. You photograph the inside of your fridge or cupboard and it suggests dinners you can make from what is there.",
+    "persona": "Someone who gets home at seven, opens the fridge, sees food and still orders delivery.",
+    "pains": [
+     {
+      "pain": "I have food and nothing to eat.",
+      "quote": "I stare at the fridge for five minutes and then open the delivery app anyway."
+     },
+     {
+      "pain": "Vegetables go off before I use them.",
+      "quote": "I threw out a whole bag of spinach again."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-photo",
+      "wording": "Suggests dinners from a photo of what is in your fridge."
+     },
+     {
+      "id": "c-three",
+      "wording": "Gives three dinner options per photo."
+     },
+     {
+      "id": "c-free",
+      "wording": "Free for five photos a week."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-fridge",
+      "title": "Fridge photo to three dinners",
+      "start_state": "the camera view pointed at an open fridge",
+      "user_action": "takes one photo",
+      "end_state": "three dinner cards, each listing the ingredients it spotted",
+      "seconds": 6
+     }
+    ],
+    "constraints": "Never claim it saves a stated amount of money. Never call it a nutritionist or a diet tool. Do not say AI in the hook.",
+    "offer_and_cta": "Organic creator posts. Ask: link in bio. No creator codes.",
+    "coverage": 0.8,
+    "alternatives": [
+     "ordering delivery",
+     "scrolling recipe videos"
+    ]
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "What to cook when you have food and nothing to eat"
+   },
+   "expect": "write",
+   "must": [
+    "Open on the fridge moment in the customer's words, not on the app.",
+    "Show demo moment d-fridge and hold on the three dinner cards.",
+    "Cite c-photo or c-three on the clip that describes what it did.",
+    "Name Pantry Lens once, in the last clip, with a link in bio ask."
+   ],
+   "must_not": [
+    "Say AI in the hook.",
+    "State money saved or a diet benefit.",
+    "List more than one feature.",
+    "Invent a dish the product suggested with a claim about quality."
+   ]
+  },
+  {
+   "id": "02-ai-headshot-toy-trap-reference",
+   "company": {
+    "product_name": "Portrait Room",
+    "category": "consumer AI app",
+    "product": "Web and phone app that turns a handful of selfies into professional headshots for a CV or work profile.",
+    "persona": "Someone applying for jobs who has no decent photo and does not want to pay a photographer.",
+    "pains": [
+     {
+      "pain": "My profile photo is a cropped wedding picture.",
+      "quote": "My LinkedIn photo is me at a wedding with someone's arm cut off."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-selfies",
+      "wording": "Makes headshots from 8 selfies."
+     },
+     {
+      "id": "c-time",
+      "wording": "Results arrive in about 20 minutes."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-grid",
+      "title": "Selfies in, headshot grid out",
+      "start_state": "an upload screen with 8 selfies",
+      "user_action": "taps Generate",
+      "end_state": "a grid of headshots",
+      "seconds": 5
+     }
+    ],
+    "constraints": "Never say results look exactly like you. Never say hiring managers prefer it. AI-generated images must be described as generated.",
+    "offer_and_cta": "Organic creator posts. Ask: link in bio.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "I needed a headshot by Monday",
+    "linkNotes": "Same energy, but for job hunting",
+    "reference": {
+     "observed": {
+      "transcript": true,
+      "word_timings": false,
+      "frames": true
+     },
+     "platform": "tiktok",
+     "media": "video",
+     "duration_ms": 14000,
+     "format": "prank as demo",
+     "subject": "an AI app that makes a fake celebrity selfie",
+     "hook": {
+      "spoken": "I told my mum I met him at the airport.",
+      "on_screen": "telling my mum I met him",
+      "visual": "phone screen of a text thread",
+      "archetype": "story cold-open"
+     },
+     "beats": [
+      {
+       "role": "hook",
+       "start_ms": 0,
+       "end_ms": 2500,
+       "words": 9
+      },
+      {
+       "role": "demo",
+       "start_ms": 2500,
+       "end_ms": 7000,
+       "words": 8
+      },
+      {
+       "role": "payoff",
+       "start_ms": 7000,
+       "end_ms": 14000,
+       "words": 14,
+       "function": "mum's reaction, no ask"
+      }
+     ],
+     "product_moment": {
+      "present": true,
+      "start_ms": 2500
+     },
+     "cta": {
+      "kind": "none"
+     },
+     "why_it_works": [
+      "the reaction is the entertainment",
+      "comments are about the mum, not the app"
+     ],
+     "transfer": {
+      "keep": [
+       "result shown within three seconds",
+       "a real person's reaction as the payoff"
+      ],
+      "replace": [
+       "the fake selfie",
+       "deceiving a family member"
+      ]
+     }
+    }
+   },
+   "expect": "write",
+   "must": [
+    "Keep what transfers (result on screen within about three seconds, a real reaction as payoff) and say what did not transfer.",
+    "Tie the result to the job application problem so the video is not shareable without wanting the product.",
+    "Describe the images as generated."
+   ],
+   "must_not": [
+    "Script deceiving anyone with a fake image.",
+    "Copy any sentence or the mum set-up from the reference.",
+    "Claim the headshots look exactly like the creator or that hiring managers prefer them."
+   ]
+  },
+  {
+   "id": "03-devtool-greenscreen",
+   "company": {
+    "product_name": "Stacklight",
+    "category": "B2B dev tool",
+    "product": "Error tracing for backend services. Groups a production error with the request that caused it and the commit that introduced it.",
+    "persona": "A backend engineer on call for a small team who gets paged and has to work out which deploy broke it.",
+    "pains": [
+     {
+      "pain": "The stack trace tells me where, not why or since when.",
+      "quote": "I spend the first twenty minutes of every incident just finding which deploy did it."
+     },
+     {
+      "pain": "Logs are in three places.",
+      "quote": "I have four tabs open before I have read a single line."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-commit",
+      "wording": "Links each error group to the commit where it first appeared."
+     },
+     {
+      "id": "c-request",
+      "wording": "Shows the request that triggered the error next to the stack trace."
+     },
+     {
+      "id": "c-langs",
+      "wording": "Supports Node, Python and Go services."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-commit",
+      "title": "Error to commit",
+      "start_state": "an error group page",
+      "user_action": "clicks First seen",
+      "end_state": "the commit diff that introduced the error, with author and deploy time",
+      "seconds": 5
+     }
+    ],
+    "constraints": "Never claim it prevents outages or reduces downtime by any figure. No customer names. No AI claims; the product does not use AI.",
+    "offer_and_cta": "Goal is trial sign-ups from engineers. Ask: search the name or link in bio. Free for one service.",
+    "coverage": 0.8,
+    "alternatives": [
+     "grepping logs",
+     "git bisect by hand"
+    ]
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Greenscreen",
+    "title": "The first twenty minutes of every incident"
+   },
+   "expect": "write",
+   "must": [
+    "Use a real artifact as the first background (a stack trace or a wall of logs described generically), then d-commit as the answer.",
+    "Sound like an engineer talking to another engineer, with one honest limit (for example the supported languages).",
+    "Cite c-commit on the clip that shows the commit."
+   ],
+   "must_not": [
+    "Claim reduced downtime, prevented outages or any figure.",
+    "Use hype words or stock 'hacker' imagery.",
+    "Mention AI.",
+    "Name a customer or a competitor's product screen."
+   ]
+  },
+  {
+   "id": "04-devtool-outline",
+   "company": {
+    "product_name": "Stacklight",
+    "category": "B2B dev tool",
+    "product": "Error tracing for backend services. Groups a production error with the request that caused it and the commit that introduced it.",
+    "persona": "A backend engineer on call for a small team who gets paged and has to work out which deploy broke it.",
+    "pains": [
+     {
+      "pain": "The stack trace tells me where, not why or since when.",
+      "quote": "I spend the first twenty minutes of every incident just finding which deploy did it."
+     },
+     {
+      "pain": "Logs are in three places.",
+      "quote": "I have four tabs open before I have read a single line."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-commit",
+      "wording": "Links each error group to the commit where it first appeared."
+     },
+     {
+      "id": "c-request",
+      "wording": "Shows the request that triggered the error next to the stack trace."
+     },
+     {
+      "id": "c-langs",
+      "wording": "Supports Node, Python and Go services."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-commit",
+      "title": "Error to commit",
+      "start_state": "an error group page",
+      "user_action": "clicks First seen",
+      "end_state": "the commit diff that introduced the error, with author and deploy time",
+      "seconds": 5
+     }
+    ],
+    "constraints": "Never claim it prevents outages or reduces downtime by any figure. No customer names. No AI claims; the product does not use AI.",
+    "offer_and_cta": "Goal is trial sign-ups from engineers. Ask: search the name or link in bio. Free for one service.",
+    "coverage": 0.8,
+    "alternatives": [
+     "grepping logs",
+     "git bisect by hand"
+    ]
+   },
+   "request": {
+    "mode": "outline",
+    "type": "Talking Head",
+    "title": "Stop bisecting by hand"
+   },
+   "expect": "write",
+   "must": [
+    "Notes are four to seven lines of direction a practitioner can film in their own words.",
+    "One suggested opening line marked as a suggestion, plus what must be shown (d-commit end state).",
+    "Give facts and customer phrases, not adjectives."
+   ],
+   "must_not": [
+    "Write a word for word script.",
+    "Include a claim without support in the approved claims.",
+    "Tell the creator to 'be authentic' or 'make it fun'."
+   ]
+  },
+  {
+   "id": "05-finance-code-cta",
+   "company": {
+    "product_name": "Tallyup",
+    "category": "finance app",
+    "product": "Phone app that reads your card statements and lists every recurring charge so you can see what you are still paying for.",
+    "persona": "Someone in their twenties or thirties who suspects they are paying for things they forgot about and avoids opening their banking app.",
+    "pains": [
+     {
+      "pain": "I do not know what I am subscribed to.",
+      "quote": "I found out I had been paying for a meditation app for two years."
+     },
+     {
+      "pain": "Reading statements feels like homework.",
+      "quote": "I never read these."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-list",
+      "wording": "Lists every recurring charge found on your connected cards."
+     },
+     {
+      "id": "c-year",
+      "wording": "Looks back over the last 12 months of statements."
+     },
+     {
+      "id": "c-code",
+      "wording": "Creator codes give one month of the paid plan free, entered on the last sign-up screen."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-list",
+      "title": "Recurring charges list",
+      "start_state": "the home screen after connecting a card",
+      "user_action": "taps Find recurring",
+      "end_state": "a list of recurring charges with monthly amounts and a count at the top",
+      "seconds": 5
+     }
+    ],
+    "constraints": "Never state or imply an amount a viewer will save. Never say it cancels subscriptions for you (it does not). Results differ; say so. First person only: never tell the viewer they are in debt or bad with money. Disclosure: on-screen text 'Tallyup partner' in the first clip.",
+    "offer_and_cta": "Organic creator posts, some later boosted. Each creator has a code. Ask: say the code once, what it gives and where it is entered.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "The app I forgot I was paying for"
+   },
+   "expect": "write",
+   "must": [
+    "First person throughout: the creator's own statement, their own small specific sum framed as theirs to adjust.",
+    "Say results differ.",
+    "Say the code once, what it gives and where it is entered, matching c-code.",
+    "Include the on-screen disclosure the constraints require in the first clip.",
+    "Show d-list and hold on the count."
+   ],
+   "must_not": [
+    "Promise or imply an amount the viewer will save.",
+    "Say the app cancels anything.",
+    "Address the viewer's financial state in the second person.",
+    "Invent a number of subscriptions the product found as a product claim."
+   ]
+  },
+  {
+   "id": "06-finance-unsupported-claim",
+   "company": {
+    "product_name": "Tallyup",
+    "category": "finance app",
+    "product": "Phone app that reads your card statements and lists every recurring charge so you can see what you are still paying for.",
+    "persona": "Someone in their twenties or thirties who suspects they are paying for things they forgot about and avoids opening their banking app.",
+    "pains": [
+     {
+      "pain": "I do not know what I am subscribed to.",
+      "quote": "I found out I had been paying for a meditation app for two years."
+     },
+     {
+      "pain": "Reading statements feels like homework.",
+      "quote": "I never read these."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-list",
+      "wording": "Lists every recurring charge found on your connected cards."
+     },
+     {
+      "id": "c-year",
+      "wording": "Looks back over the last 12 months of statements."
+     },
+     {
+      "id": "c-code",
+      "wording": "Creator codes give one month of the paid plan free, entered on the last sign-up screen."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-list",
+      "title": "Recurring charges list",
+      "start_state": "the home screen after connecting a card",
+      "user_action": "taps Find recurring",
+      "end_state": "a list of recurring charges with monthly amounts and a count at the top",
+      "seconds": 5
+     }
+    ],
+    "constraints": "Never state or imply an amount a viewer will save. Never say it cancels subscriptions for you (it does not). Results differ; say so. First person only: never tell the viewer they are in debt or bad with money. Disclosure: on-screen text 'Tallyup partner' in the first clip.",
+    "offer_and_cta": "Organic creator posts, some later boosted. Each creator has a code. Ask: say the code once, what it gives and where it is entered.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "How this app saved me $500 a month"
+   },
+   "expect": "decline_or_reframe",
+   "must": [
+    "Either decline with a reason that names the missing support, or reframe to what is true and say in the angle that the savings promise was dropped.",
+    "Queue a question about whether any savings figure can be substantiated."
+   ],
+   "must_not": [
+    "Put '$500' or any savings amount in a creator's mouth as a result of the product.",
+    "Keep the title's promise in the hook."
+   ]
+  },
+  {
+   "id": "07-fitness-slideshow",
+   "company": {
+    "product_name": "Rep Streak",
+    "category": "health and fitness app",
+    "product": "Phone app for short home workouts with a streak counter. Ten-minute sessions, no equipment.",
+    "persona": "Someone who has started and dropped a gym routine several times and feels behind before they begin.",
+    "pains": [
+     {
+      "pain": "I cannot keep a routine going past two weeks.",
+      "quote": "I am great for nine days and then I miss one and it is over."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-ten",
+      "wording": "Sessions are ten minutes and need no equipment."
+     },
+     {
+      "id": "c-streak",
+      "wording": "A streak counter shows consecutive days."
+     },
+     {
+      "id": "c-freeze",
+      "wording": "One missed day a week does not break the streak."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-streak",
+      "title": "Streak after a session",
+      "start_state": "the end-of-session screen",
+      "user_action": "taps Done",
+      "end_state": "the streak counter ticking up by one",
+      "seconds": 4
+     }
+    ],
+    "constraints": "No weight loss amounts or timelines. No before and after bodies. Nothing that shames a body. Not a medical product. Write about behaviour and how it felt.",
+    "offer_and_cta": "Organic creator posts. Ask: save or send, or link in bio.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Slideshow",
+    "title": "How I finally kept a routine past two weeks"
+   },
+   "expect": "write",
+   "must": [
+    "Five to seven slides, text only, hook slide first.",
+    "Every non-product slide is a real, useful habit tip on its own.",
+    "Product appears once in the middle or later, by what it did (c-freeze or c-streak).",
+    "Last slide is the only CTA and gives a reason to save or send."
+   ],
+   "must_not": [
+    "Put the product on slide one.",
+    "Mention weight, bodies, or results by a date.",
+    "Have any spoken line.",
+    "Pad the list with filler items."
+   ]
+  },
+  {
+   "id": "08-sleep-long-text",
+   "company": {
+    "product_name": "Dimmer",
+    "category": "health and fitness app",
+    "product": "Phone app that logs when you fall asleep and wake, and puts daily habits you tag (caffeine, screens, late meals) on the same timeline.",
+    "persona": "Someone who thinks of themselves as a bad sleeper and has not connected it to anything they do.",
+    "pains": [
+     {
+      "pain": "I am tired and I do not know why.",
+      "quote": "I assumed I was just a bad sleeper."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-timeline",
+      "wording": "Shows your tagged habits and your sleep on one timeline."
+     },
+     {
+      "id": "c-noclaim",
+      "wording": "Tracks sleep and wake times from phone use; it is an estimate."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-timeline",
+      "title": "Habit and sleep timeline",
+      "start_state": "the week view",
+      "user_action": "scrolls to a day",
+      "end_state": "a tagged habit sitting above that night's sleep bar",
+      "seconds": 4
+     }
+    ],
+    "constraints": "Never say it improves, fixes or treats sleep or insomnia. Never give sleep amounts gained. It is an estimate; do not call it accurate. Not medical advice.",
+    "offer_and_cta": "Organic creator posts. Ask: link in bio.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "long_text",
+    "type": "Long Text",
+    "title": "I thought I was just a bad sleeper"
+   },
+   "expect": "write",
+   "must": [
+    "One clip, no speech, 45 to 90 words in two or three paragraphs.",
+    "At least six {a|b} groups, none containing the product name or a claim.",
+    "Product appears once, in the last paragraph, by what it showed (c-timeline).",
+    "Reads like one person's thought, with a specific habit and time."
+   ],
+   "must_not": [
+    "Say sleep improved because of the app or give hours gained.",
+    "Call the tracking accurate.",
+    "Use a headline tone or list formatting."
+   ]
+  },
+  {
+   "id": "09-notes-reference-transplant",
+   "company": {
+    "product_name": "Minutely",
+    "category": "productivity SaaS",
+    "product": "Joins video calls and produces a summary with who said what and a list of action items when the call ends.",
+    "persona": "Someone a few weeks into a job with back-to-back calls who keeps losing what they agreed to do.",
+    "pains": [
+     {
+      "pain": "I cannot listen and take notes at once.",
+      "quote": "I literally cannot listen and write at the same time."
+     },
+     {
+      "pain": "Someone always asks for the notes.",
+      "quote": "Can you send the notes? I did not take any."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-summary",
+      "wording": "Produces a summary when the call ends."
+     },
+     {
+      "id": "c-actions",
+      "wording": "Pulls out action items with the name of who took each one."
+     },
+     {
+      "id": "c-free",
+      "wording": "Free for the first ten calls."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-summary",
+      "title": "End of call summary",
+      "start_state": "a live call screen",
+      "user_action": "ends the call",
+      "end_state": "a summary with an Action items section showing three items with names",
+      "seconds": 6
+     }
+    ],
+    "constraints": "Never claim transcription accuracy figures. Never say it replaces a note taker or assistant. The bot is visible to other participants; do not imply it is hidden.",
+    "offer_and_cta": "Trial sign-ups. Ask: search the name. Free for the first ten calls.",
+    "coverage": 0.8,
+    "alternatives": [
+     "typing notes during the call",
+     "asking a colleague afterwards"
+    ]
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "My manager asked for the notes",
+    "linkNotes": "Same structure, meeting notes instead of skincare",
+    "reference": {
+     "observed": {
+      "transcript": true,
+      "word_timings": true,
+      "frames": true
+     },
+     "platform": "tiktok",
+     "media": "video",
+     "duration_ms": 24000,
+     "format": "talking-head story",
+     "subject": "a skincare routine",
+     "hook": {
+      "spoken": "My dermatologist looked at my bathroom shelf and laughed.",
+      "on_screen": "she laughed at my shelf",
+      "visual": "creator holding an armful of bottles",
+      "archetype": "story cold-open"
+     },
+     "beats": [
+      {
+       "role": "hook",
+       "start_ms": 0,
+       "end_ms": 3000,
+       "words": 9
+      },
+      {
+       "role": "setup",
+       "start_ms": 3000,
+       "end_ms": 9000,
+       "words": 17,
+       "function": "the old way, in embarrassing detail"
+      },
+      {
+       "role": "turn",
+       "start_ms": 9000,
+       "end_ms": 13000,
+       "words": 11,
+       "function": "what the expert said to do instead"
+      },
+      {
+       "role": "demo",
+       "start_ms": 13000,
+       "end_ms": 19000,
+       "words": 15,
+       "function": "the product in use, one action"
+      },
+      {
+       "role": "payoff",
+       "start_ms": 19000,
+       "end_ms": 24000,
+       "words": 12,
+       "function": "result and a soft ask"
+      }
+     ],
+     "product_moment": {
+      "present": true,
+      "start_ms": 13000
+     },
+     "cta": {
+      "kind": "link_in_bio"
+     },
+     "transfer": {
+      "keep": [
+       "story cold-open with an authority figure reacting",
+       "five beats in this order and proportion",
+       "product first seen at 54 percent of runtime",
+       "soft ask"
+      ],
+      "replace": [
+       "the dermatologist",
+       "the shelf of bottles",
+       "every skincare detail and claim"
+      ]
+     }
+    }
+   },
+   "expect": "write",
+   "must": [
+    "Five clips in the reference's order with each close to its word count, product first seen a little past halfway.",
+    "A cold-open with someone reacting, rebuilt for work (for example a manager or teammate asking for notes).",
+    "Demo d-summary with the action items readable.",
+    "State which elements were kept and which replaced."
+   ],
+   "must_not": [
+    "Reuse any sentence, the dermatologist, or anything about skincare.",
+    "Claim accuracy or that it replaces a person.",
+    "Run more than about 20 percent over the reference's length."
+   ]
+  },
+  {
+   "id": "10-scheduling-unreadable-reference",
+   "company": {
+    "product_name": "Slotwise",
+    "category": "productivity SaaS",
+    "product": "Scheduling links for small service businesses: clients pick a time from your real availability and it lands in your calendar.",
+    "persona": "A solo practitioner (tutor, physio, stylist) who books clients over text messages.",
+    "pains": [
+     {
+      "pain": "Booking takes six messages.",
+      "quote": "Does Tuesday work? No. Thursday? What time? It takes six texts to book one haircut."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-link",
+      "wording": "Clients choose a time from a link that shows your real availability."
+     },
+     {
+      "id": "c-cal",
+      "wording": "Bookings appear in your Google or Apple calendar."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-book",
+      "title": "Client books from a link",
+      "start_state": "the booking page on a phone",
+      "user_action": "taps a time slot",
+      "end_state": "a confirmation screen and the event in the calendar",
+      "seconds": 5
+     }
+    ],
+    "constraints": "No pricing claims; plans are changing. Do not name competitors.",
+    "offer_and_cta": "Organic creator posts by practitioners. Ask: link in bio.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "Six texts to book one appointment",
+    "link": "https://www.tiktok.com/@example/video/0000",
+    "reference": null,
+    "reference_state": "unreadable"
+   },
+   "expect": "write",
+   "must": [
+    "Return a reference_note saying the post could not be read.",
+    "Write from the title and the company material alone."
+   ],
+   "must_not": [
+    "Describe the reference or say the brief follows it.",
+    "State a price.",
+    "Name a competitor."
+   ]
+  },
+  {
+   "id": "11-language-comment-keyword",
+   "company": {
+    "product_name": "Parla",
+    "category": "education app",
+    "product": "Language app built on short spoken conversations with a tutor voice, corrected as you go. Spanish, Italian and Portuguese.",
+    "persona": "Someone with a trip or a partner's family coming up who has done lessons before and still cannot hold a conversation.",
+    "pains": [
+     {
+      "pain": "I know words and cannot speak.",
+      "quote": "I have a 400 day streak on another app and I froze ordering a coffee."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-speak",
+      "wording": "Lessons are spoken conversations, not tapping answers."
+     },
+     {
+      "id": "c-correct",
+      "wording": "Corrects your sentence out loud after you say it."
+     },
+     {
+      "id": "c-langs",
+      "wording": "Available for Spanish, Italian and Portuguese."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-correct",
+      "title": "Spoken correction",
+      "start_state": "a conversation screen with the mic on",
+      "user_action": "says a sentence with a mistake",
+      "end_state": "the corrected sentence shown and played back",
+      "seconds": 6
+     }
+    ],
+    "constraints": "No fluency timelines. Do not name other apps. Do not claim creators are fluent.",
+    "offer_and_cta": "The company runs a comment flow: viewers comment the word PARLA and get a link by message. Use that as the ask.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "400 day streak and I froze ordering a coffee"
+   },
+   "expect": "write",
+   "must": [
+    "Use the customer's own phrase or situation in the opening.",
+    "Show d-correct.",
+    "Close with the comment PARLA flow as the single ask.",
+    "Include one honest limit or moment of doubt."
+   ],
+   "must_not": [
+    "Name another app.",
+    "Promise fluency or a timeline.",
+    "Have the creator claim months of use or fluency.",
+    "Add link in bio on top of the comment ask."
+   ]
+  },
+  {
+   "id": "12-flashcards-slideshow-reference",
+   "company": {
+    "product_name": "Deckhand",
+    "category": "education app",
+    "product": "Study app that turns lecture slides or a PDF into flashcards and schedules reviews.",
+    "persona": "A university student in a content-heavy course the week before exams.",
+    "pains": [
+     {
+      "pain": "Making flashcards takes longer than studying them.",
+      "quote": "I spent the whole evening making cards and never revised a single one."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-pdf",
+      "wording": "Makes flashcards from a PDF or slide deck."
+     },
+     {
+      "id": "c-schedule",
+      "wording": "Schedules each card for review based on how well you knew it."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-pdf",
+      "title": "PDF to cards",
+      "start_state": "the import screen",
+      "user_action": "drops in a lecture PDF",
+      "end_state": "a deck of cards with a count",
+      "seconds": 6
+     }
+    ],
+    "constraints": "No grade claims. Do not say it replaces studying. Generated cards can contain errors; never say they are always right.",
+    "offer_and_cta": "Organic creator posts by students. Ask: save or send, or link in bio.",
+    "coverage": 0.8
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Slideshow",
+    "title": "Things I wish I knew before exam week",
+    "linkNotes": "Same format for studying",
+    "reference": {
+     "observed": {
+      "transcript": false,
+      "word_timings": false,
+      "frames": true
+     },
+     "platform": "tiktok",
+     "media": "slideshow",
+     "format": "list slideshow",
+     "subject": "apartment hunting tips",
+     "slides": [
+      "things i wish i knew before signing my first lease",
+      "1. visit at night, not just at noon",
+      "2. run every tap and flush every toilet",
+      "3. i used a checklist app so i did not forget any of this",
+      "4. ask what the last tenant paid",
+      "save this for your next viewing"
+     ],
+     "cta": {
+      "kind": "save"
+     },
+     "transfer": {
+      "keep": [
+       "'things i wish i knew' hook slide",
+       "six slides",
+       "product as item 3 of 4",
+       "save prompt to close",
+       "lowercase first person"
+      ],
+      "replace": [
+       "everything about leases and apartments"
+      ]
+     }
+    }
+   },
+   "expect": "write",
+   "must": [
+    "Six slides, 'things I wish I knew' hook, product as one item in the middle, save prompt last.",
+    "Other items are real study advice.",
+    "Product slide says what it did (c-pdf)."
+   ],
+   "must_not": [
+    "Copy any slide text from the reference.",
+    "Claim better grades.",
+    "Say the cards are always right."
+   ]
+  },
+  {
+   "id": "13-sparse-brain-legacy",
+   "company": {
+    "product_name": "Chordbook",
+    "category": "education app",
+    "product": "",
+    "persona": "",
+    "pains": [],
+    "approved_claims": [],
+    "demo_moments": [],
+    "constraints": "",
+    "offer_and_cta": "",
+    "coverage": 0.1,
+    "legacy_brand_context": {
+     "products": "An app for learning guitar chords with your phone listening as you play.",
+     "audience": "Adult beginners who bought a guitar and stopped.",
+     "approved_claims": [
+      {
+       "id": "legacy:pf-1",
+       "wording": "Listens through the phone mic and shows which strings rang wrong."
+      }
+     ],
+     "banned_phrases": [
+      "shred"
+     ]
+    }
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": "Why your G chord buzzes"
+   },
+   "expect": "write_or_decline",
+   "must": [
+    "If written: a light, useful video that teaches one thing, with the product statement resting only on legacy:pf-1.",
+    "Return at least two questions (a demo moment, the offer or how to send people).",
+    "If declined: the reason names what is missing in plain words."
+   ],
+   "must_not": [
+    "Describe product screens in detail (no demo moment exists).",
+    "State a price, a plan or a feature beyond the legacy claim.",
+    "Use the banned word 'shred'."
+   ]
+  },
+  {
+   "id": "14-titles-grounded",
+   "company": {
+    "product_name": "Minutely",
+    "category": "productivity SaaS",
+    "product": "Joins video calls and produces a summary with who said what and a list of action items when the call ends.",
+    "persona": "Someone a few weeks into a job with back-to-back calls who keeps losing what they agreed to do.",
+    "pains": [
+     {
+      "pain": "I cannot listen and take notes at once.",
+      "quote": "I literally cannot listen and write at the same time."
+     },
+     {
+      "pain": "Someone always asks for the notes.",
+      "quote": "Can you send the notes? I did not take any."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-summary",
+      "wording": "Produces a summary when the call ends."
+     },
+     {
+      "id": "c-actions",
+      "wording": "Pulls out action items with the name of who took each one."
+     },
+     {
+      "id": "c-free",
+      "wording": "Free for the first ten calls."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-summary",
+      "title": "End of call summary",
+      "start_state": "a live call screen",
+      "user_action": "ends the call",
+      "end_state": "a summary with an Action items section showing three items with names",
+      "seconds": 6
+     }
+    ],
+    "constraints": "Never claim transcription accuracy figures. Never say it replaces a note taker or assistant. The bot is visible to other participants; do not imply it is hidden.",
+    "offer_and_cta": "Trial sign-ups. Ask: search the name. Free for the first ten calls.",
+    "coverage": 0.8,
+    "alternatives": [
+     "typing notes during the call",
+     "asking a colleague afterwards"
+    ]
+   },
+   "request": {
+    "mode": "titles",
+    "type": "Talking Head",
+    "typed": "notes"
+   },
+   "expect": "titles",
+   "must": [
+    "Six titles, four to nine words each, each starting from a pain, moment or outcome in the company material.",
+    "At least three different kinds of idea (how-to, mistake, story, comparison, result)."
+   ],
+   "must_not": [
+    "Lead with the product or a feature name.",
+    "Offer a title any company could use.",
+    "Use dashes, emoji or hype words.",
+    "Promise accuracy."
+   ]
+  },
+  {
+   "id": "15-do-not-repeat",
+   "company": {
+    "product_name": "Pantry Lens",
+    "category": "consumer AI app",
+    "product": "Phone app. You photograph the inside of your fridge or cupboard and it suggests dinners you can make from what is there.",
+    "persona": "Someone who gets home at seven, opens the fridge, sees food and still orders delivery.",
+    "pains": [
+     {
+      "pain": "I have food and nothing to eat.",
+      "quote": "I stare at the fridge for five minutes and then open the delivery app anyway."
+     },
+     {
+      "pain": "Vegetables go off before I use them.",
+      "quote": "I threw out a whole bag of spinach again."
+     }
+    ],
+    "approved_claims": [
+     {
+      "id": "c-photo",
+      "wording": "Suggests dinners from a photo of what is in your fridge."
+     },
+     {
+      "id": "c-three",
+      "wording": "Gives three dinner options per photo."
+     },
+     {
+      "id": "c-free",
+      "wording": "Free for five photos a week."
+     }
+    ],
+    "demo_moments": [
+     {
+      "id": "d-fridge",
+      "title": "Fridge photo to three dinners",
+      "start_state": "the camera view pointed at an open fridge",
+      "user_action": "takes one photo",
+      "end_state": "three dinner cards, each listing the ingredients it spotted",
+      "seconds": 6
+     }
+    ],
+    "constraints": "Never claim it saves a stated amount of money. Never call it a nutritionist or a diet tool. Do not say AI in the hook.",
+    "offer_and_cta": "Organic creator posts. Ask: link in bio. No creator codes.",
+    "coverage": 0.8,
+    "alternatives": [
+     "ordering delivery",
+     "scrolling recipe videos"
+    ],
+    "recent_briefs": [
+     {
+      "type": "Talking Head",
+      "title": "What to cook when you have food and nothing to eat",
+      "hook": "I stared at a full fridge for five minutes and ordered noodles."
+     },
+     {
+      "type": "Slideshow",
+      "title": "Dinners from the sad end of the week fridge",
+      "hook": "things i make when the fridge is 'empty'"
+     },
+     {
+      "type": "Talking Head",
+      "title": "I threw out spinach again",
+      "hook": "This is the third bag of spinach I have binned this month."
+     }
+    ]
+   },
+   "request": {
+    "mode": "guided",
+    "type": "Talking Head",
+    "title": ""
+   },
+   "expect": "write",
+   "must": [
+    "Choose an idea the material supports that is not in the already-made list.",
+    "Hooks differ in kind from each other and from the three listed openings."
+   ],
+   "must_not": [
+    "Repeat a listed title, opening or angle (the full-fridge stare, the spinach).",
+    "Invent a feature to find a new angle."
+   ]
+  }
+ ]
+}

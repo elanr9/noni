@@ -1,46 +1,65 @@
-// Edit my video: the creator's raw takes of one reel in, an edited
-// timeline out. Every take is transcribed (Deepgram, word timestamps), then
-// Claude marks retakes and stumbles to cut, writes the hook and one header
-// per tip on the word that starts it, and says when a feature recording
-// should pop up. _shared/autoEdit.ts turns that into blocks and overlays on
-// the output clock. Nothing renders here; the app applies the result to
-// its edit document and the creator keeps editing.
+// Auto edit: the creator's raw takes of one post in, an edit plan out. Every
+// take is transcribed (Deepgram, word timestamps) unless the app already
+// holds its words, then _shared/ai/editPlanner.ts plans the edit: which
+// ranges to keep and in what order, punch-ins, speed, on-screen text timed
+// to the words, product media, captions and the brief's sound. Nothing
+// renders here; the app applies the plan to its edit document
+// (lib/auto-edit.ts applyEditPlan) and the creator keeps editing.
 //
-// Body: { assignment_id, takes: [{ asset_id, storage_path, duration_ms, words? }],
-//         features?: [{ id, title, description, kind: 'clip' | 'still' }],
+// Body: { assignment_id,
+//         takes: [{ asset_id, storage_path, duration_ms, words?, slot? }],
+//         features?: [{ id, title, description, kind: 'clip' | 'still', duration_ms? }],
+//         overlays?: [{ id, text, start_ms, end_ms, y }],   text already on the video
+//         frames?: [{ asset_id, base64, media_type }],      optional still per take
 //         mode?: 'words' }
-// Reply: { takes: [{ asset_id, words }], blocks, texts, media, cut_ms, ai }
+// Reply: { takes: [{ asset_id, duration_ms, words }],
+//          plan: EditPlan | null,            null only in mode 'words'
+//          replace_overlay_ids, repairs, fallback_reason, sound_track, run_id,
+//          media_assets: [{ id, title, kind, path }],   brain demo moments the plan may insert
+//          unheard: [asset_id],                         takes that could not be transcribed
+//          blocks, texts, media, cut_ms, ai }   the older flat fields, from the plan
 //
-// A take that already carries words skips Deepgram: the app transcribes each
-// take as soon as it uploads (mode 'words', which returns only the
-// transcripts), so by the time the creator taps Done only the plan is left.
+// `ai` false with a `fallback_reason` means the model did not plan this edit
+// and the plan is the plain trim from the word timings; the app says so.
+//
+// A take that already carries words skips Deepgram: mode 'words' returns
+// only the transcripts, so the app can listen to each take as it uploads.
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
-import { askClaude, handleCors, jsonResponse, parseClaudeJson } from '../_shared/wp8.ts';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { handleCors, jsonResponse } from '../_shared/wp8.ts';
 import { MANAGER_MEMBER_ROLES, memberRole } from '../_shared/membership.ts';
 import { transcribeClip, type TranscriptWord } from '../_shared/cues.ts';
-import {
-  autoEditPrompt,
-  buildAutoEdit,
-  fallbackPlan,
-  parsePlan,
-  type AutoBrief,
-  type AutoFeature,
-  type AutoPlan,
-  type AutoTake,
-} from '../_shared/autoEdit.ts';
+import type { LlmImage } from '../_shared/ai/llm.ts';
+import { assembleBrainContext } from '../_shared/ai/brain.ts';
+import { getReferenceAnalysis, renderReferenceForPrompt } from '../_shared/ai/reference.ts';
+import { planEdit, type PlannerBrief, type PlannerInput, type PlannerMedia, type PlannerOverlay, type PlannerTake } from '../_shared/ai/editPlanner.ts';
 
-type BodyTake = { asset_id?: unknown; storage_path?: unknown; duration_ms?: unknown; words?: unknown };
-type BodyFeature = { id?: unknown; title?: unknown; description?: unknown; kind?: unknown };
-type Body = { assignment_id?: unknown; takes?: unknown; features?: unknown; mode?: unknown };
+type BodyTake = { asset_id?: unknown; storage_path?: unknown; duration_ms?: unknown; words?: unknown; slot?: unknown };
+type BodyFeature = { id?: unknown; title?: unknown; description?: unknown; kind?: unknown; duration_ms?: unknown };
+type BodyOverlay = { id?: unknown; text?: unknown; start_ms?: unknown; end_ms?: unknown; y?: unknown };
+type BodyFrame = { asset_id?: unknown; base64?: unknown; media_type?: unknown };
+type Body = { assignment_id?: unknown; takes?: unknown; features?: unknown; overlays?: unknown; frames?: unknown; mode?: unknown };
 
 const SIGNED_URL_TTL_SECONDS = 600;
 const MAX_TAKES = 20;
 const MAX_FEATURES = 12;
-const CLAUDE_TIMEOUT_MS = 35_000;
+const MAX_OVERLAYS = 40;
+const MAX_FRAMES = 6;
+const MAX_FRAME_BASE64 = 600_000;
+const BRAIN_WAIT_MS = 8000;
+const VIDEO_FILE = /\.(mp4|mov|m4v|webm)(\?|$)/i;
+const FRAME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function rec(v: unknown): Record<string, unknown> | null {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 /** Words the app already has for a take; null when absent or malformed. */
@@ -56,16 +75,50 @@ function parseWords(raw: unknown): TranscriptWord[] | null {
   return out;
 }
 
-function slidePoints(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const s of raw) {
-    if (typeof s !== 'object' || s === null) continue;
-    const role = (s as { role?: unknown }).role;
-    const text = str((s as { text?: unknown }).text);
-    if (role === 'point' && text) out.push(text);
+/**
+ * What the planner knows about the brief. A post made from a library brief
+ * reads its script, on-screen text and sound from library_briefs; a post the
+ * creator started on their own has only its title.
+ */
+async function loadBrief(
+  admin: SupabaseClient,
+  assignment: { brief_id: string | null; library_brief_id: string | null },
+  productName: string | null,
+): Promise<{ brief: PlannerBrief; link: string | null; track: Record<string, unknown> | null }> {
+  const brief: PlannerBrief = { title: '', type: null, kind: null, notes: '', productName, clips: [], sound: null };
+  if (assignment.library_brief_id) {
+    const { data: row } = await admin
+      .from('library_briefs')
+      .select('title, type, kind, notes, link, audio, clips, g, lt')
+      .eq('id', assignment.library_brief_id)
+      .maybeSingle();
+    if (row) {
+      const g = rec(row.g);
+      const lt = rec(row.lt);
+      brief.title = str(row.title) ?? '';
+      brief.type = str(row.type);
+      brief.kind = str(row.kind);
+      brief.notes = [str(row.notes), str(g?.notes)].filter(Boolean).join('\n');
+      const clips = Array.isArray(row.clips) ? row.clips : Array.isArray(g?.clips) ? (g!.clips as unknown[]) : [];
+      for (const c of clips) {
+        const clip = rec(c);
+        if (!clip) continue;
+        brief.clips.push({ say: str(clip.text) ?? '', onScreen: str(clip.onScreen) ?? '', cta: clip.cta === true });
+      }
+      if (brief.clips.length === 0 && str(lt?.onScreen)) brief.clips.push({ say: '', onScreen: str(lt!.onScreen)!, cta: false });
+      const audio = rec(row.audio) ?? rec(g?.audio);
+      const track = audio && audio.mode !== 'none' ? rec(audio.track) : null;
+      if (track && str(track.title)) brief.sound = { title: str(track.title)!, artist: str(track.artist) ?? '' };
+      return { brief, link: str(row.link) ?? str(g?.link), track: brief.sound ? track : null };
+    }
   }
-  return out.slice(0, 10);
+  if (assignment.brief_id) {
+    const { data: row } = await admin.from('briefs').select('title, creator_note').eq('id', assignment.brief_id).maybeSingle();
+    const title = str(row?.title);
+    brief.title = title && title !== 'Untitled post' && title !== 'New post' ? title : '';
+    brief.notes = str(row?.creator_note) ?? '';
+  }
+  return { brief, link: null, track: null };
 }
 
 Deno.serve(async (req) => {
@@ -87,7 +140,7 @@ Deno.serve(async (req) => {
 
     const { data: assignment } = await admin
       .from('assignments')
-      .select('id, company_id, brief_id, creator_id')
+      .select('id, company_id, brief_id, library_brief_id, creator_id')
       .eq('id', assignmentId)
       .maybeSingle();
     if (!assignment) return jsonResponse({ error: 'assignment not found' }, 404);
@@ -100,104 +153,146 @@ Deno.serve(async (req) => {
       if (!allowed) return jsonResponse({ error: 'forbidden' }, 403);
     }
 
-    const takesIn: { assetId: string; path: string; durationMs: number; words: TranscriptWord[] | null }[] = [];
+    const takesIn: { assetId: string; path: string; durationMs: number; words: TranscriptWord[] | null; slot: number | null }[] = [];
     for (const t of rawTakes) {
       const assetId = str(t.asset_id);
       const path = str(t.storage_path);
       const durationMs = typeof t.duration_ms === 'number' && t.duration_ms > 0 ? Math.round(t.duration_ms) : 0;
-      if (!assetId || !path) return jsonResponse({ error: 'every take needs asset_id and storage_path' }, 400);
-      if (!path.startsWith(`${companyId}/`)) return jsonResponse({ error: 'forbidden' }, 403);
-      takesIn.push({ assetId, path, durationMs, words: parseWords(t.words) });
+      const words = parseWords(t.words);
+      // A take the app already heard needs no file; one it has not must be in this company's folder.
+      if (!assetId || (!path && !words)) return jsonResponse({ error: 'every take needs asset_id and storage_path' }, 400);
+      if (path && !path.startsWith(`${companyId}/`)) return jsonResponse({ error: 'forbidden' }, 403);
+      const slot = num(t.slot);
+      takesIn.push({ assetId, path: path ?? '', durationMs, words, slot: slot !== null && Number.isInteger(slot) && slot >= 0 ? slot : null });
     }
     const wordsOnly = body?.mode === 'words';
 
-    const features: AutoFeature[] = [];
+    const media: PlannerMedia[] = [];
     for (const f of Array.isArray(body?.features) ? (body!.features as BodyFeature[]) : []) {
       const id = str(f.id);
       const title = str(f.title);
       if (!id || !title) continue;
-      features.push({ id, title, description: str(f.description) ?? '', kind: f.kind === 'clip' ? 'clip' : 'still' });
-      if (features.length >= MAX_FEATURES) break;
+      const durationMs = num(f.duration_ms);
+      media.push({ id, title, description: str(f.description) ?? '', kind: f.kind === 'clip' ? 'clip' : 'still', durationMs: durationMs && durationMs > 0 ? Math.round(durationMs) : null });
+      if (media.length >= MAX_FEATURES) break;
     }
 
-    const deepgramKey = Deno.env.get('DEEPGRAM_API_KEY');
-    if (!deepgramKey) return jsonResponse({ error: 'DEEPGRAM_API_KEY not configured' }, 500);
-
-    const briefId = (assignment.brief_id ?? null) as string | null;
-    const [{ data: company }, { data: briefRow }] = await Promise.all([
-      admin.from('companies').select('name').eq('id', companyId).maybeSingle(),
-      briefId
-        ? admin
-            .from('briefs')
-            .select('title, creator_note, cta, slides, post_types ( key, label )')
-            .eq('id', briefId)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
+    const { data: company } = await admin.from('companies').select('name, settings').eq('id', companyId).maybeSingle();
     const companyName = str(company?.name);
-    const postType = (briefRow?.post_types ?? null) as { key?: string; label?: string } | null;
-    const title = str(briefRow?.title);
-    const brief: AutoBrief = {
-      title: title && title !== 'Untitled post' ? title : '',
-      postTypeKey: postType?.key ?? null,
-      postTypeName: postType?.label ?? null,
-      note: str(briefRow?.creator_note),
-      cta: str(briefRow?.cta),
-      points: slidePoints(briefRow?.slides),
-      companyName,
-    };
+    let productName = str(rec(company?.settings)?.product_name) ?? companyName;
+    const briefLoad = wordsOnly
+      ? null
+      : loadBrief(admin, { brief_id: (assignment.brief_id ?? null) as string | null, library_brief_id: (assignment.library_brief_id ?? null) as string | null }, productName);
+
+    // Started now so it runs while the takes are transcribed; the plan never waits on it past BRAIN_WAIT_MS.
+    const brainLoad = briefLoad
+      ? Promise.race([
+          briefLoad.then((b) => assembleBrainContext(admin, { companyId, topic: b.brief.title || undefined, limit: 1 })).catch((e) => {
+            console.warn('auto-edit: brain context not loaded', e);
+            return null;
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), BRAIN_WAIT_MS)),
+        ])
+      : Promise.resolve(null);
 
     // Transcribe every take at once; one that fails keeps its speech (no words, nothing cut).
-    const keyterms = [companyName, ...features.map((f) => f.title)].filter((k): k is string => !!k).slice(0, 20);
-    const takes: AutoTake[] = await Promise.all(
+    const needsDeepgram = takesIn.some((t) => !t.words);
+    const deepgramKey = Deno.env.get('DEEPGRAM_API_KEY');
+    if (needsDeepgram && !deepgramKey) return jsonResponse({ error: 'DEEPGRAM_API_KEY not configured' }, 500);
+    const keyterms = [productName, companyName, ...media.map((f) => f.title)].filter((k): k is string => !!k).slice(0, 20);
+    const unheard: string[] = [];
+    const takes: PlannerTake[] = await Promise.all(
       takesIn.map(async (t) => {
         let words: TranscriptWord[] = t.words ?? [];
-        if (t.words) return { assetId: t.assetId, durationMs: t.durationMs || (words.length ? words[words.length - 1].e + 500 : 0), words };
-        try {
-          const { data: signed } = await admin.storage.from('videos').createSignedUrl(t.path, SIGNED_URL_TTL_SECONDS);
-          if (signed?.signedUrl) words = await transcribeClip({ url: signed.signedUrl, apiKey: deepgramKey, keyterms });
-        } catch (e) {
-          console.warn(`auto-edit: transcription failed for ${t.path}`, e);
+        if (!t.words) {
+          try {
+            const { data: signed } = await admin.storage.from('videos').createSignedUrl(t.path, SIGNED_URL_TTL_SECONDS);
+            if (!signed?.signedUrl) throw new Error('no signed url');
+            words = await transcribeClip({ url: signed.signedUrl, apiKey: deepgramKey!, keyterms });
+          } catch (e) {
+            unheard.push(t.assetId);
+            console.warn(`auto-edit: transcription failed for ${t.path}`, e);
+          }
         }
         const last = words[words.length - 1];
-        const durationMs = t.durationMs || (last ? last.e + 500 : 0);
-        return { assetId: t.assetId, durationMs, words };
+        return { assetId: t.assetId, durationMs: t.durationMs || (last ? last.e + 500 : 0), words, scriptClip: t.slot };
       }),
     );
+    const takesOut = takes.map((t) => ({ asset_id: t.assetId, duration_ms: t.durationMs, words: t.words }));
 
     if (wordsOnly) {
-      return jsonResponse({
-        takes: takes.map((t) => ({ asset_id: t.assetId, duration_ms: t.durationMs, words: t.words })),
-        blocks: [],
-        texts: [],
-        media: [],
-        cut_ms: 0,
-        ai: false,
-      });
+      return jsonResponse({ takes: takesOut, plan: null, unheard, replace_overlay_ids: [], repairs: [], fallback_reason: null, sound_track: null, run_id: null, media_assets: [], blocks: [], texts: [], media: [], cut_ms: 0, ai: false });
     }
 
-    let plan: AutoPlan = fallbackPlan(brief);
-    let ai = false;
-    if (takes.some((t) => t.words.length > 0)) {
+    const overlays: PlannerOverlay[] = [];
+    for (const o of Array.isArray(body?.overlays) ? (body!.overlays as BodyOverlay[]).slice(0, MAX_OVERLAYS) : []) {
+      const id = str(o.id);
+      const text = str(o.text);
+      if (!id || !text) continue;
+      overlays.push({ id, text, startMs: Math.max(0, num(o.start_ms) ?? 0), endMs: Math.max(0, num(o.end_ms) ?? 0), y: num(o.y) ?? 0.3 });
+    }
+    const frames: { assetId: string; image: LlmImage }[] = [];
+    for (const f of Array.isArray(body?.frames) ? (body!.frames as BodyFrame[]).slice(0, MAX_FRAMES) : []) {
+      const assetId = str(f.asset_id);
+      const base64 = str(f.base64);
+      const mediaType = FRAME_TYPES.find((t) => t === f.media_type);
+      if (!assetId || !base64 || !mediaType || base64.length > MAX_FRAME_BASE64) continue;
+      frames.push({ assetId, image: { base64, mediaType } });
+    }
+
+    const { brief, track, link } = await briefLoad!;
+
+    // The company brain: what creators call the product, and demo moments with media in our own storage.
+    const mediaAssets: { id: string; title: string; kind: 'clip' | 'still'; path: string }[] = [];
+    try {
+      const brain = await brainLoad;
+      if (brain) {
+        if (brain.productName && brain.productName !== 'the product') brief.productName = productName = brain.productName;
+        for (const d of brain.demoMoments) {
+          // The render reads storage paths only, so a moment whose media is an outside URL cannot be inserted.
+          if (!d.media_url || /^https?:/i.test(d.media_url) || media.length >= MAX_FEATURES || media.some((m) => m.id === d.id)) continue;
+          const kind = VIDEO_FILE.test(d.media_url) ? 'clip' : 'still';
+          media.push({ id: d.id, title: d.title, description: [d.user_action, d.end_state].filter(Boolean).join('. '), kind, durationMs: null });
+          mediaAssets.push({ id: d.id, title: d.title, kind, path: d.media_url });
+        }
+      }
+    } catch (e) {
+      console.warn('auto-edit: brain context not loaded', e);
+    }
+    // Script clips line up with takes only when the camera recorded clip by clip.
+    if (brief.kind !== 'Guided') for (const t of takes) t.scriptClip = null;
+
+    // The reference the brief was modelled on, when it has been analysed. Never starts an analysis.
+    let reference: string | null = null;
+    if (link) {
       try {
-        const { system, user } = autoEditPrompt(brief, takes, features);
-        const text = await askClaude(system, user, 1500, { timeoutMs: CLAUDE_TIMEOUT_MS });
-        const parsed = parsePlan(parseClaudeJson<unknown>(text), takes, features.map((f) => f.id));
-        plan = { ...parsed, hook: parsed.hook ?? plan.hook };
-        ai = true;
+        const analysis = await getReferenceAnalysis(admin, companyId, link);
+        if (analysis && analysis.media === 'video') reference = renderReferenceForPrompt(analysis);
       } catch (e) {
-        console.warn('auto-edit: plan failed, using the fallback', e);
+        console.warn('auto-edit: reference analysis not loaded', e);
       }
     }
 
-    const result = buildAutoEdit(takes, plan);
+    const input: PlannerInput = { companyId, takes, brief, media, reference, overlays, frames };
+    const result = await planEdit(input);
+    const { plan } = result;
+
     return jsonResponse({
-      takes: takes.map((t) => ({ asset_id: t.assetId, duration_ms: t.durationMs, words: t.words })),
-      blocks: result.blocks.map((b) => ({ asset_id: b.assetId, in_ms: b.inMs, out_ms: b.outMs })),
-      texts: result.texts.map((t) => ({ role: t.role, text: t.text, start_ms: t.startMs, end_ms: t.endMs })),
-      media: result.media.map((m) => ({ feature_id: m.featureId, start_ms: m.startMs, end_ms: m.endMs })),
-      cut_ms: result.cutMs,
-      ai,
+      takes: takesOut,
+      plan,
+      unheard,
+      replace_overlay_ids: result.replaceOverlayIds,
+      repairs: result.repairs,
+      fallback_reason: result.fallbackReason,
+      sound_track: plan.sound.use_brief_track ? track : null,
+      run_id: result.runId,
+      media_assets: mediaAssets,
+      // The older flat reply, for app builds that read it.
+      blocks: plan.keeps.map((k) => ({ asset_id: k.asset_id, in_ms: k.in_ms, out_ms: k.out_ms })),
+      texts: plan.texts.map((t) => ({ role: t.role === 'hook' ? 'hook' : 'header', text: t.text, start_ms: t.start_ms, end_ms: t.end_ms })),
+      media: plan.inserts.map((m) => ({ feature_id: m.media_id, start_ms: m.start_ms, end_ms: m.end_ms })),
+      cut_ms: plan.cut_ms,
+      ai: plan.ai,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

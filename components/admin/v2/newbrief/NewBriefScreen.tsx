@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { planOutline } from '../../../../lib/brief-ai';
+import { logBriefEdit, planOutline, referenceWithin, type Declined } from '../../../../lib/brief-ai';
 import { clearDraft, loadDraft, saveDraft, WIZ_V, type WizardState } from '../../../../lib/brief-drafts';
 import { useLibStore } from '../../../../lib/brief-library-api';
 import { briefWord, emptyGuided, emptyLongText, newClip, outlineTwinId, uid, type Brief, type BriefKind, type BriefType, type GuidedState, type LongTextState } from '../../../../lib/brief-library';
@@ -105,6 +105,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const [editor, setEditor] = useState<{ clip: string | null } | null>(null);
   const [gai, setGai] = useState<AiState | null>(null);
   const [oai, setOai] = useState(false);
+  const [outlineNote, setOutlineNote] = useState<{ declined: Declined | null; referenceNote: string | null }>({ declined: null, referenceNote: null });
   const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
   const [arm, setArm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -191,9 +192,13 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const fillOutline = async () => {
     if (oai) return;
     setOai(true);
+    setOutlineNote({ declined: null, referenceNote: null });
     try {
-      const f = await planOutline({ title: st.title || '', link: st.link || '' });
-      setSt((x) => (x ? { ...x, title: (x.title || '').trim() || f.title, notes: f.notes || x.notes, filled: true } : x));
+      // The post behind the link is read from the moment it is pasted; give it a moment when it is not done yet.
+      if (st.link) await referenceWithin(st.link, 90_000);
+      const f = await planOutline({ title: st.title || '', link: st.link || '', notes: st.notes || '' });
+      setOutlineNote({ declined: f.declined, referenceNote: f.referenceNote });
+      if (!f.declined) setSt((x) => (x ? { ...x, title: (x.title || '').trim() || f.title, notes: f.notes || x.notes, filled: true } : x));
     } catch {
       toast.error("Couldn't write the outline. Check your connection and try again.", { label: 'Retry', onPress: () => void fillOutline() });
     } finally {
@@ -228,6 +233,18 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
     if (err) {
       toast.error("Couldn't save to your team yet. It's kept on this phone.", { label: 'Retry', onPress: () => void finish() });
       return;
+    }
+    // What the manager kept and changed of an AI fill teaches the next one.
+    if (guided) {
+      logBriefEdit({
+        libraryBriefId: id,
+        type,
+        ai: g.ai,
+        angle: g.angle,
+        saved: { title: g.title.trim(), clips: g.clips.map((c) => ({ say: c.text, onScreen: c.onScreen, cta: c.cta })), caption: g.caption, tags: g.tags },
+      });
+    } else if (isLong) {
+      logBriefEdit({ libraryBriefId: id, type: 'Long Text', ai: lt.ai, saved: { title: lt.title.trim(), clips: [{ say: '', onScreen: lt.onScreen, cta: false }], caption: '', tags: [] } });
     }
     clearDraft(key);
     celebrate(id, twin);
@@ -374,6 +391,8 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
               ai={oai}
               onFill={() => void fillOutline()}
               editingExisting={!!st.editingExisting}
+              declined={outlineNote.declined}
+              referenceNote={outlineNote.referenceNote}
             />
           )}
         </TabPane>

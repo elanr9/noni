@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 
-import { LONG_TEXT_NOTES, longTextPlan } from '../../../../lib/brief-ai';
+import { LONG_TEXT_NOTES, longTextPlan, type Declined, type LongTextPlan } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
 import { stText, type LongTextState, type StText } from '../../../../lib/brief-library';
 import { briefs, color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Label, Press } from '../../../v2';
+import { AiNote } from './AiNote';
 import { ClipFrame, ShimmerLine } from './ClipFrame';
 import type { AiState } from './GuidedForm';
 import { SpinIcon } from './GuidedForm';
@@ -29,6 +30,7 @@ export function longTextStyle(onScreen: string): Pick<StText, 'y' | 'size' | 'w'
 /** Long Text compose: title, the text on screen, notes. One 7 second clip. */
 export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFormProps) {
   const [edit, setEdit] = useState(false);
+  const [declined, setDeclined] = useState<Declined | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
     const list = timers.current;
@@ -37,19 +39,26 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
   const typed = /\S/.test(lt.title);
   const fill = async () => {
     if (!typed || ai) return;
+    setDeclined(null);
     setAi({ stage: 'onScreen', i: 0, n: 2 });
-    let screen = '';
+    let plan: LongTextPlan | null = null;
     try {
-      screen = await longTextPlan(lt.title.trim());
+      plan = await longTextPlan(lt.title.trim());
     } catch {
-      screen = '';
+      plan = null;
     }
-    if (!screen) {
+    if (plan?.declined) {
+      setAi(null);
+      setDeclined(plan.declined);
+      return;
+    }
+    const screen = plan?.onScreen ?? '';
+    if (!plan || !screen) {
       setAi(null);
       toast.error("Couldn't write the text. Check your connection and try again.", { label: 'Retry', onPress: () => void fill() });
       return;
     }
-    set({ onScreen: lt.onScreen.trim() || screen, doc: null });
+    set({ onScreen: lt.onScreen.trim() || screen, doc: null, ai: plan.ai });
     setAi({ stage: 'notes', i: 1, n: 2 });
     timers.current.push(
       setTimeout(() => {
@@ -72,6 +81,7 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
             <Text style={{ fontSize: 17, fontWeight: '700', color: typed ? color.white : color.grey3 }}>{ai ? 'Filling in' : 'Fill in with AI'}</Text>
           </Press>
         )}
+        {declined ? <AiNote body={declined.reason} lines={declined.questions} /> : null}
         <TitleInput value={lt.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} type="Long Text" />
         <Press onPress={() => setEdit(true)} accessibilityRole="button" style={{ backgroundColor: color.card, borderRadius: radius.card, padding: 12, flexDirection: 'row', gap: 14, alignItems: 'center', ...shadow.card }}>
           <ClipFrame width={W} height={(W * 16) / 9} radius={12} texts={lt.onScreen ? [{ ...text, text: lt.onScreen }] : []} />

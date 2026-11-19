@@ -56,6 +56,24 @@ export type BriefClip = {
   green: boolean;
   gs: GsMedia | null;
   doc: ClipDoc | null;
+  /** Direction for the creator from Fill in with AI: framing and what to show. */
+  shot?: string;
+};
+
+/** An opening Fill in with AI offered for clip 1. */
+export type BriefHook = { say: string; onScreen: string; visual: string; archetype: string };
+
+/** The plan as Fill in with AI returned it, kept to compare with what gets saved. */
+export type BriefAiDraft = { title: string; clips: { say: string; onScreen: string; cta: boolean }[]; caption: string; tags: string[] };
+
+/** What Fill in with AI returned beyond the fields it filled. */
+export type BriefAi = {
+  hooks: BriefHook[];
+  warnings: string[];
+  /** Set when the reference link was not read in full. */
+  referenceNote: string | null;
+  questions: string[];
+  draft: BriefAiDraft | null;
 };
 
 export type GuidedState = {
@@ -71,9 +89,12 @@ export type GuidedState = {
   clips: BriefClip[];
   audio: BriefAudio;
   filled?: boolean;
+  /** One sentence from Fill in with AI: who it is for, the pain and the turn. */
+  angle?: string;
+  ai?: BriefAi | null;
 };
 
-export type LongTextState = { title: string; onScreen: string; notes: string; doc: ClipDoc | null };
+export type LongTextState = { title: string; onScreen: string; notes: string; doc: ClipDoc | null; ai?: BriefAi | null };
 
 export type Brief = {
   id: string;
