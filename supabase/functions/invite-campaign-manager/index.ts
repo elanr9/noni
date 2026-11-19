@@ -453,6 +453,14 @@ Deno.serve(async (req) => {
     return await handleResend(admin, user, body ?? {});
   } catch (e) {
     console.error('invite-campaign-manager failed', e);
-    return jsonResponse({ error: e instanceof Error ? e.message : 'unknown' }, 500);
+    /* Database errors are plain objects, not Error instances. */
+    const message =
+      e instanceof Error
+        ? e.message
+        : typeof (e as { message?: unknown })?.message === 'string'
+          ? (e as { message: string }).message
+          : 'unknown';
+    console.error('invite-campaign-manager failed', e);
+    return jsonResponse({ error: message }, 500);
   }
 });
