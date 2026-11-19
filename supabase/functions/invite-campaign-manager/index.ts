@@ -203,9 +203,12 @@ async function userIdForEmail(email: string): Promise<string | null> {
   return json.users?.find((u) => (u.email ?? '').toLowerCase() === email)?.id ?? null;
 }
 
+/* A company has one admin: a seated one, or an unexpired admin invite still
+   out. Accepting an invite passes its own id so it does not block itself. */
 async function companyHasAdmin(
   admin: SupabaseClient,
   companyId: string,
+  exceptInviteId?: string,
 ): Promise<boolean> {
   const { data: existing } = await admin
     .from('company_roster')
@@ -215,14 +218,15 @@ async function companyHasAdmin(
     .limit(1)
     .maybeSingle();
   if (existing) return true;
-  const { data: pending } = await admin
+  let pendingQuery = admin
     .from('company_invites')
     .select('id')
     .eq('company_id', companyId)
     .eq('role', 'company_admin')
     .is('accepted_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .limit(1);
+    .gt('expires_at', new Date().toISOString());
+  if (exceptInviteId) pendingQuery = pendingQuery.neq('id', exceptInviteId);
+  const { data: pending } = await pendingQuery.limit(1);
   return (pending ?? []).length > 0;
 }
 
@@ -349,7 +353,7 @@ async function handleAccept(
       403,
     );
   }
-  if (row.role === 'company_admin' && (await companyHasAdmin(admin, row.company_id))) {
+  if (row.role === 'company_admin' && (await companyHasAdmin(admin, row.company_id, row.id))) {
     return jsonResponse({ error: 'this company already has an admin' }, 400);
   }
 
@@ -358,9 +362,8 @@ async function handleAccept(
     .select('id, role, onboarded')
     .eq('id', user.id)
     .maybeSingle();
-  if (profile?.role === 'admin') {
-    return jsonResponse({ error: 'platform admin cannot accept invites' }, 400);
-  }
+  /* The platform admin may join a company too: apply_invite_membership
+     keeps profiles.role as 'admin' and adds the membership beside it. */
   if (!profile) {
     const fullName = (user.user_metadata?.full_name as string | undefined) ?? null;
     const { error } = await admin.from('profiles').insert({
