@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { View } from 'react-native';
 
 import { BriefList } from '../../../components/admin/v2/briefs/BriefList';
+import { UploadBriefButton } from '../../../components/admin/v2/importbrief/UploadBriefButton';
 import { ContextRow } from '../../../components/shared/ContextRow';
 import { useAuth } from '../../../lib/auth';
 import { useLibStore } from '../../../lib/brief-library-api';
@@ -31,7 +32,12 @@ export default function BriefsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top }}>
-      <ContextRow style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 }} />
+      <ContextRow
+        style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 }}
+        right={
+          <UploadBriefButton onPress={() => router.push('/(admin)/import-brief')} />
+        }
+      />
       <BriefList
         loading={!loaded}
         empty="No posts yet. Tap + to make your first one and your creators will see it in their Briefs."

@@ -705,7 +705,7 @@ function angleForPrompt(angle: Angle): string {
   );
 }
 
-function shapeNote(type: BriefType): string {
+export function shapeNote(type: BriefType): string {
   if (type === 'Long Text') {
     return 'The plan has exactly one clip. Leave "say" empty, put the whole text in "onScreen" with a blank line between paragraphs and the {a|b} variation the Long Text section asks for, set cta false, and give one line of shot direction.';
   }
@@ -759,7 +759,7 @@ export function renderDraft(script: Script, type: BriefType): string {
   return lines.join('\n');
 }
 
-function issueLines(issues: Issue[]): string {
+export function issueLines(issues: Issue[]): string {
   return issues.map((i) => `- ${i.message}`).join('\n');
 }
 
@@ -959,9 +959,9 @@ export function referenceNote(reference: ReferenceState): string | null {
   return null;
 }
 
-type Gathered = { brain: BrainContext; legacy: LegacyBrand | null; reference: ReferenceState; recent: RecentBrief[] };
+export type Gathered = { brain: BrainContext; legacy: LegacyBrand | null; reference: ReferenceState; recent: RecentBrief[] };
 
-async function gather(admin: AdminClient, deps: BriefEngineDeps, req: WriteBriefRequest, type: BriefType, withReference: boolean): Promise<Gathered> {
+export async function gather(admin: AdminClient, deps: BriefEngineDeps, req: WriteBriefRequest, type: BriefType, withReference: boolean): Promise<Gathered> {
   const topic = [req.title, req.typed, req.notes, req.linkNotes].map((s) => (s ?? '').trim()).filter(Boolean).join('. ');
   const [brain, reference, recent] = await Promise.all([
     deps.assembleBrainContext(admin, { companyId: req.companyId, topic: topic || undefined, format: type }).catch((e) => {
@@ -997,7 +997,7 @@ export function knowsNothing(g: Pick<Gathered, 'brain' | 'legacy'>): boolean {
     !(g.brain.demoMoments ?? []).length && !hasLegacyText(g.legacy);
 }
 
-function checkContext(type: BriefType, g: Gathered): CheckContext {
+export function checkContext(type: BriefType, g: Gathered): CheckContext {
   return {
     type,
     claimIds: new Set([...(g.brain.approvedClaims ?? []).map((c) => c.id), ...legacyClaims(g.legacy).map((c) => c.id)]),
@@ -1042,7 +1042,7 @@ async function queueAll(admin: AdminClient, deps: BriefEngineDeps, questions: Qu
   );
 }
 
-function tidyHooks(hooks: HookOption[] | undefined, spoken: boolean): HookOption[] {
+export function tidyHooks(hooks: HookOption[] | undefined, spoken: boolean): HookOption[] {
   return (Array.isArray(hooks) ? hooks : [])
     .map((h) => ({
       say: spoken ? clean(h?.say, 300) : '',

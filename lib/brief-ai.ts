@@ -22,7 +22,7 @@ export type GuidedPlan = {
 };
 
 type FillClip = { say: string; onScreen: string; cta: boolean; shot?: string };
-type FillResponse = {
+export type FillResponse = {
   title?: string;
   phrase?: string;
   clips?: FillClip[];
@@ -61,20 +61,25 @@ async function errorMessage(error: { message: string }): Promise<string> {
   return error.message;
 }
 
-async function callFill(body: Record<string, unknown>, timeoutMs = FILL_TIMEOUT_MS): Promise<FillResponse> {
+/** Calls an AI edge function that answers with a JSON body, throwing its `error` or a timeout. */
+export async function callAi<T extends { error?: string }>(fn: string, body: Record<string, unknown>, timeoutMs = FILL_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // The timeout option aborts the request; the race covers a fetch that does not honour the abort.
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('The writer took too long')), timeoutMs + 2000);
   });
   try {
-    const { data, error } = await Promise.race([supabase.functions.invoke<FillResponse>('brief-fill', { body, timeout: timeoutMs }), late]);
+    const { data, error } = await Promise.race([supabase.functions.invoke<T>(fn, { body, timeout: timeoutMs }), late]);
     if (error) throw new Error(await errorMessage(error));
     if (!data || data.error) throw new Error(data?.error ?? 'No answer from the writer');
     return data;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function callFill(body: Record<string, unknown>, timeoutMs = FILL_TIMEOUT_MS): Promise<FillResponse> {
+  return callAi<FillResponse>('brief-fill', body, timeoutMs);
 }
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && /\S/.test(x)) : []);
@@ -118,6 +123,11 @@ function greenify(clips: BriefClip[], g: GuidedState, type: BriefType): BriefCli
 /** A guided plan (title, search phrase, clips, caption, tags) for this company, or why the writer declined. Throws on failure. */
 export async function planGuided(g: GuidedState, type: BriefType): Promise<GuidedPlan> {
   const res = await callFill({ mode: 'guided', type, title: g.title, link: g.link, linkNotes: g.linkNotes, notes: g.notes });
+  return guidedPlanOf(res, g, type);
+}
+
+/** The app's plan from a guided answer of brief-fill or brief-import. */
+export function guidedPlanOf(res: FillResponse, g: GuidedState, type: BriefType): GuidedPlan {
   const raw = res.clips ?? [];
   const clips = raw.map((c) => {
     const shot = (c.shot ?? '').trim();

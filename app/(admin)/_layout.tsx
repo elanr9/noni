@@ -57,6 +57,7 @@ export default function AdminLayout() {
       {__DEV__ ? <Stack.Screen name="kitchen-sink" options={{ headerShown: false }} /> : null}
       <Stack.Screen name="settings" options={{ headerShown: false, contentStyle: { backgroundColor: v2.bg } }} />
       <Stack.Screen name="new-brief" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'slide_from_bottom', animationDuration: 240 }} />
+      <Stack.Screen name="import-brief" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'slide_from_bottom', animationDuration: 240 }} />
       <Stack.Screen name="brief-post/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
       <Stack.Screen name="creators" options={{ title: 'Creators', headerShown: false }} />

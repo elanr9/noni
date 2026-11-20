@@ -176,6 +176,8 @@ export type LlmImage =
   | { url: string }
   | { base64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' };
 
+export type LlmDocument = { base64: string; title?: string };
+
 export type LlmRequest = {
   /** Name of the job for ai_runs, e.g. 'brief.write'. */
   task: string;
@@ -187,6 +189,8 @@ export type LlmRequest = {
   /** The per-request content. */
   input: string;
   images?: LlmImage[];
+  /** PDFs the model reads natively, pages and pictures included. */
+  documents?: LlmDocument[];
   effort?: Effort;
   maxTokens?: number;
   companyId?: string | null;
@@ -233,7 +237,7 @@ function systemBlocks(system: string): StreamParams['system'] {
  * Effort is part of the cached prefix: keep it fixed per task.
  */
 export function buildRequest(
-  req: Pick<LlmRequest, 'system' | 'context' | 'input' | 'images'> & {
+  req: Pick<LlmRequest, 'system' | 'context' | 'input' | 'images' | 'documents'> & {
     model: string;
     effort: Effort;
     maxTokens: number;
@@ -259,6 +263,11 @@ export function buildRequest(
             type: 'text' as const,
             text,
             ...(marked(i) ? { cache_control: { type: 'ephemeral' as const } } : {}),
+          })),
+          ...(req.documents ?? []).map((doc) => ({
+            type: 'document' as const,
+            source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: doc.base64 },
+            ...(doc.title ? { title: doc.title } : {}),
           })),
           ...(req.images ?? []).map((img) => ({
             type: 'image' as const,
