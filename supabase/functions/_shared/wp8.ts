@@ -157,6 +157,23 @@ export async function authenticate(
     .eq('id', data.user.id)
     .maybeSingle();
   if (!profile) return null;
+  const platformAdmin = profile.role === 'admin';
+  // company_members is the source of truth; profiles.role only mirrors it.
+  // A caller removed from their active company (or left with none) holds no
+  // role there and is turned away. The platform admin has no membership.
+  let role: string = profile.role;
+  if (!platformAdmin) {
+    if (!profile.active_company_id) return null;
+    const { data: member } = await admin
+      .from('company_members')
+      .select('role')
+      .eq('company_id', profile.active_company_id)
+      .eq('profile_id', data.user.id)
+      .is('removed_at', null)
+      .maybeSingle();
+    if (!member) return null;
+    role = member.role as string;
+  }
   // Platform admin and company admin inherit campaign manager powers inside
   // their company; platform-only endpoints gate on platformAdmin, company
   // admin-only endpoints gate on companyAdmin.
@@ -164,12 +181,9 @@ export async function authenticate(
     kind: 'user',
     userId: data.user.id,
     companyId: profile.active_company_id,
-    role:
-      profile.role === 'admin' || profile.role === 'company_admin'
-        ? 'campaign_manager'
-        : profile.role,
-    platformAdmin: profile.role === 'admin',
-    companyAdmin: profile.role === 'company_admin',
+    role: platformAdmin || role === 'company_admin' ? 'campaign_manager' : role,
+    platformAdmin,
+    companyAdmin: role === 'company_admin',
   };
 }
 
@@ -192,6 +206,7 @@ export async function hasPermission(
     .select('permissions')
     .eq('company_id', caller.companyId)
     .eq('profile_id', caller.userId)
+    .is('removed_at', null)
     .maybeSingle();
   const permissions = data?.permissions as Record<string, unknown> | undefined;
   return permissions?.[key] === true;

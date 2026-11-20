@@ -4,9 +4,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 
@@ -140,6 +142,24 @@ async function selectProfile(userId: string): Promise<Profile | null> {
   return data as Profile | null;
 }
 
+/** Launch and foreground re-sync with the server runs at most this often. */
+const SERVER_SYNC_MIN_MS = 15_000;
+
+/**
+ * True when the server moved the person's company context: a switch on the
+ * web or another device, or a removal that reassigned the active company.
+ */
+export function companyContextChanged(
+  current: Pick<Profile, 'active_company_id' | 'role' | 'can_create'>,
+  next: Pick<Profile, 'active_company_id' | 'role' | 'can_create'>,
+): boolean {
+  return (
+    current.active_company_id !== next.active_company_id ||
+    current.role !== next.role ||
+    (current.can_create === true) !== (next.can_create === true)
+  );
+}
+
 async function fetchProfile(userId: string): Promise<Profile | null> {
   const existing = await selectProfile(userId);
   if (existing) return existing;
@@ -240,6 +260,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<CompanyMembership[]>([]);
   const [activeMode, setActiveModeState] = useState<AppMode>('admin');
   const [loading, setLoading] = useState(true);
+  // Bumped by anything that moves the company context from this device, so a
+  // server re-sync that was reading meanwhile does not apply an older answer.
+  const contextEpoch = useRef(0);
+  const sessionUserId = session?.user?.id ?? null;
+  useEffect(() => {
+    contextEpoch.current += 1;
+  }, [sessionUserId]);
 
   const refreshAccounts = useCallback(async () => {
     setAccounts(await listStoredAccounts());
@@ -391,6 +418,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const enableCreatorMode = useCallback(async () => {
     if (!profile || !session) return;
+    contextEpoch.current += 1;
     if (profile.can_create !== true) {
       const { error } = await supabase.rpc('enable_creator_for_active_company');
       if (error) throw error;
@@ -426,6 +454,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const switchCompany = useCallback(
     async (companyId: string, preferredMode?: AppMode) => {
       if (!profile || profile.active_company_id === companyId) return null;
+      contextEpoch.current += 1;
       await setActiveCompany(companyId);
       const next = await fetchProfile(profile.id);
       if (!next) throw new Error('profile missing after company switch');
@@ -453,6 +482,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [profile, session, activeMode],
   );
+
+  // The active company is one server value shared with the web and every
+  // other device, and an invite can attach a new company while the app is
+  // already signed in. On launch and on return to the foreground: claim any
+  // pending invite, re-read the profile, and when the server's context moved
+  // follow it the way a local switch does (never switch back). Throttled,
+  // and never awaited by the UI.
+  const serverSync = useRef({ userId: '', at: 0, running: false });
+  const syncWithServer = useCallback(async () => {
+    if (!session || !profile) return;
+    const userId = profile.id;
+    const sync = serverSync.current;
+    const now = Date.now();
+    if (sync.running) return;
+    if (sync.userId === userId && now - sync.at < SERVER_SYNC_MIN_MS) return;
+    serverSync.current = { userId, at: now, running: true };
+    const epoch = contextEpoch.current;
+    try {
+      // Attaches invites sent to this email since the last check; a no-op
+      // (one indexed lookup) when there are none.
+      await supabase.rpc('claim_pending_invite').then(
+        () => undefined,
+        () => undefined,
+      );
+      const next = await selectProfile(userId);
+      // A local switch or an account change started meanwhile: it wins.
+      if (!next || contextEpoch.current !== epoch) return;
+      if (companyContextChanged(profile, next)) {
+        contextEpoch.current += 1;
+        setProfile(next);
+        const [perms, access] = await Promise.all([
+          fetchPermissions(next),
+          fetchManagerAccess(next),
+        ]);
+        setPermissions(perms);
+        setManagerAccess(access);
+        await upsertStoredAccount(session, next);
+        const mode = modesForProfile(next).includes(activeMode)
+          ? activeMode
+          : await resolveMode(next);
+        try {
+          await setStoredMode(next.id, mode);
+        } catch (e) {
+          console.error('active mode persist failed', e);
+        }
+        setActiveModeState(mode);
+        if (mode !== activeMode) {
+          router.replace(destinationForProfile(next, true, mode));
+        }
+      }
+      // A claimed invite shows up in the switcher; a server switch re-sorts it.
+      await refreshCompanies();
+    } catch (e) {
+      console.error('server sync failed', e);
+    } finally {
+      serverSync.current.running = false;
+    }
+  }, [session, profile, activeMode, refreshCompanies]);
+
+  const syncWithServerRef = useRef(syncWithServer);
+  syncWithServerRef.current = syncWithServer;
+
+  const syncUserId = profile?.id ?? null;
+  useEffect(() => {
+    if (!syncUserId) return;
+    void syncWithServerRef.current();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void syncWithServerRef.current();
+    });
+    return () => sub.remove();
+  }, [syncUserId]);
 
   const switchAccount = useCallback(
     async (userId: string) => {

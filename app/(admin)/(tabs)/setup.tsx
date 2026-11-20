@@ -83,7 +83,8 @@ export default function ManagerSetupScreen() {
   const [inviteSending, setInviteSending] = useState(false);
 
   const alreadyComplete =
-    profile !== null && isManagerSetupCompleteFlag(profile.onboarding_answers);
+    profile !== null &&
+    isManagerSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
   // Managers without the invite permission only need the brief step; the
   // company admin invites creators from the web dashboard.
   const needsCreators = managerAccess.inviteCreators;
@@ -102,7 +103,7 @@ export default function ManagerSetupScreen() {
     if (next.brief && (!needsCreators || next.creators)) {
       // Retires the tab: destinationForProfile and the tab layout both read
       // this flag off the profile.
-      await markManagerSetupComplete(profile.id).catch(() => undefined);
+      await markManagerSetupComplete(profile.id, profile.active_company_id).catch(() => undefined);
       await refreshProfile();
     }
   }, [profile, alreadyComplete, needsCreators, refreshProfile, refreshManagerAccess]);
@@ -123,7 +124,7 @@ export default function ManagerSetupScreen() {
     setInviteSending(true);
     try {
       await inviteCreator(profile.active_company_id, name, email);
-      await markCreatorInvited(profile.id).catch(() => undefined);
+      await markCreatorInvited(profile.id, profile.active_company_id).catch(() => undefined);
       setInviteOpen(false);
       Alert.alert('Invite sent', `${name} will get an email at ${email}.`);
       await refresh();

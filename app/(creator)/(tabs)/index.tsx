@@ -16,7 +16,9 @@ import { CreatorSetupChecklist } from '../setup';
 export default function CreatorHome() {
   const { profile } = useAuth();
   const router = useRouter();
-  const setupFlagged = profile !== null && isSetupCompleteFlag(profile.onboarding_answers);
+  const setupFlagged =
+    profile !== null &&
+    isSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
   const setup = useSetupState(!setupFlagged ? profile : null);
   const setupPending = !setupFlagged && (setup.state === null || !setup.state.complete);
   const companyId = profile?.active_company_id;

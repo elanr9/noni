@@ -61,7 +61,8 @@ export default function CreatorLayout() {
     profileCanCreate(profile) &&
     (!profileIsPlatformAdmin(profile) || activeMode === 'creator');
   const setupFlagged =
-    inCreatorMode && isSetupCompleteFlag(profile.onboarding_answers);
+    inCreatorMode &&
+    isSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
   const setup = useSetupState(inCreatorMode && !setupFlagged ? profile : null);
 
   // Managers see a green dot on the creator's inbox row while the app is open.

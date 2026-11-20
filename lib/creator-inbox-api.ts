@@ -64,6 +64,7 @@ async function loadTeamThread(companyId: string, meId: string): Promise<CreatorT
       supabase
         .from('message_reads')
         .select('last_read_at')
+        .eq('company_id', companyId)
         .eq('creator_id', meId)
         .eq('profile_id', meId)
         .maybeSingle(),

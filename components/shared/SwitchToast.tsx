@@ -5,7 +5,7 @@ import { useCompany } from '../../lib/company-context';
 import { color, motion, shadow } from '../../theme/tokens';
 import { CompanyMark } from './CompanyMark';
 
-/** Confirms the jump after switchTo resolves. The provider hides it after 2200ms. */
+/** Confirms a company switch, or a company the person was just added to. The provider hides it after 2200ms. */
 export function SwitchToast() {
   const { toast } = useCompany();
   const progress = useRef(new Animated.Value(0)).current;
@@ -43,7 +43,7 @@ export function SwitchToast() {
         size={26}
       />
       <Text style={styles.text} numberOfLines={1}>
-        Now in {toast.name}
+        {toast.added ? `Added to ${toast.name}` : `Now in ${toast.name}`}
       </Text>
     </Animated.View>
   );

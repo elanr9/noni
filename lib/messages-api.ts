@@ -296,12 +296,16 @@ export async function markCreatorThreadRead(params: {
   creatorId: string;
   profileId: string;
 }): Promise<void> {
-  const { error } = await supabase.from('message_reads').upsert({
-    company_id: params.companyId,
-    creator_id: params.creatorId,
-    profile_id: params.profileId,
-    last_read_at: new Date().toISOString(),
-  });
+  // One marker per company: the same two people can share several companies.
+  const { error } = await supabase.from('message_reads').upsert(
+    {
+      company_id: params.companyId,
+      creator_id: params.creatorId,
+      profile_id: params.profileId,
+      last_read_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,creator_id,profile_id' },
+  );
   if (error) throw error;
 }
 

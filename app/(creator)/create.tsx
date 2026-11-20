@@ -44,7 +44,9 @@ async function pickVideos(): Promise<PickResult> {
 export default function CreateRoute() {
   const router = useRouter();
   const { profile } = useAuth();
-  const setupFlagged = profile !== null && isSetupCompleteFlag(profile.onboarding_answers);
+  const setupFlagged =
+    profile !== null &&
+    isSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
   const setup = useSetupState(!setupFlagged ? profile : null);
   const gated = !setupFlagged && setup.state !== null && !setup.state.complete;
   const [preparing, setPreparing] = useState(false);

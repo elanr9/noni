@@ -17,7 +17,8 @@
 // invited email creates the creator on the inviting company.
 //
 // Existing accounts accept from https://www.usenoni.app/invite/[token] while
-// signed in, which adds a membership without changing their active company.
+// signed in, which adds a membership (or the second role on the seat they
+// already hold) and moves them into the invited company.
 
 import type { SupabaseClient, User } from 'npm:@supabase/supabase-js@2';
 import { adminClient, handleCors, hasPermission, jsonResponse } from '../_shared/wp8.ts';
@@ -250,9 +251,31 @@ async function handleInvite(
     return jsonResponse({ error: 'this company already has an admin or a pending admin invite' }, 400);
   }
 
+  // Someone already here can still be invited into the role they do not hold
+  // yet: a manager as a creator, or a creator as a manager
+  // (apply_invite_membership adds the second role to the same seat).
   const existingUserId = await userIdForEmail(email);
-  if (existingUserId && (await activeMembership(admin, existingUserId, body.company_id))) {
-    return jsonResponse({ error: 'this person is already a member of this company' }, 400);
+  if (existingUserId) {
+    const { data: seat } = await admin
+      .from('company_members')
+      .select('role, can_create')
+      .eq('company_id', body.company_id)
+      .eq('profile_id', existingUserId)
+      .is('removed_at', null)
+      .maybeSingle();
+    const manages = seat?.role === 'campaign_manager' || seat?.role === 'company_admin';
+    const covered = !seat
+      ? false
+      : role === 'creator'
+        ? seat.role === 'creator' || seat.can_create === true
+        : role === 'campaign_manager'
+          ? manages
+          : seat.role === 'company_admin';
+    if (covered) {
+      return jsonResponse({
+        error: role === 'creator' ? 'this person already creates for this company' : 'this person already manages this company',
+      }, 400);
+    }
   }
 
   /* Paywall and creator cap (noni-web creatorInviteBlock): creators need an

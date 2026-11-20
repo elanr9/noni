@@ -3,9 +3,18 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { CREATOR_ROSTER_OR } from './active-mode';
 import { getSocialConnectStatus, type SocialConnectStatus } from './admin-api';
 import { getCreatorAccount, type CreatorAccount } from './creator-accounts-api';
+import {
+  CREATOR_INVITED_KEY,
+  hasCompanyFlag,
+  MANAGER_SETUP_COMPLETE_KEY,
+  SETUP_COMPLETE_KEY,
+  withCompanyFlag,
+} from './profile';
 import { parseSocialAccount } from './social-accounts';
 import { supabase } from './supabase';
 import type { Json } from './types';
+
+export { isSetupCompleteFlag } from './profile';
 
 /**
  * Creator setup state, derived entirely from live data (creator_accounts,
@@ -61,13 +70,21 @@ export function deriveSetupState(
 // ---------------------------------------------------------------------------
 // Shared snapshot so the layout gate and the checklist screen see one state.
 
+// Setup is per company: the same creator has separate accounts, review and
+// warm-up in each one, so the snapshot is keyed by both ids.
 type SetupSnapshot = {
   creatorId: string | null;
+  companyId: string | null;
   state: SetupState | null;
   loading: boolean;
 };
 
-let snapshot: SetupSnapshot = { creatorId: null, state: null, loading: false };
+let snapshot: SetupSnapshot = {
+  creatorId: null,
+  companyId: null,
+  state: null,
+  loading: false,
+};
 const listeners = new Set<() => void>();
 
 function setSnapshot(next: SetupSnapshot): void {
@@ -88,17 +105,30 @@ export async function refreshSetupState(
   companyId: string,
   creatorId: string,
 ): Promise<SetupState> {
-  setSnapshot({ ...snapshot, creatorId, loading: true });
+  const sameKey =
+    snapshot.creatorId === creatorId && snapshot.companyId === companyId;
+  setSnapshot({
+    creatorId,
+    companyId,
+    // Another company's state must never show while this one loads.
+    state: sameKey ? snapshot.state : null,
+    loading: true,
+  });
   const [account, social] = await Promise.all([
     getCreatorAccount(companyId, creatorId).catch(() => null),
     getSocialConnectStatus().catch(() => null),
   ]);
   const state = deriveSetupState(account, social);
-  setSnapshot({ creatorId, state, loading: false });
+  // The creator switched company while this was loading: the newer request
+  // owns the snapshot.
+  if (snapshot.creatorId !== creatorId || snapshot.companyId !== companyId) {
+    return state;
+  }
+  setSnapshot({ creatorId, companyId, state, loading: false });
   if (state.complete) {
     // Fast path for future launches: the gate trusts this flag and skips the
     // network calls. Setup never un-completes once approved.
-    void mergeOnboardingAnswers(creatorId, { setup_complete: true }).catch(
+    void markCompanyFlag(creatorId, SETUP_COMPLETE_KEY, companyId).catch(
       () => undefined,
     );
   }
@@ -117,14 +147,16 @@ export function useSetupState(
     await refreshSetupState(companyId, creatorId);
   }, [creatorId, companyId]);
 
-  const stale = snap.state === null || snap.creatorId !== creatorId;
+  const current = snap.creatorId === creatorId && snap.companyId === companyId;
+  const stale = snap.state === null || !current;
   useEffect(() => {
-    if (creatorId !== null && stale && !snap.loading) void refresh();
-  }, [creatorId, stale, snap.loading, refresh]);
+    // A load for another company does not hold this one back.
+    if (creatorId !== null && stale && !(current && snap.loading)) void refresh();
+  }, [creatorId, stale, current, snap.loading, refresh]);
 
   return {
-    state: snap.creatorId === creatorId ? snap.state : null,
-    loading: snap.loading,
+    state: current ? snap.state : null,
+    loading: current && snap.loading,
     refresh,
   };
 }
@@ -161,8 +193,25 @@ export async function markWarmupTutorialSeen(creatorId: string): Promise<void> {
   await mergeOnboardingAnswers(creatorId, { warmup_tutorial_seen: true });
 }
 
-export function isSetupCompleteFlag(answers: Json | null): boolean {
-  return answersRecord(answers).setup_complete === true;
+async function markCompanyFlag(
+  profileId: string,
+  key: string,
+  companyId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('onboarding_answers')
+    .eq('id', profileId)
+    .single();
+  if (error) throw error;
+  if (hasCompanyFlag(data.onboarding_answers, key, companyId)) return;
+  const { error: writeError } = await supabase
+    .from('profiles')
+    .update({
+      onboarding_answers: withCompanyFlag(data.onboarding_answers, key, companyId),
+    })
+    .eq('id', profileId);
+  if (writeError) throw writeError;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,16 +249,20 @@ export async function fetchManagerSetupState(
     brief: (briefs.count ?? 0) > 0,
     creators:
       (creators.count ?? 0) > 0 ||
-      answersRecord(answers).creator_invited === true,
+      hasCompanyFlag(answers, CREATOR_INVITED_KEY, companyId),
   };
 }
 
-export async function markCreatorInvited(profileId: string): Promise<void> {
-  await mergeOnboardingAnswers(profileId, { creator_invited: true });
+export async function markCreatorInvited(
+  profileId: string,
+  companyId: string,
+): Promise<void> {
+  await markCompanyFlag(profileId, CREATOR_INVITED_KEY, companyId);
 }
 
 export async function markManagerSetupComplete(
   profileId: string,
+  companyId: string,
 ): Promise<void> {
-  await mergeOnboardingAnswers(profileId, { manager_setup_complete: true });
+  await markCompanyFlag(profileId, MANAGER_SETUP_COMPLETE_KEY, companyId);
 }

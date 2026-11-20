@@ -29,7 +29,13 @@ import { modeForDeepLink, parseDeepLink, routeForDeepLink } from './deep-link';
 import { attachForegroundPushRefresh, attachNotificationRouting } from './notifications';
 import { supabase } from './supabase';
 
-export type SwitchToastState = { companyId: string; name: string; logoPath: string | null };
+export type SwitchToastState = {
+  companyId: string;
+  name: string;
+  logoPath: string | null;
+  /** A company the person was just added to, not the one they are now in. */
+  added?: boolean;
+};
 
 type CompanyState = {
   companies: CompanyMembership[];
@@ -178,10 +184,60 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // The active company can also move from the server (a switch on the web or
+  // another device, picked up when the app returns to the foreground), and an
+  // invite can add a company while the app is open. Both get the same toast a
+  // local switch does, so the change is never silent.
+  const localSwitch = useRef(false);
+  const seen = useRef<{
+    userId: string | null;
+    activeId: string | null;
+    known: Set<string> | null;
+  }>({ userId: null, activeId: null, known: null });
+  useEffect(() => {
+    const prev = seen.current;
+    if (prev.userId !== userId) {
+      seen.current = {
+        userId,
+        activeId: activeCompanyId,
+        known: companies.length > 0 ? new Set(companies.map((c) => c.companyId)) : null,
+      };
+      return;
+    }
+    if (companies.length === 0) return;
+    let announced = false;
+    if (prev.activeId !== activeCompanyId) {
+      const target = companies.find((c) => c.companyId === activeCompanyId);
+      if (prev.activeId !== null && !localSwitch.current && target) {
+        showToast({ companyId: target.companyId, name: target.name, logoPath: target.logoPath });
+        announced = true;
+      }
+      // Not in the list yet: wait for the companies refresh that follows.
+      if (target || activeCompanyId === null) prev.activeId = activeCompanyId;
+    }
+    if (prev.known !== null) {
+      const known = prev.known;
+      const added = companies.find((c) => !known.has(c.companyId));
+      if (added) {
+        void refreshSummary();
+        if (!announced && added.companyId !== activeCompanyId) {
+          showToast({
+            companyId: added.companyId,
+            name: added.name,
+            logoPath: added.logoPath,
+            added: true,
+          });
+        }
+      }
+    }
+    prev.known = new Set(companies.map((c) => c.companyId));
+  }, [userId, activeCompanyId, companies, showToast, refreshSummary]);
+
   const switchTo = useCallback(
     async (companyId: string, side?: CompanySide) => {
       if (companyId === activeCompanyId) return null;
       setSwitching(true);
+      localSwitch.current = true;
       try {
         const mode = await switchCompany(companyId, side);
         await Promise.all([refreshCompanies(), refreshSummary(), refreshNotifications()]);
@@ -193,6 +249,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         }
         return mode;
       } finally {
+        localSwitch.current = false;
         setSwitching(false);
       }
     },

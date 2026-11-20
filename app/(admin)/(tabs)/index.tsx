@@ -106,7 +106,7 @@ export default function ReviewScreen() {
     router.push({ pathname: '/(admin)/review/[id]', params: creatorId ? { id, creator: creatorId } : { id } });
   const openCreator = (creatorId: string) => router.push({ pathname: '/(admin)/review/creator/[creatorId]', params: { creatorId } });
   const openCreators = () => router.push('/(admin)/creators');
-  const setupIncomplete = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers);
+  const setupIncomplete = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
 
   const body = () => {
     if (loading && !failed) {
