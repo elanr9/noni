@@ -644,21 +644,6 @@ export const ENTITY_TYPES = Object.keys(ENTITIES) as EntityType[];
 
 export type JsonSchema = { [key: string]: unknown };
 
-function fieldSchema(f: Field): JsonSchema {
-  switch (f.t) {
-    case 'string':
-      return { type: 'string', description: f.d };
-    case 'list':
-      return { type: 'array', items: { type: 'string' }, description: f.d };
-    case 'enum':
-      return { type: 'string', enum: [...f.values], description: f.d };
-    case 'int':
-      return { type: 'integer', description: f.d };
-    case 'bool':
-      return { type: 'boolean', description: f.d };
-  }
-}
-
 /** Fields the extractor is asked for (imports fill the rest). */
 export function extractableFields(type: EntityType): string[] {
   return Object.entries(ENTITIES[type].fields)
@@ -666,41 +651,117 @@ export function extractableFields(type: EntityType): string[] {
     .map(([name]) => name);
 }
 
-function itemSchema(type: EntityType): JsonSchema {
-  const spec = ENTITIES[type];
-  const names = extractableFields(type);
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['key', 'title', 'excerpt', 'data'],
-    properties: {
-      key: { type: 'string', description: 'short lowercase slug naming the subject; reuse an existing key when the record is about the same thing' },
-      title: { type: 'string', description: 'a few words a person would recognise the record by' },
-      excerpt: { type: 'string', description: 'the passage that supports this record, copied character for character from the source' },
-      data: {
-        type: 'object',
-        additionalProperties: false,
-        required: names,
-        properties: Object.fromEntries(names.map((n) => [n, fieldSchema(spec.fields[n])])),
-      },
-    },
-  };
-}
+/** One field as the extractor returns it: a name and its values as text. */
+export type ExtractedField = { name: string; values: string[] };
+/** One record as the extractor returns it, before its fields are typed. */
+export type ExtractedRecord = { type: string; key: string; title: string; excerpt: string; fields: ExtractedField[] };
 
 /**
- * The structured-output schema for one extraction call: one array per entity
- * type the source is allowed to yield. Strict (every object closed, every
- * property required) as llm.ts generate() demands.
+ * The structured-output schema for one extraction call: a flat list of
+ * records, each naming its type and carrying its fields as name and values.
+ *
+ * It is deliberately this small. Structured outputs compile the schema to a
+ * grammar and refuse one that is too large (HTTP 400, "compiled grammar is
+ * too large"). A schema with one typed object per entity type is refused from
+ * about four types up, with or without enums and descriptions, so the field
+ * names, kinds and allowed values travel in the prompt (extractionGuide) and
+ * are enforced afterwards by recordData and normaliseData. Do not grow this
+ * schema per entity type or per field.
  */
 export function extractionSchema(types: EntityType[]): JsonSchema {
   return {
     type: 'object',
     additionalProperties: false,
-    required: [...types],
-    properties: Object.fromEntries(
-      types.map((t) => [t, { type: 'array', description: `Use when the source states ${ENTITIES[t].when}.`, items: itemSchema(t) }]),
-    ),
+    required: ['records'],
+    properties: {
+      records: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'key', 'title', 'excerpt', 'fields'],
+          properties: {
+            type: { type: 'string', enum: [...types], description: 'the record type' },
+            key: { type: 'string', description: 'short lowercase slug naming the subject; reuse an existing key when the record is about the same thing' },
+            title: { type: 'string', description: 'a few words a person would recognise the record by' },
+            excerpt: { type: 'string', description: 'the passage that supports this record, copied character for character from the source' },
+            fields: {
+              type: 'array',
+              description: 'the fields of this record type that the source gives; leave out the ones it does not',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['name', 'values'],
+                properties: {
+                  name: { type: 'string', description: 'a field name of this record type, as listed' },
+                  values: { type: 'array', items: { type: 'string' }, description: 'one value, or several for a list field' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   };
+}
+
+function fieldKind(f: Field): string {
+  switch (f.t) {
+    case 'string':
+      return 'text';
+    case 'list':
+      return 'list';
+    case 'enum':
+      return `one of ${f.values.join(', ')}`;
+    case 'int':
+      return 'whole number';
+    case 'bool':
+      return 'true or false';
+  }
+}
+
+/**
+ * The record types a source may yield and the fields of each, written out
+ * for the extractor. This is where the field guidance lives now that the
+ * schema no longer carries it. Stable per tier, so it caches across companies.
+ */
+export function extractionGuide(types: EntityType[]): string {
+  const blocks = types.map((t) => {
+    const spec = ENTITIES[t];
+    const lines = extractableFields(t).map((name) => {
+      const f = spec.fields[name];
+      return `  ${name} (${fieldKind(f)}): ${f.d}`;
+    });
+    return `${t}: use when the source states ${spec.when}.${spec.singletonKey ? ' At most one record.' : ''}\n${lines.join('\n')}`;
+  });
+  return [
+    'Record types you may write for this document, with the fields of each.',
+    'Give each field as its name and its values. A text, choice, number or true/false field takes exactly one value; a list field takes one value per entry. Use the field names exactly as written here. Leave a field out when the document does not give it.',
+    blocks.join('\n\n'),
+  ].join('\n\n');
+}
+
+/** Types the extractor's name and values pairs into the entity's fields; normaliseData finishes the job. */
+export function recordData(type: EntityType, fields: unknown): Record<string, unknown> {
+  const spec = ENTITIES[type];
+  const allowed = new Set(extractableFields(type));
+  const out: Record<string, unknown> = {};
+  for (const raw of Array.isArray(fields) ? fields : []) {
+    const field = raw as Partial<ExtractedField> | null;
+    const name = typeof field?.name === 'string' ? field.name.trim() : '';
+    if (!allowed.has(name)) continue;
+    const values = (Array.isArray(field?.values) ? field.values : [])
+      .filter((v): v is string => typeof v === 'string' && !!v.trim())
+      .map((v) => v.trim());
+    if (!values.length) continue;
+    const f = spec.fields[name];
+    if (f.t === 'list') out[name] = [...((out[name] as string[] | undefined) ?? []), ...values];
+    else if (f.t === 'string') out[name] = values.join('; ');
+    else if (f.t === 'enum') out[name] = values[0].toLowerCase().replace(/[\s-]+/g, '_');
+    else if (f.t === 'int') out[name] = Number.parseInt(values[0].replace(/[^\d]/g, ''), 10) || 0;
+    else out[name] = /^(true|yes)$/i.test(values[0]);
+  }
+  return out;
 }
 
 /**

@@ -22,7 +22,7 @@ import {
 import type { BrainFact, ReferenceAnalysis } from './contracts.ts';
 import { analyzeVoiceReferences, parseVoiceReferences } from './voiceReferences.ts';
 import { assertStrictSchema } from './llm.ts';
-import { allowedEntityTypes, extractionSchema } from './brainSchema.ts';
+import { allowedEntityTypes, extractionGuide, extractionSchema, recordData } from './brainSchema.ts';
 
 // ---------------------------------------------------------------- fake database
 
@@ -162,8 +162,9 @@ function setup(script: (call: Call) => unknown) {
     embed: (texts) => Promise.resolve(texts.map(() => Array.from({ length: 384 }, () => 0.05))),
     generate: ((req: Call) => {
       calls.push(req);
-      const data = script(req);
-      if (data instanceof Error) return Promise.reject(data);
+      const scripted = script(req);
+      if (scripted instanceof Error) return Promise.reject(scripted);
+      const data = req.task === 'brain.extract' ? asRecords(scripted as ByType) : scripted;
       return Promise.resolve({ data, model: 'test-model', runId: 'run', usage: {} });
     }) as unknown as BrainDeps['generate'],
   };
@@ -171,11 +172,39 @@ function setup(script: (call: Call) => unknown) {
   return { db, admin: db as unknown as SupabaseClient, deps, calls };
 }
 
+type ByType = Record<string, Array<{ key: string; title: string; excerpt: string; data: Record<string, unknown> }>>;
+
+/**
+ * The scripts below write an extraction grouped by type with plain data,
+ * which is easy to read. The extractor's real reply is a flat list of records
+ * whose fields are name and values pairs (brainSchema.extractionSchema); this
+ * turns the one into the other.
+ */
+function asRecords(byType: ByType): { records: unknown[] } {
+  return {
+    records: Object.entries(byType).flatMap(([type, items]) =>
+      (Array.isArray(items) ? items : []).map((item) => ({
+        type,
+        key: item.key,
+        title: item.title,
+        excerpt: item.excerpt,
+        fields: Object.entries(item.data).map(([name, value]) => ({
+          name,
+          values: Array.isArray(value) ? value.map(String) : [String(value)],
+        })),
+      }))
+    ),
+  };
+}
+
+/** The record types a call was offered. */
+const offered = (call: Call): string[] =>
+  ((call.schema.properties as { records: { items: { properties: { type: { enum: string[] } } } } }).records.items.properties.type.enum);
 const empty = (types: string[]) => Object.fromEntries(types.map((t) => [t, []]));
 const facts = (db: FakeDb) => db.rows('brain_facts') as unknown as BrainFact[];
 
 const siteExtraction = (call: Call) => ({
-  ...empty(Object.keys(call.schema.properties as object)),
+  ...empty(offered(call)),
   feature: [
     { key: 'calendar-sync', title: 'Calendar sync', excerpt: 'Sync with Google Calendar so every task lands on your schedule.', data: { name: 'Calendar sync', description: 'Puts every task on your Google Calendar' } },
     { key: 'ai-coach', title: 'AI coach', excerpt: 'An AI coach reviews your week', data: { name: 'AI coach', description: 'Reviews your week' } },
@@ -193,6 +222,42 @@ async function scanSite(admin: SupabaseClient, deps: BrainDeps): Promise<BrainSo
 
 Deno.test('extraction schemas for every tier pass the structured output checks in llm.ts', () => {
   for (const tier of [1, 2, 3, 4, 5, 6] as const) assertStrictSchema(extractionSchema(allowedEntityTypes(tier)));
+});
+
+Deno.test('the extraction schema stays small however many record types there are', () => {
+  // Structured outputs refuse a schema whose grammar is too large (it took the
+  // scan down once). The schema must not grow with the types or their fields.
+  const few = JSON.stringify(extractionSchema(allowedEntityTypes(5)));
+  const many = JSON.stringify(extractionSchema(allowedEntityTypes(3)));
+  assert(many.length < 2500, `extraction schema is ${many.length} characters`);
+  assert(many.length - few.length < 300);
+  assert(!many.includes('one_liner'), 'field names belong in the guide, not the schema');
+  // The guide carries what the schema no longer does.
+  const guide = extractionGuide(allowedEntityTypes(3));
+  for (const expected of ['feature: use when', 'maturity (one of stable, beta, changing, unknown)', 'seconds (whole number)', 'is_aha (true or false)', 'platforms (list)']) {
+    assertStringIncludes(guide, expected);
+  }
+  assert(!guide.includes('media_urls'));
+  assert(!extractionGuide(allowedEntityTypes(5)).includes('offer: use when'));
+});
+
+Deno.test('recordData types the name and values pairs and ignores what it does not know', () => {
+  assertEquals(
+    recordData('demo_moment', [
+      { name: 'user_action', values: ['Tap Sync'] },
+      { name: 'seconds', values: ['about 12 seconds'] },
+      { name: 'is_aha', values: ['True'] },
+      { name: 'must_not_show', values: ['client names'] },
+      { name: 'must_not_show', values: ['prices', ' '] },
+      { name: 'media_url', values: ['https://x.test/a.png'] },
+      { name: 'made_up', values: ['x'] },
+      { name: 'feature', values: [] },
+      'nonsense',
+    ]),
+    { user_action: 'Tap Sync', seconds: 12, is_aha: true, must_not_show: ['client names', 'prices'] },
+  );
+  assertEquals(recordData('feature', [{ name: 'maturity', values: ['Beta'] }]), { maturity: 'beta' });
+  assertEquals(recordData('feature', null), {});
 });
 
 Deno.test('addSource stores a document once, chunks it and embeds the chunks', async () => {
@@ -227,16 +292,16 @@ Deno.test('extractFacts keeps what the source states and demotes what it does no
 });
 
 Deno.test('a review source is never offered product record types', async () => {
-  const { admin, deps, calls } = setup((call) => empty(Object.keys(call.schema.properties as object)));
+  const { admin, deps, calls } = setup((call) => empty(offered(call)));
   const { source } = await addSource(admin, { companyId: CO, kind: 'review', content: 'Review, 5 stars. It is basically free for what you get.' }, deps);
   await extractFacts(admin, source, deps);
-  assertEquals(Object.keys(calls[0].schema.properties as object).sort(), ['alternative', 'objection', 'pain', 'persona', 'quote']);
+  assertEquals([...offered(calls[0])].sort(), ['alternative', 'objection', 'pain', 'persona', 'quote']);
 });
 
 Deno.test('two sources that disagree on the trial raise a conflict, and a person settles it', async () => {
   const { db, admin, deps } = setup((call) =>
     call.input.includes('3-day')
-      ? { ...empty(Object.keys(call.schema.properties as object)), offer: [{ key: 'x', title: 'Free trial', excerpt: 'Start with a 3-day free trial.', data: { kind: 'trial', terms: '3-day free trial' } }] }
+      ? { ...empty(offered(call)), offer: [{ key: 'x', title: 'Free trial', excerpt: 'Start with a 3-day free trial.', data: { kind: 'trial', terms: '3-day free trial' } }] }
       : siteExtraction(call)
   );
   await scanSite(admin, deps);
@@ -287,13 +352,13 @@ Deno.test('a rejected record stays rejected when the next scan finds it again', 
 Deno.test('a survey answer is saved first, then becomes confirmed records', async () => {
   const answer = 'They download the app and get 14 days free, no card needed.';
   const { db, admin, deps } = setup((call) => ({
-    ...empty(Object.keys(call.schema.properties as object)),
+    ...empty(offered(call)),
     offer: [
       { key: 'x', title: 'Free trial', excerpt: 'get 14 days free, no card needed', data: { kind: 'trial', terms: '14 days free, no card needed' } },
       { key: 'y', title: 'Discount', excerpt: 'half price for life', data: { kind: 'promotion', terms: 'Half price for life' } },
     ],
   }));
-  await scanSite(admin, { ...deps, generate: ((req: Call) => Promise.resolve({ data: siteExtraction(req), model: 'test-model' })) as unknown as BrainDeps['generate'] });
+  await scanSite(admin, { ...deps, generate: ((req: Call) => Promise.resolve({ data: asRecords(siteExtraction(req)), model: 'test-model' })) as unknown as BrainDeps['generate'] });
   const scanned = facts(db).find((f) => f.key === 'trial')!;
 
   const out = await recordSurveyAnswer(admin, CO, 'offer', answer, USER, deps);
@@ -454,7 +519,7 @@ Deno.test('parseVoiceReferences reads each link, the note beside it and which wa
 });
 
 Deno.test('a voice answer with links becomes liked and disliked references the brain context returns', async () => {
-  const { db, admin, deps } = setup((call) => empty(Object.keys(call.schema.properties as object)));
+  const { db, admin, deps } = setup((call) => empty(offered(call)));
   const answered = await recordSurveyAnswer(admin, CO, 'voice', VOICE_ANSWER, USER, deps);
   const analysis = (url: string): ReferenceAnalysis => ({
     version: 2, url, platform: 'tiktok', media: 'video', duration_ms: 20000, author: 'planner', caption: `caption for ${url}`, hashtags: [],

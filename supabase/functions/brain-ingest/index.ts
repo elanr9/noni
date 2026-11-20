@@ -22,12 +22,18 @@
 // to EdgeRuntime.waitUntil work too. One model call per source can take most
 // of a minute, so a whole scan does not fit in one invocation. The run is
 // therefore a row (brain_ingest) plus state that is already in the tables:
-// a source with extracted_at null still needs extracting, a chunk with no
-// embedding still needs embedding. Each invocation takes a short lease on
+// a source with extracted_at null still needs extracting. Each invocation takes a short lease on
 // the row, does steps until about 40 s have passed, releases the lease and,
 // if work remains, calls itself for the next slice. If that hand-off is ever
 // lost, the client's next 'status' poll finds a running row with no lease and
 // picks the work up. Nothing is redone: every step is recorded as it lands.
+//
+// Embedding is not done here at all. The runtime's embedder burns the
+// worker's own CPU and a worker over its CPU allowance is killed with nothing
+// to catch, which used to end a run mid-scan and leave it "running" for good.
+// The embed phase only asks brain-embed to start; that function works through
+// the passages and records a few per request on its own workers, and the scan
+// does not wait for it (search uses words until the vectors land).
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
@@ -35,26 +41,32 @@ import {
   addSource,
   type BrainSource,
   computeCoverage,
-  embedPending,
+  EXTRACT_TIMEOUT_MS,
   extractFacts,
   importLegacyBrain,
+  kickEmbed,
   suggestSurveyAnswers,
 } from '../_shared/ai/brain.ts';
 import type { BrainFact, SourceKind } from '../_shared/ai/contracts.ts';
 import { brainCaller, text } from '../_shared/ai/brainHttp.ts';
-import { assertSafePublicHttpUrl, crawlSite, stripHtml } from '../_shared/crawlSite.ts';
+import { assertSafePublicHttpUrl, crawlPages, stripHtml } from '../_shared/crawlSite.ts';
 import { adminClient, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 // A step is only started inside this window. The longest step is an
-// extraction round (model timeout 100 s), so an invocation ends by about 140 s.
+// extraction round (one model call per source, all at once, each cut off at
+// EXTRACT_TIMEOUT_MS), so an invocation ends by about 140 s.
 const START_BUDGET_MS = 40_000;
-const LEASE_MS = 170_000;
+// Held a little longer than the longest invocation can live, so a slice that
+// is still working is never joined by a second one.
+const LEASE_MS = START_BUDGET_MS + EXTRACT_TIMEOUT_MS + 30_000;
 const MAX_HOPS = 20;
-const EXTRACT_PARALLEL = 3;
+// A site scan leaves about ten sources (pages, a store listing, reviews): read them in one round.
+const EXTRACT_PARALLEL = 8;
 const MAX_EXTRACT_ATTEMPTS = 2;
-const MAX_EMBED_ROUNDS = 60;
+// A site with less text than this across all its pages drew itself in JavaScript; there is nothing to read.
+const MIN_SITE_CHARS = 400;
 const PART_CHARS = 20_000;
 const MAX_TEXT_CHARS = 200_000;
 const UPLOAD_BUCKET = 'brain-uploads';
@@ -136,24 +148,31 @@ async function addText(
   return created;
 }
 
-async function crawlWebsite(admin: SupabaseClient, companyId: string, website: string): Promise<void> {
-  const base = assertSafePublicHttpUrl(website);
-  const crawled = await crawlSite(base.href);
-  if (!crawled.trim()) throw new Error('The website returned no readable text');
-  // crawlSite joins pages as "<home>\n[Page /path]\n<text>"; split them back
-  // so every record can point at the page it came from.
-  const pieces = crawled.split(/\n\[Page ([^\]\n]+)\]\n/);
-  const pages = [{ path: base.pathname || '/', content: pieces[0] }];
-  for (let i = 1; i + 1 < pieces.length; i += 2) pages.push({ path: pieces[i], content: pieces[i + 1] });
-  for (const page of pages) {
-    if (page.content.trim().length < 80) continue;
+/** Reads the site's best pages, one source per page, and returns what else it noticed. */
+async function crawlWebsite(admin: SupabaseClient, companyId: string, inputs: Inputs): Promise<string[]> {
+  const { pages, storeLinks } = await crawlPages(inputs.website!);
+  const readable = pages.filter((page) => page.text.trim().length >= 80);
+  if (readable.reduce((sum, page) => sum + page.text.length, 0) < MIN_SITE_CHARS) {
+    throw new Error('The website has too little readable text. Paste a description of the product instead, or add an App Store link.');
+  }
+  const host = new URL(readable[0].url).hostname.replace(/^www\./, '');
+  for (const page of readable) {
     await addText(admin, companyId, {
       kind: 'website_page',
-      content: page.content,
-      url: new URL(page.path, base).href,
-      title: `${base.hostname}${page.path === '/' ? '' : page.path}`,
+      content: page.text,
+      url: page.url,
+      title: `${host}${page.path === '/' ? '' : page.path}`,
     });
   }
+  const notes: string[] = [];
+  // A store link on the home page is the company pointing at its own listing: read it when none was given.
+  const store = storeLinks.find((link) => link.includes('apps.apple.com')) ?? storeLinks[0];
+  if (store && !(inputs.app_store_urls ?? []).length) {
+    await readStore(admin, companyId, store)
+      .then(() => notes.push('Read the app store listing linked from your site'))
+      .catch(() => undefined);
+  }
+  return notes;
 }
 
 async function fetchJson(url: string): Promise<Record<string, unknown>> {
@@ -267,7 +286,7 @@ async function step(admin: SupabaseClient, row: IngestRow): Promise<boolean> {
       if (item === 'legacy') {
         const out = await importLegacyBrain(admin, companyId);
         if (out.sources || out.facts) progress.notes.push(`Imported ${out.sources} existing documents and ${out.facts} records`);
-      } else if (item.startsWith('website:')) await crawlWebsite(admin, companyId, row.inputs.website!);
+      } else if (item.startsWith('website:')) progress.notes.push(...(await crawlWebsite(admin, companyId, row.inputs)));
       else if (item.startsWith('store:')) await readStore(admin, companyId, item.slice('store:'.length));
       else {
         const doc = (row.inputs.documents ?? []).find((d) => `doc:${d.bucket}/${d.path}` === item);
@@ -293,6 +312,20 @@ async function step(admin: SupabaseClient, row: IngestRow): Promise<boolean> {
       .limit(EXTRACT_PARALLEL);
     const sources = (pending ?? []) as BrainSource[];
     if (!sources.length) {
+      // Sources were read but none could be turned into records, and the brain is still empty:
+      // say so plainly instead of finishing a scan that found nothing.
+      const failedExtracts = progress.failed.filter((f) => f.input.startsWith('extract:'));
+      if (failedExtracts.length) {
+        const { count } = await admin.from('brain_facts').select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+        if (!count) {
+          await patchRow(admin, companyId, {
+            status: 'failed',
+            error: 'We read your pages but could not pull facts from them. Scan again in a minute.',
+            finished_at: new Date().toISOString(),
+          });
+          return false;
+        }
+      }
       await patchRow(admin, companyId, { phase: 'embed' });
       return true;
     }
@@ -319,19 +352,9 @@ async function step(admin: SupabaseClient, row: IngestRow): Promise<boolean> {
   }
 
   if (row.phase === 'embed') {
-    // Vectors are a refinement: search falls back to words without them, so a
-    // failure here is noted and the run moves on.
-    const embedded = await embedPending(admin, companyId, { limit: 16 }).catch((err) => {
-      progress.notes.push(`Embedding skipped: ${err instanceof Error ? err.message : 'failed'}`);
-      return -1;
-    });
-    // The round cap stops a row that can never be embedded from holding the run here.
-    const rounds = Number((row.progress as { embed_rounds?: number }).embed_rounds ?? 0) + 1;
-    const finished = embedded <= 0 || rounds >= MAX_EMBED_ROUNDS;
-    await patchRow(admin, companyId, {
-      ...(finished ? { phase: 'suggest' as const } : {}),
-      progress: { ...progress, embed_rounds: finished ? 0 : rounds } as Progress,
-    });
+    // Vectors are a refinement made elsewhere (see the note at the top): start them and move on.
+    await kickEmbed(companyId);
+    await patchRow(admin, companyId, { phase: 'suggest' });
     return true;
   }
 
@@ -478,6 +501,18 @@ Deno.serve(async (req) => {
     // Keep the company's website on record the first time one is given, as research-company does.
     const { data: company } = await admin.from('companies').select('website').eq('id', companyId).maybeSingle();
     if (company && !company.website) await admin.from('companies').update({ website: inputs.website }).eq('id', companyId);
+  }
+
+  // A source whose extraction was given up last time gets another go: the
+  // page has not changed, so reading it again would not create a new source.
+  const { data: gaveUp } = await admin
+    .from('brain_sources')
+    .select('id, meta')
+    .eq('company_id', companyId)
+    .not('extract_error', 'is', null);
+  for (const source of (gaveUp ?? []) as Array<{ id: string; meta: Record<string, unknown> | null }>) {
+    const { extract_attempts: _attempts, ...meta } = source.meta ?? {};
+    await admin.from('brain_sources').update({ extracted_at: null, extract_error: null, meta }).eq('id', source.id);
   }
 
   // A new start adds to whatever ran before: inputs already read are not read

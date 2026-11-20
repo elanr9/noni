@@ -498,3 +498,7 @@ verify_jwt = false
 
 [functions.notify-lead]
 verify_jwt = false
+
+# Internal: service role key from the brain functions, x-cron-secret from the sweep job.
+[functions.brain-embed]
+verify_jwt = false

@@ -448,12 +448,16 @@ describe('schema', () => {
       }
       if (n.items) strict(n.items, `${path}[]`);
     };
+    const typesOf = (schema: Record<string, unknown>): string[] =>
+      (schema.properties as { records: { items: { properties: { type: { enum: string[] } } } } }).records.items.properties.type.enum;
     const schema = extractionSchema(allowedEntityTypes(5));
     strict(schema, '$');
-    expect(Object.keys(schema.properties as object).sort()).toEqual(['alternative', 'objection', 'pain', 'persona', 'quote']);
+    expect([...typesOf(schema)].sort()).toEqual(['alternative', 'objection', 'pain', 'persona', 'quote']);
     strict(extractionSchema(allowedEntityTypes(3)), '$');
     // No nullable fields: structured outputs cap how many a schema may have.
     expect(JSON.stringify(extractionSchema(allowedEntityTypes(3)))).not.toContain('null');
+    // Small on purpose: a schema with typed fields per entity is refused as too large a grammar.
+    expect(JSON.stringify(extractionSchema(allowedEntityTypes(3))).length).toBeLessThan(2500);
   });
 
   it('never asks the extractor for media and gives every entity a lead field', () => {

@@ -28,7 +28,7 @@ import {
   computeCoverage,
   confirmFact,
   editFact,
-  embedPending,
+  settleEmbeddings,
   ENTITIES,
   ENTITY_TYPES,
   FACT_COLUMNS,
@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
     if (!caller.canWrite) return jsonResponse({ error: 'forbidden' }, 403);
 
     const factId = text(body.fact_id);
-    const settle = () => embedPending(admin, companyId, { limit: 4 }).catch(() => 0);
+    const settle = () => settleEmbeddings(admin, companyId);
     if (action === 'confirm' || action === 'edit' || action === 'reject') {
       if (!factId) return jsonResponse({ error: 'fact_id is required' }, 400);
       const fact = action === 'confirm'
