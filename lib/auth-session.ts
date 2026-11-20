@@ -72,7 +72,10 @@ function getQueryParams(input: string): { params: Record<string, string>; errorC
       params[key] = value;
     });
   }
-  return { params, errorCode };
+  // Supabase reports a refused sign-in (no invite for that email, say) as
+  // error and error_description on the redirect; show its words.
+  const refused = params.error_description || params.error || null;
+  return { params, errorCode: errorCode ?? (refused ? refused.replace(/\+/g, ' ') : null) };
 }
 
 export async function createSessionFromUrl(url: string): Promise<boolean> {
