@@ -7,6 +7,8 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { sendEmail } from '../_shared/email.ts';
+import { inviteEmail } from '../_shared/inviteEmail.ts';
 
 const WEB_URL = 'https://www.usenoni.app';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,31 +46,13 @@ async function sendAdminInviteEmail(
   companyName: string,
   token: string,
 ): Promise<void> {
-  const apiKey = Deno.env.get('RESEND_API_KEY');
-  if (!apiKey) throw new Error('RESEND_API_KEY not set');
-  const from = Deno.env.get('INVITE_FROM_EMAIL') ?? 'Noni <founders@usenoni.app>';
-  const link = `${WEB_URL}/invite/${token}/accept`;
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [email],
-      subject: `You are the admin for ${companyName} on Noni`,
-      html: [
-        `<p><strong>${companyName}</strong> is set up on Noni and this email address is its admin.</p>`,
-        `<p><a href="${WEB_URL}"><strong>Go to usenoni.app</strong></a> and sign in with Google using this email (${email}). You will be walked through setup, then manage your brand, budget, billing, and campaign managers from the web dashboard.</p>`,
-        `<p>Already using Noni with this email? <a href="${link}">Accept your invite here</a> instead.</p>`,
-        `<p>This invite expires in 14 days. If you were not expecting this email you can ignore it.</p>`,
-      ].join('\n'),
-    }),
+  const { subject, content } = inviteEmail({
+    email,
+    companyName,
+    role: 'company_admin',
+    token,
   });
-  if (!res.ok) {
-    throw new Error(`Resend ${res.status}: ${await res.text()}`);
-  }
+  await sendEmail({ to: email, subject, content });
 }
 
 Deno.serve(async (req) => {

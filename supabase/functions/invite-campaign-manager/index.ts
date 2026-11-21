@@ -22,10 +22,10 @@
 
 import type { SupabaseClient, User } from 'npm:@supabase/supabase-js@2';
 import { adminClient, handleCors, hasPermission, jsonResponse } from '../_shared/wp8.ts';
+import { sendEmail } from '../_shared/email.ts';
+import { inviteEmail } from '../_shared/inviteEmail.ts';
 import { creatorInviteBlock, gateAudience } from '../_shared/plan.ts';
 
-const INVITE_BASE_URL = 'https://www.usenoni.app/invite/';
-const APP_STORE_URL = 'https://apps.apple.com/app/id6799189794';
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -115,56 +115,30 @@ async function sendInviteEmail(
   role: InviteRole,
   token: string,
   inviteeName?: string,
+  inviterName?: string | null,
 ): Promise<void> {
-  const apiKey = Deno.env.get('RESEND_API_KEY');
-  if (!apiKey) throw new Error('RESEND_API_KEY not set');
-  const from = Deno.env.get('INVITE_FROM_EMAIL') ?? 'Noni <founders@usenoni.app>';
-  const link = `${INVITE_BASE_URL}${token}/accept`;
-  const greeting = inviteeName?.trim() ? `<p>Hi ${inviteeName.trim()},</p>\n` : '';
-
-  const body =
-    role === 'company_admin'
-      ? [
-          `<p>You have been invited to run <strong>${companyName}</strong> on Noni.</p>`,
-          `<p><a href="${link}"><strong>Set up your company on usenoni.app</strong></a> by signing in with Google using this email address (${email}). You will be taken through onboarding, then into your company dashboard.</p>`,
-          `<p>This invite expires in 14 days. If you were not expecting this email you can ignore it.</p>`,
-        ].join('\n')
-      : role === 'campaign_manager'
-        ? [
-            `<p>You have been invited to manage campaigns for <strong>${companyName}</strong> on Noni.</p>`,
-            `<p><a href="${APP_STORE_URL}"><strong>Download Noni on the App Store</strong></a> and sign in with Google using this email address (${email}). Your account will be set up as a campaign manager for ${companyName} automatically.</p>`,
-            `<p>Already using Noni with this email? <a href="${link}">Accept your invite here</a> instead.</p>`,
-            `<p>This invite expires in 14 days. If you were not expecting this email you can ignore it.</p>`,
-          ].join('\n')
-        : [
-            `<p>You have been invited to create content for <strong>${companyName}</strong> on Noni.</p>`,
-            `<p><a href="${APP_STORE_URL}"><strong>Download Noni on the App Store</strong></a> and sign in with Google using this email address (${email}). Your account will be set up as a creator for ${companyName} automatically.</p>`,
-            `<p>Already using Noni with this email? <a href="${link}">Accept your invite here</a> instead.</p>`,
-            `<p>This invite expires in 14 days. If you were not expecting this email you can ignore it.</p>`,
-          ].join('\n');
-  const html = greeting + body;
-
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [email],
-      subject:
-        role === 'company_admin'
-          ? `You are invited to run ${companyName} on Noni`
-          : role === 'campaign_manager'
-            ? `You are invited to manage ${companyName} on Noni`
-            : `You are invited to create for ${companyName} on Noni`,
-      html,
-    }),
+  const { subject, content } = inviteEmail({
+    email,
+    companyName,
+    role,
+    token,
+    inviteeName,
+    inviterName,
   });
-  if (!res.ok) {
-    throw new Error(`Resend ${res.status}: ${await res.text()}`);
-  }
+  await sendEmail({ to: email, subject, content });
+}
+
+/** The inviter's name for the email, when they are a person at the company
+    (not Noni ops provisioning a company). */
+async function inviterName(admin: SupabaseClient, userId: string): Promise<string | null> {
+  const { data } = await admin
+    .from('profiles')
+    .select('full_name, role')
+    .eq('id', userId)
+    .maybeSingle();
+  if (!data || data.role === 'admin') return null;
+  const name = typeof data.full_name === 'string' ? data.full_name.trim() : '';
+  return name || null;
 }
 
 async function companyName(
@@ -302,7 +276,14 @@ async function handleInvite(
     .single();
   if (error) throw error;
 
-  await sendInviteEmail(email, name, role, (invite as InviteRow).token, body.name);
+  await sendInviteEmail(
+    email,
+    name,
+    role,
+    (invite as InviteRow).token,
+    body.name,
+    await inviterName(admin, user.id),
+  );
   return jsonResponse({ invite });
 }
 
@@ -345,7 +326,14 @@ async function handleResend(
 
   const row = invite as InviteRow;
   const name = await companyName(admin, row.company_id);
-  await sendInviteEmail(row.email, name ?? 'a company', row.role, row.token);
+  await sendInviteEmail(
+    row.email,
+    name ?? 'a company',
+    row.role,
+    row.token,
+    undefined,
+    await inviterName(admin, user.id),
+  );
   return jsonResponse({ invite });
 }
 

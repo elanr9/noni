@@ -28,6 +28,7 @@
 import Anthropic from 'npm:@anthropic-ai/sdk@1.10.0';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
+import { type EmailContent, greet, sendEmail } from '../_shared/email.ts';
 import { adminClient, corsHeaders, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -483,26 +484,56 @@ function sse(obj: unknown): Uint8Array {
 // ---------------------------------------------------------------- decisions
 
 async function sendDecisionEmail(app: App, approved: boolean, note: string | null): Promise<void> {
-  const apiKey = Deno.env.get('RESEND_API_KEY');
-  if (!apiKey || !app.email) return;
-  const from = Deno.env.get('INVITE_FROM_EMAIL') ?? 'Noni <founders@usenoni.app>';
-  const first = String(app.full_name ?? '').trim().split(/\s+/)[0] || 'there';
+  if (!Deno.env.get('RESEND_API_KEY') || !app.email) return;
+  const name = typeof app.full_name === 'string' ? app.full_name : null;
+  const company = app.kind === 'company';
   const subject = approved
-    ? app.kind === 'company'
+    ? company
       ? "You're in. Your Noni workspace is open"
-      : "You're in. Start applying to brands on Noni"
+      : "You're in. Welcome to Noni"
     : 'About your Noni application';
-  const body = approved
-    ? app.kind === 'company'
-      ? `<p>Hi ${first},</p><p>Your workspace is open. <a href="${WEB_URL}/apply"><strong>Sign in at usenoni.app</strong></a> with this Google account to set up your first campaign.</p>`
-      : `<p>Hi ${first},</p><p>You're approved as a Noni creator. <a href="${WEB_URL}/apply"><strong>Sign in at usenoni.app</strong></a> with this Google account and get the app to start applying to brands.</p>`
-    : `<p>Hi ${first},</p><p>Thanks for applying to Noni. We can't take you on right now.${note ? ` ${note}` : ''}</p><p>You're welcome to apply again later.</p>`;
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [app.email], subject, html: body }),
-  });
-  if (!res.ok) console.error('apply-chat email', res.status, await res.text());
+  const content: EmailContent = approved
+    ? company
+      ? {
+          preview: 'Sign in with Google to set up your first campaign.',
+          heading: "You're in. Your workspace is open",
+          paragraphs: [
+            greet(name, "we read your application and we'd love to work with you. Your Noni workspace is open and ready to set up."),
+          ],
+          cta: { label: 'Open your workspace', url: `${WEB_URL}/apply` },
+          steps: [
+            `Sign in with Google as ${app.email}.`,
+            'Answer a few quick questions while Noni reads your website.',
+            'Pick a plan and your creators can start posting.',
+          ],
+        }
+      : {
+          preview: 'Sign in and start applying to brands.',
+          heading: "You're in. Welcome to Noni",
+          paragraphs: [
+            greet(name, "you're approved as a Noni creator. Brands post what they need, you apply to the ones you like, and you get paid for every post that goes live."),
+          ],
+          cta: { label: 'Sign in to Noni', url: `${WEB_URL}/apply` },
+          steps: [
+            `Sign in with Google as ${app.email}.`,
+            'Get the Noni app on your iPhone.',
+            'Apply to brands in the Market tab.',
+          ],
+        }
+    : {
+        preview: 'An update on your application.',
+        heading: 'About your Noni application',
+        paragraphs: [
+          greet(name, "thanks for applying to Noni. We can't take you on right now."),
+          ...(note ? [note] : []),
+          "You're welcome to apply again later.",
+        ],
+      };
+  try {
+    await sendEmail({ to: app.email, subject, content });
+  } catch (e) {
+    console.error('apply-chat email', e instanceof Error ? e.message : e);
+  }
 }
 
 // ---------------------------------------------------------------- handler
