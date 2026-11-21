@@ -28,6 +28,11 @@ void SplashScreen.preventAutoHideAsync();
 /** The TikTok Sans instance every on-screen text preview draws with. */
 const OVERLAY_FONTS = {
   [OVERLAY_TEXT_SPEC.bubble.fontFamily]: require('../assets/fonts/TikTokSans-Bubble.ttf'),
+  // The other font choices of the slide and story editor (ST_FONT_FACES).
+  'TikTokSans-Heavy': require('../assets/fonts/TikTokSans-Heavy.ttf'),
+  'Gelasio-Serif': require('../assets/fonts/Gelasio-Serif.ttf'),
+  'CourierPrime-Bold': require('../assets/fonts/CourierPrime-Bold.ttf'),
+  'Nunito-Round': require('../assets/fonts/Nunito-Round.ttf'),
 };
 
 /** Overlay text plus the v2 icon font instances. */

@@ -10,7 +10,28 @@ import type { TextStyle } from 'react-native';
 import type { StText, StTextStyle } from './brief-library';
 import { OVERLAY_TEXT_SPEC, overlayBoxFill, overlayTextContrast } from './overlay-boxes';
 
-export const ST_FONTS: readonly string[] = ['System', 'Georgia', 'Arial Black', 'Courier New', 'Trebuchet MS'];
+/**
+ * The font choices of the slide and story editor, by the index a text stores
+ * in `font`. Classic and Bold are cut from TikTok Sans (wght 600 and 900);
+ * Serif, Typewriter and Round are open licensed faces close to the platform
+ * ones (Gelasio 700, Courier Prime 700, Nunito 800). Each `family` is a file
+ * in assets/fonts registered in app/_layout.tsx, and `weight` is the weight
+ * that file was cut at, so no platform ever fakes a bold.
+ */
+export const ST_FONT_FACES: readonly { name: string; family: string; weight: TextStyle['fontWeight'] }[] = [
+  { name: 'Classic', family: OVERLAY_TEXT_SPEC.bubble.fontFamily, weight: OVERLAY_TEXT_SPEC.bubble.fontWeight },
+  { name: 'Serif', family: 'Gelasio-Serif', weight: '700' },
+  { name: 'Bold', family: 'TikTokSans-Heavy', weight: '900' },
+  { name: 'Typewriter', family: 'CourierPrime-Bold', weight: '700' },
+  { name: 'Round', family: 'Nunito-Round', weight: '800' },
+];
+
+/** The face a stored font index draws with; unknown indexes draw Classic. */
+export function stFontFace(font: number): (typeof ST_FONT_FACES)[number] {
+  return ST_FONT_FACES[font] ?? ST_FONT_FACES[0];
+}
+
+export const ST_FONTS: readonly string[] = ST_FONT_FACES.map((f) => f.family);
 
 const DARK = '#0B0B0C';
 
@@ -26,9 +47,8 @@ export function stRender(x: Pick<StText, 'size' | 'color' | 'style' | 'align' | 
   const style: StTextStyle = x.style;
   const boxed = style === 'bg' || style === 'inv-bg';
   const spec = boxed ? OVERLAY_TEXT_SPEC.bubble : OVERLAY_TEXT_SPEC.condensed;
-  const base: { -readonly [K in keyof TextStyle]: TextStyle[K] } = { color: x.color, fontSize: size, lineHeight: Math.round(size * spec.lineHeight), fontFamily: spec.fontFamily, fontWeight: spec.fontWeight, textAlign: x.align };
-  if (x.font === 1) base.fontFamily = 'Georgia';
-  if (x.font === 3) base.fontFamily = 'Courier New';
+  const face = stFontFace(x.font);
+  const base: { -readonly [K in keyof TextStyle]: TextStyle[K] } = { color: x.color, fontSize: size, lineHeight: Math.round(size * spec.lineHeight), fontFamily: face.family, fontWeight: face.weight, textAlign: x.align };
   const box: StRender['box'] = {};
   let strokeColor: string | null = null;
   /* StTextView offsets its stroke copies by half of this. */

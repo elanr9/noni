@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { stText, uid, type ClipDoc, type GsMedia, type StOverlay, type StText, type StTextStyle } from '../../../../lib/brief-library';
 import { useKeyboardHeight } from '../../../../lib/keyboard';
-import { ST_FONTS, stRender } from '../../../../lib/st-text';
+import { ST_FONT_FACES, ST_FONTS, stRender } from '../../../../lib/st-text';
 import { color, editor, motion } from '../../../../theme/v2';
 import { GradientFill, MediaFill } from '../../../admin/v2/newbrief/ClipFrame';
 import { MediaPickerSheet } from '../../../admin/v2/newbrief/MediaPickerSheet';
@@ -23,7 +23,6 @@ import { TikTokChrome } from './TikTokChrome';
 const ST_SWATCH: readonly string[] = editor.swatch;
 const ST_STYLES: StTextStyle[] = ['none', 'inv-bg', 'bg', 'outline'];
 const STYLE_ICON: Record<string, IconName> = { none: 'title', 'inv-bg': 'format_color_fill', bg: 'invert_colors', outline: 'border_color', 'inv-outline': 'border_color' };
-const FONT_NAMES = ['Classic', 'Serif', 'Bold', 'Typewriter', 'Round'];
 /** Where text may sit, percent of the frame: clear of the side rail and the caption. */
 const SAFE = { l: 15, r: 78, t: 4, b: 92 };
 const ST_BG: [string, string] = [editor.panelTop, editor.panel];
@@ -332,8 +331,8 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
                 {hasRange ? <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: editor.w70, marginBottom: -6 }}>Styling selected words</Text> : null}
                 {tab === 'font' ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
-                    {FONT_NAMES.map((l, i) => (
-                      <View key={l}>{optBtn(editT.font === i, () => upd(editT.id, { font: i }), <Text style={{ fontSize: 14, fontWeight: '600', color: editT.font === i ? editor.black : editor.white, fontFamily: i === 1 ? 'Georgia' : i === 3 ? 'Courier New' : undefined }}>{l}</Text>, 72)}</View>
+                    {ST_FONT_FACES.map((f, i) => (
+                      <View key={f.name}>{optBtn(editT.font === i, () => upd(editT.id, { font: i }), <Text style={{ fontSize: 14, fontWeight: f.weight, fontFamily: f.family, color: editT.font === i ? editor.black : editor.white }}>{f.name}</Text>, 84)}</View>
                     ))}
                   </ScrollView>
                 ) : tab === 'align' ? (
