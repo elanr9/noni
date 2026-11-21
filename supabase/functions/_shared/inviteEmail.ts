@@ -4,7 +4,12 @@
 import { type EmailContent, greet } from './email.ts';
 
 const INVITE_BASE_URL = 'https://www.usenoni.app/invite/';
-const APP_STORE_URL = 'https://apps.apple.com/app/id6799189794';
+// Noni is on TestFlight until the App Store listing is live, and the listing
+// link opens "App Not Available" until then. So the button goes to the invite
+// page on the web, which walks the person through getting the beta. When the
+// app is on the App Store, set this to the listing and the email links
+// straight to it again.
+const APP_STORE_URL: string | null = null;
 
 export type InviteEmailRole = 'company_admin' | 'campaign_manager' | 'creator';
 
@@ -22,6 +27,9 @@ export function inviteEmail(input: {
   const link = `${INVITE_BASE_URL}${input.token}/accept`;
   const name = input.inviteeName;
   const from = input.inviterName?.trim();
+  const getApp = APP_STORE_URL
+    ? { label: 'Get Noni on the App Store', url: APP_STORE_URL }
+    : { label: 'Get the Noni app', url: `${INVITE_BASE_URL}${input.token}` };
   const footnote = `This invite is for ${email} and expires in 14 days. Not expecting it? You can ignore this email.`;
 
   if (role === 'company_admin') {
@@ -71,9 +79,11 @@ export function inviteEmail(input: {
           ? 'You will send briefs, review what creators post and see how every post performs.'
           : 'You get briefs that tell you exactly what to film, you post on your own account, and you get paid for every post that goes live.',
       ],
-      cta: { label: 'Get Noni on the App Store', url: APP_STORE_URL },
+      cta: getApp,
       steps: [
-        'Download Noni on your iPhone.',
+        APP_STORE_URL
+          ? 'Download Noni on your iPhone.'
+          : 'Open this on your iPhone and install Noni through TestFlight, Apple\'s app for beta apps.',
         `Sign in with Google as ${email}.`,
         role === 'campaign_manager'
           ? `You land in ${companyName}, ready to go.`

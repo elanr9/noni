@@ -6,14 +6,14 @@
 // that company's single admin.
 //
 // campaign_manager invites: sent by the company admin (or a manager holding
-// invite_members, or the platform admin). The email routes to the App Store;
+// invite_members, or the platform admin). The email routes to the web invite page (TestFlight until the App Store listing is live);
 // signing in with Google on the invited email creates the manager with the
 // preset permission toggles from the invite (all off unless the admin chose
 // otherwise).
 //
 // creator invites: sent by the company admin from the web dashboard, or by
 // a campaign manager when companies.settings.manager_access.invite_creators
-// is on. The email routes to the App Store; signing in with Google on the
+// is on. The email routes to the web invite page (TestFlight until the App Store listing is live); signing in with Google on the
 // invited email creates the creator on the inviting company.
 //
 // Existing accounts accept from https://www.usenoni.app/invite/[token] while
