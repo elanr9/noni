@@ -19,7 +19,8 @@ export function stSegments(x: Pick<StText, 'text' | 'spans'>): { text: string; c
 
 /**
  * One on-screen text placed in a frame of `width` x `height` (percent coordinates,
- * centred on x,y). Outline styles draw the stroke as offset copies under the fill.
+ * centred on x,y). Outline styles draw the stroke as offset copies under the fill;
+ * each copy is pinned to the fill's own width so it wraps on the same words.
  */
 export function StTextView({ x, width, height, style }: { x: StText; width: number; height: number; style?: StyleProp<ViewStyle> }) {
   const scale = width / 300;
@@ -42,7 +43,7 @@ export function StTextView({ x, width, height, style }: { x: StText; width: numb
     >
       <View style={[r.box, { alignSelf: x.align === 'left' ? 'flex-start' : x.align === 'right' ? 'flex-end' : 'center' }]}>
         {offsets.map(([dx, dy], i) => (
-          <Text key={i} allowFontScaling={false} style={[r.text, { position: 'absolute', left: (r.box.paddingHorizontal ?? 0) + dx * sw, top: (r.box.paddingVertical ?? 0) + dy * sw, color: r.strokeColor ?? undefined, textShadowColor: 'transparent' }]}>
+          <Text key={i} allowFontScaling={false} style={[r.text, { position: 'absolute', left: (r.box.paddingHorizontal ?? 0) + dx * sw, right: (r.box.paddingHorizontal ?? 0) - dx * sw, top: (r.box.paddingVertical ?? 0) + dy * sw, color: r.strokeColor ?? undefined, textShadowColor: 'transparent' }]}>
             {x.text}
           </Text>
         ))}

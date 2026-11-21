@@ -140,10 +140,6 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
   const editT = editing && selT ? selT : null;
   const sliderVal = selO ? (selO.w - 20) / 80 : selT ? (Math.min(selT.w || 60, SAFE.r - SAFE.l) - 24) / (SAFE.r - SAFE.l - 24) : 0;
 
-  const slider = Gesture.Pan()
-    .runOnJS(true)
-    .onBegin((e) => sliderAt(e.y))
-    .onUpdate((e) => sliderAt(e.y));
   const sliderAt = (y: number) => {
     const p = 1 - Math.max(0, Math.min(1, y / 232));
     const lo = selO ? 20 : 24;
@@ -155,6 +151,10 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
       upd(selT.id, { w, x: Math.max(SAFE.l + half, Math.min(SAFE.r - half, selT.x)) });
     }
   };
+  const slider = Gesture.Pan()
+    .runOnJS(true)
+    .onBegin((e) => sliderAt(e.y))
+    .onUpdate((e) => sliderAt(e.y));
 
   const panelH = editing ? 136 : 104;
   const scrY = useSharedValue(1);
@@ -308,7 +308,7 @@ export function StoryEditor({ doc, onChange, photo, green, title, script, onScri
             </Pressable>
 
             {!editing ? (
-              <View style={{ position: 'absolute', right: 10, top: 132, gap: 14, zIndex: 2 }}>
+              <View style={{ position: 'absolute', right: 10, top: 100, gap: 12, zIndex: 2 }}>
                 {rail('text_fields', addText, 'Text')}
                 {rail('add_photo_alternate', () => setPick(true), 'Overlay')}
               </View>
