@@ -1088,7 +1088,7 @@ export function bulletText(text: string): string {
   return plainText(text).replace(/\s+/g, ' ').replace(/[.;,\s]+$/, '').slice(0, 90);
 }
 
-const SHORTS_SYSTEM = `Each line below is one sentence from a company summary used to brief creators who film short videos about its product. Rewrite each as one bullet of at most nine words, the way you would jot it on a whiteboard, keeping its key. No full stop, no product name at the start, no "and" chains, no hype words, no dashes. Say the concrete thing: what it is, who they are, what the user gets.`;
+const SHORTS_SYSTEM = `Each numbered line below is one sentence from a company summary used to brief creators who film short videos about its product. Rewrite every line as one bullet of at most nine words, the way you would jot it on a whiteboard. Return one bullet per line, in the same order, each with the number of the line it rewrites. No full stop, no product name at the start, no "and" chains, no hype words, no dashes. Say the concrete thing: what it is, who they are, what the user gets.`;
 
 /**
  * Gives every shown line of a stored summary its bullet. Summaries written
@@ -1113,12 +1113,12 @@ export async function ensureSnapshotShorts(
   if (!slots.length) return snapshot;
   try {
     const generate = deps.generate ?? defaultGenerate;
-    const { data } = await generate<{ bullets: Array<{ key: string; short: string }> }>({
+    const { data } = await generate<{ bullets: Array<{ n: number; short: string }> }>({
       task: 'brain.snapshot_shorts',
       tier: 'fast',
       system: SHORTS_SYSTEM,
       context: [],
-      input: slots.map((s) => `${s.key}: ${s.item.title ? `${s.item.title}. ` : ''}${s.item.text}`).join('\n'),
+      input: slots.map((s, i) => `${i + 1}. ${s.item.text}`).join('\n'),
       schema: {
         type: 'object',
         additionalProperties: false,
@@ -1129,8 +1129,8 @@ export async function ensureSnapshotShorts(
             items: {
               type: 'object',
               additionalProperties: false,
-              required: ['key', 'short'],
-              properties: { key: { type: 'string' }, short: { type: 'string' } },
+              required: ['n', 'short'],
+              properties: { n: { type: 'integer' }, short: { type: 'string' } },
             },
           },
         },
@@ -1139,7 +1139,12 @@ export async function ensureSnapshotShorts(
       companyId,
       timeoutMs: 30_000,
     });
-    const byKey = new Map((data.bullets ?? []).map((b) => [b.key, bulletText(b.short ?? '')]));
+    // Matched by the line number the model echoes; by position when it leaves the numbers off.
+    const bullets = data.bullets ?? [];
+    const numbered = bullets.every((b) => Number.isInteger(b.n) && b.n >= 1 && b.n <= slots.length);
+    const byKey = new Map(
+      bullets.map((b, i) => [slots[numbered ? b.n - 1 : i]?.key ?? '', bulletText(b.short ?? '')] as const),
+    );
     const fill = (key: string, item: SnapshotItem | null): SnapshotItem | null =>
       item && byKey.get(key) ? { ...item, short: byKey.get(key)! } : item;
     const updated: CompanySnapshot = {
