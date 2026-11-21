@@ -976,6 +976,8 @@ export async function suggestSurveyAnswers(
 export type SnapshotItem = {
   title: string;
   text: string;
+  /** The same thing as one bullet of a few words, for the Company Brain page. Absent on summaries written before bullets. */
+  short?: string;
   fact_ids: string[];
   status: 'open' | 'confirmed' | 'dismissed';
 };
@@ -1000,15 +1002,18 @@ features: the three to five core features, the things a user actually does with 
 
 viral: the single feature that sells the product on sight in a 20 second video, the moment a viewer thinks "I need that", if there is one (for example "Cut a full game into a highlight video in minutes" or "Email hundreds of coaches in seconds"). It may also appear in features. Leave it out when nothing stands out.
 
+Every item also gets "short": the same point as one bullet of at most nine words, the way you would jot it on a whiteboard. No full stop, no product name at the start, no "and" chains. For sells say what it is ("AI assistant that gets soccer players recruited"), for audience who they are ("High school soccer players and their parents"), for viral the moment itself ("Full game in, highlight video out in minutes"), for a feature what the user gets ("A personal email to every coach").
+
 Write in plain words. No em dashes or en dashes, no hype words, no filler like "seamless", "empower", "unlock" or "game-changer". Use only what the records support. Give the ids of the records each item draws on.`;
 
 const ITEM_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'text', 'fact_ids'],
+  required: ['title', 'text', 'short', 'fact_ids'],
   properties: {
     title: { type: 'string' },
     text: { type: 'string' },
+    short: { type: 'string' },
     fact_ids: { type: 'array', items: { type: 'string' } },
   },
 } as const;
@@ -1028,7 +1033,7 @@ export async function buildCompanySnapshot(
   const facts = (await loadLiveFacts(admin, companyId)).filter((f) => f.usage !== 'blocked');
   if (!facts.length) return null;
 
-  type Raw = { title: string; text: string; fact_ids: string[] };
+  type Raw = { title: string; text: string; short?: string; fact_ids: string[] };
   const { data } = await generate<{ sells: Raw; audience: Raw; features: Raw[]; viral: Raw | null; has_viral: boolean }>({
     task: 'brain.snapshot',
     tier: 'fast',
@@ -1058,6 +1063,7 @@ export async function buildCompanySnapshot(
       ? {
           title: plainText(r.title ?? '').slice(0, 80),
           text: plainText(r.text).slice(0, 400),
+          ...(r.short?.trim() ? { short: bulletText(r.short) } : {}),
           fact_ids: (r.fact_ids ?? []).filter((id) => ids.has(id)),
           status: 'open',
         }
@@ -1075,6 +1081,84 @@ export async function buildCompanySnapshot(
     .upsert({ company_id: companyId, snapshot, updated_at: now.toISOString() }, { onConflict: 'company_id' });
   fail('brain_survey snapshot save', error);
   return snapshot;
+}
+
+/** A bullet: one line, no trailing full stop. */
+export function bulletText(text: string): string {
+  return plainText(text).replace(/\s+/g, ' ').replace(/[.;,\s]+$/, '').slice(0, 90);
+}
+
+const SHORTS_SYSTEM = `Each line below is one sentence from a company summary used to brief creators who film short videos about its product. Rewrite each as one bullet of at most nine words, the way you would jot it on a whiteboard, keeping its key. No full stop, no product name at the start, no "and" chains, no hype words, no dashes. Say the concrete thing: what it is, who they are, what the user gets.`;
+
+/**
+ * Gives every shown line of a stored summary its bullet. Summaries written
+ * before bullets, and lines a person rewrote at length, have none; this
+ * writes them in one fast call and saves. Returns the summary unchanged when
+ * nothing is missing or the call fails.
+ */
+export async function ensureSnapshotShorts(
+  admin: SupabaseClient,
+  companyId: string,
+  snapshot: CompanySnapshot,
+  deps: BrainDeps = {},
+): Promise<CompanySnapshot> {
+  const slots: Array<{ key: string; item: SnapshotItem }> = [];
+  for (const part of ['sells', 'audience', 'viral'] as const) {
+    const item = snapshot[part];
+    if (item && item.status !== 'dismissed' && !item.short) slots.push({ key: part, item });
+  }
+  snapshot.features.forEach((item, i) => {
+    if (item.status !== 'dismissed' && !item.short) slots.push({ key: `feature_${i}`, item });
+  });
+  if (!slots.length) return snapshot;
+  try {
+    const generate = deps.generate ?? defaultGenerate;
+    const { data } = await generate<{ bullets: Array<{ key: string; short: string }> }>({
+      task: 'brain.snapshot_shorts',
+      tier: 'fast',
+      system: SHORTS_SYSTEM,
+      context: [],
+      input: slots.map((s) => `${s.key}: ${s.item.title ? `${s.item.title}. ` : ''}${s.item.text}`).join('\n'),
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['bullets'],
+        properties: {
+          bullets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['key', 'short'],
+              properties: { key: { type: 'string' }, short: { type: 'string' } },
+            },
+          },
+        },
+      },
+      maxTokens: 600,
+      companyId,
+      timeoutMs: 30_000,
+    });
+    const byKey = new Map((data.bullets ?? []).map((b) => [b.key, bulletText(b.short ?? '')]));
+    const fill = (key: string, item: SnapshotItem | null): SnapshotItem | null =>
+      item && byKey.get(key) ? { ...item, short: byKey.get(key)! } : item;
+    const updated: CompanySnapshot = {
+      ...snapshot,
+      sells: fill('sells', snapshot.sells),
+      audience: fill('audience', snapshot.audience),
+      viral: fill('viral', snapshot.viral),
+      features: snapshot.features.map((f, i) => fill(`feature_${i}`, f)!),
+    };
+    const { error } = await admin
+      .from('brain_survey')
+      .update({ snapshot: updated, updated_at: nowOf(deps).toISOString() })
+      .eq('company_id', companyId);
+    fail('brain_survey snapshot save', error);
+    return updated;
+  } catch (e) {
+    console.warn('snapshot bullets skipped:', e instanceof Error ? e.message : e);
+    return snapshot;
+  }
 }
 
 export async function loadCompanySnapshot(admin: SupabaseClient, companyId: string): Promise<CompanySnapshot | null> {
@@ -1117,7 +1201,9 @@ export async function settleSnapshotItem(
             ? { entity_type: 'persona', data: { label: title, situation: text } }
             : { entity_type: 'feature', data: { name: title, description: text } };
       const out = await addManualFact(admin, companyId, { ...typed, title }, userId, deps);
-      next = { title, text, fact_ids: out.fact ? [out.fact.id] : [], status: 'confirmed' };
+      // A line rewritten at bullet length is its own bullet; a longer one gets a fresh bullet on the next read.
+      const short = text.length <= 90 && !text.includes('\n') ? bulletText(text) : undefined;
+      next = { title, text, ...(short ? { short } : {}), fact_ids: out.fact ? [out.fact.id] : [], status: 'confirmed' };
     } else {
       for (const id of current.fact_ids) {
         try {

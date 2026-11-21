@@ -30,6 +30,7 @@
 
 import {
   buildCompanySnapshot,
+  ensureSnapshotShorts,
   computeCoverage,
   loadCompanySnapshot,
   settleSnapshotItem,
@@ -75,7 +76,9 @@ Deno.serve(async (req) => {
     }
     if (action === 'snapshot') {
       const existing = body.rebuild === true ? null : await loadCompanySnapshot(admin, companyId);
-      if (existing) return jsonResponse({ snapshot: existing });
+      if (existing) {
+        return jsonResponse({ snapshot: caller.canWrite ? await ensureSnapshotShorts(admin, companyId, existing) : existing });
+      }
       if (!caller.canWrite) return jsonResponse({ snapshot: null });
       return jsonResponse({ snapshot: await buildCompanySnapshot(admin, companyId) });
     }
