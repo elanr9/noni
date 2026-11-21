@@ -9,7 +9,7 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
-export type PlanTier = 'starter' | 'premium' | 'enterprise';
+export type PlanTier = 'starter' | 'premium' | 'managed' | 'enterprise';
 
 /** Who is told about a block: admins fix it in Billing, managers and ops
     hand it to the company admin. */
@@ -19,6 +19,8 @@ export type GateAudience = 'admin' | 'manager' | 'ops';
 export const PLAN_CREATOR_CAP: Record<PlanTier, number | null> = {
   starter: 5,
   premium: 15,
+  /* Done for you: Noni's team runs the program, so no cap applies. */
+  managed: null,
   enterprise: null,
 };
 
@@ -28,6 +30,8 @@ const STORED_PLAN_TIER: Record<string, PlanTier> = {
   starter_annual: 'starter',
   premium_monthly: 'premium',
   premium_annual: 'premium',
+  managed_monthly: 'managed',
+  managed_annual: 'managed',
 };
 
 /** The in-house testing company. Mirrors IN_HOUSE_COMPANY_ID in noni-web
@@ -43,7 +47,7 @@ export function capUpgradeHint(tier: PlanTier): string {
     return `Starter allows ${cap} creators per campaign. Upgrade to Premium for ${PLAN_CREATOR_CAP.premium}.`;
   }
   if (tier === 'premium') {
-    return `Premium allows ${cap} creators per campaign. Contact us about Enterprise for unlimited creators.`;
+    return `Premium allows ${cap} creators per campaign. Book a call about Enterprise for unlimited creators.`;
   }
   return '';
 }
