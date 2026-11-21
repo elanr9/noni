@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { payOnLive } from '../_shared/pay-on-live.ts';
 import {
   assembleSubmission,
   ensureInstagramSlides,
@@ -645,6 +646,7 @@ Deno.serve(async (req) => {
       provider_post_id: string | null;
       post_url: string | null;
       status: string;
+      posted_at: string | null;
     }> = [];
     let requestId: string | null = null;
     let results: Record<string, PlatformResult> = {};
@@ -703,18 +705,25 @@ Deno.serve(async (req) => {
           provider_post_id: groupRequestId ?? r?.post_id ?? null,
           post_url: r?.url ?? null,
           status: r?.success === false ? 'failed' : r?.url ? 'posted' : 'pending',
+          // The go-live time: creator view pay counts 30 days from here.
+          posted_at: r?.success !== false && r?.url ? new Date().toISOString() : null,
         });
       }
     }
 
     if (postRows.length > 0) {
-      const { error: postsError } = await admin.from('posts').insert(postRows);
+      const { data: inserted, error: postsError } = await admin
+        .from('posts')
+        .insert(postRows)
+        .select('id, status');
       if (postsError) {
         return jsonResponse(
           { error: 'failed to write posts', detail: postsError.message },
           500,
         );
       }
+      const live = (inserted ?? []).find((p) => p.status === 'posted');
+      if (live && target.assignmentId) await payOnLive(admin, target.assignmentId, live.id as string);
     }
 
     const anyPosted = postRows.some(

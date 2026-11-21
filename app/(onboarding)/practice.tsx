@@ -35,7 +35,7 @@ function RecordButton({ running, onPress }: { running: boolean; onPress: () => v
   );
 }
 
-/** Step 5: a throwaway take so the teleprompter feels familiar before the first real post. Nothing records or uploads. */
+/** Step 6: a throwaway take so the teleprompter feels familiar before the first real post. Nothing records or uploads. */
 export default function PracticeScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();

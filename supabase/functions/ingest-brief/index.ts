@@ -125,7 +125,7 @@ function featureSourceLines(feature: BrainFeatureRow, context: string | null): s
   ].filter((p): p is string => p !== null);
   const example = feature.idea_example?.trim();
   const angle = angleParts.length
-    ? `Angle that has worked: ${angleParts.join(' — ')}${example ? ` (${example})` : ''}`
+    ? `Angle that has worked: ${angleParts.join('. ')}${example ? ` (${example})` : ''}`
     : example
       ? `Angle that has worked: ${example}`
       : null;

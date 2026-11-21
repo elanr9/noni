@@ -8,8 +8,8 @@ import { useV2Data } from '../../lib/v2-posts';
 const SUMMARY: PayoutSummary = {
   wallet: { available_cents: 124000, pending_cents: 8000, payout_ready: true } as PayoutSummary['wallet'],
   payouts: [
-    { id: 'p1', amount_cents: 40000, company_id: 'c', creator_id: 'fab', status: 'completed', completed_at: new Date(Date.now() - 3 * 864e5).toISOString(), created_at: null, stripe_transfer_id: null },
-    { id: 'p2', amount_cents: 32000, company_id: 'c', creator_id: 'fab', status: 'completed', completed_at: new Date(Date.now() - 10 * 864e5).toISOString(), created_at: null, stripe_transfer_id: null },
+    { id: 'p1', amount_cents: 40000, status: 'sent', completed_at: new Date(Date.now() - 3 * 864e5).toISOString(), created_at: null },
+    { id: 'p2', amount_cents: 32000, status: 'sent', completed_at: new Date(Date.now() - 10 * 864e5).toISOString(), created_at: null },
   ],
   paidCents: 72000,
 };

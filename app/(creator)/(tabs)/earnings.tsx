@@ -5,6 +5,7 @@ import { EarningsScreen } from '../../../components/creator/v2/EarningsScreen';
 import { useAuth } from '../../../lib/auth';
 import { loadPayoutSummary, type PayoutSummary } from '../../../lib/payouts-api';
 import { toast } from '../../../components/v2/Toast';
+import { NoCompanyYet } from '../../../components/marketplace/NoCompanyYet';
 import { useV2Data } from '../../../lib/v2-posts';
 
 /** Earnings tab: the creator's own analytics and payout figures. */
@@ -50,6 +51,7 @@ export default function CreatorEarnings() {
   );
 
   const mine = useMemo(() => posts.filter((p) => p.creatorId === meId), [posts, meId]);
+  if (profile && !companyId) return <NoCompanyYet title="Earnings" line="You earn $10 a video plus $1 for every 1,000 views. Join a campaign in the Market to start." />;
   return (
     <EarningsScreen
       posts={mine}

@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
       .eq('creator_id', profile.id)
       .maybeSingle();
     if (!wallet) {
-      return jsonResponse({ error: 'wallet not found — open Balance first' }, 400);
+      return jsonResponse({ error: 'Wallet not found. Open Balance first.' }, 400);
     }
     if (!wallet.stripe_connect_account_id) {
       return jsonResponse({ error: 'Connect Stripe first' }, 400);
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
     if (!held?.length) {
       await admin.from('wallet_ledger').delete().eq('payout_id', payout.id);
       await admin.from('payouts').delete().eq('id', payout.id);
-      return jsonResponse({ error: 'Balance changed — try again' }, 409);
+      return jsonResponse({ error: 'Your balance changed. Try again.' }, 409);
     }
 
     let transfer: Stripe.Transfer;

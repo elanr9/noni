@@ -46,9 +46,9 @@ export function mercuryInviteEmail(
       greeting(creatorName) +
       [
         `<p>You are one step away from getting paid for your Noni content.</p>`,
-        `<p><a href="${onboardingUrl}"><strong>Add your payout details</strong></a> — it takes about two minutes. You will enter your bank account and sign a W-9 so we can pay you and handle tax paperwork properly.</p>`,
+        `<p><a href="${onboardingUrl}"><strong>Add your payout details</strong></a>. It takes about two minutes. You will enter your bank account and sign a W-9 so we can pay you and handle tax paperwork properly.</p>`,
         `<p>This form is hosted by Mercury, the bank Noni pays creators through. Your bank details go straight to them; Noni never sees them.</p>`,
-        `<p>When you are done, head back to the Noni app and tap <strong>I'm done setting up</strong>.</p>`,
+        `<p>When you are done, head back to the Noni app and tap <strong>I've finished setup</strong>.</p>`,
         `<p>Payouts run every Sunday evening once your details are in.</p>`,
       ].join('\n'),
   };
@@ -64,10 +64,10 @@ export function mercuryReminderEmail(
     html:
       greeting(creatorName) +
       [
-        `<p>You started setting up payouts a few days ago but we do not have your details yet — so we cannot pay you.</p>`,
+        `<p>You started setting up payouts a few days ago but we do not have your details yet, so we cannot pay you yet.</p>`,
         `<p><a href="${onboardingUrl}"><strong>Finish your payout setup</strong></a>. It takes about two minutes: your bank account and a W-9.</p>`,
         `<p>Anything you have already earned is safe and waiting. It will go out on the first Sunday after your details are in.</p>`,
-        `<p>When you are done, tap <strong>I'm done setting up</strong> in the Noni app.</p>`,
+        `<p>When you are done, tap <strong>I've finished setup</strong> in the Noni app.</p>`,
       ].join('\n'),
   };
 }

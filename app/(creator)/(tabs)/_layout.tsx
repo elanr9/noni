@@ -7,12 +7,13 @@ import { useCompany } from '../../../lib/company-context';
 import { unreadCreatorDmCount } from '../../../lib/creator-inbox-api';
 import { color, screenTransition } from '../../../theme/v2';
 
-// v2 creator shell: Home, Earnings, the raised Create button, Messages, Profile.
+// v2 creator shell: Home, Market, Earnings, the Create button, Messages, Profile.
 // Create opens the sheet over whatever tab is showing.
 const POLL_MS = 20_000;
 
 const ENTRIES: TabBarEntry[] = [
   { kind: 'route', name: 'index', icon: 'home', label: 'Home' },
+  { kind: 'route', name: 'market', icon: 'storefront', label: 'Market' },
   { kind: 'route', name: 'earnings', icon: 'payments', label: 'Earnings' },
   { kind: 'create', label: 'Create' },
   { kind: 'route', name: 'messages', icon: 'chat_bubble', label: 'Messages' },
@@ -30,7 +31,8 @@ export default function CreatorTabsLayout() {
 
   useFocusEffect(
     useCallback(() => {
-      if (companyId === undefined || meId === undefined) return;
+      // A creator no company has taken on yet has no inbox to count.
+      if (!companyId || meId === undefined) return;
       const read = () => {
         void unreadCreatorDmCount(companyId, meId).then(setUnread).catch(() => undefined);
       };
@@ -42,7 +44,7 @@ export default function CreatorTabsLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <TabBar {...props} entries={ENTRIES} onCreate={() => router.push('/(creator)/create')} counts={{ messages: unread || undefined }} dots={{ index: elsewhereTotal > 0 }} />}
+      tabBar={(props) => <TabBar {...props} entries={ENTRIES} onCreate={() => (companyId ? router.push('/(creator)/create') : router.navigate('/(creator)/(tabs)/market'))} counts={{ messages: unread || undefined }} dots={{ index: elsewhereTotal > 0 }} />}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: color.bg },
@@ -50,6 +52,7 @@ export default function CreatorTabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="market" options={{ title: 'Market' }} />
       <Tabs.Screen name="earnings" options={{ title: 'Earnings' }} />
       <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

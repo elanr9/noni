@@ -22,6 +22,7 @@ export type AppDestination =
   | '/(admin)/(tabs)'
   | '/(admin)/(tabs)/setup'
   | '/(creator)/(tabs)'
+  | '/(creator)/(tabs)/market'
   | '/platform-admin'
   | '/company-admin';
 
@@ -92,8 +93,11 @@ export function destinationForProfile(
     if (active === 'creator') return '/(creator)/(tabs)';
     return '/platform-admin';
   }
-  // Old unattached creator rows (pre invite-only trigger) have no company.
-  if (!profile.active_company_id) return '/(auth)/invite-required';
+  // An approved creator no company has taken on yet (migration 154) lives in
+  // the Market until one does. Anyone else without a company is blocked.
+  if (!profile.active_company_id) {
+    return profile.role === 'creator' && profile.onboarded ? '/(creator)/(tabs)/market' : '/(auth)/invite-required';
+  }
   if (!profile.onboarded) return '/(onboarding)';
   const active = mode ?? defaultMode(profile);
   if (

@@ -22,7 +22,7 @@ export const color = {
   segTrack: '#E6E7EB',
   /** Selected Seg count badge. */
   segBadgeOn: 'rgba(255,255,255,0.25)',
-  tabActive: '#0A4DA3',
+  tabActive: '#111114',
   tabInactive: '#8E8E99',
 } as const;
 
@@ -158,6 +158,12 @@ export const motion = {
   sheet: 320,
   shimmer: 1200,
   pressScale: 0.97,
+  /** Press: ease in over pressIn, spring back with no bounce. */
+  pressIn: 140,
+  pressEase: Easing.inOut(Easing.cubic),
+  pressOut: { stiffness: 380, damping: 36, mass: 1, overshootClamping: true },
+  /** Sheets and pagers settling after a drag: near critical damping, never past the target. */
+  settle: { stiffness: 320, damping: 34, mass: 1, overshootClamping: true },
   ease: Easing.bezier(0.22, 0.61, 0.36, 1),
   sheetEase: Easing.bezier(0.2, 0.8, 0.2, 1),
   /** In-screen content change: fade and lift in. */

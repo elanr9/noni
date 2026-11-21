@@ -44,6 +44,7 @@ import {
   EXTRACT_TIMEOUT_MS,
   extractFacts,
   importLegacyBrain,
+  buildCompanySnapshot,
   kickEmbed,
   suggestSurveyAnswers,
 } from '../_shared/ai/brain.ts';
@@ -359,9 +360,15 @@ async function step(admin: SupabaseClient, row: IngestRow): Promise<boolean> {
   }
 
   if (row.phase === 'suggest') {
-    await suggestSurveyAnswers(admin, companyId).catch((err) => {
-      progress.notes.push(`No draft answers: ${err instanceof Error ? err.message : 'failed'}`);
-    });
+    // Both read the same records; run them side by side so the scan ends sooner.
+    await Promise.all([
+      suggestSurveyAnswers(admin, companyId).catch((err) => {
+        progress.notes.push(`No draft answers: ${err instanceof Error ? err.message : 'failed'}`);
+      }),
+      buildCompanySnapshot(admin, companyId).catch((err) => {
+        progress.notes.push(`No summary: ${err instanceof Error ? err.message : 'failed'}`);
+      }),
+    ]);
     await patchRow(admin, companyId, { phase: 'done', status: 'done', progress, finished_at: new Date().toISOString() });
   }
   return false;

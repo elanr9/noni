@@ -112,8 +112,8 @@ export function ChatScreen({ header, messages, error, onReload, onBack, onHeader
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: color.bg, paddingTop: insets.top, paddingBottom: keyboard }}>
-      <View style={{ height: 56, flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingRight: 8, backgroundColor: color.card, boxShadow: `0 1px 0 ${color.grey2}`, zIndex: 2 }}>
+    <View style={{ flex: 1, backgroundColor: color.bg, paddingBottom: keyboard }}>
+      <View style={{ height: 56 + insets.top, paddingTop: insets.top, flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingRight: 8, backgroundColor: color.card, boxShadow: `0 1px 0 ${color.grey2}`, zIndex: 2 }}>
         <Press accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="chevron_left" size={32} color={color.ink} />
         </Press>

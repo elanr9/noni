@@ -21,10 +21,19 @@
 //   in the brain (see _shared/ai/voiceReferences.ts). `references` lists them.
 // POST { action: 'save_step', step: number }     200 { ok: true }
 // POST { action: 'complete' }                    200 { completed_at, coverage, missing }
+// POST { action: 'snapshot', rebuild?: boolean }  200 { snapshot: CompanySnapshot | null }
+//   The short summary of the company (what it sells, who it is for, core
+//   features, the viral one). Built when missing and there are records.
+// POST { action: 'snapshot_settle', part, index?, decision: 'confirm'|'dismiss', title?, text? }
+//   200 { snapshot }
 // Errors: 4xx/5xx { error }.
 
 import {
+  buildCompanySnapshot,
   computeCoverage,
+  loadCompanySnapshot,
+  settleSnapshotItem,
+  type SnapshotPart,
   loadLiveFacts,
   recordSurveyAnswer,
   type SurveyAnswer,
@@ -64,11 +73,21 @@ Deno.serve(async (req) => {
         ...(await coverage()),
       });
     }
+    if (action === 'snapshot') {
+      const existing = body.rebuild === true ? null : await loadCompanySnapshot(admin, companyId);
+      if (existing) return jsonResponse({ snapshot: existing });
+      if (!caller.canWrite) return jsonResponse({ snapshot: null });
+      return jsonResponse({ snapshot: await buildCompanySnapshot(admin, companyId) });
+    }
     if (!caller.canWrite) return jsonResponse({ error: 'forbidden' }, 403);
 
     if (action === 'answer') {
       const key = text(body.key);
-      const out = await recordSurveyAnswer(admin, companyId, key, text(body.answer), userId);
+      // The answer is stored before this returns; its records are made in the
+      // background so the person moves on at once.
+      const out = await recordSurveyAnswer(admin, companyId, key, text(body.answer), userId, {}, {
+        background: (work) => EdgeRuntime.waitUntil(work),
+      });
       if (typeof body.step === 'number') {
         await admin.from('brain_survey').update({ step: body.step, updated_at: nowIso() }).eq('company_id', companyId);
       }
@@ -90,6 +109,24 @@ Deno.serve(async (req) => {
         references: references.map((r) => ({ url: r.url, stance: r.stance })),
         ...(await coverage()),
       });
+    }
+    if (action === 'snapshot_settle') {
+      const part = text(body.part) as SnapshotPart;
+      if (!['sells', 'audience', 'features', 'viral'].includes(part)) return jsonResponse({ error: 'Unknown part' }, 400);
+      const decision = text(body.decision) === 'dismiss' ? 'dismiss' : 'confirm';
+      const snapshot = await settleSnapshotItem(
+        admin,
+        companyId,
+        {
+          part,
+          index: typeof body.index === 'number' ? body.index : undefined,
+          action: decision,
+          title: typeof body.title === 'string' ? body.title : undefined,
+          text: typeof body.text === 'string' ? body.text : undefined,
+        },
+        userId,
+      );
+      return jsonResponse({ snapshot });
     }
     if (action === 'save_step') {
       if (typeof body.step !== 'number') return jsonResponse({ error: 'step is required' }, 400);

@@ -16,7 +16,7 @@ async function askOrOpenSettings(permission: PermissionResponse | null, request:
   return (await request()).granted;
 }
 
-/** Step 2: camera and microphone, both needed to film with the teleprompter. */
+/** Step 3: camera and microphone, both needed to film with the teleprompter. */
 export default function PermissionsScreen() {
   const [camera, requestCamera, getCamera] = useCameraPermissions();
   const [mic, requestMic, getMic] = useMicrophonePermissions();
@@ -65,7 +65,7 @@ export default function PermissionsScreen() {
 
   return (
     <OnboardingShell
-      step={2}
+      step={3}
       onBack={() => router.back()}
       title="Camera and mic"
       subtitle="Both are needed to film with the teleprompter. Nothing records until you press the button."

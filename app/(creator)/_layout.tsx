@@ -33,6 +33,8 @@ const SETUP_EXEMPT = [
   '/payouts',
   '/create',
   '/assignment',
+  // The marketplace belongs to the person, not to one company's setup.
+  '/market',
 ];
 
 function isSetupExempt(pathname: string): boolean {
@@ -116,6 +118,8 @@ export default function CreatorLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="create" options={{ presentation: 'transparentModal', animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="briefs" />
+          <Stack.Screen name="market/[id]" />
+          <Stack.Screen name="market/profile" />
           <Stack.Screen name="resume/[id]" options={{ presentation: 'transparentModal', animation: 'fade', animationDuration: motion.press * 2, contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="assignment/[id]" />
           <Stack.Screen name="outline/[id]" />

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { Screen } from '../../components/layout/Screen';
@@ -36,7 +36,7 @@ export default function InviteRequiredScreen() {
     <Screen edges={['top', 'left', 'right', 'bottom']} contentStyle={styles.content}>
       <View style={styles.hero}>
         <Wordmark size={type.size.titleXl} />
-        <Text style={styles.headline}>You need an invite</Text>
+        <Text style={styles.headline}>Not on Noni yet</Text>
         {hiddenAppleEmail ? (
           <Text style={styles.body}>
             You signed in with Apple and chose Hide My Email, so Noni received a
@@ -48,9 +48,10 @@ export default function InviteRequiredScreen() {
           </Text>
         ) : (
           <Text style={styles.body}>
-            There is no Noni invite for {email}. Sign in with the account
-            (Google or Apple) that uses the email address your invite was sent
-            to, or ask your company admin to invite {email}.
+            There is no Noni account for {email} yet. New here? Apply on
+            usenoni.app and we will email you when you are in. Invited by a
+            company? Sign in with the account (Google or Apple) that uses the
+            email address your invite was sent to.
             {provider === 'apple'
               ? ' If you used Apple, check that it shared the same email your invite went to.'
               : ''}
@@ -61,6 +62,14 @@ export default function InviteRequiredScreen() {
       <View style={styles.footer}>
         <Button
           size="lg"
+          block
+          onPress={() => void Linking.openURL('https://www.usenoni.app/apply')}
+        >
+          Apply to join
+        </Button>
+        <Button
+          size="lg"
+          variant="secondary"
           block
           disabled={busy}
           onPress={() => void handleSwitch()}
@@ -96,6 +105,7 @@ const styles = StyleSheet.create({
     maxWidth: 300,
   },
   footer: {
+    gap: space[3],
     paddingBottom: space[4],
   },
 });

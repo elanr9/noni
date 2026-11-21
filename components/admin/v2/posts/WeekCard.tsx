@@ -9,11 +9,9 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { addDays, DAY_LETTERS, sameDay, sunday, today } from '../../../../lib/v2-format';
-import { color, radius, shadow } from '../../../../theme/v2';
+import { color, motion, radius, shadow } from '../../../../theme/v2';
 import { Icon, Press, TabPane, tap } from '../../../v2';
 
-/** Page settle: close to critically damped, never past the target, carries the finger's speed. */
-const PAGE_SPRING = { stiffness: 320, damping: 34, mass: 1, overshootClamping: true } as const;
 /** Drag past the first or last page moves at a quarter speed. */
 const RESIST = 0.25;
 /** How far ahead a flick is projected when choosing the page to land on, in seconds. */
@@ -122,10 +120,11 @@ function Pager({ index, onIndex, min, max, render, heightOf, ref }: PagerProps) 
     onIndex(to);
     setLanded((n) => n + 1);
   };
+  // Carries the finger's speed into the settle.
   const settle = (to: number, velocity: number) => {
     'worklet';
     x.set(
-      withSpring(-to * w, { ...PAGE_SPRING, velocity }, (done) => {
+      withSpring(-to * w, { ...motion.settle, velocity }, (done) => {
         if (done) runOnJS(land)(to);
       }),
     );

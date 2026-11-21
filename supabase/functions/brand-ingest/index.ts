@@ -373,7 +373,7 @@ const CLEANUP_SPECS: Record<CleanupKind, string> = {
 };
 
 async function cleanupDoc(kind: CleanupKind, content: string): Promise<string> {
-  const system = `You clean up brand knowledge documents for a UGC content engine. ${CLEANUP_SPECS[kind]} Rewrite the user's draft into tight markdown: short sections, concrete specifics, no filler, no invented facts or features. Keep every real claim. Do not wrap the answer in JSON or code fences — return only the cleaned markdown document.`;
+  const system = `You clean up brand knowledge documents for a UGC content engine. ${CLEANUP_SPECS[kind]} Rewrite the user's draft into tight markdown: short sections, concrete specifics, no filler, no invented facts or features. Keep every real claim. Do not wrap the answer in JSON or code fences. Return only the cleaned markdown document. Write plainly: no em dashes or en dashes, no hype words, no filler.`;
   return softenDashes(await askOpenAI(system, content.slice(0, 12000), 4096));
 }
 

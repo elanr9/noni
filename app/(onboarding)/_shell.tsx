@@ -7,8 +7,8 @@ import { Icon, Press } from '../../components/v2';
 import { useKeyboardHeight } from '../../lib/keyboard';
 import { color, control, motion, radius, shadow, space, text } from '../../theme/v2';
 
-/** Creator steps with a progress bar: name, camera and mic, notifications, connect, practice. The finish has none. */
-export const CREATOR_STEPS = 5;
+/** Creator steps with a progress bar: name, pay, camera and mic, notifications, connect, practice. The finish has none. */
+export const CREATOR_STEPS = 6;
 
 export interface OnboardingShellProps {
   /** 1-based step for the progress bar. */

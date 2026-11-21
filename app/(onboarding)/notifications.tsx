@@ -5,7 +5,7 @@ import { useAuth } from '../../lib/auth';
 import { registerPushToken } from '../../lib/notifications';
 import { OnboardingShell, QuietButton, StepCard } from './_shell';
 
-/** Step 3: push, so a new brief or a review never waits on the creator opening the app. */
+/** Step 4: push, so a new brief or a review never waits on the creator opening the app. */
 export default function NotificationsScreen() {
   const { session } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,7 @@ export default function NotificationsScreen() {
 
   return (
     <OnboardingShell
-      step={3}
+      step={4}
       onBack={() => router.back()}
       title="Turn on notifications"
       subtitle="We tell you when there is something to record and when your team reviews a post."

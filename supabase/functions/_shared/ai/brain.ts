@@ -738,6 +738,7 @@ export async function recordSurveyAnswer(
   answer: string,
   userId: string,
   deps: BrainDeps = {},
+  options: { background?: (work: Promise<unknown>) => void } = {},
 ): Promise<{ source: BrainSource; facts: BrainFact[]; conflicts: number; extractError: string | null }> {
   const question = SURVEY_QUESTIONS.find((q) => q.key === questionKey);
   if (!question) throw new Error('Unknown question');
@@ -758,41 +759,56 @@ export async function recordSurveyAnswer(
     },
     deps,
   );
-  const saveAnswer = async (factIds: string[]) => {
-    const { data: row } = await admin.from('brain_survey').select('answers').eq('company_id', companyId).maybeSingle();
-    const answers = { ...((row?.answers as Record<string, SurveyAnswer> | null) ?? {}) };
-    answers[questionKey] = { answer: text, answered_by: userId, answered_at: now, fact_ids: factIds };
-    const { error } = await admin
-      .from('brain_survey')
-      .upsert({ company_id: companyId, answers, updated_at: now }, { onConflict: 'company_id' });
-    fail('brain_survey save', error);
-  };
-  await saveAnswer([]);
+  const { error: putError } = await admin.rpc('brain_survey_put_answer', {
+    p_company: companyId,
+    p_key: questionKey,
+    p_answer: { answer: text, answered_by: userId, answered_at: now, fact_ids: [] },
+  });
+  fail('brain_survey save', putError);
 
-  let facts: BrainFact[] = [];
-  let conflicts = 0;
-  let extractError: string | null = null;
-  if (source.extracted_at) {
-    // The same answer again: return what it produced the first time.
-    const { data } = await admin
-      .from('brain_facts')
-      .select(FACT_COLUMNS)
-      .eq('company_id', companyId)
-      .contains('sources', [{ source_id: source.id }]);
-    facts = (data ?? []) as unknown as BrainFact[];
-  } else {
-    try {
-      const extracted = await extractFacts(admin, source, deps);
-      facts = extracted.facts;
-      conflicts = extracted.conflicts;
-    } catch (err) {
-      extractError = err instanceof Error ? err.message : String(err);
-      await admin.from('brain_sources').update({ extract_error: extractError.slice(0, 500) }).eq('id', source.id);
+  /* Turning the answer into records is a model call; the answer above is
+     already safe. With `background`, the caller returns now and this runs on. */
+  const process = async () => {
+    let facts: BrainFact[] = [];
+    let conflicts = 0;
+    let extractError: string | null = null;
+    if (source.extracted_at) {
+      // The same answer again: return what it produced the first time.
+      const { data } = await admin
+        .from('brain_facts')
+        .select(FACT_COLUMNS)
+        .eq('company_id', companyId)
+        .contains('sources', [{ source_id: source.id }]);
+      facts = (data ?? []) as unknown as BrainFact[];
+    } else {
+      try {
+        const extracted = await extractFacts(admin, source, deps);
+        facts = extracted.facts;
+        conflicts = extracted.conflicts;
+      } catch (err) {
+        extractError = err instanceof Error ? err.message : String(err);
+        await admin.from('brain_sources').update({ extract_error: extractError.slice(0, 500) }).eq('id', source.id);
+      }
     }
+    if (facts.length) {
+      const { error } = await admin.rpc('brain_survey_set_answer_facts', {
+        p_company: companyId,
+        p_key: questionKey,
+        p_answered_at: now,
+        p_fact_ids: facts.map((f) => f.id),
+      });
+      fail('brain_survey facts', error);
+    }
+    await settleEmbeddings(admin, companyId, deps);
+    return { facts, conflicts, extractError };
+  };
+
+  if (options.background) {
+    options.background(process().catch((e) => console.error('survey answer processing', e instanceof Error ? e.message : e)));
+    return { source, facts: [], conflicts: 0, extractError: null };
   }
-  if (facts.length) await saveAnswer(facts.map((f) => f.id));
-  await settleEmbeddings(admin, companyId, deps);
-  return { source, facts, conflicts, extractError };
+  const out = await process();
+  return { source, ...out };
 }
 
 /**
@@ -854,7 +870,9 @@ const SUGGEST_SYSTEM = `A company is about to answer a short set of questions ab
 
 Write each draft in plain first person plural ("We...", "Our customers..."), two to four sentences, using only what the records say. Give the ids of the records you drew on. The person will see where each draft came from, so a draft that goes beyond its records would be caught and would cost their trust in the rest.
 
-Most questions ask for things a website does not reveal (what was happening the day a customer signed up, why people hesitate, what must never be shown). When the records do not really answer a question, leave it out. A missing draft is expected and useful: it tells the person this one needs their own words. Records marked unconfirmed are fine to draw on, since confirming is exactly what the person is about to do.`;
+Most questions ask for things a website does not reveal (what was happening the day a customer signed up, why people hesitate, what must never be shown). When the records do not really answer a question, leave it out. A missing draft is expected and useful: it tells the person this one needs their own words. Records marked unconfirmed are fine to draw on, since confirming is exactly what the person is about to do.
+
+Write like the founder talking, in plain words. No em dashes or en dashes, no hype words, no filler like "seamless", "empower" or "game-changer".`;
 
 export type SurveySuggestion = {
   text: string;
@@ -917,7 +935,8 @@ export async function suggestSurveyAnswers(
   const sourceIds = new Set<string>();
   const kept = (data.suggestions ?? [])
     .map((s) => ({ ...s, fact_ids: (s.fact_ids ?? []).filter((id) => byId.has(id)) }))
-    .filter((s) => s.answer?.trim() && s.fact_ids.length);
+    .filter((s) => s.answer?.trim() && s.fact_ids.length)
+    .map((s) => ({ ...s, answer: plainText(s.answer) }));
   for (const s of kept) for (const id of s.fact_ids) for (const ref of byId.get(id)!.sources) sourceIds.add(ref.source_id);
   const { data: sourceRows } = sourceIds.size
     ? await admin.from('brain_sources').select('id, title, url, kind').in('id', [...sourceIds])
@@ -944,6 +963,184 @@ export async function suggestSurveyAnswers(
     .upsert({ company_id: companyId, suggestions, updated_at: now.toISOString() }, { onConflict: 'company_id' });
   fail('brain_survey save', error);
   return suggestions;
+}
+
+// ---------------------------------------------------------------- company snapshot
+
+/**
+ * The short version of what a scan understood, for the founder to confirm in
+ * one screen instead of checking every record: what the company sells, who
+ * its UGC should speak to, its core features and the one feature that sells
+ * it on sight. Stored on brain_survey.snapshot (migration 147).
+ */
+export type SnapshotItem = {
+  title: string;
+  text: string;
+  fact_ids: string[];
+  status: 'open' | 'confirmed' | 'dismissed';
+};
+
+export type CompanySnapshot = {
+  generated_at: string;
+  sells: SnapshotItem | null;
+  audience: SnapshotItem | null;
+  features: SnapshotItem[];
+  viral: SnapshotItem | null;
+};
+
+export type SnapshotPart = 'sells' | 'audience' | 'features' | 'viral';
+
+const SNAPSHOT_SYSTEM = `You are setting up a UGC (user-generated content) campaign for a company. Creators will film short TikTok and Instagram videos about its product. A scan of the company's website produced the records below, each with an id. Read all of them and write the short summary a sharp marketer would write after an hour on the site.
+
+sells: what the company sells, in one plain sentence a stranger understands. Name the product. Title: the product name.
+
+audience: the specific people the videos should speak to. Be concrete about who they are and the situation they are in, the way a marketer would brief a creator (for example "High school soccer players, and college players looking to transfer, who want to get recruited by college coaches"). Infer it from everything: who the features serve, the language, the testimonials, the pricing. Not a demographic list, not the buyer's job title alone. One or two sentences. Title: a two to five word label for them.
+
+features: the three to five core features, the things a user actually does with the product. Merge records that describe the same feature. Skip data sources, pages and fine print. Each: a short name as title and one sentence on what it does for the user.
+
+viral: the single feature that sells the product on sight in a 20 second video, the moment a viewer thinks "I need that", if there is one (for example "Cut a full game into a highlight video in minutes" or "Email hundreds of coaches in seconds"). It may also appear in features. Leave it out when nothing stands out.
+
+Write in plain words. No em dashes or en dashes, no hype words, no filler like "seamless", "empower", "unlock" or "game-changer". Use only what the records support. Give the ids of the records each item draws on.`;
+
+const ITEM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'text', 'fact_ids'],
+  properties: {
+    title: { type: 'string' },
+    text: { type: 'string' },
+    fact_ids: { type: 'array', items: { type: 'string' } },
+  },
+} as const;
+
+/** Model text a person reads: dashes become commas, whatever the prompt said. */
+export function plainText(text: string): string {
+  return text.replace(/\s*[—–]\s*/g, ", ").replace(/,\s*,/g, ",").trim();
+}
+
+export async function buildCompanySnapshot(
+  admin: SupabaseClient,
+  companyId: string,
+  deps: BrainDeps = {},
+): Promise<CompanySnapshot | null> {
+  const generate = deps.generate ?? defaultGenerate;
+  const now = nowOf(deps);
+  const facts = (await loadLiveFacts(admin, companyId)).filter((f) => f.usage !== 'blocked');
+  if (!facts.length) return null;
+
+  type Raw = { title: string; text: string; fact_ids: string[] };
+  const { data } = await generate<{ sells: Raw; audience: Raw; features: Raw[]; viral: Raw | null; has_viral: boolean }>({
+    task: 'brain.snapshot',
+    tier: 'fast',
+    system: SNAPSHOT_SYSTEM,
+    context: [`Records\n${renderRetrieved(facts, now)}`],
+    input: 'Write the summary.',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['sells', 'audience', 'features', 'has_viral', 'viral'],
+      properties: {
+        sells: ITEM_SCHEMA,
+        audience: ITEM_SCHEMA,
+        features: { type: 'array', items: ITEM_SCHEMA },
+        has_viral: { type: 'boolean' },
+        viral: ITEM_SCHEMA,
+      },
+    },
+    maxTokens: 2500,
+    companyId,
+    timeoutMs: 60_000,
+  });
+
+  const ids = new Set(facts.map((f) => f.id));
+  const item = (r: Raw | null | undefined): SnapshotItem | null =>
+    r && r.text?.trim()
+      ? {
+          title: plainText(r.title ?? '').slice(0, 80),
+          text: plainText(r.text).slice(0, 400),
+          fact_ids: (r.fact_ids ?? []).filter((id) => ids.has(id)),
+          status: 'open',
+        }
+      : null;
+
+  const snapshot: CompanySnapshot = {
+    generated_at: now.toISOString(),
+    sells: item(data.sells),
+    audience: item(data.audience),
+    features: (data.features ?? []).map(item).filter((x): x is SnapshotItem => x !== null).slice(0, 5),
+    viral: data.has_viral ? item(data.viral) : null,
+  };
+  const { error } = await admin
+    .from('brain_survey')
+    .upsert({ company_id: companyId, snapshot, updated_at: now.toISOString() }, { onConflict: 'company_id' });
+  fail('brain_survey snapshot save', error);
+  return snapshot;
+}
+
+export async function loadCompanySnapshot(admin: SupabaseClient, companyId: string): Promise<CompanySnapshot | null> {
+  const { data, error } = await admin.from('brain_survey').select('snapshot').eq('company_id', companyId).maybeSingle();
+  fail('brain_survey snapshot read', error);
+  return (data?.snapshot as CompanySnapshot | null) ?? null;
+}
+
+/**
+ * The founder confirms one line of the snapshot, as written or edited.
+ * As written: the records it was drawn from are confirmed (tier 1). Edited:
+ * their words become a confirmed record of the matching type. Dismissed: the
+ * line is hidden; the records are left alone for the Company Brain page.
+ */
+export async function settleSnapshotItem(
+  admin: SupabaseClient,
+  companyId: string,
+  input: { part: SnapshotPart; index?: number; action: 'confirm' | 'dismiss'; title?: string; text?: string },
+  userId: string,
+  deps: BrainDeps = {},
+): Promise<CompanySnapshot> {
+  const snapshot = await loadCompanySnapshot(admin, companyId);
+  if (!snapshot) throw new Error('There is no summary yet');
+  const current =
+    input.part === 'features' ? snapshot.features[input.index ?? -1] ?? null : snapshot[input.part];
+  if (!current) throw new Error('That line is gone. Reload the page.');
+
+  let next: SnapshotItem;
+  if (input.action === 'dismiss') {
+    next = { ...current, status: 'dismissed' };
+  } else {
+    const title = input.title?.trim() || current.title;
+    const text = input.text?.trim() || current.text;
+    const edited = title !== current.title || text !== current.text;
+    if (edited) {
+      const typed: { entity_type: EntityType; data: Record<string, unknown> } =
+        input.part === 'sells'
+          ? { entity_type: 'product', data: { name: title, one_liner: text } }
+          : input.part === 'audience'
+            ? { entity_type: 'persona', data: { label: title, situation: text } }
+            : { entity_type: 'feature', data: { name: title, description: text } };
+      const out = await addManualFact(admin, companyId, { ...typed, title }, userId, deps);
+      next = { title, text, fact_ids: out.fact ? [out.fact.id] : [], status: 'confirmed' };
+    } else {
+      for (const id of current.fact_ids) {
+        try {
+          await confirmFact(admin, companyId, id, userId, deps);
+        } catch (e) {
+          // A record retired since the summary was written is simply skipped.
+          console.warn('snapshot confirm skipped', id, e instanceof Error ? e.message : e);
+        }
+      }
+      next = { ...current, status: 'confirmed' };
+    }
+  }
+
+  const updated: CompanySnapshot =
+    input.part === 'features'
+      ? { ...snapshot, features: snapshot.features.map((f, i) => (i === input.index ? next : f)) }
+      : { ...snapshot, [input.part]: next };
+  const { error } = await admin
+    .from('brain_survey')
+    .update({ snapshot: updated, updated_at: new Date().toISOString() })
+    .eq('company_id', companyId);
+  fail('brain_survey snapshot save', error);
+  return updated;
 }
 
 // ---------------------------------------------------------------- context for generators

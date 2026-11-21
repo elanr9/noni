@@ -44,7 +44,7 @@ export default function NameScreen() {
     try {
       await saveCreatorProfile(profile.id, profile.active_company_id ?? null, name.trim(), photo);
       await refreshProfile().catch(() => undefined);
-      router.push('/(onboarding)/permissions');
+      router.push('/(onboarding)/earn');
     } catch (e) {
       toast.error(e instanceof Error && e.message ? `Could not save your name. ${e.message}` : 'Could not save your name. Try again.', {
         label: 'Retry',

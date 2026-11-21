@@ -9,6 +9,7 @@
 // then stay claimed with publish_error set for a manager to see.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
+import { payOnLive } from '../_shared/pay-on-live.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -262,8 +263,11 @@ async function reconcilePending(admin: Admin): Promise<void> {
           .update({
             status: posted ? 'posted' : 'failed',
             post_url: r.post_url ?? null,
+            // The go-live time: creator view pay counts 30 days from here.
+            ...(posted ? { posted_at: new Date().toISOString() } : {}),
           })
           .eq('id', post.id);
+        if (posted && post.assignment_id) await payOnLive(admin, post.assignment_id, post.id);
         if (posted && post.assignment_id && post.assignments && r.post_url) {
           await admin
             .from('assignments')

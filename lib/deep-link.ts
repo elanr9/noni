@@ -9,8 +9,8 @@ import type { AppMode } from './active-mode';
  *
  * role   creator | manager
  * screen creator: home | posts | chat | profile | earnings | assignment/<id> | post/<id>
- *                 | posts/<id> | channel/<id> | briefs[/<id>]
- *        manager: home | settings | analytics | briefs | review/<id>
+ *                 | posts/<id> | channel/<id> | briefs[/<id>] | market[/<listing id>]
+ *        manager: home | settings | analytics | briefs | market | review/<id>
  *                 | chat/<id> | messages/<id> | account-approval/<id>
  *                 | creator/<id> | music/<id>
  */
@@ -54,6 +54,7 @@ export function routeForDeepLink(link: DeepLink): string {
     // The posts list lives on Profile; Earnings is its own tab.
     if ((screen === 'posts' && !id) || screen === 'profile') return `${CREATOR_ROOT}/(tabs)/profile`;
     if (screen === 'earnings') return `${CREATOR_ROOT}/(tabs)/earnings`;
+    if (screen === 'market') return id ? `${CREATOR_ROOT}/market/${id}` : `${CREATOR_ROOT}/(tabs)/market`;
     if (screen === 'chat') return `${CREATOR_ROOT}/chat`;
     if (screen === 'briefs') return id ? `${CREATOR_ROOT}/open-brief/${id}` : `${CREATOR_ROOT}/briefs`;
     if (id && (screen === 'assignment' || screen === 'posts' || screen === 'channel')) {
@@ -65,7 +66,7 @@ export function routeForDeepLink(link: DeepLink): string {
   }
   if (screen === 'home') return `${MANAGER_ROOT}/(tabs)`;
   if (screen === 'settings') return `${MANAGER_ROOT}/settings`;
-  if (screen === 'analytics' || screen === 'briefs') return `${MANAGER_ROOT}/(tabs)/${screen}`;
+  if (screen === 'analytics' || screen === 'briefs' || screen === 'market') return `${MANAGER_ROOT}/(tabs)/${screen}`;
   // Week links predate the Briefs library; they land on the tab.
   if (screen === 'week') return `${MANAGER_ROOT}/(tabs)/briefs`;
   if (
@@ -93,7 +94,9 @@ export type OpenDeepLinkOptions = {
 /** Switches the active company when the link points elsewhere, then navigates. */
 export async function openDeepLink(options: OpenDeepLinkOptions): Promise<string> {
   const { link, activeCompanyId, switchCompany, router } = options;
-  if (link.companyId !== activeCompanyId) {
+  // A creator's Market links name a company they have not joined yet: no switch.
+  const personal = link.role === 'creator' && link.screen === 'market';
+  if (!personal && link.companyId !== activeCompanyId) {
     await switchCompany(link.companyId);
   }
   const href = routeForDeepLink(link);

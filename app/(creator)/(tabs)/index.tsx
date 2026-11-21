@@ -11,6 +11,7 @@ import { postTapHref } from '../../../lib/creator-resume';
 import { forgetPostDrafts } from '../../../components/creator/v2/record/model';
 import { isSetupCompleteFlag, useSetupState } from '../../../lib/setup';
 import { useV2Data } from '../../../lib/v2-posts';
+import { NoCompanyYet } from '../../../components/marketplace/NoCompanyYet';
 import { CreatorSetupChecklist } from '../setup';
 
 export default function CreatorHome() {
@@ -47,6 +48,7 @@ export default function CreatorHome() {
   );
 
   if (!profile) return null;
+  if (!companyId) return <NoCompanyYet title="Home" line="Pick a campaign in the Market and apply. Once a company takes you on, your briefs and posts live here." />;
   if (setupPending) return <CreatorSetupChecklist />;
 
   return (

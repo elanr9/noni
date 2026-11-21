@@ -6,10 +6,7 @@ import {
   handleCors,
   jsonResponse,
 } from '../_shared/wp8.ts';
-import {
-  formatCentsDollars,
-  spendCompanyCreditsForEarning,
-} from '../_shared/credits.ts';
+import { formatCentsDollars } from '../_shared/credits.ts';
 import {
   adminRecipients,
   creatorRecipients,
@@ -22,6 +19,10 @@ declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 // The only purely positive notification in the product. Fires once per post
 // per threshold, claimed atomically via claim_post_milestone.
 const MILESTONES = [5000, 10000, 50000, 100000, 1000000] as const;
+
+// Views count toward pay for this long after a post goes live. Must match
+// view_window_days in public.creator_pay_rates() (migration 144).
+const VIEW_WINDOW_DAYS = 30;
 
 function milestoneLabel(threshold: number): string {
   return threshold >= 1_000_000
@@ -63,22 +64,6 @@ function asInt(value: unknown): number {
     if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
   }
   return 0;
-}
-
-function parseBounty(settings: unknown): {
-  amountCents: number;
-  viewThreshold: number;
-} {
-  const obj =
-    settings && typeof settings === 'object' && !Array.isArray(settings)
-      ? (settings as Record<string, unknown>)
-      : {};
-  const amount = asInt(obj.bounty_amount_cents);
-  const threshold = asInt(obj.bounty_view_threshold);
-  return {
-    amountCents: amount > 0 ? amount : 2000,
-    viewThreshold: threshold > 0 ? threshold : 5000,
-  };
 }
 
 function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
@@ -153,7 +138,7 @@ async function notifyCreditsLow(
     const recipients = await adminRecipients(admin, companyId);
     await sendPush(admin, recipients, {
       title: 'Credits low',
-      body: 'Add credits to keep paying bounties.',
+      body: 'Add credits so creators keep getting paid for their posts and views.',
       data: {
         event: 'credits_low',
         company_id: companyId,
@@ -165,14 +150,14 @@ async function notifyCreditsLow(
   }
 }
 
-async function notifyBountyEarned(
+async function notifyPostPaid(
   admin: SupabaseClient,
   params: {
     companyId: string;
     creatorId: string;
-    assignmentId: string | null;
+    assignmentId: string;
     postId: string;
-    creatorNet: number;
+    amountCents: number;
   },
 ): Promise<void> {
   try {
@@ -182,21 +167,19 @@ async function notifyBountyEarned(
       params.companyId,
     );
     await sendPush(admin, recipients, {
-      title: 'Bounty earned',
-      body: `You hit the views goal and earned ${formatCentsDollars(params.creatorNet)}.`,
+      title: 'You got paid for your post',
+      body: `${formatCentsDollars(params.amountCents)} is in your balance. Views earn $1 per 1,000 for 30 days.`,
       data: {
         event: 'bounty_earned',
         company_id: params.companyId,
-        deep_link: params.assignmentId
-          ? creatorLink(params.companyId, 'assignment', params.assignmentId)
-          : creatorLink(params.companyId, 'home'),
+        deep_link: creatorLink(params.companyId, 'assignment', params.assignmentId),
         assignment_id: params.assignmentId,
         post_id: params.postId,
-        amount_cents: String(params.creatorNet),
+        amount_cents: String(params.amountCents),
       },
     });
   } catch (e) {
-    console.error(`bounty_earned push ${params.postId}:`, e);
+    console.error(`post paid push ${params.postId}:`, e);
   }
 }
 
@@ -284,116 +267,35 @@ async function notifyCreatorMilestones(
   }
 }
 
-type BountyCreditOutcome = 'credited' | 'skipped' | 'insufficient';
-
-async function maybeCreditBounty(
-  admin: SupabaseClient,
-  params: {
-    companyId: string;
-    creatorId: string;
-    postId: string;
-    views: number;
-    amountCents: number;
-    viewThreshold: number;
-  },
-): Promise<BountyCreditOutcome> {
-  if (params.views < params.viewThreshold) return 'skipped';
-
-  const { data: existing } = await admin
-    .from('wallet_ledger')
-    .select('id')
-    .eq('post_id', params.postId)
-    .eq('kind', 'bounty_credit')
-    .maybeSingle();
-  if (existing) return 'skipped';
-
-  const spend = await spendCompanyCreditsForEarning(admin, {
-    companyId: params.companyId,
-    creatorId: params.creatorId,
-    assignmentId: null,
-    grossCents: params.amountCents,
-    kind: 'bounty_debit',
-    postId: params.postId,
-  });
-  if (!spend.ok) {
-    if (spend.reason === 'insufficient_credits') {
-      console.warn(
-        `bounty insufficient_credits company=${params.companyId} post=${params.postId} gross=${params.amountCents}`,
-      );
-      return 'insufficient';
-    }
-    console.error(`legacy bounty spend ${params.postId}:`, spend.reason);
-    return 'skipped';
-  }
-
-  if (!spend.idempotent) {
-    await notifyBountyEarned(admin, {
-      companyId: params.companyId,
-      creatorId: params.creatorId,
-      assignmentId: null,
-      postId: params.postId,
-      creatorNet: spend.creator_net,
-    });
-  }
-  return 'credited';
-}
+type PayOutcome = {
+  ok: boolean;
+  reason?: string | null;
+  paid_base_cents?: number;
+  paid_view_cents?: number;
+};
 
 /**
- * Spend prepaid credits first; only then set bounty_credited_at.
- * On insufficient_credits leave bounty_credited_at null so later polls retry.
+ * Creator pay v2 (migration 144): $10 video / $5 static per post plus $1 per
+ * 1,000 views (first 30 days, capped at $500), creator take-home; the company
+ * pays +13%. pay_assignment is cumulative and idempotent, so calling it every
+ * poll pays only what is newly owed and retries a credits shortfall later.
  */
-async function creditAssignmentBounty(
+async function payAssignment(
   admin: SupabaseClient,
-  params: {
-    companyId: string;
-    creatorId: string;
-    assignmentId: string;
-    postId: string;
-    amountCents: number;
-    viewThreshold: number;
-  },
-): Promise<{ outcome: BountyCreditOutcome; creatorNet: number }> {
-  const spend = await spendCompanyCreditsForEarning(admin, {
-    companyId: params.companyId,
-    creatorId: params.creatorId,
-    assignmentId: params.assignmentId,
-    grossCents: params.amountCents,
-    kind: 'bounty_debit',
-    postId: params.postId,
+  assignmentId: string,
+  windowViews: number,
+  postId: string,
+): Promise<PayOutcome> {
+  const { data, error } = await admin.rpc('pay_assignment', {
+    p_assignment: assignmentId,
+    p_views: windowViews,
+    p_post_id: postId,
   });
-  if (!spend.ok) {
-    if (spend.reason === 'insufficient_credits') {
-      console.warn(
-        `bounty insufficient_credits company=${params.companyId} assignment=${params.assignmentId} gross=${params.amountCents}`,
-      );
-      return { outcome: 'insufficient', creatorNet: 0 };
-    }
-    console.error(`assignment bounty spend ${params.assignmentId}:`, spend.reason);
-    return { outcome: 'skipped', creatorNet: 0 };
+  if (error) {
+    console.error(`pay_assignment ${assignmentId}:`, error.message);
+    return { ok: false, reason: error.message };
   }
-
-  const { data: claimed, error: claimError } = await admin
-    .from('assignments')
-    .update({
-      bounty_credited_at: new Date().toISOString(),
-      bounty_amount_cents: spend.creator_net,
-    })
-    .eq('id', params.assignmentId)
-    .is('bounty_credited_at', null)
-    .select('id');
-  if (claimError) throw claimError;
-  if (!claimed?.length) return { outcome: 'skipped', creatorNet: 0 };
-
-  if (!spend.idempotent) {
-    await notifyBountyEarned(admin, {
-      companyId: params.companyId,
-      creatorId: params.creatorId,
-      assignmentId: params.assignmentId,
-      postId: params.postId,
-      creatorNet: spend.creator_net,
-    });
-  }
-  return { outcome: 'credited', creatorNet: spend.creator_net };
+  return (data ?? { ok: false, reason: 'empty response' }) as PayOutcome;
 }
 
 type AssignmentRow = {
@@ -405,6 +307,7 @@ type AssignmentRow = {
   bounty_credited_at: string | null;
   bounty_amount_cents: number | null;
   music_approved_at: string | null;
+  publish_at: string | null;
   metrics: Record<string, unknown> | null;
 };
 
@@ -462,17 +365,10 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   credited: number;
   skipped: number;
 }> {
-  const { data: company } = await admin
-    .from('companies')
-    .select('settings')
-    .eq('id', companyId)
-    .single();
-  const bounty = parseBounty(company?.settings);
-
   const { data: assignments, error: assignmentsError } = await admin
     .from('assignments')
     .select(
-      'id, creator_id, task_id, brief_id, post_url, bounty_credited_at, bounty_amount_cents, music_approved_at, metrics',
+      'id, creator_id, task_id, brief_id, post_url, bounty_credited_at, bounty_amount_cents, music_approved_at, publish_at, metrics',
     )
     .eq('company_id', companyId);
   if (assignmentsError) throw assignmentsError;
@@ -481,27 +377,6 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   for (const raw of (assignments ?? []) as AssignmentRow[]) {
     assignmentById.set(raw.id, raw);
     if (raw.task_id) assignmentByTask.set(raw.task_id, raw);
-  }
-
-  // Music gate needs the brief's format: photo_carousel earnings unlock only
-  // after the admin approves the song. Videos skip the music loop entirely.
-  const briefIds = [
-    ...new Set(
-      (assignments ?? [])
-        .map((a) => a.brief_id as string | null)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
-  const briefFormat = new Map<string, string>();
-  if (briefIds.length > 0) {
-    const { data: briefs, error: briefsError } = await admin
-      .from('briefs')
-      .select('id, format')
-      .in('id', briefIds);
-    if (briefsError) throw briefsError;
-    for (const brief of briefs ?? []) {
-      briefFormat.set(brief.id as string, (brief.format as string | null) ?? 'video');
-    }
   }
 
   const { data: tasks, error: tasksError } = await admin
@@ -519,7 +394,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       ? admin
           .from('posts')
           .select(
-            'id, platform, provider_post_id, post_url, assignment_id, milestones_fired',
+            'id, platform, provider_post_id, post_url, assignment_id, milestones_fired, status, posted_at',
           )
           .in('assignment_id', assignmentIds)
           .not('provider_post_id', 'is', null)
@@ -548,11 +423,24 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     milestonesFired: number[];
     assignment: AssignmentRow | null;
     creatorId: string | null;
+    /** When the post went live; null while still scheduled (status pending). */
+    liveSince: string | null;
   };
   const pending: PendingPost[] = [];
 
   for (const raw of assignmentPostsRes.data ?? []) {
     const assignment = assignmentById.get(raw.assignment_id as string) ?? null;
+    const postedAt = (raw.posted_at as string | null) ?? null;
+    const publishAt = assignment?.publish_at ?? null;
+    // posted_at is stamped when the post row is written, which for a
+    // scheduled post is before it goes out; the later of the two is the
+    // real go-live time the 30-day view window starts from.
+    const liveSince = raw.status === 'posted'
+      ? [postedAt, publishAt]
+          .filter((t): t is string => Boolean(t))
+          .sort()
+          .at(-1) ?? new Date().toISOString()
+      : null;
     pending.push({
       postId: raw.id as string,
       requestId: raw.provider_post_id as string,
@@ -561,6 +449,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       milestonesFired: (raw.milestones_fired as number[] | null) ?? [],
       assignment,
       creatorId: assignment?.creator_id ?? null,
+      liveSince,
     });
   }
   for (const raw of (taskPostsRes.data ?? []) as unknown as PostRow[]) {
@@ -574,6 +463,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       milestonesFired: raw.milestones_fired ?? [],
       assignment: assignmentByTask.get(raw.task_id) ?? null,
       creatorId: submission.creator_id,
+      liveSince: null,
     });
   }
 
@@ -583,39 +473,63 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   let creditsLowNotified = false;
   const rollups = new Map<string, AssignmentRollup>();
   const milestoneClaims: MilestoneClaim[] = [];
+  // Per assignment: views inside the pay window, summed across its live
+  // platform posts, and the post earnings are attributed to.
+  const payable = new Map<string, { windowViews: number; postId: string }>();
 
   for (const post of pending) {
     const metrics = await fetchPostAnalytics(post.requestId, post.platform);
-    if (!metrics) {
+    if (metrics) {
+      const { error: insertError } = await admin.from('post_metrics').insert({
+        post_id: post.postId,
+        views: metrics.views,
+        likes: metrics.likes,
+        comments: metrics.comments,
+        shares: metrics.shares,
+        saves: metrics.saves,
+      });
+      if (insertError) {
+        console.error(`post_metrics insert ${post.postId}:`, insertError.message);
+      } else {
+        polled += 1;
+      }
+    } else {
       skipped += 1;
-      continue;
     }
 
-    const { error: insertError } = await admin.from('post_metrics').insert({
-      post_id: post.postId,
-      views: metrics.views,
-      likes: metrics.likes,
-      comments: metrics.comments,
-      shares: metrics.shares,
-      saves: metrics.saves,
-    });
-    if (insertError) {
-      console.error(`post_metrics insert ${post.postId}:`, insertError.message);
-      skipped += 1;
-      continue;
-    }
-    polled += 1;
-
-    // Best views ever seen for this post (includes the snapshot just written),
-    // so a platform undercount on one poll never hides a crossed threshold.
+    // Snapshot history (includes the one just written). A failed fetch today
+    // still pays from earlier snapshots, and base pay never waits on analytics.
     const { data: history } = await admin
       .from('post_metrics')
-      .select('views')
+      .select('views, fetched_at')
       .eq('post_id', post.postId);
-    const bestViews = Math.max(
-      metrics.views,
-      ...(history ?? []).map((r) => asInt(r.views)),
-    );
+    const snapshots = (history ?? []).map((r) => ({
+      views: asInt(r.views),
+      at: r.fetched_at as string,
+    }));
+
+    if (post.assignment && post.liveSince) {
+      const windowEnd =
+        new Date(post.liveSince).getTime() + VIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      const windowViews = Math.max(
+        0,
+        ...snapshots
+          .filter((r) => new Date(r.at).getTime() <= windowEnd)
+          .map((r) => r.views),
+      );
+      const entry = payable.get(post.assignment.id) ?? {
+        windowViews: 0,
+        postId: post.postId,
+      };
+      entry.windowViews += windowViews;
+      payable.set(post.assignment.id, entry);
+    }
+
+    if (!metrics) continue;
+
+    // Best views ever seen for this post, so a platform undercount on one
+    // poll never hides a crossed milestone.
+    const bestViews = Math.max(metrics.views, ...snapshots.map((r) => r.views));
 
     // Milestones fire once per post per threshold. Membership check first,
     // then an atomic claim so a concurrent poll cannot double-fire.
@@ -645,7 +559,7 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     }
 
     if (post.assignment) {
-      // Roll up into the assignment; bounty is decided per assignment below.
+      // Roll up into the assignment's displayed metrics.
       const rollup = rollups.get(post.assignment.id) ?? {
         creatorId: post.assignment.creator_id,
         views: 0,
@@ -657,27 +571,42 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       rollup.likes += asInt(metrics.likes);
       if (rollup.postUrl === null) rollup.postUrl = post.postUrl;
       rollups.set(post.assignment.id, rollup);
-      continue;
     }
+    // Posts with no assignment (pre-campaign legacy tasks) earn nothing under
+    // creator pay v2: there is no brief format to price them by.
+  }
 
-    if (!post.creatorId) {
-      skipped += 1;
-      continue;
+  // Pay every assignment with a live post: base pay once, view pay as the
+  // 30-day count grows. Before the milestone pushes, so they can quote it.
+  for (const [assignmentId, { windowViews, postId }] of payable) {
+    const assignment = assignmentById.get(assignmentId);
+    if (!assignment) continue;
+    const result = await payAssignment(admin, assignmentId, windowViews, postId);
+    const paidBase = result.paid_base_cents ?? 0;
+    const paidViews = result.paid_view_cents ?? 0;
+    if (paidBase + paidViews > 0) {
+      credited += 1;
+      assignment.bounty_amount_cents =
+        (assignment.bounty_amount_cents ?? 0) + paidBase + paidViews;
+      assignment.bounty_credited_at ??= new Date().toISOString();
     }
-
-    // Legacy post with no assignment: per-post bounty on max views in history.
-    const outcome = await maybeCreditBounty(admin, {
-      companyId,
-      creatorId: post.creatorId,
-      postId: post.postId,
-      views: bestViews,
-      amountCents: bounty.amountCents,
-      viewThreshold: bounty.viewThreshold,
-    });
-    if (outcome === 'credited') credited += 1;
-    if (outcome === 'insufficient' && !creditsLowNotified) {
-      creditsLowNotified = true;
-      await notifyCreditsLow(admin, companyId);
+    if (paidBase > 0) {
+      await notifyPostPaid(admin, {
+        companyId,
+        creatorId: assignment.creator_id,
+        assignmentId,
+        postId,
+        amountCents: paidBase + paidViews,
+      });
+    }
+    if (result.reason === 'insufficient_credits') {
+      console.warn(
+        `pay_assignment insufficient_credits company=${companyId} assignment=${assignmentId} views=${windowViews}`,
+      );
+      if (!creditsLowNotified) {
+        creditsLowNotified = true;
+        await notifyCreditsLow(admin, companyId);
+      }
     }
   }
 
@@ -746,10 +675,6 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
     const assignment = assignmentById.get(assignmentId);
     if (!assignment) continue;
 
-    const previous =
-      assignment.metrics && typeof assignment.metrics === 'object'
-        ? assignment.metrics
-        : {};
     const patch: Record<string, unknown> = {
       metrics: {
         views: rollup.views,
@@ -766,42 +691,6 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       .eq('id', assignmentId);
     if (metricsError) {
       console.error(`assignment metrics ${assignmentId}:`, metricsError.message);
-      continue;
-    }
-
-    // Threshold on the best views ever seen, so a platform undercount on one
-    // poll never claws back an earned bounty.
-    const bountyViews = Math.max(
-      rollup.views,
-      asInt((previous as Record<string, unknown>).views),
-    );
-    // Music gate (Agent 7 owns this): photo_carousel bounties additionally
-    // require admin music approval on the assignment. Videos are never gated;
-    // they skip the music loop entirely.
-    const isCarousel =
-      assignment.brief_id !== null &&
-      briefFormat.get(assignment.brief_id) === 'photo_carousel';
-    if (isCarousel && assignment.music_approved_at === null) {
-      continue;
-    }
-    if (assignment.bounty_credited_at === null && bountyViews >= bounty.viewThreshold) {
-      const { outcome, creatorNet } = await creditAssignmentBounty(admin, {
-        companyId,
-        creatorId: rollup.creatorId,
-        assignmentId,
-        postId: rollup.postId,
-        amountCents: bounty.amountCents,
-        viewThreshold: bounty.viewThreshold,
-      });
-      if (outcome === 'credited') {
-        credited += 1;
-        assignment.bounty_credited_at = new Date().toISOString();
-        assignment.bounty_amount_cents = creatorNet;
-      }
-      if (outcome === 'insufficient' && !creditsLowNotified) {
-        creditsLowNotified = true;
-        await notifyCreditsLow(admin, companyId);
-      }
     }
   }
 

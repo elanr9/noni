@@ -9,14 +9,15 @@ import { useCompany } from '../../../lib/company-context';
 import { unreadDmCount } from '../../../lib/inbox-api';
 import { color, screenTransition } from '../../../theme/v2';
 
-// v2 shell: Review, Briefs, the raised Create button, Messages, Analytics.
-// Always the same five. The onboarding checklist (setup) stays in the folder,
+// v2 shell: Review, Briefs, Market, the Create button, Messages, Analytics.
+// Always the same six. The onboarding checklist (setup) stays in the folder,
 // hidden from the bar; Review's first-run card links to it until it is done.
 const POLL_MS = 45_000;
 
 const ADMIN_ENTRIES: TabBarEntry[] = [
   { kind: 'route', name: 'index', icon: 'inbox', label: 'Review' },
   { kind: 'route', name: 'briefs', icon: 'list_alt', label: 'Briefs' },
+  { kind: 'route', name: 'market', icon: 'storefront', label: 'Market' },
   { kind: 'create', label: 'Create' },
   { kind: 'route', name: 'messages', icon: 'chat_bubble', label: 'Messages' },
   { kind: 'route', name: 'analytics', icon: 'bar_chart', label: 'Analytics' },
@@ -74,6 +75,7 @@ export default function AdminTabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: 'Review' }} />
       <Tabs.Screen name="briefs" options={{ title: 'Briefs' }} />
+      <Tabs.Screen name="market" options={{ title: 'Market' }} />
       <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
       <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
       <Tabs.Screen name="setup" options={{ title: 'Onboarding', href: null }} />

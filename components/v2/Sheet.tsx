@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
 import { useKeyboardHeight } from '../../lib/keyboard';
 import { color, motion, radius, shadow, text } from '../../theme/v2';
@@ -50,7 +50,7 @@ export function Sheet({ open, onClose, title, children, footer }: SheetProps) {
     })
     .onEnd((e) => {
       if (e.translationY > CLOSE_DRAG || e.velocityY > 600) runOnJS(onClose)();
-      else drag.set(withTiming(0, { duration: motion.push, easing: motion.ease }));
+      else drag.set(withSpring(0, { ...motion.settle, velocity: e.velocityY }));
     });
 
   const scrim = useAnimatedStyle(() => ({ opacity: progress.get() }));

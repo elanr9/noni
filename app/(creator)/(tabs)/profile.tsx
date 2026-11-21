@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 
 import { CreatorScreen } from '../../../components/admin/v2/creator/CreatorScreen';
+import { NoCompanyYet } from '../../../components/marketplace/NoCompanyYet';
 import { useAuth } from '../../../lib/auth';
 import { postTapHref } from '../../../lib/creator-resume';
 import { useV2Data } from '../../../lib/v2-posts';
@@ -18,6 +19,7 @@ export default function CreatorProfile() {
   }, [companyId, load]);
 
   if (!profile) return null;
+  if (!companyId) return <NoCompanyYet title="Profile" line="Your posts and numbers show here once you are creating for a company. Your marketplace profile is in the Market tab." />;
   return (
     <CreatorScreen
       id={profile.id}

@@ -66,7 +66,7 @@ export function formatCents(cents: number): string {
 export function ledgerKindLabel(kind: string): string {
   switch (kind) {
     case 'bounty_credit':
-      return 'Bounty credit';
+      return 'Post earnings';
     case 'streak_bonus':
       return 'Streak bonus';
     case 'payout_hold':

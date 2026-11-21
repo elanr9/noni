@@ -24,7 +24,7 @@ export default function OnboardingIndex() {
     return <Redirect href="/(onboarding)/manager" />;
   }
 
-  // Creators: name, camera and mic, notifications, connect, a practice take,
+  // Creators: name, how pay works, camera and mic, notifications, connect, a practice take,
   // then the finish screen.
   return <Redirect href="/(onboarding)/name" />;
 }

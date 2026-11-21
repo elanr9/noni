@@ -71,12 +71,15 @@ async function payCreator(
   accountId: string,
   periodStart: string,
   periodEnd: string,
+  testMode = false,
 ): Promise<PayResult> {
   const amountCents = wallet.available_cents;
+  // A test company can be paid out more than once a day from ops, so its key
+  // carries the run time; real payouts stay one per creator per week.
   const idempotencyKey = await computeIdempotencyKey(
     wallet.creator_id,
     wallet.company_id,
-    periodEnd,
+    testMode ? `${periodEnd}-test-${Date.now()}` : periodEnd,
   );
 
   // 1. Claim the payout. The unique index on idempotency_key is the real
@@ -132,6 +135,30 @@ async function payCreator(
     await admin.from('wallet_ledger').delete().eq('mercury_payout_id', payout.id);
     await admin.from('mercury_payouts').delete().eq('id', payout.id);
     return { outcome: 'skipped', reason: 'balance changed mid-run' };
+  }
+
+  // 4t. Test company (migration 146): no money moves. Record the payout as
+  //     sent and settled at once, the same end state the webhook writes for a
+  //     real ACH that cleared.
+  if (testMode) {
+    const now = new Date().toISOString();
+    const { error: settleError } = await admin
+      .from('creator_wallets')
+      .update({ pending_cents: wallet.pending_cents })
+      .eq('id', wallet.id);
+    if (settleError) throw settleError;
+    const { error: testError } = await admin
+      .from('mercury_payouts')
+      .update({
+        status: 'sent',
+        mercury_transaction_id: `test_${payout.id}`,
+        sent_at: now,
+        settled_at: now,
+        failure_reason: null,
+      })
+      .eq('id', payout.id);
+    if (testError) throw testError;
+    return { outcome: 'sent', transactionId: `test_${payout.id}` };
   }
 
   // 4. Send.
@@ -207,9 +234,15 @@ async function processCompany(
   accountId: string,
   periodStart: string,
   periodEnd: string,
+  testMode = false,
+  manual = false,
 ): Promise<Record<string, unknown>> {
   // One run per company per week; the unique (company_id, period_end) index
-  // makes a duplicate hourly firing a no-op.
+  // makes a duplicate hourly firing a no-op. An ops-run test payout skips the
+  // claim so it can be repeated; the per-payout key still guards each send.
+  if (testMode && manual) {
+    return payWallets(admin, companyId, accountId, periodStart, periodEnd, null, true);
+  }
   const { data: run, error: claimError } = await admin
     .from('company_payout_runs')
     .insert({
@@ -229,7 +262,18 @@ async function processCompany(
     throw claimError;
   }
   if (!run) return { company_id: companyId, skipped: true, reason: 'already claimed' };
+  return payWallets(admin, companyId, accountId, periodStart, periodEnd, run.id as string, testMode);
+}
 
+async function payWallets(
+  admin: ReturnType<typeof adminClient>,
+  companyId: string,
+  accountId: string,
+  periodStart: string,
+  periodEnd: string,
+  runId: string | null,
+  testMode: boolean,
+): Promise<Record<string, unknown>> {
   const { data: wallets, error: walletsError } = await admin
     .from('creator_wallets')
     .select('id, company_id, creator_id, available_cents, pending_cents, mercury_recipient_id')
@@ -257,7 +301,7 @@ async function processCompany(
 
   for (const wallet of payable) {
     try {
-      const result = await payCreator(admin, wallet, accountId, periodStart, periodEnd);
+      const result = await payCreator(admin, wallet, accountId, periodStart, periodEnd, testMode);
       if (result.outcome === 'sent') {
         creatorsPaid += 1;
         sentCents += wallet.available_cents;
@@ -274,19 +318,22 @@ async function processCompany(
   }
 
   const problems = [...rejected, ...unresolved];
-  await admin
-    .from('company_payout_runs')
-    .update({
-      status: problems.length && creatorsPaid === 0 ? 'failed' : 'transferred',
-      charged_cents: sentCents,
-      creators_paid: creatorsPaid,
-      error: problems.length ? problems.join('; ').slice(0, 2000) : null,
-    })
-    .eq('id', run.id);
+  if (runId) {
+    await admin
+      .from('company_payout_runs')
+      .update({
+        status: problems.length && creatorsPaid === 0 ? 'failed' : 'transferred',
+        charged_cents: sentCents,
+        creators_paid: creatorsPaid,
+        error: problems.length ? problems.join('; ').slice(0, 2000) : null,
+      })
+      .eq('id', runId);
+  }
 
   return {
     company_id: companyId,
-    run_id: run.id,
+    run_id: runId,
+    ...(testMode ? { test_mode: true } : {}),
     eligible: payable.length,
     creators_paid: creatorsPaid,
     sent_cents: sentCents,
@@ -304,27 +351,32 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const caller = await authenticate(req, admin);
     if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
-    if (caller.kind !== 'cron') return jsonResponse({ error: 'forbidden' }, 403);
-
-    // Checked before any query and before the time window, so a dormant
-    // deployment touches neither the database nor Mercury. Placed after auth
-    // only so an unauthenticated caller cannot probe the flag's state.
-    if (!payoutsArmed()) {
-      console.log('mercury-weekly-payouts: payouts disabled (MERCURY_PAYOUTS_ENABLED)');
-      return jsonResponse({
-        skipped: true,
-        reason: 'payouts disabled',
-        hint: "set MERCURY_PAYOUTS_ENABLED='true' to arm the Sunday run",
-      });
-    }
 
     const body = (await req.json().catch(() => ({}))) as {
       force?: boolean;
       company_id?: string;
     };
 
+    // Ops "Pay out now" on a test company (migration 146): the platform admin
+    // may run one test company at any hour. Nothing else is open to a user.
+    const manual = caller.kind === 'user';
+    if (manual) {
+      if (!caller.platformAdmin || !body.company_id) {
+        return jsonResponse({ error: 'forbidden' }, 403);
+      }
+      const { data: c, error } = await admin
+        .from('companies')
+        .select('payout_test_mode')
+        .eq('id', body.company_id)
+        .maybeSingle();
+      if (error) throw error;
+      if (c?.payout_test_mode !== true) {
+        return jsonResponse({ error: 'Only a test company can be paid out by hand.' }, 403);
+      }
+    }
+
     const et = etParts();
-    if (body.force !== true && !inEtWindow(PAYOUT_WEEKDAY, PAYOUT_HOUR)) {
+    if (!manual && body.force !== true && !inEtWindow(PAYOUT_WEEKDAY, PAYOUT_HOUR)) {
       return jsonResponse({
         skipped: true,
         reason: `outside ${PAYOUT_WEEKDAY} ${PAYOUT_HOUR}:00-${PAYOUT_HOUR}:59 America/New_York`,
@@ -336,7 +388,6 @@ Deno.serve(async (req) => {
 
     const periodEnd = et.date;
     const periodStart = addDays(periodEnd, -6);
-    const accountId = mercuryAccountId();
 
     let companyIds: string[];
     if (body.company_id) {
@@ -352,20 +403,41 @@ Deno.serve(async (req) => {
       companyIds = [...new Set((rows ?? []).map((r) => r.company_id as string))];
     }
 
+    // The kill switch guards real money only. Test companies pay on paper, so
+    // they run either way; real companies are skipped (before any read or
+    // send) until MERCURY_PAYOUTS_ENABLED is 'true'.
+    const armed = payoutsArmed();
     const results: Record<string, unknown>[] = [];
     for (const companyId of companyIds) {
       const { data: company, error: companyError } = await admin
         .from('companies')
-        .select('payouts_enabled')
+        .select('payout_test_mode')
         .eq('id', companyId)
         .maybeSingle();
       if (companyError) throw companyError;
-      if (company?.payouts_enabled !== true) {
-        results.push({ company_id: companyId, skipped: true, reason: 'payouts disabled' });
+      if (!company) continue;
+      const testMode = company.payout_test_mode === true;
+      if (!testMode && !armed) {
+        results.push({
+          company_id: companyId,
+          skipped: true,
+          reason: "payouts disabled: set MERCURY_PAYOUTS_ENABLED='true' to arm real payouts",
+        });
         continue;
       }
+      // Credits are prepaid and already debited when a post earned, so a real
+      // company needs no further gate here. (companies.payouts_enabled was the
+      // old Stripe Connect flag and is never set on this rail.)
       results.push(
-        await processCompany(admin, companyId, accountId, periodStart, periodEnd),
+        await processCompany(
+          admin,
+          companyId,
+          testMode ? 'test' : mercuryAccountId(),
+          periodStart,
+          periodEnd,
+          testMode,
+          manual,
+        ),
       );
     }
 

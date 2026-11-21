@@ -44,6 +44,34 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, already_set_up: true });
     }
 
+    // Test company (migration 146): no bank exists yet, so the creator is
+    // marked ready with a placeholder recipient. The payout run pays test
+    // companies on paper only, so this id is never sent to Mercury.
+    const { data: company, error: companyError } = await admin
+      .from('companies')
+      .select('payout_test_mode')
+      .eq('id', caller.companyId)
+      .maybeSingle();
+    if (companyError) throw companyError;
+    if (company?.payout_test_mode === true) {
+      const now = new Date().toISOString();
+      const { error: upsertError } = await admin.from('creator_wallets').upsert(
+        {
+          company_id: caller.companyId,
+          creator_id: caller.userId,
+          payout_ready: true,
+          payout_rail: 'mercury',
+          mercury_recipient_id: `test-${caller.userId}`,
+          mercury_invite_status: 'completed',
+          mercury_invite_sent_at: now,
+          mercury_onboarded_at: now,
+        },
+        { onConflict: 'company_id,creator_id' },
+      );
+      if (upsertError) throw upsertError;
+      return jsonResponse({ success: true, already_set_up: true, test_mode: true });
+    }
+
     await createInviteForCreator(admin, caller.userId, caller.companyId);
 
     // Deliberately no onboardingUrl in the response.

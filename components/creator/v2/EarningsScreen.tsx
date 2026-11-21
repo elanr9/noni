@@ -163,7 +163,7 @@ export function EarningsScreen({ posts, loaded, summary, refreshing = false, onR
               <Row>
                 <View style={{ flex: 1 }}>
                   <Text style={text.row}>Pending</Text>
-                  <Text style={text.meta}>{summary && summary.wallet.pending_cents > 0 ? `${money(summary.wallet.pending_cents)} clears when posts finish review` : 'Nothing clearing right now'}</Text>
+                  <Text style={text.meta}>{summary && summary.wallet.pending_cents > 0 ? `${money(summary.wallet.pending_cents)} on the way to your bank` : 'Nothing on the way right now'}</Text>
                 </View>
               </Row>
               <Row last chevron onPress={onPayouts}>

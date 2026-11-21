@@ -83,7 +83,7 @@ function PlatformRow({ k, label, info, loading }: { k: Key; label: string; info:
   );
 }
 
-/** Step 4: link TikTok and Instagram. Skippable; Home keeps the checklist item until both are linked. */
+/** Step 5: link TikTok and Instagram. Skippable; Home keeps the checklist item until both are linked. */
 export default function ConnectStep() {
   const [status, setStatus] = useState<SocialConnectStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,7 +158,7 @@ export default function ConnectStep() {
 
   return (
     <OnboardingShell
-      step={4}
+      step={5}
       onBack={() => router.back()}
       title="Connect your accounts"
       subtitle="Approved posts go out on these. Nothing posts without your team's approval, and we never see your password."

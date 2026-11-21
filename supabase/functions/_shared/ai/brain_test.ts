@@ -57,6 +57,20 @@ class FakeDb {
     return new Query(this, table);
   }
   rpc(name: string, args: Row): Promise<{ data: Row[]; error: null }> {
+    // Migration 148: one survey answer key written at a time.
+    if (name === 'brain_survey_put_answer' || name === 'brain_survey_set_answer_facts') {
+      let row = this.rows('brain_survey').find((r) => r.company_id === args.p_company);
+      if (!row) {
+        row = { company_id: args.p_company, answers: {} };
+        this.rows('brain_survey').push(row);
+      }
+      const answers = { ...((row.answers as Record<string, Row> | null) ?? {}) };
+      const key = args.p_key as string;
+      if (name === 'brain_survey_put_answer') answers[key] = args.p_answer as Row;
+      else if (answers[key]?.answered_at === args.p_answered_at) answers[key] = { ...answers[key], fact_ids: args.p_fact_ids };
+      row.answers = answers;
+      return Promise.resolve({ data: [], error: null });
+    }
     assertEquals(name, 'match_brain');
     const words = String(args.p_query).toLowerCase().split(/\W+/).filter((w) => w.length > 3);
     const data = this.rows('brain_facts')
