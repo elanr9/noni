@@ -12,6 +12,8 @@ const BRAIN_MAX_SUBPAGES = 7;
 const MAX_HTML_BYTES = 1_500_000;
 const USER_AGENT = 'Mozilla/5.0 (compatible; NoniBot/1.0)';
 
+import { detectBrandColor, stylesheetLinks } from './brandColor.ts';
+
 // Pages that say what the product is, costs and does, best first. A path
 // scores by the first pattern it matches.
 const WORTH_READING: Array<[RegExp, number]> = [
@@ -193,6 +195,40 @@ async function fetchPage(url: string, timeoutMs = 15000): Promise<{ html: string
   return { html: (await res.text()).slice(0, MAX_HTML_BYTES), url: res.url };
 }
 
+/** Stylesheets read when looking for the brand color, and how much of each. */
+const MAX_BRAND_STYLESHEETS = 3;
+const MAX_STYLESHEET_BYTES = 600_000;
+
+/** One linked stylesheet as text, or '' when it cannot be read. Validates the host before and after the fetch. */
+async function fetchStylesheet(url: string): Promise<string> {
+  try {
+    assertSafePublicHttpUrl(url);
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/css,*/*;q=0.5' },
+      redirect: 'follow',
+    });
+    if (!res.ok) {
+      await res.body?.cancel();
+      return '';
+    }
+    assertSafePublicHttpUrl(res.url);
+    return (await res.text()).slice(0, MAX_STYLESHEET_BYTES);
+  } catch {
+    return '';
+  }
+}
+
+/** The brand color the home page shows, from its own CSS and the first stylesheets it links. Never throws. */
+async function brandColorOf(html: string, base: URL): Promise<string | null> {
+  try {
+    const sheets = await Promise.all(stylesheetLinks(html, base).slice(0, MAX_BRAND_STYLESHEETS).map(fetchStylesheet));
+    return detectBrandColor(html, sheets);
+  } catch {
+    return null;
+  }
+}
+
 const bareHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, '');
 
 /** How much a path is worth reading: 0 never, otherwise higher is better. */
@@ -286,14 +322,15 @@ function readPage(html: string, url: string, path: string, cap: number): Crawled
 
 /**
  * The page asked for plus the same-site pages most worth reading (pricing,
- * features, FAQ, customers, about), each as its own text. Sign-in, checkout
+ * features, FAQ, customers, about), each as its own text, and the brand
+ * color the home page shows. Sign-in, checkout
  * and legal pages are never read. Also returns app store links found on the
  * home page. Validates the host before every fetch.
  */
 export async function crawlPages(
   website: string,
   opts: { maxSubpages?: number; pageCharCap?: number } = {},
-): Promise<{ pages: CrawledPage[]; storeLinks: string[] }> {
+): Promise<{ pages: CrawledPage[]; storeLinks: string[]; brandColor: string | null }> {
   const asked = assertSafePublicHttpUrl(website);
   const home = await fetchPage(asked.href);
   // Follow a redirect to www or to another domain the company moved to.
@@ -322,6 +359,7 @@ export async function crawlPages(
   });
   const chosen = (spread.length ? spread : ranked.slice(0, 1)).slice(0, max);
 
+  const brand = brandColorOf(home.html, base);
   const fetched = await Promise.allSettled(
     chosen.map(async ({ path }) => {
       const page = await fetchPage(new URL(path, base).href, 10000);
@@ -346,7 +384,7 @@ export async function crawlPages(
     seenText.add(page.text);
     pages.push(page);
   }
-  return { pages, storeLinks: stores };
+  return { pages, storeLinks: stores, brandColor: await brand };
 }
 
 /**

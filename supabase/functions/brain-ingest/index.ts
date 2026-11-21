@@ -149,9 +149,31 @@ async function addText(
   return created;
 }
 
+/**
+ * Makes the site's brand color the company's on-screen text theme
+ * (companies.settings.overlay_theme) when none is set yet. A color someone
+ * picked, or a deliberate "No theme", is never overwritten. True when set.
+ */
+async function adoptThemeColor(admin: SupabaseClient, companyId: string, color: string): Promise<boolean> {
+  try {
+    const { data } = await admin.from('companies').select('settings').eq('id', companyId).maybeSingle();
+    const raw: unknown = data?.settings;
+    const settings = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    if (settings.overlay_theme !== undefined && settings.overlay_theme !== null) return false;
+    const { error } = await admin
+      .from('companies')
+      .update({ settings: { ...settings, overlay_theme: { color, source: 'site' } } })
+      .eq('id', companyId);
+    return !error;
+  } catch (e) {
+    console.warn('brain-ingest theme color skipped:', e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
 /** Reads the site's best pages, one source per page, and returns what else it noticed. */
 async function crawlWebsite(admin: SupabaseClient, companyId: string, inputs: Inputs): Promise<string[]> {
-  const { pages, storeLinks } = await crawlPages(inputs.website!);
+  const { pages, storeLinks, brandColor } = await crawlPages(inputs.website!);
   const readable = pages.filter((page) => page.text.trim().length >= 80);
   if (readable.reduce((sum, page) => sum + page.text.length, 0) < MIN_SITE_CHARS) {
     throw new Error('The website has too little readable text. Paste a description of the product instead, or add an App Store link.');
@@ -166,6 +188,9 @@ async function crawlWebsite(admin: SupabaseClient, companyId: string, inputs: In
     });
   }
   const notes: string[] = [];
+  if (brandColor && (await adoptThemeColor(admin, companyId, brandColor))) {
+    notes.push('Set your theme color from your site');
+  }
   // A store link on the home page is the company pointing at its own listing: read it when none was given.
   const store = storeLinks.find((link) => link.includes('apps.apple.com')) ?? storeLinks[0];
   if (store && !(inputs.app_store_urls ?? []).length) {
