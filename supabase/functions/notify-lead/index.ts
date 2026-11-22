@@ -4,11 +4,11 @@
 // leads_creator_call) through pg_net with the cron secret. Cron secret only.
 //
 // Env: RESEND_API_KEY, INVITE_FROM_EMAIL (the verified sender), optional
-// LEADS_TO_EMAIL (defaults to founders@fieldvisionai.com).
+// LEADS_TO_EMAIL (defaults to founders@usenoni.app).
 
 import { adminClient, handleCors, jsonResponse } from '../_shared/wp8.ts';
 
-const DEFAULT_TO = 'founders@fieldvisionai.com';
+const DEFAULT_TO = 'founders@usenoni.app';
 
 const SUBJECT: Record<string, (name: string, company: string | null) => string> = {
   creator: (name) => `New creator applied to Noni: ${name}`,
