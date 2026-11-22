@@ -74,10 +74,11 @@ const isPlaceholderName = (name: string): boolean => !name.trim() || name.trim()
 const selfRun = (s: State): boolean => s.runBy !== 'noni';
 
 const AGENDA: Slot[] = [
-  // Who they are and which company, asked only when it is not known yet.
-  // Someone who signs up on the website brings only their Google account:
-  // the name comes from it; the website is asked; the company name is
-  // offered from that website as one tap.
+  // Who they are and which company. Someone who signs up on the website
+  // brings only their Google account, so the chat just asks: their name (if
+  // Google had none), the company, its website, their role. An invited
+  // company already has its name and website, so those are skipped or
+  // confirmed.
   {
     key: 'your_name',
     when: (s) => !s.firstName,
@@ -86,17 +87,17 @@ const AGENDA: Slot[] = [
     placeholder: 'Your name',
   },
   {
+    key: 'company_name',
+    when: (s) => isPlaceholderName(s.companyName),
+    kind: 'text',
+    ask: 'Ask what their company is called.',
+    placeholder: 'Company name',
+  },
+  {
     key: 'website',
     kind: 'text',
     ask: 'Ask for their company website so you can read it while you talk (if one is on file, ask them to confirm it).',
     placeholder: 'yourcompany.com',
-  },
-  {
-    key: 'company_name',
-    when: (s) => isPlaceholderName(s.companyName),
-    kind: 'text',
-    ask: 'Ask what their company is called (if a name is guessed, ask them to confirm it).',
-    placeholder: 'Company name',
   },
   {
     key: 'role',
@@ -300,12 +301,6 @@ function nextSlot(s: State): Slot | null {
   return AGENDA.find((slot) => !s.chat.answered.includes(slot.key) && (slot.when ? slot.when(s) : true)) ?? null;
 }
 
-/** A company name guessed from its domain: inkbound.ai gives Inkbound. */
-function nameFromDomain(domain: string): string {
-  const label = domain.replace(/^www\./, '').split('.')[0] ?? '';
-  return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
-}
-
 /** A site as people say it: www.inkbound.ai. */
 function wwwHost(url: string): string {
   const host = url.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
@@ -329,16 +324,8 @@ function specFor(slot: Slot | null, s: State): SlotSpec | null {
     // With nothing written for it, a company question is answered in words.
     kind: slot.dynamic && !written.length ? 'text' : slot.kind,
     ...(options && options.length ? { options } : {}),
-    // Only what they gave us: a website already on file, and a company name
-    // guessed from the website they typed. Never from their email: one
-    // person runs several companies, often from another company's address.
-    ...(slot.key === 'website' && s.website
-      ? { draft: wwwHost(s.website) }
-      : slot.key === 'company_name' && nameFromDomain(s.website)
-        ? { draft: nameFromDomain(s.website) }
-        : draft
-          ? { draft }
-          : {}),
+    // No guessing: only a website already on file is offered to confirm.
+    ...(slot.key === 'website' && s.website ? { draft: wwwHost(s.website) } : draft ? { draft } : {}),
     ...(slot.placeholder ? { placeholder: slot.placeholder } : {}),
   };
 }
