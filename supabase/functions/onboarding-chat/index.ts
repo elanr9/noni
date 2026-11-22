@@ -67,27 +67,38 @@ export type SlotSpec = {
   draft?: string;
 };
 
+/** The name a company gets when someone signs up on the website, before the chat asks for the real one. */
+const isPlaceholderName = (name: string): boolean => !name.trim() || name.trim() === 'New company';
+
 /** They (or their team) run the campaigns; false once they hand it to Noni. */
 const selfRun = (s: State): boolean => s.runBy !== 'noni';
 
 const AGENDA: Slot[] = [
+  // Someone who signed up on the website has a placeholder company until
+  // they say its name here.
+  {
+    key: 'company_name',
+    when: (s) => isPlaceholderName(s.companyName),
+    kind: 'text',
+    ask: 'Ask the name of their company.',
+    placeholder: 'Company name',
+  },
   {
     key: 'website',
     kind: 'text',
-    ask: "This is the first message. Say hi with their first name, say you are Noni, and say you have a few quick questions before you get started (use those words). Then ask for their website so you can read it while you talk (if one is on file, ask them to confirm it). Under 30 words.",
+    ask: 'Ask for their website so you can read it while you talk (if one is on file, ask them to confirm it).',
     placeholder: 'yourcompany.com',
   },
-  // Asked second: everything after branches on it. When Noni runs it, the
-  // company is hands off, so only the few questions Noni cannot answer itself
-  // are asked; when they run it, they answer every question themselves.
+  // Everything after branches on this. Noni team: hands off, a couple more
+  // questions and then a call. On Noni: they answer every question themselves,
+  // then pick a plan.
   {
-    key: 'runs_campaigns',
+    key: 'looking_for',
     kind: 'choice',
-    ask: 'Say you are reading their site now in the background. Ask if they want Noni to run everything for them, fully hands off, or if they or someone on their team will run it day to day (approving videos, keeping creators on pace).',
+    ask: 'Say you are reading their site now in the background. Ask what they are looking for. The two answers are shown as buttons; do not describe them.',
     options: [
-      { value: 'noni', label: 'Noni runs it for us' },
-      { value: 'me', label: 'Me' },
-      { value: 'team', label: 'Someone on my team' },
+      { value: 'diy', label: 'I want to run our UGC campaigns on Noni' },
+      { value: 'dfy', label: 'I want the Noni team to run my UGC' },
     ],
   },
   {
@@ -131,6 +142,16 @@ const AGENDA: Slot[] = [
       { value: 'this_week', label: 'This week' },
       { value: 'this_month', label: 'Within a month' },
       { value: 'exploring', label: 'Just exploring' },
+    ],
+  },
+  {
+    key: 'runs_campaigns',
+    when: selfRun,
+    kind: 'choice',
+    ask: 'Ask who will run the campaigns day to day on their side: approving videos and keeping creators on pace.',
+    options: [
+      { value: 'me', label: 'Me' },
+      { value: 'team', label: 'Someone on my team' },
     ],
   },
   // The company, as one-tap choices written from what the site scan found.
@@ -201,13 +222,13 @@ const AGENDA: Slot[] = [
     key: 'done',
     when: selfRun,
     kind: 'done',
-    ask: 'Close in one or two short sentences: they are set, Noni is writing their first briefs now.',
+    ask: 'Close in one or two short sentences: that is everything, Noni is writing their first briefs now, and next they pick their plan.',
   },
   {
     key: 'done',
     when: (s) => !selfRun(s),
     kind: 'done',
-    ask: 'Close in one or two short sentences: that is all Noni needs, the Noni team takes it from here and will reach out to set up a quick call.',
+    ask: 'Close in one or two short sentences: that is all Noni needs, and the last step is booking a quick call with the founders on the next screen.',
   },
 ];
 
@@ -308,6 +329,47 @@ async function saveAnswer(
     case 'role':
       await admin.from('companies').update({ admin_role: one }).eq('id', s.companyId);
       return;
+    case 'company_name': {
+      const name = text.trim().slice(0, 80);
+      if (name) {
+        await admin.from('companies').update({ name }).eq('id', s.companyId);
+        s.companyName = name;
+      }
+      return;
+    }
+    case 'looking_for': {
+      const dfy = one === 'dfy';
+      const { data } = await admin.from('companies').select('intake').eq('id', s.companyId).maybeSingle();
+      const intake = (data?.intake as Record<string, unknown>) ?? {};
+      const firstCall = dfy && !intake.call_requested_at;
+      await admin
+        .from('companies')
+        .update({
+          intake: {
+            ...intake,
+            campaigns_run_by: dfy ? 'noni' : 'me',
+            ...(firstCall ? { call_requested_at: new Date().toISOString() } : {}),
+          },
+          manager_count: dfy ? 0 : 1,
+          self_is_manager: !dfy,
+        })
+        .eq('id', s.companyId);
+      s.runBy = dfy ? 'noni' : 'me';
+      if (firstCall) {
+        // The founders hear about it at once (notify-lead).
+        const { data: who } = await admin.auth.admin.getUserById(s.userId);
+        await admin.from('leads').insert({
+          kind: 'call',
+          name: s.firstName || who.user?.email || 'New company',
+          email: who.user?.email ?? '',
+          company: s.companyName,
+          website: s.website || null,
+          message: 'Wants the Noni team to run their UGC. They book the call on the next screen.',
+          source: 'onboarding',
+        });
+      }
+      return;
+    }
     case 'website': {
       const site = text.trim();
       if (site) await admin.from('companies').update({ website: site }).eq('id', s.companyId);
@@ -501,9 +563,9 @@ function turnInstruction(s: State, slot: Slot | null, last: { slot: Slot; text: 
   }
   // Picking the chat up after sign up (the basics were asked there): the
   // first message still says hello before its question.
-  if (slot && slot.key !== 'website' && s.chat.messages.length === 0) {
+  if (slot && s.chat.messages.length === 0) {
     parts.push(
-      `This is the first message. Say hi with their first name, say you are Noni, and that a few quick questions about ${s.companyName} help creators get it right. Then go straight into the question below.`,
+      'This is the first message. Say hi with their first name, say you are Noni, and say you have a few quick questions before we get started (use those words). Then go straight into the question below. Under 30 words.',
     );
   }
   if (slot) {
@@ -659,14 +721,16 @@ Deno.serve(async (req) => {
 /** Plain wording for when the model cannot be reached. */
 function fallbackLine(slot: Slot, s: State): string {
   const lines: Record<string, string> = {
-    website: `Hi${s.firstName ? ` ${s.firstName}` : ''}, I'm Noni. A few quick questions and your first videos are moving. What's your website?`,
+    website: "What's your website?",
     goal: 'What should the videos do first?',
     platforms: 'Where should the videos go?',
     creators_wanted: 'How many creators do you want posting?',
     monthly_budget: "What's your monthly UGC budget?",
     launch: 'When do you want the first videos live?',
     does_ugc: 'Do you already work with creators?',
-    runs_campaigns: 'Should Noni run it all for you, or will you or your team run it?',
+    runs_campaigns: 'Who will run it day to day on your side?',
+    company_name: "What's your company called?",
+    looking_for: 'What are you looking for?',
     sells: `Which line says best what ${s.companyName} does?`,
     audience: 'Who are you selling to?',
     price: 'What does it cost?',

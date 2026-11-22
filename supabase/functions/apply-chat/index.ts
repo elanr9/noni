@@ -654,6 +654,56 @@ Deno.serve(async (req) => {
     return jsonResponse({ application: data });
   }
 
+  // A company signing up on the website gets its workspace at once, with a
+  // placeholder name, and goes straight into the onboarding chat (which asks
+  // its name, website and everything else). No questions here, no review.
+  if (body.action === 'join_company') {
+    if (kind !== 'company') return jsonResponse({ error: 'Companies only' }, 400);
+    let app = apps.find((a) => a.kind === 'company');
+    if (app?.status === 'approved') return jsonResponse({ company_id: (app as App & { company_id?: string }).company_id ?? null });
+    const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+    const fullName = String(meta.full_name ?? meta.name ?? '').trim() || null;
+    const { data: row, error } = await admin
+      .from('applications')
+      .upsert(
+        {
+          user_id: user.id,
+          kind: 'company',
+          status: 'pending',
+          email: user.email?.toLowerCase() ?? null,
+          full_name: fullName,
+          chat: {},
+          answers: {},
+          submitted_at: new Date().toISOString(),
+          decided_at: null,
+          decided_by: null,
+          decision_note: null,
+        },
+        { onConflict: 'user_id,kind' },
+      )
+      .select('*')
+      .single();
+    if (error || !row) return jsonResponse({ error: error?.message ?? 'Could not sign you up' }, 500);
+    app = row as App;
+    const { data: approved, error: approveError } = await admin.rpc('approve_application', {
+      p_id: app.id,
+      p_note: 'Signed up on the website',
+    });
+    if (approveError) return jsonResponse({ error: approveError.message }, 500);
+    const companyId = (approved as { company_id?: string } | null)?.company_id ?? null;
+    // Approval counts setup as done; here the onboarding chat is still ahead.
+    if (companyId) await admin.from('companies').update({ onboarded_at: null }).eq('id', companyId);
+    await admin.from('profiles').update({ onboarded: false }).eq('id', user.id);
+    await admin.from('leads').insert({
+      kind: 'business',
+      name: fullName ?? user.email ?? 'New company',
+      email: user.email ?? '',
+      message: 'Signed up on the website. They are in the onboarding chat now.',
+      source: 'apply',
+    });
+    return jsonResponse({ company_id: companyId });
+  }
+
   if (body.action !== 'turn') return jsonResponse({ error: 'Unknown action' }, 400);
   const app = apps.find((a) => a.kind === kind);
   if (!app) return jsonResponse({ error: 'Start the application first' }, 400);
