@@ -1069,12 +1069,21 @@ export async function buildCompanySnapshot(
         }
       : null;
 
+  // What the company has already confirmed or fixed is theirs: a rebuild (it
+  // runs after every new thing Noni reads) only rewrites lines nobody has
+  // settled, so telling Noni something new never undoes a confirmation.
+  const before = await loadCompanySnapshot(admin, companyId);
+  const kept = (old: SnapshotItem | null | undefined, fresh: SnapshotItem | null): SnapshotItem | null =>
+    old && old.status === 'confirmed' ? old : fresh;
+  const settledFeatures = (before?.features ?? []).some((f) => f.status === 'confirmed');
   const snapshot: CompanySnapshot = {
     generated_at: now.toISOString(),
-    sells: item(data.sells),
-    audience: item(data.audience),
-    features: (data.features ?? []).map(item).filter((x): x is SnapshotItem => x !== null).slice(0, 5),
-    viral: data.has_viral ? item(data.viral) : null,
+    sells: kept(before?.sells, item(data.sells)),
+    audience: kept(before?.audience, item(data.audience)),
+    features: settledFeatures
+      ? before!.features
+      : (data.features ?? []).map(item).filter((x): x is SnapshotItem => x !== null).slice(0, 5),
+    viral: kept(before?.viral, data.has_viral ? item(data.viral) : null),
   };
   const { error } = await admin
     .from('brain_survey')
