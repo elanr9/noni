@@ -71,7 +71,7 @@ const AGENDA: Slot[] = [
   {
     key: 'website',
     kind: 'text',
-    ask: "This is the first message. Say hi with their first name, say you are Noni, and that a few quick questions get their first videos moving. Then ask for their website so you can read it while you talk (if one is on file, ask them to confirm it). Under 30 words.",
+    ask: "This is the first message. Say hi with their first name, say you are Noni, and say you have a few quick questions before you get started (use those words). Then ask for their website so you can read it while you talk (if one is on file, ask them to confirm it). Under 30 words.",
     placeholder: 'yourcompany.com',
   },
   {
