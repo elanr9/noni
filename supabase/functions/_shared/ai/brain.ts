@@ -1172,6 +1172,50 @@ export async function loadCompanySnapshot(admin: SupabaseClient, companyId: stri
   return (data?.snapshot as CompanySnapshot | null) ?? null;
 }
 
+const REVISE_SYSTEM = `One line of a company summary is used to brief creators who film short videos about the company's product. Someone at the company read the line and replied with what is wrong or missing, in a chat, in their own words. Rewrite the line so it is correct.
+
+Their reply is a correction, not the new line: "yes, also transfers" means add transfers to who it is for; "no, that is not how it works, users upload clips and tap themselves" means describe it the way they said. Keep everything in the old line they did not contradict. Use only what the old line and their reply say; add nothing.
+
+text: the corrected line as one or two plain sentences, written about the product, never quoting or answering the reply.
+short: the same point as one bullet of at most nine words, no full stop, no product name at the start.
+
+Plain words. No dashes, no hype.`;
+
+/** One summary line rewritten to take in the company's correction. Null when the model does not answer. */
+async function reviseSnapshotLine(
+  current: SnapshotItem,
+  part: SnapshotPart,
+  note: string,
+  companyId: string,
+  deps: BrainDeps,
+): Promise<{ text: string; short: string } | null> {
+  const what = { sells: 'what the company sells', audience: 'who the product is for', viral: 'the moment that sells it in a video', features: 'one thing the product does' }[part];
+  try {
+    const generate = deps.generate ?? defaultGenerate;
+    const { data } = await generate<{ text: string; short: string }>({
+      task: 'brain.snapshot_revise',
+      tier: 'fast',
+      system: REVISE_SYSTEM,
+      context: [],
+      input: `The line says ${what}.\n\nOld line: ${current.text}\n\nTheir reply: ${note.slice(0, 1500)}`,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['text', 'short'],
+        properties: { text: { type: 'string' }, short: { type: 'string' } },
+      },
+      maxTokens: 500,
+      companyId,
+      timeoutMs: 30_000,
+    });
+    const text = plainText(data.text ?? '').slice(0, 400);
+    return text ? { text, short: bulletText(data.short ?? '') } : null;
+  } catch (e) {
+    console.warn('snapshot revise failed:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 /**
  * The founder confirms one line of the snapshot, as written or edited.
  * As written: the records it was drawn from are confirmed (tier 1). Edited:
@@ -1181,7 +1225,15 @@ export async function loadCompanySnapshot(admin: SupabaseClient, companyId: stri
 export async function settleSnapshotItem(
   admin: SupabaseClient,
   companyId: string,
-  input: { part: SnapshotPart; index?: number; action: 'confirm' | 'dismiss'; title?: string; text?: string },
+  input: {
+    part: SnapshotPart;
+    index?: number;
+    action: 'confirm' | 'dismiss';
+    title?: string;
+    text?: string;
+    /** What the company said is wrong, in its own words. The line is rewritten to take it in. */
+    note?: string;
+  },
   userId: string,
   deps: BrainDeps = {},
 ): Promise<CompanySnapshot> {
@@ -1195,8 +1247,12 @@ export async function settleSnapshotItem(
   if (input.action === 'dismiss') {
     next = { ...current, status: 'dismissed' };
   } else {
+    // A correction typed in conversation ("yes, also transfers") is not the
+    // line itself: the line is rewritten to take it in, never replaced by it.
+    const revised = input.note?.trim() ? await reviseSnapshotLine(current, input.part, input.note.trim(), companyId, deps) : null;
+    if (input.note?.trim() && !revised) throw new Error('That did not save. Try again.');
     const title = input.title?.trim() || current.title;
-    const text = input.text?.trim() || current.text;
+    const text = revised?.text || input.text?.trim() || current.text;
     const edited = title !== current.title || text !== current.text;
     if (edited) {
       const typed: { entity_type: EntityType; data: Record<string, unknown> } =
@@ -1207,7 +1263,7 @@ export async function settleSnapshotItem(
             : { entity_type: 'feature', data: { name: title, description: text } };
       const out = await addManualFact(admin, companyId, { ...typed, title }, userId, deps);
       // A line rewritten at bullet length is its own bullet; a longer one gets a fresh bullet on the next read.
-      const short = text.length <= 90 && !text.includes('\n') ? bulletText(text) : undefined;
+      const short = revised?.short || (text.length <= 90 && !text.includes('\n') ? bulletText(text) : undefined);
       next = { title, text, ...(short ? { short } : {}), fact_ids: out.fact ? [out.fact.id] : [], status: 'confirmed' };
     } else {
       for (const id of current.fact_ids) {

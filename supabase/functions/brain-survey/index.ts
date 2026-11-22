@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
           action: decision,
           title: typeof body.title === 'string' ? body.title : undefined,
           text: typeof body.text === 'string' ? body.text : undefined,
+          note: typeof body.note === 'string' ? body.note : undefined,
         },
         userId,
       );
