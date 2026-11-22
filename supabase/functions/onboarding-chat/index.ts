@@ -115,6 +115,8 @@ const AGENDA: Slot[] = [
   // then pick a plan.
   {
     key: 'looking_for',
+    // Ops already set it on an outbound invite.
+    when: (s) => !s.runBy,
     kind: 'choice',
     ask: 'Say you are reading their site now in the background. Ask what they are looking for. The two answers are shown as buttons; do not describe them.',
     options: [
@@ -241,15 +243,27 @@ const AGENDA: Slot[] = [
   },
   {
     key: 'done',
-    when: selfRun,
+    when: (s) => selfRun(s) && !s.planSet,
     kind: 'done',
     ask: 'Close in one or two short sentences: that is everything, Noni is writing their first briefs now, and next they pick their plan.',
   },
   {
     key: 'done',
-    when: (s) => !selfRun(s),
+    when: (s) => selfRun(s) && s.planSet,
+    kind: 'done',
+    ask: 'Close in one or two short sentences: that is everything, and Noni is writing their first briefs now.',
+  },
+  {
+    key: 'done',
+    when: (s) => !selfRun(s) && !s.planSet,
     kind: 'done',
     ask: 'Close in one or two short sentences: that is all Noni needs, and the last step is booking a quick call with the founders on the next screen.',
+  },
+  {
+    key: 'done',
+    when: (s) => !selfRun(s) && s.planSet,
+    kind: 'done',
+    ask: 'Close in one or two short sentences: that is all Noni needs, and the Noni team is already getting their first creators and briefs going.',
   },
 ];
 
@@ -271,15 +285,18 @@ type State = {
   options: CompanyOptions;
   /** companies.intake.campaigns_run_by: 'noni' | 'me' | 'team'. */
   runBy: string;
+  /** A plan is already in place (bought, or set by ops on an invite): no plan or call step after the chat. */
+  planSet: boolean;
 };
 
 type CompanyOptions = Partial<Record<CompanyKey, string[]>> & { status?: 'generating' | 'ready'; at?: string };
 
 async function loadState(admin: SupabaseClient, companyId: string, userId: string): Promise<State> {
-  const [{ data: company }, { data: profile }, { data: survey }] = await Promise.all([
+  const [{ data: company }, { data: profile }, { data: survey }, { data: billing }] = await Promise.all([
     admin.from('companies').select('name, website, onboarding_chat, onboarding_options, intake').eq('id', companyId).maybeSingle(),
     admin.from('profiles').select('full_name').eq('id', userId).maybeSingle(),
     admin.from('brain_survey').select('suggestions, snapshot, answers').eq('company_id', companyId).maybeSingle(),
+    admin.from('company_billing').select('subscription_status, subscription_plan, billing_simulated').eq('company_id', companyId).maybeSingle(),
   ]);
   const raw = (company?.onboarding_chat ?? {}) as Partial<ChatState>;
   return {
@@ -294,6 +311,9 @@ async function loadState(admin: SupabaseClient, companyId: string, userId: strin
     answers: (survey?.answers ?? {}) as Record<string, { answer: string }>,
     options: (company?.onboarding_options ?? {}) as CompanyOptions,
     runBy: String((company?.intake as { campaigns_run_by?: unknown } | null)?.campaigns_run_by ?? ''),
+    planSet:
+      Boolean(billing?.billing_simulated) ||
+      (Boolean(billing?.subscription_plan) && ['active', 'trialing'].includes(String(billing?.subscription_status ?? ''))),
   };
 }
 
