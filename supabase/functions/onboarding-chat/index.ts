@@ -106,18 +106,6 @@ const AGENDA: Slot[] = [
     ],
   },
   {
-    key: 'monthly_budget',
-    kind: 'choice',
-    ask: 'Ask their monthly UGC budget. Give the pay in one line so the number means something: creators earn $10 per video and $5 per static post, plus $1 for every 1,000 views.',
-    options: [
-      { value: 'under_1k', label: 'Under $1,000' },
-      { value: '1k-3k', label: '$1,000 to $3,000' },
-      { value: '3k-10k', label: '$3,000 to $10,000' },
-      { value: '10k+', label: '$10,000 or more' },
-      { value: 'unsure', label: 'Not sure yet' },
-    ],
-  },
-  {
     key: 'launch',
     kind: 'choice',
     ask: 'Ask when they want the first videos live.',
