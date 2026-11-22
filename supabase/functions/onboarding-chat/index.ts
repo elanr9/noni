@@ -67,6 +67,9 @@ export type SlotSpec = {
   draft?: string;
 };
 
+/** They (or their team) run the campaigns; false once they hand it to Noni. */
+const selfRun = (s: State): boolean => s.runBy !== 'noni';
+
 const AGENDA: Slot[] = [
   {
     key: 'website',
@@ -74,10 +77,23 @@ const AGENDA: Slot[] = [
     ask: "This is the first message. Say hi with their first name, say you are Noni, and say you have a few quick questions before you get started (use those words). Then ask for their website so you can read it while you talk (if one is on file, ask them to confirm it). Under 30 words.",
     placeholder: 'yourcompany.com',
   },
+  // Asked second: everything after branches on it. When Noni runs it, the
+  // company is hands off, so only the few questions Noni cannot answer itself
+  // are asked; when they run it, they answer every question themselves.
+  {
+    key: 'runs_campaigns',
+    kind: 'choice',
+    ask: 'Say you are reading their site now in the background. Ask if they want Noni to run everything for them, fully hands off, or if they or someone on their team will run it day to day (approving videos, keeping creators on pace).',
+    options: [
+      { value: 'noni', label: 'Noni runs it for us' },
+      { value: 'me', label: 'Me' },
+      { value: 'team', label: 'Someone on my team' },
+    ],
+  },
   {
     key: 'goal',
     kind: 'choice',
-    ask: 'Say you are reading their site now in the background. Ask what the videos should do first for them.',
+    ask: 'Ask what the videos should do first for them.',
     options: [
       { value: 'signups', label: 'Downloads and sign ups' },
       { value: 'audience', label: 'A bigger audience' },
@@ -86,6 +102,7 @@ const AGENDA: Slot[] = [
   },
   {
     key: 'platforms',
+    when: selfRun,
     kind: 'multi',
     ask: 'Ask where the videos should go. They can pick more than one.',
     options: [
@@ -96,6 +113,7 @@ const AGENDA: Slot[] = [
   },
   {
     key: 'creators_wanted',
+    when: selfRun,
     kind: 'choice',
     ask: 'Ask how many creators they want posting. Mention Noni finds and manages them.',
     options: [
@@ -115,52 +133,81 @@ const AGENDA: Slot[] = [
       { value: 'exploring', label: 'Just exploring' },
     ],
   },
-  {
-    key: 'runs_campaigns',
-    kind: 'choice',
-    ask: 'Ask who should run the campaigns day to day: approving videos and keeping creators on pace. Make clear Noni can run it all for them, or they or someone on their team can.',
-    options: [
-      { value: 'noni', label: 'Noni runs it for us' },
-      { value: 'me', label: 'Me' },
-      { value: 'team', label: 'Someone on my team' },
-    ],
-  },
   // The company, as one-tap choices written from what the site scan found.
   {
     key: 'sells',
+    when: selfRun,
     kind: 'choice',
     dynamic: 'sells',
     ask: 'Say you have read their site. Ask them to pick the line that best says what the company does. The choices are shown as buttons, do not list them.',
   },
   {
     key: 'audience',
+    when: selfRun,
     kind: 'multi',
     dynamic: 'audience',
     ask: 'Ask who they are selling to. They can pick more than one.',
   },
   {
     key: 'price',
+    when: selfRun,
     kind: 'choice',
     dynamic: 'price',
     ask: 'Ask what it costs.',
   },
   {
     key: 'cta',
+    when: selfRun,
     kind: 'choice',
     dynamic: 'cta',
     ask: 'Ask what a viewer should do right after watching.',
   },
   {
     key: 'never_say',
+    when: selfRun,
     kind: 'multi',
     dynamic: 'never_say',
     extra: [{ value: 'none', label: 'Nothing specific' }],
-    ask: 'Last one. Ask if there is anything creators must never say or show. They can pick any, or nothing specific.',
+    ask: 'Ask if there is anything creators must never say or show. They can pick any, or nothing specific.',
+  },
+  // They run it, so the detail creators are briefed from comes from them.
+  {
+    key: 'voice',
+    when: selfRun,
+    kind: 'choice',
+    ask: 'Ask how creators should sound on camera.',
+    options: [
+      { value: 'casual', label: 'Casual and funny' },
+      { value: 'direct', label: 'Straight to the point' },
+      { value: 'personal', label: 'Real and personal' },
+      { value: 'hype', label: 'High energy' },
+    ],
+  },
+  {
+    key: 'must_show',
+    when: selfRun,
+    kind: 'text',
+    ask: 'Ask what every video has to show or say, in one line.',
+    placeholder: 'The home screen and the free trial',
+  },
+  {
+    key: 'competitors',
+    when: selfRun,
+    kind: 'text',
+    ask: 'Last one. Ask who they compete with, so creators never mention them by name.',
+    placeholder: 'Names, or none',
   },
   {
     key: 'done',
+    when: selfRun,
     kind: 'done',
     ask: 'Close in one or two short sentences: they are set, Noni is writing their first briefs now.',
+  },
+  {
+    key: 'done',
+    when: (s) => !selfRun(s),
+    kind: 'done',
+    ask: 'Close in one or two short sentences: that is all Noni needs, the Noni team takes it from here and will reach out to set up a quick call.',
   },
 ];
 
@@ -180,13 +227,15 @@ type State = {
   snapshot: CompanySnapshot | null;
   answers: Record<string, { answer: string }>;
   options: CompanyOptions;
+  /** companies.intake.campaigns_run_by: 'noni' | 'me' | 'team'. */
+  runBy: string;
 };
 
 type CompanyOptions = Partial<Record<CompanyKey, string[]>> & { status?: 'generating' | 'ready'; at?: string };
 
 async function loadState(admin: SupabaseClient, companyId: string, userId: string): Promise<State> {
   const [{ data: company }, { data: profile }, { data: survey }] = await Promise.all([
-    admin.from('companies').select('name, website, onboarding_chat, onboarding_options').eq('id', companyId).maybeSingle(),
+    admin.from('companies').select('name, website, onboarding_chat, onboarding_options, intake').eq('id', companyId).maybeSingle(),
     admin.from('profiles').select('full_name').eq('id', userId).maybeSingle(),
     admin.from('brain_survey').select('suggestions, snapshot, answers').eq('company_id', companyId).maybeSingle(),
   ]);
@@ -202,6 +251,7 @@ async function loadState(admin: SupabaseClient, companyId: string, userId: strin
     snapshot: (survey?.snapshot ?? null) as CompanySnapshot | null,
     answers: (survey?.answers ?? {}) as Record<string, { answer: string }>,
     options: (company?.onboarding_options ?? {}) as CompanyOptions,
+    runBy: String((company?.intake as { campaigns_run_by?: unknown } | null)?.campaigns_run_by ?? ''),
   };
 }
 
@@ -218,7 +268,7 @@ function wwwHost(url: string): string {
 
 /** How far along they are: answered questions out of all of them. */
 function progressOf(s: State): { at: number; total: number } {
-  const asked = AGENDA.filter((x) => x.kind !== 'done');
+  const asked = AGENDA.filter((x) => x.kind !== 'done' && (x.when ? x.when(s) : true));
   return { at: asked.filter((x) => s.chat.answered.includes(x.key)).length, total: asked.length };
 }
 
@@ -267,6 +317,9 @@ async function saveAnswer(
     case 'creators_wanted':
     case 'monthly_budget':
     case 'launch':
+    case 'voice':
+    case 'must_show':
+    case 'competitors':
       await mergeIntake({ [slot.key]: one });
       return;
     case 'platforms':
@@ -282,6 +335,7 @@ async function saveAnswer(
         .update({ manager_count: one === 'noni' ? 0 : 1, self_is_manager: one === 'me' })
         .eq('id', s.companyId);
       await mergeIntake({ campaigns_run_by: one });
+      s.runBy = one;
       return;
     default:
       if (slot.dynamic) {
@@ -605,12 +659,15 @@ function fallbackLine(slot: Slot, s: State): string {
     monthly_budget: "What's your monthly UGC budget?",
     launch: 'When do you want the first videos live?',
     does_ugc: 'Do you already work with creators?',
-    runs_campaigns: 'Who will run the campaigns day to day?',
+    runs_campaigns: 'Should Noni run it all for you, or will you or your team run it?',
     sells: `Which line says best what ${s.companyName} does?`,
     audience: 'Who are you selling to?',
     price: 'What does it cost?',
     cta: 'What should a viewer do right after watching?',
     never_say: 'Anything creators must never say or show?',
+    voice: 'How should creators sound?',
+    must_show: 'What does every video have to show or say?',
+    competitors: 'Who do you compete with?',
     summary: "That's everything. Here's what I understood about your company.",
     done: "You're all set.",
   };
