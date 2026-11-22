@@ -60,7 +60,7 @@ const COMPANY: Slot[] = [
   {
     key: 'company_name',
     kind: 'text',
-    ask: "First message. Say hi with their first name, say you are Noni, and that a few quick questions get them set up with creators. Ask the name of their company. Under 30 words.",
+    ask: "First message. Say hi with their first name, say you are Noni, and say you have a few quick questions before you get started (use those words). Ask the name of their company. Under 30 words.",
     placeholder: 'Company name',
   },
   {
@@ -75,7 +75,6 @@ const COMPANY: Slot[] = [
     ask: 'Ask what the videos should do first for them.',
     options: [
       { value: 'signups', label: 'Downloads and sign ups' },
-      { value: 'sales', label: 'Sales' },
       { value: 'audience', label: 'A bigger audience' },
       { value: 'trust', label: 'Trust in the brand' },
     ],
@@ -112,19 +111,9 @@ const COMPANY: Slot[] = [
     ],
   },
   {
-    key: 'runs_campaigns',
-    kind: 'choice',
-    ask: 'Last one. Ask who should run the campaigns day to day: approving videos and keeping creators on pace. Noni can run it all for them, or they or someone on their team can.',
-    options: [
-      { value: 'noni', label: 'Noni runs it for us' },
-      { value: 'me', label: 'Me' },
-      { value: 'team', label: 'Someone on my team' },
-    ],
-  },
-  {
     key: 'done',
     kind: 'done',
-    ask: 'Close in two short sentences: their application is in, the Noni team reviews it quickly and emails them when their workspace is open.',
+    ask: 'Close in one short sentence: that is everything, and there is one last choice on the next screen. No question.',
   },
 ];
 
@@ -378,10 +367,18 @@ async function saveApp(admin: SupabaseClient, s: State, extra: Record<string, un
   if (error) throw error;
 }
 
-/** Into review: the founders hear about it through leads (notify-lead). */
+/** Finished. A creator goes into review; a company is let straight in (its
+    workspace is made now) and picks next whether it runs the campaigns
+    itself or Noni does it for them. The founders hear about both through
+    leads (notify-lead). */
 async function submit(admin: SupabaseClient, s: State): Promise<void> {
   s.app.status = 'pending';
   await saveApp(admin, s, { status: 'pending', submitted_at: new Date().toISOString() });
+  if (s.app.kind === 'company') {
+    const { error } = await admin.rpc('approve_application', { p_id: s.app.id, p_note: 'Signed up on the website' });
+    if (error) console.error('apply-chat auto approve', error.message);
+    else s.app.status = 'approved';
+  }
   const a = s.app.answers;
   const lines = Object.entries(a).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`);
   await admin.from('leads').insert({
@@ -390,7 +387,9 @@ async function submit(admin: SupabaseClient, s: State): Promise<void> {
     email: s.app.email,
     company: s.app.kind === 'company' ? String(a.company_name ?? '') || null : null,
     website: s.app.kind === 'company' ? String(a.website ?? '') || null : null,
-    message: `Applied on the website. Review in /ops/applications.\n\n${lines.join('\n')}`,
+    message: s.app.kind === 'company'
+      ? `Signed up on the website. Next they pick do it yourself or done for you.\n\n${lines.join('\n')}`
+      : `Applied on the website. Review in /ops/applications.\n\n${lines.join('\n')}`,
     source: 'apply',
   });
 }

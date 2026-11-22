@@ -499,6 +499,13 @@ function turnInstruction(s: State, slot: Slot | null, last: { slot: Slot; text: 
       );
     }
   }
+  // Picking the chat up after sign up (the basics were asked there): the
+  // first message still says hello before its question.
+  if (slot && slot.key !== 'website' && s.chat.messages.length === 0) {
+    parts.push(
+      `This is the first message. Say hi with their first name, say you are Noni, and that a few quick questions about ${s.companyName} help creators get it right. Then go straight into the question below.`,
+    );
+  }
   if (slot) {
     parts.push(`Next: ${slot.ask}`);
     const draft = slot.kind === 'text' ? s.suggestions[slot.key]?.text : undefined;
