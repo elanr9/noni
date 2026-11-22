@@ -80,7 +80,6 @@ const AGENDA: Slot[] = [
     ask: 'Say you are reading their site now in the background. Ask what the videos should do first for them.',
     options: [
       { value: 'signups', label: 'Downloads and sign ups' },
-      { value: 'sales', label: 'Sales' },
       { value: 'audience', label: 'A bigger audience' },
       { value: 'trust', label: 'Trust in the brand' },
     ],
