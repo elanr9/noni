@@ -74,20 +74,40 @@ const isPlaceholderName = (name: string): boolean => !name.trim() || name.trim()
 const selfRun = (s: State): boolean => s.runBy !== 'noni';
 
 const AGENDA: Slot[] = [
-  // Someone who signed up on the website has a placeholder company until
-  // they say its name here.
+  // Who they are and which company, asked only when it is not known yet.
+  // Someone who signs up on the website brings only their Google account:
+  // the name comes from it, the website is guessed from a work email's
+  // domain and the company name from the site, each offered as one tap.
   {
-    key: 'company_name',
-    when: (s) => isPlaceholderName(s.companyName),
+    key: 'your_name',
+    when: (s) => !s.firstName,
     kind: 'text',
-    ask: 'Ask the name of their company.',
-    placeholder: 'Company name',
+    ask: 'Ask their first name.',
+    placeholder: 'Your name',
   },
   {
     key: 'website',
     kind: 'text',
-    ask: 'Ask for their website so you can read it while you talk (if one is on file, ask them to confirm it).',
+    ask: 'Ask for their company website so you can read it while you talk (if one is on file or guessed from their email, ask them to confirm it).',
     placeholder: 'yourcompany.com',
+  },
+  {
+    key: 'company_name',
+    when: (s) => isPlaceholderName(s.companyName),
+    kind: 'text',
+    ask: 'Ask what their company is called (if a name is guessed, ask them to confirm it).',
+    placeholder: 'Company name',
+  },
+  {
+    key: 'role',
+    kind: 'choice',
+    ask: 'Ask what their role is at the company.',
+    options: [
+      { value: 'Founder', label: 'Founder' },
+      { value: 'Marketing', label: 'Marketing' },
+      { value: 'Growth', label: 'Growth' },
+      { value: 'Something else', label: 'Something else' },
+    ],
   },
   // Everything after branches on this. Noni team: hands off, a couple more
   // questions and then a call. On Noni: they answer every question themselves,
@@ -250,15 +270,18 @@ type State = {
   options: CompanyOptions;
   /** companies.intake.campaigns_run_by: 'noni' | 'me' | 'team'. */
   runBy: string;
+  /** Their sign in email, for guessing the company from a work domain. */
+  email: string;
 };
 
 type CompanyOptions = Partial<Record<CompanyKey, string[]>> & { status?: 'generating' | 'ready'; at?: string };
 
 async function loadState(admin: SupabaseClient, companyId: string, userId: string): Promise<State> {
-  const [{ data: company }, { data: profile }, { data: survey }] = await Promise.all([
+  const [{ data: company }, { data: profile }, { data: survey }, { data: who }] = await Promise.all([
     admin.from('companies').select('name, website, onboarding_chat, onboarding_options, intake').eq('id', companyId).maybeSingle(),
     admin.from('profiles').select('full_name').eq('id', userId).maybeSingle(),
     admin.from('brain_survey').select('suggestions, snapshot, answers').eq('company_id', companyId).maybeSingle(),
+    admin.auth.admin.getUserById(userId),
   ]);
   const raw = (company?.onboarding_chat ?? {}) as Partial<ChatState>;
   return {
@@ -273,11 +296,29 @@ async function loadState(admin: SupabaseClient, companyId: string, userId: strin
     answers: (survey?.answers ?? {}) as Record<string, { answer: string }>,
     options: (company?.onboarding_options ?? {}) as CompanyOptions,
     runBy: String((company?.intake as { campaigns_run_by?: unknown } | null)?.campaigns_run_by ?? ''),
+    email: String(who?.user?.email ?? '').toLowerCase(),
   };
 }
 
 function nextSlot(s: State): Slot | null {
   return AGENDA.find((slot) => !s.chat.answered.includes(slot.key) && (slot.when ? slot.when(s) : true)) ?? null;
+}
+
+const FREE_MAIL = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'hey.com', 'gmx.com',
+]);
+
+/** The company domain of a work email (elan@inkbound.ai: inkbound.ai), or '' for a personal one. */
+function workDomain(email: string): string {
+  const domain = email.split('@')[1]?.trim().toLowerCase() ?? '';
+  return domain && !FREE_MAIL.has(domain) ? domain : '';
+}
+
+/** A company name guessed from its domain: inkbound.ai gives Inkbound. */
+function nameFromDomain(domain: string): string {
+  const label = domain.replace(/^www\./, '').split('.')[0] ?? '';
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
 }
 
 /** A site as people say it: www.inkbound.ai. */
@@ -303,7 +344,13 @@ function specFor(slot: Slot | null, s: State): SlotSpec | null {
     // With nothing written for it, a company question is answered in words.
     kind: slot.dynamic && !written.length ? 'text' : slot.kind,
     ...(options && options.length ? { options } : {}),
-    ...(slot.key === 'website' && s.website ? { draft: wwwHost(s.website) } : draft ? { draft } : {}),
+    ...(slot.key === 'website' && (s.website || workDomain(s.email))
+      ? { draft: wwwHost(s.website || workDomain(s.email)) }
+      : slot.key === 'company_name' && nameFromDomain(s.website || workDomain(s.email))
+        ? { draft: nameFromDomain(s.website || workDomain(s.email)) }
+        : draft
+          ? { draft }
+          : {}),
     ...(slot.placeholder ? { placeholder: slot.placeholder } : {}),
   };
 }
@@ -329,6 +376,14 @@ async function saveAnswer(
     case 'role':
       await admin.from('companies').update({ admin_role: one }).eq('id', s.companyId);
       return;
+    case 'your_name': {
+      const name = text.trim().slice(0, 80);
+      if (name) {
+        await admin.from('profiles').update({ full_name: name }).eq('id', s.userId);
+        s.firstName = name.split(/\s+/)[0] ?? name;
+      }
+      return;
+    }
     case 'company_name': {
       const name = text.trim().slice(0, 80);
       if (name) {
@@ -372,7 +427,10 @@ async function saveAnswer(
     }
     case 'website': {
       const site = text.trim();
-      if (site) await admin.from('companies').update({ website: site }).eq('id', s.companyId);
+      if (site) {
+        await admin.from('companies').update({ website: site }).eq('id', s.companyId);
+        s.website = site;
+      }
       return;
     }
     case 'goal':
@@ -730,6 +788,8 @@ function fallbackLine(slot: Slot, s: State): string {
     does_ugc: 'Do you already work with creators?',
     runs_campaigns: 'Who will run it day to day on your side?',
     company_name: "What's your company called?",
+    your_name: "What's your first name?",
+    role: "What's your role?",
     looking_for: 'What are you looking for?',
     sells: `Which line says best what ${s.companyName} does?`,
     audience: 'Who are you selling to?',
