@@ -586,8 +586,14 @@ const FOLLOW_UP_TOOL = {
   input_schema: {
     type: 'object' as const,
     additionalProperties: false,
-    properties: { reason: { type: 'string', description: 'What was missing, in a few words.' } },
-    required: ['reason'],
+    properties: {
+      reason: { type: 'string', description: 'What was missing, in a few words.' },
+      question: {
+        type: 'string',
+        description: 'The one follow-up question your message asks them, word for word, ending with a question mark.',
+      },
+    },
+    required: ['reason', 'question'],
   },
 };
 
@@ -735,7 +741,18 @@ Deno.serve(async (req) => {
         }
         const final = await response.finalMessage();
         if (final.stop_reason === 'refusal') throw new Error('refused');
-        followedUp = final.content.some((b) => b.type === 'tool_use' && b.name === 'follow_up');
+        const followUp = final.content.find((b) => b.type === 'tool_use' && b.name === 'follow_up') as
+          | { input?: { question?: unknown } }
+          | undefined;
+        followedUp = Boolean(followUp);
+        // The tool call ends the turn, so a message that only announced the
+        // follow-up ("I'll ask for a bit more.") would never ask it: add it.
+        const question = String(followUp?.input?.question ?? '').replace(/\s*[—–]\s*/g, ', ').trim();
+        if (followedUp && question && !/\?\s*$/.test(text.trim())) {
+          const add = (text.trim() ? ' ' : '') + question;
+          text += add;
+          controller.enqueue(sse({ type: 'delta', text: add }));
+        }
       } catch (e) {
         console.error('onboarding-chat model', e instanceof Error ? e.message : e);
         // The conversation must never stall on a model error: fall back to plain wording.
