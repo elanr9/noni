@@ -679,7 +679,7 @@ Deno.serve(async (req) => {
     s.chat.answered.push(open.key);
   } else if (body.answer && !open) {
     return jsonResponse({ error: 'The conversation is finished' }, 400);
-  } else if (s.chat.messages.length && !body.answer) {
+  } else if (s.chat.messages.length && !body.answer && s.chat.messages[s.chat.messages.length - 1].role !== 'user') {
     // Nothing new to say: the last message is still waiting for an answer.
     return jsonResponse({ error: 'Answer the question first' }, 400);
   }

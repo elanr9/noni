@@ -124,7 +124,7 @@ const CREATOR: Slot[] = [
   {
     key: 'experience',
     kind: 'choice',
-    ask: "First message. Say hi with their first name, say you are Noni, and that brands on Noni pay creators to make short videos. A few quick questions build their creator profile. Ask if they have done UGC before. Under 35 words.",
+    ask: "Say that brands on Noni pay creators to make short videos, and a few quick questions build their creator profile (only if nothing has been said yet in this chat, open with hi, their first name and that you are Noni). Ask if they have done UGC before. Under 35 words.",
     options: [
       { value: 'pro', label: "Yes, I've done paid UGC" },
       { value: 'some', label: 'A little' },
@@ -542,6 +542,9 @@ Deno.serve(async (req) => {
     decision?: string;
     note?: string;
     answer?: { slot?: string; value?: string | string[]; text?: string };
+    /** What they said on the website before signing in. */
+    name?: string;
+    intro?: unknown;
   };
   const kind: Kind | null = body.kind === 'company' || body.kind === 'creator' ? body.kind : null;
 
@@ -631,18 +634,31 @@ Deno.serve(async (req) => {
 
   if (!kind) return jsonResponse({ error: 'expected kind: company or creator' }, 400);
 
+  // The first lines of the chat, said on the website before signing in
+  // ("What should I call you?", "Company or creator?"), carried into the
+  // conversation so it picks up from there.
+  const name = String(body.name ?? '').trim().slice(0, 80) || null;
+  const intro = Array.isArray(body.intro)
+    ? (body.intro as unknown[])
+        .slice(0, 6)
+        .map((m) => m as { role?: unknown; text?: unknown; slot?: unknown })
+        .filter((m) => (m.role === 'assistant' || m.role === 'user') && typeof m.text === 'string' && m.text.trim())
+        .map((m) => ({ role: m.role as 'assistant' | 'user', text: String(m.text).trim().slice(0, 300), slot: String(m.slot ?? 'intro') }))
+    : [];
+
+
   if (body.action === 'start') {
     const existing = apps.find((a) => a.kind === kind);
     if (existing && existing.status !== 'rejected') return jsonResponse({ application: existing });
     const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
-    const fullName = String(meta.full_name ?? meta.name ?? '').trim() || null;
+    const fullName = name ?? (String(meta.full_name ?? meta.name ?? '').trim() || null);
     const row = {
       user_id: user.id,
       kind,
       status: 'draft',
       email: user.email?.toLowerCase() ?? null,
       full_name: fullName,
-      chat: {},
+      chat: intro.length ? { messages: intro, answered: [], followups: {} } : {},
       answers: {},
       submitted_at: null,
       decided_at: null,
@@ -662,7 +678,7 @@ Deno.serve(async (req) => {
     let app = apps.find((a) => a.kind === 'company');
     if (app?.status === 'approved') return jsonResponse({ company_id: (app as App & { company_id?: string }).company_id ?? null });
     const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
-    const fullName = String(meta.full_name ?? meta.name ?? '').trim() || null;
+    const fullName = name ?? (String(meta.full_name ?? meta.name ?? '').trim() || null);
     const { data: row, error } = await admin
       .from('applications')
       .upsert(
@@ -692,8 +708,16 @@ Deno.serve(async (req) => {
     if (approveError) return jsonResponse({ error: approveError.message }, 500);
     const companyId = (approved as { company_id?: string } | null)?.company_id ?? null;
     // Approval counts setup as done; here the onboarding chat is still ahead.
-    if (companyId) await admin.from('companies').update({ onboarded_at: null }).eq('id', companyId);
-    await admin.from('profiles').update({ onboarded: false }).eq('id', user.id);
+    if (companyId) {
+      await admin
+        .from('companies')
+        .update({ onboarded_at: null, ...(intro.length ? { onboarding_chat: { messages: intro, answered: [], followups: {} } } : {}) })
+        .eq('id', companyId);
+    }
+    await admin
+      .from('profiles')
+      .update({ onboarded: false, ...(name ? { full_name: name } : {}) })
+      .eq('id', user.id);
     await admin.from('leads').insert({
       kind: 'business',
       name: fullName ?? user.email ?? 'New company',
@@ -727,7 +751,7 @@ Deno.serve(async (req) => {
     s.chat.answered.push(open.key);
   } else if (body.answer && !open) {
     return jsonResponse({ error: 'The conversation is finished' }, 400);
-  } else if (s.chat.messages.length && !body.answer) {
+  } else if (s.chat.messages.length && !body.answer && s.chat.messages[s.chat.messages.length - 1].role !== 'user') {
     return jsonResponse({ error: 'Answer the question first' }, 400);
   }
 
