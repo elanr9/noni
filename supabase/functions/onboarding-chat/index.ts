@@ -56,8 +56,8 @@ type Slot = {
 
 type CompanyKey = 'sells' | 'audience' | 'price' | 'cta' | 'never_say';
 const COMPANY_KEYS: CompanyKey[] = ['sells', 'audience', 'price', 'cta', 'never_say'];
-/** The ones still asked in the chat (price is no longer asked). */
-const ASKED_KEYS: CompanyKey[] = ['sells', 'audience', 'cta', 'never_say'];
+/** The ones still asked in the chat (price and next step are no longer asked). */
+const ASKED_KEYS: CompanyKey[] = ['sells', 'audience', 'never_say'];
 
 /** The input the web shows under the newest message. */
 export type SlotSpec = {
@@ -196,13 +196,8 @@ const AGENDA: Slot[] = [
   },
   // No price question: what the product costs comes from the site scan, and
   // the company's budget is never asked here (it is set on a call).
-  {
-    key: 'cta',
-    when: selfRun,
-    kind: 'choice',
-    dynamic: 'cta',
-    ask: 'Ask what a viewer should do right after watching.',
-  },
+  // No "what should a viewer do next" question: it is always sign up on
+  // their site, which the site scan already knows.
   {
     key: 'never_say',
     when: selfRun,
@@ -482,7 +477,6 @@ const OPTIONS_SYSTEM = `You are setting up a UGC campaign for a company. From wh
 
 sells: three different ways to say what the company does, each a full line a founder would agree with (for example "Turns a full game into a highlight video").
 audience: two to four specific groups it sells to, concrete enough to brief a creator (for example "High school players chasing a college spot", "College players looking to transfer", "Parents of recruits").
-cta: three next steps a viewer of a short UGC video takes to become a customer, each a verb plus where, using the company's real site or app name (for example "Sign up at www.example.com", "Download the Example app", "Book a demo at www.example.com"). Only sign up, download, buy or book. Never a creator code, promo code or discount. Never a feature, page or section inside the product (not "Browse the directory", not "Start with the AI assistant").
 never_say: three or four things a creator in this category must never claim or show (for example "Guarantee a scholarship", "Show a real player's private data").`;
 
 /** Writes the company question choices once, from whatever the scan has so far. */
@@ -543,7 +537,6 @@ async function ensureOptions(admin: SupabaseClient, s: State, wait: boolean): Pr
       at: new Date().toISOString(),
       sells: clean(data.sells, 3),
       audience: clean(data.audience, 4),
-      cta: clean(data.cta, 3),
       never_say: clean(data.never_say, 4),
     };
     await admin.from('companies').update({ onboarding_options: options }).eq('id', s.companyId);
