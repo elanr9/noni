@@ -653,6 +653,19 @@ Deno.serve(async (req) => {
 
   const s = await loadState(admin, caller.companyId, caller.userId);
 
+  // A conversation saved mid-way can end on a question that is no longer
+  // next (a question since removed, like the old price one). Drop it, so the
+  // page asks for the real next question instead of showing the old words
+  // over the new choices.
+  {
+    const lastMsg = s.chat.messages[s.chat.messages.length - 1];
+    const next = nextSlot(s);
+    if (lastMsg?.role === 'assistant' && next && lastMsg.slot !== next.key && lastMsg.slot !== 'end' && !lastMsg.slot?.startsWith('intro')) {
+      s.chat.messages.pop();
+      await saveChat(admin, s);
+    }
+  }
+
   if (body.action === 'state') {
     return jsonResponse({
       messages: s.chat.messages,
