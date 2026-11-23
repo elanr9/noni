@@ -482,7 +482,7 @@ const OPTIONS_SYSTEM = `You are setting up a UGC campaign for a company. From wh
 
 sells: three different ways to say what the company does, each a full line a founder would agree with (for example "Turns a full game into a highlight video").
 audience: two to four specific groups it sells to, concrete enough to brief a creator (for example "High school players chasing a college spot", "College players looking to transfer", "Parents of recruits").
-cta: three next steps a viewer of a short UGC video takes to become a customer, each a verb plus where, using the company's real site or app name (for example "Sign up at www.example.com", "Download the Example app", "Use the creator's code at checkout", "Book a demo at www.example.com"). Only sign up, download, buy, book or use a code. Never a feature, page or section inside the product (not "Browse the directory", not "Start with the AI assistant").
+cta: three next steps a viewer of a short UGC video takes to become a customer, each a verb plus where, using the company's real site or app name (for example "Sign up at www.example.com", "Download the Example app", "Book a demo at www.example.com"). Only sign up, download, buy or book. Never a creator code, promo code or discount. Never a feature, page or section inside the product (not "Browse the directory", not "Start with the AI assistant").
 never_say: three or four things a creator in this category must never claim or show (for example "Guarantee a scholarship", "Show a real player's private data").`;
 
 /** Writes the company question choices once, from whatever the scan has so far. */
