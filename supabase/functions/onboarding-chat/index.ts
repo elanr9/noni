@@ -192,13 +192,8 @@ const AGENDA: Slot[] = [
     dynamic: 'audience',
     ask: 'Ask who they are selling to. They can pick more than one.',
   },
-  {
-    key: 'price',
-    when: selfRun,
-    kind: 'choice',
-    dynamic: 'price',
-    ask: 'Ask what it costs.',
-  },
+  // No price question: what the product costs comes from the site scan, and
+  // the company's budget is never asked here (it is set on a call).
   {
     key: 'cta',
     when: selfRun,
@@ -575,6 +570,7 @@ How you write:
 - A reaction must be specific to their business, never generic praise ("Great!", "Love it", "Awesome"). Do not repeat their answer back to them.
 - Plain words. No em dashes or en dashes, no emoji, no exclamation marks, no hype words, no filler ("seamless", "empower", "unlock", "game-changer", "dive in", "elevate").
 - Never invent facts about their company. Use only what they said and what the site scan found, given below.
+- Never ask about budget, spend, price or plans. Money is settled on a call, not in this chat. Noni has no free plan, free trial or free start, so never offer or mention one.
 - The answer choices are shown to them as buttons under your message. NEVER list, name or paraphrase choices in your message (no "X, Y, or Z?"); just ask the question.
 - Address them as "you". Use their first name only in your first message and rarely after that, never in two messages in a row. Refer to the company by name.
 - Do not include internal or system XML tags in your response.`;
