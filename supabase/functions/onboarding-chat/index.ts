@@ -187,13 +187,13 @@ const AGENDA: Slot[] = [
     key: 'done',
     when: (s) => selfRun(s) && !s.planSet,
     kind: 'done',
-    ask: 'Close in one or two short sentences: that is everything, Noni is writing their first briefs now, and next is their dashboard, where they finish setting up.',
+    ask: 'Close in one short sentence: thank them by first name, that is everything Noni needs. Never mention briefs, plans or what comes next.',
   },
   {
     key: 'done',
     when: (s) => selfRun(s) && s.planSet,
     kind: 'done',
-    ask: 'Close in one or two short sentences: that is everything, Noni is writing their first briefs now, and next is their dashboard.',
+    ask: 'Close in one short sentence: thank them by first name, that is everything Noni needs. Never mention briefs, plans or what comes next.',
   },
   {
     key: 'done',
@@ -205,7 +205,7 @@ const AGENDA: Slot[] = [
     key: 'done',
     when: (s) => !selfRun(s) && s.planSet,
     kind: 'done',
-    ask: 'Close in one or two short sentences: that is all Noni needs, and the Noni team is already getting their first creators and briefs going.',
+    ask: 'Close in one or two short sentences: that is all Noni needs, and the Noni team is already getting their first creators going.',
   },
 ];
 
