@@ -57,7 +57,7 @@ type Slot = {
 type CompanyKey = 'sells' | 'audience' | 'price' | 'cta' | 'never_say';
 const COMPANY_KEYS: CompanyKey[] = ['sells', 'audience', 'price', 'cta', 'never_say'];
 /** The ones still asked in the chat (price and next step are no longer asked). */
-const ASKED_KEYS: CompanyKey[] = ['sells', 'audience', 'never_say'];
+const ASKED_KEYS: CompanyKey[] = [];
 
 /** The input the web shows under the newest message. */
 export type SlotSpec = {
@@ -179,60 +179,10 @@ const AGENDA: Slot[] = [
       { value: 'team', label: 'Someone on my team' },
     ],
   },
-  // The company, as one-tap choices written from what the site scan found.
-  {
-    key: 'sells',
-    when: selfRun,
-    kind: 'choice',
-    dynamic: 'sells',
-    ask: 'Say you have read their site. Ask them to pick the line that best says what the company does. The choices are shown as buttons, do not list them.',
-  },
-  {
-    key: 'audience',
-    when: selfRun,
-    kind: 'multi',
-    dynamic: 'audience',
-    ask: 'Ask who they are selling to. They can pick more than one.',
-  },
-  // No price question: what the product costs comes from the site scan, and
-  // the company's budget is never asked here (it is set on a call).
-  // No "what should a viewer do next" question: it is always sign up on
-  // their site, which the site scan already knows.
-  {
-    key: 'never_say',
-    when: selfRun,
-    kind: 'multi',
-    dynamic: 'never_say',
-    extra: [{ value: 'none', label: 'Nothing specific' }],
-    ask: 'Ask if there is anything creators must never say or show. They can pick any, or nothing specific.',
-  },
-  // They run it, so the detail creators are briefed from comes from them.
-  {
-    key: 'voice',
-    when: selfRun,
-    kind: 'choice',
-    ask: 'Ask how creators should sound on camera.',
-    options: [
-      { value: 'casual', label: 'Casual and funny' },
-      { value: 'direct', label: 'Straight to the point' },
-      { value: 'personal', label: 'Real and personal' },
-      { value: 'hype', label: 'High energy' },
-    ],
-  },
-  {
-    key: 'must_show',
-    when: selfRun,
-    kind: 'text',
-    ask: 'Ask what every video has to show or say, in one line.',
-    placeholder: 'The home screen and the free trial',
-  },
-  {
-    key: 'competitors',
-    when: selfRun,
-    kind: 'text',
-    ask: 'Last one. Ask who they compete with, so creators never mention them by name.',
-    placeholder: 'Names, or none',
-  },
+  // No questions about the brand itself (what it does, who it sells to,
+  // voice, what to never say or always show, competitors): the site scan
+  // reads all of that, and a company should see campaigns without being
+  // quizzed first.
   {
     key: 'done',
     when: (s) => selfRun(s) && !s.planSet,
@@ -701,7 +651,7 @@ Deno.serve(async (req) => {
   // The company questions need their choices. Written ahead in the
   // background once the site is being read, waited for if not ready yet.
   if (slot?.dynamic) await ensureOptions(admin, s, true);
-  else if (s.chat.answered.includes('website')) EdgeRuntime.waitUntil(ensureOptions(admin, s, false));
+  // No brand questions are asked any more, so no choices are written ahead.
 
   // 2. Stream the reply.
   const stream = new ReadableStream<Uint8Array>({
