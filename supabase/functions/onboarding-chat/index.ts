@@ -56,6 +56,8 @@ type Slot = {
 
 type CompanyKey = 'sells' | 'audience' | 'price' | 'cta' | 'never_say';
 const COMPANY_KEYS: CompanyKey[] = ['sells', 'audience', 'price', 'cta', 'never_say'];
+/** The ones still asked in the chat (price is no longer asked). */
+const ASKED_KEYS: CompanyKey[] = ['sells', 'audience', 'cta', 'never_say'];
 
 /** The input the web shows under the newest message. */
 export type SlotSpec = {
@@ -480,8 +482,7 @@ const OPTIONS_SYSTEM = `You are setting up a UGC campaign for a company. From wh
 
 sells: three different ways to say what the company does, each a full line a founder would agree with (for example "Turns a full game into a highlight video").
 audience: two to four specific groups it sells to, concrete enough to brief a creator (for example "High school players chasing a college spot", "College players looking to transfer", "Parents of recruits").
-price: two or three lines for what it costs, from what the site says (for example "Free to start, $19 a month for Pro"). If the site shows no price, offer common shapes: "Free", "Free trial, then paid", "Paid plans".
-cta: two or three things a viewer should do right after watching (for example "Download the app", "Start free on the website", "Use creator code for 20% off").
+cta: three next steps a viewer of a short UGC video takes to become a customer, each a verb plus where, using the company's real site or app name (for example "Sign up at www.example.com", "Download the Example app", "Use the creator's code at checkout", "Book a demo at www.example.com"). Only sign up, download, buy, book or use a code. Never a feature, page or section inside the product (not "Browse the directory", not "Start with the AI assistant").
 never_say: three or four things a creator in this category must never claim or show (for example "Guarantee a scholarship", "Show a real player's private data").`;
 
 /** Writes the company question choices once, from whatever the scan has so far. */
@@ -523,13 +524,13 @@ async function ensureOptions(admin: SupabaseClient, s: State, wait: boolean): Pr
       task: 'onboarding.options',
       tier: 'fast',
       system: OPTIONS_SYSTEM,
-      context: [`Company: ${s.companyName}\n\nRecords from the site\n${renderRetrieved(facts.filter((f) => f.usage !== 'blocked'), new Date())}`],
+      context: [`Company: ${s.companyName}${s.website ? `\nWebsite: ${wwwHost(s.website)} (use exactly this in any choice that names the site)` : ''}\n\nRecords from the site\n${renderRetrieved(facts.filter((f) => f.usage !== 'blocked'), new Date())}`],
       input: 'Write the choices.',
       schema: {
         type: 'object',
         additionalProperties: false,
-        required: COMPANY_KEYS,
-        properties: Object.fromEntries(COMPANY_KEYS.map((k) => [k, list])),
+        required: ASKED_KEYS,
+        properties: Object.fromEntries(ASKED_KEYS.map((k) => [k, list])),
       },
       maxTokens: 1500,
       companyId: s.companyId,
@@ -542,7 +543,6 @@ async function ensureOptions(admin: SupabaseClient, s: State, wait: boolean): Pr
       at: new Date().toISOString(),
       sells: clean(data.sells, 3),
       audience: clean(data.audience, 4),
-      price: clean(data.price, 3),
       cta: clean(data.cta, 3),
       never_say: clean(data.never_say, 4),
     };
@@ -667,6 +667,10 @@ Deno.serve(async (req) => {
   }
 
   if (body.action === 'state') {
+    // An open company question with no choices yet (they were reset or
+    // never written): write them now, so it never shows without buttons.
+    const open = s.chat.messages.length ? nextSlot(s) : null;
+    if (open?.dynamic && s.options.status !== 'ready') await ensureOptions(admin, s, true);
     return jsonResponse({
       messages: s.chat.messages,
       pending: s.chat.messages.length ? specFor(nextSlot(s), s) : null,
