@@ -615,9 +615,12 @@ Deno.serve(async (req) => {
     // never written): write them now, so it never shows without buttons.
     const open = s.chat.messages.length ? nextSlot(s) : null;
     if (open?.dynamic && s.options.status !== 'ready') await ensureOptions(admin, s, true);
+    // A finished conversation still shows its way out (Go to dashboard) when
+    // reopened; without this a reload left it on the last words, stuck.
+    const finished = s.chat.messages.length > 0 && !open && s.chat.messages[s.chat.messages.length - 1].role === 'assistant';
     return jsonResponse({
       messages: s.chat.messages,
-      pending: s.chat.messages.length ? specFor(nextSlot(s), s) : null,
+      pending: finished ? { key: 'done', kind: 'done' } : s.chat.messages.length ? specFor(open, s) : null,
       first_name: s.firstName,
       company_name: s.companyName,
       progress: progressOf(s),
