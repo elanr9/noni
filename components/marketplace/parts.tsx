@@ -1,20 +1,9 @@
 // Small pieces both sides of the marketplace share.
 import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { CENTS_PER_1K_VIEWS, STATIC_POST_CENTS, VIDEO_POST_CENTS } from '../../lib/creator-pay';
 import { nicheLabel } from '../../lib/marketplace';
-import { money } from '../../lib/v2-format';
 import { color, num, radius, shadow, text, tone as tones, type Tone } from '../../theme/v2';
 import { Icon, Press, type IconName } from '../v2';
-
-/** The pay every campaign on Noni runs on, in one line. */
-export const PAY_LINE = `${money(VIDEO_POST_CENTS)} a video + ${money(CENTS_PER_1K_VIEWS)} per 1k views`;
-
-export const PAY_FIGURES = [
-  { value: money(VIDEO_POST_CENTS), label: 'per video' },
-  { value: money(STATIC_POST_CENTS), label: 'per static post' },
-  { value: money(CENTS_PER_1K_VIEWS), label: 'per 1k views' },
-];
 
 /** Wrapping pick-any pills: grey when off, blue when on. */
 export function Pills<K extends string>({

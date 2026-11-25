@@ -26,6 +26,8 @@ const PAD = 4;
 export function Seg<K extends string>({ options, value, onChange, style }: SegProps<K>) {
   const [width, setWidth] = useState(0);
   const n = options.length;
+  // Four across: tighter type so a label and its count still fit a phone.
+  const tight = n > 3;
   const index = Math.max(0, options.findIndex((o) => o.key === value));
   const itemW = width > 0 ? (width - PAD * 2) / n : 0;
   const x = useSharedValue(0);
@@ -64,14 +66,14 @@ export function Seg<K extends string>({ options, value, onChange, style }: SegPr
             onPress={() => onChange(o.key)}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
-            style={{ flex: 1, height: control.seg, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            style={{ flex: 1, height: control.seg, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: tight ? 4 : 6 }}
           >
-            <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: on ? '700' : '600', color: on ? color.white : color.ink }}>
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: tight ? 13 : 15, fontWeight: on ? '700' : '600', color: on ? color.white : color.ink }}>
               {o.label}
             </Text>
             {o.count !== undefined ? (
-              <View style={{ minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: radius.pill, backgroundColor: on ? color.segBadgeOn : t.tint, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 12, lineHeight: 20, fontWeight: '700', color: on ? color.white : t.text, fontVariant: ['tabular-nums'] }}>{o.count}</Text>
+              <View style={{ minWidth: tight ? 18 : 20, height: tight ? 18 : 20, paddingHorizontal: tight ? 5 : 6, borderRadius: radius.pill, backgroundColor: on ? color.segBadgeOn : t.tint, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12, lineHeight: tight ? 18 : 20, fontWeight: '700', color: on ? color.white : t.text, fontVariant: ['tabular-nums'] }}>{o.count}</Text>
               </View>
             ) : null}
           </Press>

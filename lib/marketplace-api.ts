@@ -89,8 +89,28 @@ export async function loadMyListings(companyId: string): Promise<Listing[]> {
   return (data ?? []) as Listing[];
 }
 
+/** The listing a company's Market works for: the open one, else the newest. */
+export function pickListing(rows: Listing[]): Listing | null {
+  return rows.find((l) => l.status === 'open') ?? rows[rows.length - 1] ?? null;
+}
+
+/** The company's campaign; the server writes a draft from company data when there is none (managers only). */
+export async function ensureListing(): Promise<Listing> {
+  const { data, error } = await db.rpc('ensure_marketplace_listing');
+  fail(error);
+  return data as Listing;
+}
+
+/** The company's campaign, made on the spot when it has none. */
+export async function loadOrMakeListing(companyId: string): Promise<Listing> {
+  return pickListing(await loadMyListings(companyId)) ?? (await ensureListing());
+}
+
+/** posts_per_week is derived on the server from posts a day; it is never sent. */
+export type ListingPatch = Partial<Omit<Listing, 'id' | 'company_id' | 'contract_version' | 'opened_at' | 'posts_per_week'>>;
+
 /** Creates the listing when id is null; the server writes the starting agreement. */
-export async function saveListing(id: string | null, patch: Partial<Omit<Listing, 'id' | 'company_id' | 'contract_version' | 'opened_at'>>): Promise<Listing> {
+export async function saveListing(id: string | null, patch: ListingPatch): Promise<Listing> {
   const { data, error } = await db.rpc('save_marketplace_listing', { p_id: id, p_patch: patch });
   fail(error);
   return data as Listing;
@@ -127,6 +147,14 @@ export async function loadCreators(q: CreatorQuery): Promise<{ total: number; ro
   fail(error);
   const out = (data ?? { total: 0, rows: [] }) as { total: number; rows: MarketCreator[] };
   return { total: out.total, rows: out.rows.map((r) => ({ ...r, niches: r.niches ?? [], styles: r.styles ?? [], portfolio: Array.isArray(r.portfolio) ? r.portfolio : [] })) };
+}
+
+/** Creators who signed and applied to the company's campaign and still wait on an answer, newest first. */
+export async function loadApplicants(companyId: string): Promise<MarketCreator[]> {
+  const listing = pickListing(await loadMyListings(companyId));
+  if (!listing) return [];
+  const { rows } = await loadCreators({ listingId: listing.id, scope: 'applicants', sort: 'newest' });
+  return rows.filter((r) => r.application_status === 'applied' && r.application_id);
 }
 
 export async function inviteCreator(listingId: string, creatorId: string, message: string): Promise<void> {

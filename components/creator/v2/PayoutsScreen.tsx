@@ -5,7 +5,7 @@ import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import * as WebBrowser from 'expo-web-browser';
 
-import { CENTS_PER_1K_VIEWS, STATIC_POST_CENTS, VIDEO_POST_CENTS, VIEW_PAY_CAP_CENTS, VIEW_WINDOW_DAYS } from '../../../lib/creator-pay';
+import { CENTS_PER_1K_VIEWS, MIN_VIEWS_FOR_POST_PAY, STATIC_POST_CENTS, VIDEO_POST_CENTS, VIEW_PAY_CAP_CENTS, VIEW_WINDOW_DAYS } from '../../../lib/creator-pay';
 import { checkPayoutSetup, payoutSetupLabel, payoutStatus, payoutStatusLabel, startPayoutSetup, type PayoutSummary } from '../../../lib/payouts-api';
 import { money, shortDate } from '../../../lib/v2-format';
 import { ledgerKindLabel, type WalletLedgerRow } from '../../../lib/wallet-api';
@@ -113,7 +113,7 @@ export function PayoutsScreen({ summary, ledger, failed = false, refreshing = fa
             <Card>
               <Text style={text.row}>How pay works</Text>
               <Text style={[text.meta, { marginTop: 4 }]}>
-                {`${money(VIDEO_POST_CENTS)} for every video and ${money(STATIC_POST_CENTS)} for every static post once it is live, plus ${money(CENTS_PER_1K_VIEWS)} for every 1,000 views in its first ${VIEW_WINDOW_DAYS} days, up to ${money(VIEW_PAY_CAP_CENTS)} per post.`}
+                {`${money(VIDEO_POST_CENTS)} for every video and ${money(STATIC_POST_CENTS)} for every slideshow once it is live with ${MIN_VIEWS_FOR_POST_PAY} views, plus ${money(CENTS_PER_1K_VIEWS)} for every 1,000 views in its first ${VIEW_WINDOW_DAYS} days, up to ${money(VIEW_PAY_CAP_CENTS)} per post.`}
               </Text>
             </Card>
             <Label style={{ marginTop: 8, marginBottom: 8, marginLeft: 4 }}>History</Label>

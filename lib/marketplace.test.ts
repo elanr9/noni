@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BRAND_COLORS,
+  DEFAULT_TERMS,
   NO_FILTERS,
+  applicantStatLine,
   campaignTodo,
+  coverColor,
+  isLightColor,
+  payHeadline,
+  payLines,
+  paySub,
+  postsPerDayLabel,
   groupCampaigns,
   activeFilterCount,
   ageBandKey,
@@ -111,5 +120,59 @@ describe('groupCampaigns', () => {
   it('says what is waiting, or nothing when caught up', () => {
     expect(campaignTodo({ to_make: 2, to_fix: 1, unread: 0, in_review: 3 }).map((t) => t.label)).toEqual(['2 to make', '1 to fix']);
     expect(campaignTodo({ to_make: 0, to_fix: 0, unread: 0, in_review: 0 })).toEqual([]);
+  });
+});
+
+describe('campaign terms', () => {
+  it('labels posts a day', () => {
+    expect(postsPerDayLabel({ posts_per_day_min: 2, posts_per_day_max: 3 })).toBe('2 to 3 posts a day');
+    expect(postsPerDayLabel({ posts_per_day_min: 1, posts_per_day_max: 1 })).toBe('1 post a day');
+    expect(postsPerDayLabel({ posts_per_day_min: 3, posts_per_day_max: 3 })).toBe('3 posts a day');
+    expect(postsPerDayLabel({ posts_per_day_min: 4, posts_per_day_max: 2 })).toBe('4 posts a day');
+  });
+  it('writes the pay pills', () => {
+    expect(payHeadline(DEFAULT_TERMS)).toBe('$10/video');
+    expect(paySub(DEFAULT_TERMS)).toBe('+$1/1k views');
+    expect(payHeadline({ video_post_cents: 1250 })).toBe('$12.50/video');
+    expect(paySub({ cents_per_1k_views: 150, view_pay_cap_cents: 20000 })).toBe('+$1.50/1k views');
+    expect(paySub({ cents_per_1k_views: 100, view_pay_cap_cents: 0 })).toBeNull();
+  });
+  it('lists the pay terms without trailing zeros', () => {
+    expect(payLines(DEFAULT_TERMS)).toEqual(['$10 a video', '$5 a slideshow', 'Paid at 500 views', '$1 per 1,000 views', 'Up to $300 view pay a post']);
+    expect(payLines({ video_post_cents: 2500, static_post_cents: 750, cents_per_1k_views: 250, view_pay_cap_cents: 100000, min_views: 1500 })).toEqual([
+      '$25 a video',
+      '$7.50 a slideshow',
+      'Paid at 1,500 views',
+      '$2.50 per 1,000 views',
+      'Up to $1,000 view pay a post',
+    ]);
+  });
+  it('leaves out what does not apply', () => {
+    expect(payLines({ ...DEFAULT_TERMS, min_views: 0, view_pay_cap_cents: 0 })).toEqual(['$10 a video', '$5 a slideshow']);
+  });
+  it('gives every preview campaign its own terms', () => {
+    expect(PREVIEW_FEED.map(payHeadline)).toEqual(['$10/video', '$25/video', '$15/video', '$12.50/video']);
+    expect(PREVIEW_FEED.map(postsPerDayLabel)).toEqual(['2 to 3 posts a day', '1 post a day', '3 posts a day', '2 to 3 posts a day']);
+  });
+});
+
+describe('cover colour', () => {
+  it('falls back to the first swatch', () => {
+    expect(coverColor(null)).toBe(BRAND_COLORS[0]);
+    expect(coverColor('blue')).toBe(BRAND_COLORS[0]);
+    expect(coverColor('#0d9488')).toBe('#0D9488');
+  });
+  it('puts white on every swatch and ink on a light colour', () => {
+    expect(BRAND_COLORS.some(isLightColor)).toBe(false);
+    expect(isLightColor('#FFE066')).toBe(true);
+    expect(isLightColor('#FFFFFF')).toBe(true);
+  });
+});
+
+describe('applicant line', () => {
+  it('joins the numbers a creator has', () => {
+    expect(applicantStatLine(maya)).toBe('24.6k followers · 842k views · 31 posts');
+    expect(applicantStatLine({ followers: null, total_views: 0, posts_live: 0 })).toBe('New to Noni');
+    expect(applicantStatLine({ followers: 3200, total_views: 0, posts_live: 1 })).toBe('3.2k followers · 1 post');
   });
 });

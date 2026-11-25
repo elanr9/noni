@@ -11,7 +11,6 @@ import {
   missingToApply,
   orderFeed,
   pastLabel,
-  spotsLabel,
   standing,
   type CreatorCampaign,
   type CreatorResume,
@@ -20,7 +19,8 @@ import {
 import { money } from '../../lib/v2-format';
 import { color, space, text } from '../../theme/v2';
 import { Button, Card, Chip, Chips, Empty, Icon, IconButton, Press, RootTitle, Seg, Sheet, Skeleton, UnderlineTabs, useTabBarInset } from '../v2';
-import { CompanyMark, NicheTags, PAY_LINE, toneFor } from './parts';
+import { CampaignCard } from './CampaignCard';
+import { CompanyMark, toneFor } from './parts';
 
 const EXPLORE = ['All', 'For you'] as const;
 type ExploreKey = (typeof EXPLORE)[number];
@@ -123,8 +123,8 @@ export function CreatorMarketScreen({
 
             {listings === null && !failed ? (
               <>
-                <Skeleton h={148} />
-                <Skeleton h={148} />
+                <Skeleton h={300} />
+                <Skeleton h={300} />
               </>
             ) : failed && listings === null ? (
               <Empty>Could not load campaigns. Pull down to try again.</Empty>
@@ -301,34 +301,5 @@ function LeaveSheet({
 }
 
 function ListingCard({ listing: l, mine, onPress }: { listing: FeedListing; mine: string[]; onPress: () => void }) {
-  const state = standing(l);
-  const spots = spotsLabel(l);
-  const meta = [`${l.posts_per_week} posts a week`, l.creator_count > 0 ? `${l.creator_count} ${l.creator_count === 1 ? 'creator' : 'creators'}` : null, spots].filter(Boolean).join(' · ');
-  return (
-    <Card onPress={onPress} accessibilityLabel={`${l.company_name}, ${l.title}`}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <CompanyMark name={l.company_name} tone={toneFor(l.company_id)} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={text.meta}>{l.company_name}</Text>
-          <Text numberOfLines={2} style={text.row}>{l.title}</Text>
-        </View>
-        {state ? <Chip label={state.label} tone={state.tone} style={{ alignSelf: 'center' }} /> : null}
-      </View>
-      {l.application_status === 'invited' && l.invite_message ? (
-        <Text numberOfLines={3} style={[text.body, { marginTop: 12 }]}>“{l.invite_message}”</Text>
-      ) : l.tagline ? (
-        <Text numberOfLines={2} style={[text.body, { marginTop: 12, color: color.grey4 }]}>{l.tagline}</Text>
-      ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 }}>
-        <Icon name="payments" size={18} color={color.green} />
-        <Text style={{ fontSize: 15, fontWeight: '700', color: color.ink }}>{PAY_LINE}</Text>
-      </View>
-      <Text style={[text.meta, { marginTop: 4 }]}>{meta}</Text>
-      {l.niches.length > 0 ? (
-        <View style={{ marginTop: 12 }}>
-          <NicheTags niches={l.niches} highlight={mine} max={4} />
-        </View>
-      ) : null}
-    </Card>
-  );
+  return <CampaignCard campaign={l} mine={mine} state={standing(l)} note={l.application_status === 'invited' ? l.invite_message : null} onPress={onPress} />;
 }

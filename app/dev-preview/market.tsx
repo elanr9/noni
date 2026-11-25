@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AdminMarketScreen, type MarketScope } from '../../components/marketplace/AdminMarketScreen';
 import { CreatorSheet, FiltersSheet, InviteSheet } from '../../components/marketplace/AdminSheets';
 import { CreatorMarketScreen } from '../../components/marketplace/CreatorMarketScreen';
-import { ListingEditor } from '../../components/marketplace/ListingEditor';
+import { ListingEditor, type EditorTab } from '../../components/marketplace/ListingEditor';
 import { ListingScreen } from '../../components/marketplace/ListingScreen';
 import { ResumeEditor, type Tab } from '../../components/marketplace/ResumeEditor';
 import { NO_FILTERS, matchesFilters, sortCreators, type CreatorFilters, type CreatorSort, type MarketCreator } from '../../lib/marketplace';
@@ -41,7 +41,7 @@ export default function Preview() {
     );
   }
   if (view === 'profile') return <ResumeEditor resume={PREVIEW_RESUME} name="Maya Torres" startTab={(tab as Tab) ?? 'you'} onBack={() => router.back()} onSave={async () => undefined} />;
-  if (view === 'editor') return <ListingEditor listing={PREVIEW_LISTING} companyName="Inkbound AI" onBack={() => router.back()} onSave={async () => undefined} />;
+  if (view === 'editor') return <ListingEditor listing={PREVIEW_LISTING} companyName="Inkbound AI" startTab={(tab as EditorTab) ?? 'card'} onBack={() => router.back()} onSave={async () => undefined} />;
 
   if (view === 'admin' || view === 'applicants' || view === 'empty') {
     const pool =

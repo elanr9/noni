@@ -1,6 +1,7 @@
 /**
  * The manager's Review queue for the active company: submitted posts, songs
- * waiting on approval and accounts pending review. One store so the Review
+ * waiting on approval, accounts pending review and creators who applied to
+ * the company's campaign. One store so the Review
  * root, the per-creator queue, the post player and the tab badge agree, and
  * so an approval can drop an item optimistically and put it back on error.
  *
@@ -19,6 +20,8 @@ import {
 } from './admin-api';
 import { formatAge, isEditing } from './admin-queue-map';
 import { listAccountApprovalQueue, type AccountApprovalItem } from './creator-accounts-api';
+import type { MarketCreator } from './marketplace';
+import { loadApplicants, signAvatars } from './marketplace-api';
 import { supabase } from './supabase';
 
 export type ReviewPost = {
@@ -54,6 +57,8 @@ type ReviewQueueState = {
   music: MusicApprovalItem[];
   /** Pending accounts first, then sent-back ones waiting on the creator. */
   accounts: AccountApprovalItem[];
+  /** Creators who signed and applied to the campaign and wait on a yes or no, newest first. */
+  applicants: MarketCreator[];
   /** Signed avatar URL by creator id; null when the creator has no photo. */
   avatars: Record<string, string | null>;
   /** Creators on the roster (any account state); null until known. 0 means a brand-new company. */
@@ -64,6 +69,7 @@ type ReviewQueueState = {
   removePost: (id: string) => () => void;
   removeMusic: (assignmentId: string) => () => void;
   removeAccount: (accountId: string) => () => void;
+  removeApplicant: (applicationId: string) => () => void;
 };
 
 /** Signed avatar URLs for creators in a company's roster. */
@@ -113,12 +119,13 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
   posts: [],
   music: [],
   accounts: [],
+  applicants: [],
   avatars: {},
   creatorCount: null,
 
   async load(companyId, opts) {
     const switched = get().companyId !== companyId;
-    if (switched) set({ companyId, posts: [], music: [], accounts: [], avatars: {}, creatorCount: null, status: 'loading', error: null });
+    if (switched) set({ companyId, posts: [], music: [], accounts: [], applicants: [], avatars: {}, creatorCount: null, status: 'loading', error: null });
     else if (!opts?.quiet) set({ status: 'loading', error: null });
     void rosterCreatorCount(companyId)
       .then((n) => {
@@ -126,10 +133,12 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
       })
       .catch(() => undefined);
     try {
-      const [queue, music, accounts] = await Promise.all([
+      const [queue, music, accounts, applied] = await Promise.all([
         listAssignmentQueue(companyId),
         listMusicApprovalQueue(companyId),
         listAccountApprovalQueue(companyId),
+        // Applicants are an extra lane: if they cannot be read the rest of the queue still shows.
+        loadApplicants(companyId).catch(() => null),
       ]);
       const subs = await latestSubmissionsByAssignment(queue.map((a) => a.id));
       const posts: ReviewPost[] = queue
@@ -155,7 +164,17 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
         .slice()
         .sort((a, b) => Number(a.status === 'needs_changes') - Number(b.status === 'needs_changes'));
       if (get().companyId !== companyId) return;
-      set({ posts, music, accounts: sortedAccounts, status: 'ready', error: null });
+      const applicants = applied ?? get().applicants;
+      set({ posts, music, accounts: sortedAccounts, applicants, status: 'ready', error: null });
+      // Applicants are not on the roster yet, so their photos are signed from their own paths.
+      void signAvatars(applicants.map((a) => a.avatar_path))
+        .then((signed) => {
+          if (get().companyId !== companyId) return;
+          const photos: Record<string, string | null> = {};
+          for (const a of applicants) photos[a.creator_id] = a.avatar_path ? (signed.get(a.avatar_path) ?? null) : null;
+          set({ avatars: { ...get().avatars, ...photos } });
+        })
+        .catch(() => undefined);
       const ids = Array.from(
         new Set([
           ...posts.map((p) => p.creatorId),
@@ -197,6 +216,14 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
     set({ accounts: get().accounts.filter((a) => a.id !== accountId) });
     return () => set({ accounts: reinsert(get().accounts, item, index, (a) => a.id === accountId) });
   },
+
+  removeApplicant(applicationId) {
+    const index = get().applicants.findIndex((a) => a.application_id === applicationId);
+    const item = get().applicants[index];
+    if (!item) return () => undefined;
+    set({ applicants: get().applicants.filter((a) => a.application_id !== applicationId) });
+    return () => set({ applicants: reinsert(get().applicants, item, index, (a) => a.application_id === applicationId) });
+  },
 }));
 
 /** Accounts a manager still has to decide (sent-back ones wait on the creator). */
@@ -205,8 +232,8 @@ export function pendingAccounts(accounts: AccountApprovalItem[]): AccountApprova
 }
 
 /** Everything the manager owes: the Review chip and the tab badge. */
-export function reviewTotal(s: Pick<ReviewQueueState, 'posts' | 'music' | 'accounts'>): number {
-  return s.posts.length + s.music.length + pendingAccounts(s.accounts).length;
+export function reviewTotal(s: Pick<ReviewQueueState, 'posts' | 'music' | 'accounts' | 'applicants'>): number {
+  return s.posts.length + s.music.length + pendingAccounts(s.accounts).length + s.applicants.length;
 }
 
 /** One group per creator with posts waiting, oldest submission first inside, most waiting first. */

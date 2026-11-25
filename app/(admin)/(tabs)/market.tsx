@@ -6,12 +6,7 @@ import { CreatorSheet, FiltersSheet, InviteSheet } from '../../../components/mar
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import { NO_FILTERS, dayLabel, type CreatorFilters, type CreatorSort, type Listing, type MarketCreator } from '../../../lib/marketplace';
-import { decideApplication, inviteCreator, loadCreators, loadMyListings, rankWithAi, signAvatars } from '../../../lib/marketplace-api';
-
-/** The listing the tab works for: the open one, else the newest. */
-function pickListing(rows: Listing[]): Listing | null {
-  return rows.find((l) => l.status === 'open') ?? rows[rows.length - 1] ?? null;
-}
+import { decideApplication, inviteCreator, loadCreators, loadOrMakeListing, rankWithAi, signAvatars } from '../../../lib/marketplace-api';
 
 /** Market tab (company): browse and rank creators, review applicants, reach out. */
 export default function AdminMarket() {
@@ -50,8 +45,9 @@ export default function AdminMarket() {
     if (!companyId) return;
     const mine = ++seq.current;
     try {
-      const listings = await loadMyListings(companyId);
-      const current = pickListing(listings);
+      // The campaign is made for the company the first time a manager looks.
+      // Creators still load if that fails.
+      const current = await loadOrMakeListing(companyId).catch(() => null);
       const [page, waiting] = await Promise.all([
         loadCreators({ listingId: current?.id ?? null, scope, search: scope === 'all' ? query : '', filters: scope === 'all' ? filters : NO_FILTERS, sort: scope === 'all' ? sort : 'newest' }),
         scope === 'applicants' ? null : loadCreators({ listingId: current?.id ?? null, scope: 'applicants', limit: 1 }),
@@ -90,7 +86,7 @@ export default function AdminMarket() {
       const r = await decideApplication(c.application_id, accept);
       const first = c.full_name?.trim().split(/\s+/)[0] || 'They';
       if (accept) toast.success(`${first} is on your team. First post due ${dayLabel(r.start_date) ?? 'soon'}.`);
-      else toast.show(`Passed on ${first}`);
+      else toast.show(`Declined ${first}`);
       setOpenCreator(null);
       await load();
     } catch (e) {

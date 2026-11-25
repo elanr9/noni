@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   SORTS,
   activeFilterCount,
+  coverColor,
   creatorFactLine,
   creatorStats,
   dayLabel,
@@ -71,24 +72,14 @@ export function AdminMarketScreen(p: AdminMarketScreenProps) {
 
         {!p.listingLoaded ? (
           <Skeleton h={76} />
-        ) : listing === null ? (
-          <Card style={{ backgroundColor: color.ink }}>
-            <Text style={[text.card, { color: color.white }]}>Put your campaign in front of every creator</Text>
-            <Text style={[text.body, { color: color.grey3, marginTop: 6, marginBottom: 16 }]}>
-              Say what you want and attach your agreement. Creators sign it when they apply, so the ones you accept start right away.
-            </Text>
-            <Button label="Set up your campaign" onPress={p.onEditListing} style={{ flex: 0 }} />
-          </Card>
-        ) : (
+        ) : listing === null ? null : (
           <Card onPress={p.onEditListing} accessibilityLabel="Edit your campaign" style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: open ? color.greenTint : color.amberTint, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="storefront" size={20} color={open ? color.green : color.amber} />
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: coverColor(listing.brand_color), alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="storefront" size={20} color={color.white} />
             </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text numberOfLines={1} style={text.row}>{listing.title}</Text>
-              <Text numberOfLines={1} style={text.meta}>
-                {open ? 'Open to applications' : listing.status === 'draft' ? 'Not open yet. Creators cannot see it.' : listing.status === 'paused' ? 'Paused. No new applications.' : 'Closed'}
-              </Text>
+              <Chip small tone={open ? 'green' : 'amber'} label={open ? 'Open' : listing.status === 'draft' ? 'Draft' : listing.status === 'paused' ? 'Paused' : 'Closed'} />
             </View>
             <Text style={[text.row, { color: color.blue }]}>Edit</Text>
           </Card>
@@ -238,7 +229,7 @@ function CreatorCard({
 
       {scope === 'applicants' ? (
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
-          <Button label="Pass" variant="quiet" onPress={() => onDecide(false)} style={{ height: 44 }} />
+          <Button label="Decline" variant="quiet" onPress={() => onDecide(false)} style={{ height: 44 }} />
           <Button label="Accept" icon="check" onPress={() => onDecide(true)} style={{ height: 44 }} />
         </View>
       ) : scope === 'invited' ? (

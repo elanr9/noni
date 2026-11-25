@@ -1,12 +1,11 @@
 /** Sample marketplace data for the dev-preview routes. Never imported by a real screen. */
-import type {
-  CreatorCampaign, CreatorResume, FeedListing, Listing, MarketCreator } from './marketplace';
+import { DEFAULT_TERMS, type CreatorCampaign, type CreatorResume, type FeedListing, type Listing, type MarketCreator } from './marketplace';
 
 const CONTRACT = `This agreement is between Inkbound AI ("the Company") and you ("the Creator"). It starts the day the Company accepts your application.
 
-1. The work. You make short videos and posts for the Company from the briefs it gives you in Noni, and post them on your own accounts. The target is 4 posts a week. Your first post is due within 3 days of being accepted.
+1. The work. You make short videos and posts for the Company from the briefs it gives you in Noni, and post them on your own accounts. The target is 2 to 3 posts a day. Your first post is due within 3 days of being accepted.
 
-2. Pay. You earn $10 for each video and $5 for each static post once it is live, plus $1 for every 1,000 views in the first 30 days, up to $500 in view pay per post. Noni pays out to your bank every Sunday.
+2. Pay. You earn $10 for each video and $5 for each slideshow once it is live and has 500 views, plus $1 for every 1,000 views in the first 30 days, up to $300 in view pay per post. Noni pays out to your bank every Sunday.
 
 3. Approval. Every post is reviewed in Noni before it goes live. Only approved posts are paid. Posts must stay up for at least 90 days.
 
@@ -28,7 +27,7 @@ function feed(over: Partial<FeedListing> & Pick<FeedListing, 'id' | 'company_nam
     requirements: null,
     niches: [],
     platforms: ['tiktok', 'instagram'],
-    posts_per_week: 3,
+    posts_per_week: 14,
     spots: null,
     spots_left: null,
     min_age: 18,
@@ -47,6 +46,9 @@ function feed(over: Partial<FeedListing> & Pick<FeedListing, 'id' | 'company_nam
     start_date: null,
     decision_note: null,
     niche_overlap: 0,
+    logo_path: null,
+    brand_color: '#1BA6EE',
+    ...DEFAULT_TERMS,
     ...over,
   };
 }
@@ -61,7 +63,8 @@ export const PREVIEW_FEED: FeedListing[] = [
     about: 'Inkbound is a writing app for students. You paste your notes, it helps you outline, draft and cite. 40,000 students use it every week.',
     requirements: 'College students who post study or day in the life content and are comfortable talking to camera.',
     niches: ['education', 'tech', 'lifestyle'],
-    posts_per_week: 4,
+    posts_per_week: 14,
+    brand_color: '#6D4AE0',
     spots: 25,
     spots_left: 9,
     creator_count: 16,
@@ -73,7 +76,15 @@ export const PREVIEW_FEED: FeedListing[] = [
     title: 'Morning routine creators',
     tagline: 'Three step skincare that fits in a gym bag.',
     niches: ['fashion_beauty', 'lifestyle', 'fitness'],
-    posts_per_week: 3,
+    posts_per_week: 7,
+    posts_per_day_min: 1,
+    posts_per_day_max: 1,
+    video_post_cents: 2500,
+    static_post_cents: 1000,
+    cents_per_1k_views: 200,
+    view_pay_cap_cents: 50000,
+    min_views: 1000,
+    brand_color: '#D0397A',
     creator_count: 41,
     application_id: 'a2',
     application_status: 'invited',
@@ -87,7 +98,12 @@ export const PREVIEW_FEED: FeedListing[] = [
     title: 'Gym and run creators',
     tagline: 'Protein bars that do not taste like chalk.',
     niches: ['fitness', 'food', 'sports'],
-    posts_per_week: 5,
+    posts_per_week: 21,
+    posts_per_day_min: 3,
+    posts_per_day_max: 3,
+    video_post_cents: 1500,
+    static_post_cents: 750,
+    brand_color: '#F97316',
     spots: 40,
     spots_left: 31,
     creator_count: 9,
@@ -102,7 +118,12 @@ export const PREVIEW_FEED: FeedListing[] = [
     title: 'Money creators, new or pro',
     tagline: 'The budgeting app that texts you before you overspend.',
     niches: ['finance', 'tech'],
-    posts_per_week: 3,
+    posts_per_week: 14,
+    video_post_cents: 1250,
+    cents_per_1k_views: 150,
+    view_pay_cap_cents: 20000,
+    min_views: 0,
+    brand_color: '#0D9488',
     creator_count: 22,
   }),
 ];
@@ -138,7 +159,7 @@ export const PREVIEW_LISTING: Listing = {
   requirements: 'College students who post study or day in the life content and are comfortable talking to camera.',
   niches: ['education', 'tech', 'lifestyle'],
   platforms: ['tiktok', 'instagram'],
-  posts_per_week: 4,
+  posts_per_week: 14,
   spots: 25,
   min_age: 18,
   start_days: 3,
@@ -146,6 +167,8 @@ export const PREVIEW_LISTING: Listing = {
   contract_body: CONTRACT,
   contract_version: 1,
   opened_at: day(6),
+  brand_color: '#6D4AE0',
+  ...DEFAULT_TERMS,
 };
 
 function creator(over: Partial<MarketCreator> & Pick<MarketCreator, 'creator_id' | 'full_name'>): MarketCreator {

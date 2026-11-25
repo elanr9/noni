@@ -9,16 +9,16 @@ import {
   dayLabel,
   isFullName,
   missingToApply,
+  postsPerDayLabel,
   spotsLabel,
   standing,
   type CreatorResume,
   type FeedListing,
 } from '../../lib/marketplace';
-import { VIEW_PAY_CAP_CENTS, VIEW_WINDOW_DAYS } from '../../lib/creator-pay';
-import { money } from '../../lib/v2-format';
 import { color, radius, space, text } from '../../theme/v2';
 import { Button, Card, Chip, Field, Icon, Press, Screen } from '../v2';
-import { CompanyMark, ContractText, FactRow, Figures, NicheTags, PAY_FIGURES, toneFor } from './parts';
+import { CampaignCover, PayBlock } from './CampaignCard';
+import { ContractText, FactRow, NicheTags } from './parts';
 
 export type SignResult = { status: string; start_date: string | null };
 
@@ -98,12 +98,8 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
       >
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: 24 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <CompanyMark name={l.company_name} size={36} tone={toneFor(l.company_id)} />
-              <Text style={[text.meta, { flex: 1 }]}>
-                Between you and {l.company_name}. It takes effect {invited ? 'when you sign' : 'if they accept you'}.
-              </Text>
-            </View>
+            <CampaignCover campaign={l} round="all" style={{ marginBottom: 12 }} />
+            <PayBlock terms={l} />
             <View style={{ backgroundColor: color.grey1, borderRadius: radius.card, padding: 16, marginBottom: 20 }}>
               <ContractText body={l.contract_body} />
             </View>
@@ -169,13 +165,9 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   return (
     <Screen back={onBack} footer={footer}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: 24 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <CompanyMark name={l.company_name} size={60} tone={toneFor(l.company_id)} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text numberOfLines={1} style={text.meta}>{l.company_name}{l.company_website ? ` · ${l.company_website.replace(/^www\./, '')}` : ''}</Text>
-            <Text style={[text.card, { fontSize: 24, lineHeight: 28 }]}>{l.title}</Text>
-          </View>
-        </View>
+        <CampaignCover campaign={l} round="all" style={{ marginBottom: 16 }} />
+        <Text numberOfLines={1} style={text.meta}>{l.company_name}{l.company_website ? ` · ${l.company_website.replace(/^www\./, '')}` : ''}</Text>
+        <Text style={[text.card, { fontSize: 24, lineHeight: 28, marginBottom: 12 }]}>{l.title}</Text>
         {state ? <Chip label={state.label} tone={state.tone} style={{ marginBottom: 12 }} /> : null}
 
         {l.application_status === 'accepted' && start ? (
@@ -199,17 +191,11 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
 
         {l.tagline ? <Text style={[text.row, { fontWeight: '400', lineHeight: 24, marginBottom: 16 }]}>{l.tagline}</Text> : null}
 
-        <Card>
-          <Text style={[text.meta, { marginBottom: 10 }]}>What you earn</Text>
-          <Figures items={PAY_FIGURES} />
-          <Text style={[text.meta, { marginTop: 12 }]}>
-            View pay counts the first {VIEW_WINDOW_DAYS} days, up to {money(VIEW_PAY_CAP_CENTS)} a post. Paid to your bank every Sunday.
-          </Text>
-        </Card>
+        <PayBlock terms={l} />
 
         <Card>
           <Text style={[text.meta, { marginBottom: 4 }]}>The job</Text>
-          <FactRow icon="movie">{`${l.posts_per_week} posts a week from briefs they give you`}</FactRow>
+          <FactRow icon="movie">{postsPerDayLabel(l)}</FactRow>
           {l.platforms.length > 0 ? <FactRow icon="smartphone">{`Posted on ${l.platforms.map((p) => (p === 'tiktok' ? 'TikTok' : p === 'instagram' ? 'Instagram' : p)).join(' and ')}`}</FactRow> : null}
           <FactRow icon="schedule">{l.start_days === 0 ? 'First post due the day you are accepted' : `First post due within ${l.start_days} ${l.start_days === 1 ? 'day' : 'days'} of being accepted`}</FactRow>
           {spots ? <FactRow icon="group">{spots}</FactRow> : null}

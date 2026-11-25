@@ -3,8 +3,8 @@
  *
  * A listing is a company's open campaign with the agreement a creator signs
  * to apply. An application is one creator on one listing, applied or invited.
- * The server side is supabase migration 155; these types mirror what its
- * functions return.
+ * The server side is supabase migrations 155 and 163; these types mirror
+ * what its functions return.
  */
 import { fmt, money } from './v2-format';
 
@@ -91,6 +91,101 @@ export function experienceLabel(e: Experience | null | undefined): string | null
   return EXPERIENCE.find((x) => x.key === e)?.label ?? null;
 }
 
+/** A campaign's own numbers (migration 163): posts a day and what a post pays. */
+export type CampaignTerms = {
+  posts_per_day_min: number;
+  posts_per_day_max: number;
+  video_post_cents: number;
+  static_post_cents: number;
+  cents_per_1k_views: number;
+  /** 0 means no view pay. */
+  view_pay_cap_cents: number;
+  /** A post earns its base pay once it has this many views. */
+  min_views: number;
+};
+
+/** What a new campaign starts with; the same defaults as the table. */
+export const DEFAULT_TERMS: CampaignTerms = {
+  posts_per_day_min: 2,
+  posts_per_day_max: 3,
+  video_post_cents: 1000,
+  static_post_cents: 500,
+  cents_per_1k_views: 100,
+  view_pay_cap_cents: 30000,
+  min_views: 500,
+};
+
+/** The floors the server holds pay to. */
+export const PAY_FLOORS = { video_post_cents: 1000, static_post_cents: 500, cents_per_1k_views: 100 } as const;
+
+/** The flat cover colours a company picks from; the server picks one from the company name. */
+export const BRAND_COLORS = ['#1BA6EE', '#6D4AE0', '#D0397A', '#16A34A', '#F97316', '#0F172A', '#0D9488', '#E11D48'] as const;
+
+/** What the campaign card draws from; a feed row fits as is. */
+export type CardCampaign = CampaignTerms & {
+  company_name: string;
+  logo_path: string | null;
+  brand_color: string | null;
+  title: string;
+  tagline: string | null;
+  niches: string[];
+  spots: number | null;
+  spots_left: number | null;
+};
+
+/** The cover colour, or the first swatch when a campaign has none saved. */
+export function coverColor(hex: string | null | undefined): string {
+  return hex && /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toUpperCase() : BRAND_COLORS[0];
+}
+
+/** True when text on this colour should be dark ink instead of white. */
+export function isLightColor(hex: string): boolean {
+  const c = coverColor(hex);
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const v = parseInt(c.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+}
+
+/** "2 to 3 posts a day", "1 post a day", "3 posts a day". */
+export function postsPerDayLabel(l: Pick<CampaignTerms, 'posts_per_day_min' | 'posts_per_day_max'>): string {
+  const min = Math.max(1, l.posts_per_day_min);
+  if (l.posts_per_day_max > min) return `${min} to ${l.posts_per_day_max} posts a day`;
+  return min === 1 ? '1 post a day' : `${min} posts a day`;
+}
+
+/** "$10/video" */
+export function payHeadline(l: Pick<CampaignTerms, 'video_post_cents'>): string {
+  return `${money(l.video_post_cents)}/video`;
+}
+
+/** "+$1/1k views", or null when the campaign pays nothing for views. */
+export function paySub(l: Pick<CampaignTerms, 'cents_per_1k_views' | 'view_pay_cap_cents'>): string | null {
+  if (l.view_pay_cap_cents <= 0) return null;
+  return `+${money(l.cents_per_1k_views)}/1k views`;
+}
+
+/** The pay terms, one short line each. */
+export function payLines(l: Omit<CampaignTerms, 'posts_per_day_min' | 'posts_per_day_max'>): string[] {
+  const lines = [`${money(l.video_post_cents)} a video`, `${money(l.static_post_cents)} a slideshow`];
+  if (l.min_views > 0) lines.push(`Paid at ${l.min_views.toLocaleString('en-US')} views`);
+  if (l.view_pay_cap_cents > 0) {
+    lines.push(`${money(l.cents_per_1k_views)} per 1,000 views`, `Up to ${money(l.view_pay_cap_cents)} view pay a post`);
+  }
+  return lines;
+}
+
+/** One line of numbers for an applicant: "24.6k followers · 842k views · 31 posts". */
+export function applicantStatLine(c: Pick<MarketCreator, 'followers' | 'total_views' | 'posts_live'>): string {
+  const parts = [
+    c.followers ? `${fmt(c.followers)} followers` : null,
+    c.total_views > 0 ? `${fmt(c.total_views)} views` : null,
+    c.posts_live > 0 ? `${fmt(c.posts_live)} ${c.posts_live === 1 ? 'post' : 'posts'}` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : 'New to Noni';
+}
+
 /** A listing as a creator sees it in the feed (rpc marketplace_feed). */
 export type FeedListing = {
   id: string;
@@ -123,7 +218,10 @@ export type FeedListing = {
   start_date: string | null;
   decision_note: string | null;
   niche_overlap: number;
-};
+  logo_path: string | null;
+  /** Never null from the feed: the server picks one from the company name. */
+  brand_color: string | null;
+} & CampaignTerms;
 
 /** A company's own listing row (table marketplace_listings). */
 export type Listing = {
@@ -144,7 +242,8 @@ export type Listing = {
   contract_body: string;
   contract_version: number;
   opened_at: string | null;
-};
+  brand_color: string | null;
+} & CampaignTerms;
 
 export type PortfolioLink = { url: string; note?: string };
 

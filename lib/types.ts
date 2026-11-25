@@ -4494,6 +4494,8 @@ export type Database = {
       marketplace_listings: {
         Row: {
           about: string | null
+          brand_color: string | null
+          cents_per_1k_views: number
           company_id: string
           contract_body: string
           contract_title: string
@@ -4502,20 +4504,28 @@ export type Database = {
           created_by: string | null
           id: string
           min_age: number
+          min_views: number
           niches: string[]
           opened_at: string | null
           platforms: string[]
+          posts_per_day_max: number
+          posts_per_day_min: number
           posts_per_week: number
           requirements: string | null
           spots: number | null
           start_days: number
+          static_post_cents: number
           status: string
           tagline: string | null
           title: string
           updated_at: string
+          video_post_cents: number
+          view_pay_cap_cents: number
         }
         Insert: {
           about?: string | null
+          brand_color?: string | null
+          cents_per_1k_views?: number
           company_id: string
           contract_body?: string
           contract_title?: string
@@ -4524,20 +4534,28 @@ export type Database = {
           created_by?: string | null
           id?: string
           min_age?: number
+          min_views?: number
           niches?: string[]
           opened_at?: string | null
           platforms?: string[]
+          posts_per_day_max?: number
+          posts_per_day_min?: number
           posts_per_week?: number
           requirements?: string | null
           spots?: number | null
           start_days?: number
+          static_post_cents?: number
           status?: string
           tagline?: string | null
           title: string
           updated_at?: string
+          video_post_cents?: number
+          view_pay_cap_cents?: number
         }
         Update: {
           about?: string | null
+          brand_color?: string | null
+          cents_per_1k_views?: number
           company_id?: string
           contract_body?: string
           contract_title?: string
@@ -4546,17 +4564,23 @@ export type Database = {
           created_by?: string | null
           id?: string
           min_age?: number
+          min_views?: number
           niches?: string[]
           opened_at?: string | null
           platforms?: string[]
+          posts_per_day_max?: number
+          posts_per_day_min?: number
           posts_per_week?: number
           requirements?: string | null
           spots?: number | null
           start_days?: number
+          static_post_cents?: number
           status?: string
           tagline?: string | null
           title?: string
           updated_at?: string
+          video_post_cents?: number
+          view_pay_cap_cents?: number
         }
         Relationships: [
           {
@@ -6856,6 +6880,45 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      ensure_marketplace_listing: {
+        Args: never
+        Returns: {
+          about: string | null
+          brand_color: string | null
+          cents_per_1k_views: number
+          company_id: string
+          contract_body: string
+          contract_title: string
+          contract_version: number
+          created_at: string
+          created_by: string | null
+          id: string
+          min_age: number
+          min_views: number
+          niches: string[]
+          opened_at: string | null
+          platforms: string[]
+          posts_per_day_max: number
+          posts_per_day_min: number
+          posts_per_week: number
+          requirements: string | null
+          spots: number | null
+          start_days: number
+          static_post_cents: number
+          status: string
+          tagline: string | null
+          title: string
+          updated_at: string
+          video_post_cents: number
+          view_pay_cap_cents: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_listings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       full_member_permissions: { Args: never; Returns: Json }
       get_supabase_refresh_token: {
         Args: { p_company: string }
@@ -7021,6 +7084,8 @@ export type Database = {
           application_id: string
           application_origin: string
           application_status: string
+          brand_color: string
+          cents_per_1k_views: number
           company_id: string
           company_name: string
           company_website: string
@@ -7032,11 +7097,15 @@ export type Database = {
           id: string
           invite_message: string
           is_member: boolean
+          logo_path: string
           min_age: number
+          min_views: number
           niche_overlap: number
           niches: string[]
           opened_at: string
           platforms: string[]
+          posts_per_day_max: number
+          posts_per_day_min: number
           posts_per_week: number
           requirements: string
           signed_at: string
@@ -7044,9 +7113,12 @@ export type Database = {
           spots_left: number
           start_date: string
           start_days: number
+          static_post_cents: number
           status: string
           tagline: string
           title: string
+          video_post_cents: number
+          view_pay_cap_cents: number
         }[]
       }
       marketplace_join: {
@@ -7265,6 +7337,8 @@ export type Database = {
         Args: { p_id: string; p_patch: Json }
         Returns: {
           about: string | null
+          brand_color: string | null
+          cents_per_1k_views: number
           company_id: string
           contract_body: string
           contract_title: string
@@ -7273,17 +7347,23 @@ export type Database = {
           created_by: string | null
           id: string
           min_age: number
+          min_views: number
           niches: string[]
           opened_at: string | null
           platforms: string[]
+          posts_per_day_max: number
+          posts_per_day_min: number
           posts_per_week: number
           requirements: string | null
           spots: number | null
           start_days: number
+          static_post_cents: number
           status: string
           tagline: string | null
           title: string
           updated_at: string
+          video_post_cents: number
+          view_pay_cap_cents: number
         }
         SetofOptions: {
           from: "*"

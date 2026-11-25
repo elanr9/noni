@@ -10,6 +10,7 @@ import {
   CENTS_PER_1K_VIEWS,
   STATIC_POST_CENTS,
   VIDEO_POST_CENTS,
+  MIN_VIEWS_FOR_POST_PAY,
   VIEW_PAY_CAP_CENTS,
   VIEW_WINDOW_DAYS,
   basePayCents,
@@ -180,7 +181,7 @@ export function PayRules() {
         entering={FadeInDown.delay(240).duration(motion.tabIn).easing(motion.tabEase)}
         style={{ backgroundColor: color.card, borderRadius: radius.card, padding: space[4], gap: space[4], ...shadow.card }}
       >
-        <FinePrint icon="bolt" title="Paid when it goes live" body="Your post pay lands in your balance once the post is up." />
+        <FinePrint icon="bolt" title={`Paid at ${MIN_VIEWS_FOR_POST_PAY} views`} body="Your post pay lands in your balance once the post gets there." />
         <FinePrint icon="calendar_month" title={`Views count for ${VIEW_WINDOW_DAYS} days`} body={`Up to ${money(VIEW_PAY_CAP_CENTS)} in view pay per post.`} />
         <FinePrint icon="payments" title="Paid every Sunday" body="Your balance goes to your bank at 8 PM Eastern." />
       </Animated.View>

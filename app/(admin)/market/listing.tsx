@@ -3,11 +3,11 @@ import { ActivityIndicator, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ListingEditor } from '../../../components/marketplace/ListingEditor';
-import { Screen } from '../../../components/v2';
+import { Empty, Screen } from '../../../components/v2';
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import type { Listing } from '../../../lib/marketplace';
-import { loadMyListings, saveListing } from '../../../lib/marketplace-api';
+import { loadOrMakeListing, saveListing } from '../../../lib/marketplace-api';
 import { color } from '../../../theme/v2';
 
 /** The company's campaign and the agreement creators sign to apply. */
@@ -20,9 +20,10 @@ export default function AdminMarketListing() {
   useEffect(() => {
     if (!companyId) return;
     let off = false;
-    void loadMyListings(companyId)
-      .then((rows) => {
-        if (!off) setListing(rows.find((l) => l.status === 'open') ?? rows[rows.length - 1] ?? null);
+    // A company with no campaign gets one written from what it told Noni.
+    void loadOrMakeListing(companyId)
+      .then((row) => {
+        if (!off) setListing(row);
       })
       .catch(() => {
         if (!off) setListing(null);
@@ -42,22 +43,27 @@ export default function AdminMarketListing() {
     );
   }
 
+  if (listing === null) {
+    return (
+      <Screen back title="Your campaign">
+        <View style={{ padding: 20 }}>
+          <Empty>Could not load your campaign.</Empty>
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <ListingEditor
-      // The first save creates the listing and its starting agreement; remount to show it.
-      key={listing?.id ?? 'new'}
+      key={listing.id}
       listing={listing}
-      companyName={activeCompany?.name ?? 'Your'}
+      companyName={activeCompany?.name ?? listing.title}
+      logoPath={activeCompany?.logoPath ?? null}
       onBack={() => router.back()}
       onSave={async (patch) => {
-        const created = listing === null;
-        const saved = await saveListing(listing?.id ?? null, patch);
+        const saved = await saveListing(listing.id, patch);
         setListing(saved);
-        if (created) {
-          toast.show('Saved. Read the agreement, then open it to creators.');
-          return;
-        }
-        toast.success(saved.status === 'open' ? 'Saved. Your campaign is open.' : 'Saved');
+        toast.success(saved.status === 'open' ? 'Campaign is open' : 'Saved');
         router.back();
       }}
     />

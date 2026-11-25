@@ -135,6 +135,7 @@ const CODEPOINTS = {
   logout: 0xe9ba,
   notifications: 0xe7f4,
   refresh: 0xe5d5,
+  remove: 0xe15b,
   cloud_off: 0xe2c1,
   info: 0xe88e,
   error: 0xe000,

@@ -6,7 +6,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { color, radius, text, tone as tones, type Tone } from '../../../../theme/v2';
 import { Button, Card, Icon, type IconName } from '../../../v2';
 
-export function StateCard({ icon, tone = 'blue', title, body, children }: { icon: IconName; tone?: Tone; title: string; body: string; children?: ReactNode }) {
+export function StateCard({ icon, tone = 'blue', title, body, children }: { icon: IconName; tone?: Tone; title: string; body?: string; children?: ReactNode }) {
   const t = tones[tone];
   return (
     <Animated.View entering={FadeIn.duration(260)}>
@@ -15,7 +15,7 @@ export function StateCard({ icon, tone = 'blue', title, body, children }: { icon
           <Icon name={icon} size={28} color={t.fg} />
         </View>
         <Text style={[text.card, { textAlign: 'center' }]}>{title}</Text>
-        <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: 6 }]}>{body}</Text>
+        {body ? <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: 6 }]}>{body}</Text> : null}
         {children ? <View style={{ alignSelf: 'stretch', gap: 8, marginTop: 18 }}>{children}</View> : null}
       </Card>
     </Animated.View>

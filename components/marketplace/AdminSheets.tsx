@@ -53,7 +53,7 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
   const invited = c.application_status === 'invited';
   const footer = waiting ? (
     <>
-      <Button label="Pass" variant="quiet" disabled={busy} onPress={() => onDecide(c, false)} />
+      <Button label="Decline" variant="quiet" disabled={busy} onPress={() => onDecide(c, false)} />
       <Button label="Accept" icon="check" disabled={busy} onPress={() => onDecide(c, true)} />
     </>
   ) : invited ? (

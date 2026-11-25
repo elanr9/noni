@@ -3,20 +3,25 @@ import { RefreshControl, ScrollView, Text, View, type ScrollViewInstance } from 
 import { useFocusEffect, useRouter, useScrollToTop } from 'expo-router';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { InviteCreatorsSheet } from '../../../components/admin/v2/review/InviteCreatorsSheet';
-import { AccountCard, CreatorQueueCard, MusicCard } from '../../../components/admin/v2/review/ReviewCards';
+import { AccountCard, ApplicantCard, CreatorQueueCard, MusicCard } from '../../../components/admin/v2/review/ReviewCards';
 import { ErrorCard, PostsEmpty, StateCard } from '../../../components/admin/v2/review/ReviewStates';
+import { CreatorSheet } from '../../../components/marketplace/AdminSheets';
 import { ContextRow, ElsewhereStrip } from '../../../components/shared';
 import { Icon as LineIcon } from '../../../components/ui/Icon';
 import { Chip, Press, Seg, Skeleton, TabPane, useTabBarInset } from '../../../components/v2';
+import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
-import { groupByCreator, pendingAccounts, reviewTotal, useReviewQueue } from '../../../lib/admin-review-queue';
+import { firstName, groupByCreator, pendingAccounts, reviewTotal, useReviewQueue } from '../../../lib/admin-review-queue';
 import { useCompany } from '../../../lib/company-context';
+import { dayLabel, type MarketCreator } from '../../../lib/marketplace';
+import { decideApplication } from '../../../lib/marketplace-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, radius, shadow, text } from '../../../theme/v2';
 
-type Lane = 'posts' | 'music' | 'accounts';
+type Lane = 'posts' | 'music' | 'accounts' | 'creators';
 
 /** Spec: a short skeleton before content so the list never flashes in half loaded. */
 const SKELETON_MS = 500;
@@ -61,6 +66,7 @@ export default function ReviewScreen() {
   const posts = useReviewQueue((s) => s.posts);
   const music = useReviewQueue((s) => s.music);
   const accounts = useReviewQueue((s) => s.accounts);
+  const applicants = useReviewQueue((s) => s.applicants);
   const avatars = useReviewQueue((s) => s.avatars);
   const creatorCount = useReviewQueue((s) => s.creatorCount);
   const queueCompany = useReviewQueue((s) => s.companyId);
@@ -70,6 +76,7 @@ export default function ReviewScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [held, setHeld] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [openApplicant, setOpenApplicant] = useState<MarketCreator | null>(null);
 
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
@@ -98,7 +105,7 @@ export default function ReviewScreen() {
 
   const groups = useMemo(() => groupByCreator(posts, avatars), [posts, avatars]);
   const pending = pendingAccounts(accounts);
-  const total = reviewTotal({ posts, music, accounts });
+  const total = reviewTotal({ posts, music, accounts, applicants });
   const loading = queueCompany !== companyId || status === 'idle' || (status === 'loading' && !refreshing) || held;
   const failed = status === 'error';
 
@@ -107,6 +114,26 @@ export default function ReviewScreen() {
   const openCreator = (creatorId: string) => router.push({ pathname: '/(admin)/review/creator/[creatorId]', params: { creatorId } });
   const openCreators = () => router.push('/(admin)/creators');
   const setupIncomplete = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
+
+  /** Leaves the lane at once; comes back and says so if the server refuses. */
+  const decideApplicant = (c: MarketCreator, accept: boolean) => {
+    if (!c.application_id) return;
+    const restore = useReviewQueue.getState().removeApplicant(c.application_id);
+    setOpenApplicant(null);
+    const first = firstName(c.full_name?.trim() || 'Creator');
+    if (accept) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    void decideApplication(c.application_id, accept)
+      .then((r) => {
+        if (!accept) return toast.show(`Declined ${first}`);
+        const due = dayLabel(r.start_date);
+        toast.success(due ? `${first} is on your team. First post due ${due}.` : `${first} is on your team`);
+        if (companyId) void load(companyId, { quiet: true });
+      })
+      .catch((e: unknown) => {
+        restore();
+        toast.error(`Could not save: ${e instanceof Error ? e.message : 'try again'}`);
+      });
+  };
 
   const body = () => {
     if (loading && !failed) {
@@ -141,6 +168,16 @@ export default function ReviewScreen() {
       return music.map((m, i) => (
         <Item key={m.assignment.id} index={i}>
           <MusicCard item={m} photo={avatars[m.assignment.creator_id] ?? null} onPress={() => router.push({ pathname: '/(admin)/music/[id]', params: { id: m.assignment.id } })} />
+        </Item>
+      ));
+    }
+    if (lane === 'creators') {
+      if (applicants.length === 0) {
+        return <StateCard icon="group" tone="green" title="No creators waiting." />;
+      }
+      return applicants.map((c, i) => (
+        <Item key={c.application_id ?? c.creator_id} index={i}>
+          <ApplicantCard creator={c} photo={avatars[c.creator_id] ?? null} onPress={() => setOpenApplicant(c)} onDecide={(accept) => decideApplicant(c, accept)} />
         </Item>
       ));
     }
@@ -183,6 +220,7 @@ export default function ReviewScreen() {
             { key: 'posts', label: 'Posts', count: loading ? undefined : posts.length, tone: 'blue' },
             { key: 'music', label: 'Music', count: loading ? undefined : music.length, tone: 'purple' },
             { key: 'accounts', label: 'Accounts', count: loading ? undefined : pending.length, tone: 'amber' },
+            { key: 'creators', label: 'Creators', count: loading ? undefined : applicants.length, tone: 'green' },
           ]}
         />
         {failed && total > 0 ? (
@@ -192,6 +230,14 @@ export default function ReviewScreen() {
         ) : null}
         <TabPane k={loading ? 'loading' : lane}>{body()}</TabPane>
       </ScrollView>
+      <CreatorSheet
+        creator={openApplicant}
+        photo={openApplicant ? (avatars[openApplicant.creator_id] ?? null) : null}
+        listing={null}
+        onClose={() => setOpenApplicant(null)}
+        onInvite={() => undefined}
+        onDecide={decideApplicant}
+      />
       <InviteCreatorsSheet open={inviteOpen} companyId={companyId} onClose={() => setInviteOpen(false)} onSent={() => companyId && void load(companyId, { quiet: true })} />
     </View>
   );
