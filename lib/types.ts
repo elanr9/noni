@@ -203,6 +203,82 @@ export type Database = {
           },
         ]
       }
+      applications: {
+        Row: {
+          answers: Json
+          chat: Json
+          company_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          kind: string
+          status: string
+          submitted_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          answers?: Json
+          chat?: Json
+          company_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          kind: string
+          status?: string
+          submitted_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          answers?: Json
+          chat?: Json
+          company_id?: string | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          kind?: string
+          status?: string
+          submitted_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "applications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assignment_segment_edits: {
         Row: {
           assignment_id: string
@@ -2155,11 +2231,14 @@ export type Database = {
           bank_last4: string | null
           bank_name: string | null
           billing_simulated: boolean
+          budget_next_invoice_at: string | null
           card_brand: string | null
           card_last4: string | null
           company_id: string
           credit_balance_cents: number
           monthly_budget_cents: number
+          offer_plan: string | null
+          offer_sent_at: string | null
           payouts_enabled: boolean
           stripe_account_id: string | null
           stripe_budget_subscription_id: string | null
@@ -2180,11 +2259,14 @@ export type Database = {
           bank_last4?: string | null
           bank_name?: string | null
           billing_simulated?: boolean
+          budget_next_invoice_at?: string | null
           card_brand?: string | null
           card_last4?: string | null
           company_id: string
           credit_balance_cents?: number
           monthly_budget_cents?: number
+          offer_plan?: string | null
+          offer_sent_at?: string | null
           payouts_enabled?: boolean
           stripe_account_id?: string | null
           stripe_budget_subscription_id?: string | null
@@ -2205,11 +2287,14 @@ export type Database = {
           bank_last4?: string | null
           bank_name?: string | null
           billing_simulated?: boolean
+          budget_next_invoice_at?: string | null
           card_brand?: string | null
           card_last4?: string | null
           company_id?: string
           credit_balance_cents?: number
           monthly_budget_cents?: number
+          offer_plan?: string | null
+          offer_sent_at?: string | null
           payouts_enabled?: boolean
           stripe_account_id?: string | null
           stripe_budget_subscription_id?: string | null
@@ -2230,6 +2315,56 @@ export type Database = {
             foreignKeyName: "company_billing_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_budget_invoices: {
+        Row: {
+          amount_cents: number
+          budget_cents: number
+          company_id: string
+          created_at: string
+          error: string | null
+          id: string
+          leftover_cents: number
+          period_start: string
+          status: string
+          stripe_invoice_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount_cents?: number
+          budget_cents: number
+          company_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          leftover_cents?: number
+          period_start: string
+          status?: string
+          stripe_invoice_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          budget_cents?: number
+          company_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          leftover_cents?: number
+          period_start?: string
+          status?: string
+          stripe_invoice_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_budget_invoices_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
@@ -2982,6 +3117,75 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      creator_profiles: {
+        Row: {
+          best_campaign: string | null
+          bio: string | null
+          birth_year: number | null
+          campaigns_done: string | null
+          created_at: string
+          experience: string | null
+          gender: string | null
+          instagram: string | null
+          instagram_followers: number | null
+          listed: boolean
+          location: string | null
+          niches: string[]
+          on_camera: string | null
+          portfolio: Json
+          styles: string[]
+          tiktok: string | null
+          tiktok_followers: number | null
+          updated_at: string
+          user_id: string
+          weekly_capacity: string | null
+        }
+        Insert: {
+          best_campaign?: string | null
+          bio?: string | null
+          birth_year?: number | null
+          campaigns_done?: string | null
+          created_at?: string
+          experience?: string | null
+          gender?: string | null
+          instagram?: string | null
+          instagram_followers?: number | null
+          listed?: boolean
+          location?: string | null
+          niches?: string[]
+          on_camera?: string | null
+          portfolio?: Json
+          styles?: string[]
+          tiktok?: string | null
+          tiktok_followers?: number | null
+          updated_at?: string
+          user_id: string
+          weekly_capacity?: string | null
+        }
+        Update: {
+          best_campaign?: string | null
+          bio?: string | null
+          birth_year?: number | null
+          campaigns_done?: string | null
+          created_at?: string
+          experience?: string | null
+          gender?: string | null
+          instagram?: string | null
+          instagram_followers?: number | null
+          listed?: boolean
+          location?: string | null
+          niches?: string[]
+          on_camera?: string | null
+          portfolio?: Json
+          styles?: string[]
+          tiktok?: string | null
+          tiktok_followers?: number | null
+          updated_at?: string
+          user_id?: string
+          weekly_capacity?: string | null
+        }
+        Relationships: []
       }
       creator_projects: {
         Row: {
@@ -4071,6 +4275,272 @@ export type Database = {
             columns: ["reply_to_id"]
             isOneToOne: false
             referencedRelation: "manager_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_applications: {
+        Row: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_name: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          contract_body?: string | null
+          contract_sha256?: string | null
+          contract_title?: string | null
+          contract_version?: number | null
+          created_at?: string
+          creator_id: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          invite_message?: string | null
+          invited_by?: string | null
+          listing_id: string
+          note?: string | null
+          origin: string
+          signed_at?: string | null
+          signed_name?: string | null
+          start_date?: string | null
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          contract_body?: string | null
+          contract_sha256?: string | null
+          contract_title?: string | null
+          contract_version?: number | null
+          created_at?: string
+          creator_id?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          invite_message?: string | null
+          invited_by?: string | null
+          listing_id?: string
+          note?: string | null
+          origin?: string
+          signed_at?: string | null
+          signed_name?: string | null
+          start_date?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_applications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_applications_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_listings: {
+        Row: {
+          about: string | null
+          company_id: string
+          contract_body: string
+          contract_title: string
+          contract_version: number
+          created_at: string
+          created_by: string | null
+          id: string
+          min_age: number
+          niches: string[]
+          opened_at: string | null
+          platforms: string[]
+          posts_per_week: number
+          requirements: string | null
+          spots: number | null
+          start_days: number
+          status: string
+          tagline: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          about?: string | null
+          company_id: string
+          contract_body?: string
+          contract_title?: string
+          contract_version?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_age?: number
+          niches?: string[]
+          opened_at?: string | null
+          platforms?: string[]
+          posts_per_week?: number
+          requirements?: string | null
+          spots?: number | null
+          start_days?: number
+          status?: string
+          tagline?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          about?: string | null
+          company_id?: string
+          contract_body?: string
+          contract_title?: string
+          contract_version?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_age?: number
+          niches?: string[]
+          opened_at?: string | null
+          platforms?: string[]
+          posts_per_week?: number
+          requirements?: string | null
+          spots?: number | null
+          start_days?: number
+          status?: string
+          tagline?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_listings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_matches: {
+        Row: {
+          computed_at: string
+          creator_id: string
+          listing_id: string
+          reason: string | null
+          score: number
+        }
+        Insert: {
+          computed_at?: string
+          creator_id: string
+          listing_id: string
+          reason?: string | null
+          score: number
+        }
+        Update: {
+          computed_at?: string
+          creator_id?: string
+          listing_id?: string
+          reason?: string | null
+          score?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_matches_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_matches_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_matches_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
             referencedColumns: ["id"]
           },
         ]
@@ -5997,6 +6467,64 @@ export type Database = {
         Args: { p_invite_id: string; p_profile_id: string }
         Returns: boolean
       }
+      apply_to_listing: {
+        Args: { p_listing_id: string; p_note?: string; p_signed_name: string }
+        Returns: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_name: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      approve_application: {
+        Args: { p_id: string; p_note?: string }
+        Returns: {
+          answers: Json
+          chat: Json
+          company_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          kind: string
+          status: string
+          submitted_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       assignment_publish_at: {
         Args: { p_assignment_id: string }
         Returns: string
@@ -6139,6 +6667,51 @@ export type Database = {
       }
       current_company_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
+      decide_marketplace_application: {
+        Args: {
+          p_accept: boolean
+          p_id: string
+          p_note?: string
+          p_start_date?: string
+        }
+        Returns: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_name: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      default_creator_contract: {
+        Args: {
+          p_company: string
+          p_posts_per_week: number
+          p_start_days: number
+        }
+        Returns: string
+      }
       default_member_permissions: { Args: never; Returns: Json }
       discard_creator_post: {
         Args: { p_assignment_id: string }
@@ -6188,6 +6761,38 @@ export type Database = {
       }
       has_permission: { Args: { p_key: string }; Returns: boolean }
       hook_require_invite: { Args: { event: Json }; Returns: Json }
+      invite_creator_to_listing: {
+        Args: { p_creator_id: string; p_listing_id: string; p_message?: string }
+        Returns: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_name: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       is_admin: { Args: never; Returns: boolean }
       is_campaign_manager: { Args: never; Returns: boolean }
       is_company_admin: { Args: never; Returns: boolean }
@@ -6242,6 +6847,120 @@ export type Database = {
       }
       mark_all_notifications_read: { Args: never; Returns: undefined }
       mark_notification_read: { Args: { p_id: string }; Returns: undefined }
+      marketplace_creator_rows: {
+        Args: { p_company_id: string; p_listing_id: string }
+        Returns: {
+          age: number
+          application_id: string
+          application_note: string
+          application_origin: string
+          application_status: string
+          applied_at: string
+          avatar_path: string
+          best_campaign: string
+          bio: string
+          campaigns_done: string
+          companies_count: number
+          creator_id: string
+          experience: string
+          followers: number
+          full_name: string
+          gender: string
+          instagram: string
+          is_member: boolean
+          joined_at: string
+          location: string
+          match_ai: boolean
+          match_reason: string
+          match_score: number
+          niches: string[]
+          on_camera: string
+          portfolio: Json
+          posts_live: number
+          signed_at: string
+          signed_name: string
+          start_date: string
+          styles: string[]
+          tiktok: string
+          total_earned_cents: number
+          total_views: number
+          weekly_capacity: string
+        }[]
+      }
+      marketplace_creators: {
+        Args: {
+          p_experience?: string
+          p_gender?: string
+          p_limit?: number
+          p_listing_id?: string
+          p_max_age?: number
+          p_min_age?: number
+          p_min_earned_cents?: number
+          p_min_followers?: number
+          p_min_views?: number
+          p_niches?: string[]
+          p_offset?: number
+          p_scope?: string
+          p_search?: string
+          p_sort?: string
+        }
+        Returns: Json
+      }
+      marketplace_feed: {
+        Args: never
+        Returns: {
+          about: string
+          application_id: string
+          application_origin: string
+          application_status: string
+          company_id: string
+          company_name: string
+          company_website: string
+          contract_body: string
+          contract_title: string
+          contract_version: number
+          creator_count: number
+          decision_note: string
+          id: string
+          invite_message: string
+          is_member: boolean
+          min_age: number
+          niche_overlap: number
+          niches: string[]
+          opened_at: string
+          platforms: string[]
+          posts_per_week: number
+          requirements: string
+          signed_at: string
+          spots: number
+          spots_left: number
+          start_date: string
+          start_days: number
+          status: string
+          tagline: string
+          title: string
+        }[]
+      }
+      marketplace_join: {
+        Args: { p_company_id: string; p_creator_id: string }
+        Returns: undefined
+      }
+      marketplace_manager_ids: {
+        Args: { p_company_id: string }
+        Returns: string[]
+      }
+      marketplace_notify: {
+        Args: {
+          p_body: string
+          p_company_id: string
+          p_data: Json
+          p_event: string
+          p_link: string
+          p_profile_ids: string[]
+          p_title: string
+        }
+        Returns: undefined
+      }
       match_brain: {
         Args: {
           p_company: string
@@ -6363,6 +7082,32 @@ export type Database = {
         Args: { p_company: string; p_from: string }
         Returns: undefined
       }
+      reject_application: {
+        Args: { p_id: string; p_note?: string }
+        Returns: {
+          answers: Json
+          chat: Json
+          company_id: string | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          kind: string
+          status: string
+          submitted_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rename_creator_post: {
         Args: { p_assignment_id: string; p_title: string }
         Returns: undefined
@@ -6371,6 +7116,68 @@ export type Database = {
       restart_onboarding: {
         Args: { p_company: string; p_user: string }
         Returns: undefined
+      }
+      save_creator_profile: {
+        Args: { p_patch: Json }
+        Returns: {
+          best_campaign: string | null
+          bio: string | null
+          birth_year: number | null
+          campaigns_done: string | null
+          created_at: string
+          experience: string | null
+          gender: string | null
+          instagram: string | null
+          instagram_followers: number | null
+          listed: boolean
+          location: string | null
+          niches: string[]
+          on_camera: string | null
+          portfolio: Json
+          styles: string[]
+          tiktok: string | null
+          tiktok_followers: number | null
+          updated_at: string
+          user_id: string
+          weekly_capacity: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "creator_profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_marketplace_listing: {
+        Args: { p_id: string; p_patch: Json }
+        Returns: {
+          about: string | null
+          company_id: string
+          contract_body: string
+          contract_title: string
+          contract_version: number
+          created_at: string
+          created_by: string | null
+          id: string
+          min_age: number
+          niches: string[]
+          opened_at: string | null
+          platforms: string[]
+          posts_per_week: number
+          requirements: string | null
+          spots: number | null
+          start_days: number
+          status: string
+          tagline: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_listings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       schedule_assignment_publish: {
         Args: { p_assignment_id: string }
@@ -6596,10 +7403,43 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      unique_company_slug: { Args: { p_name: string }; Returns: string }
       unread_inbox_count: { Args: never; Returns: number }
       unread_inbox_count_for: {
         Args: { p_company_id: string }
         Returns: number
+      }
+      withdraw_marketplace_application: {
+        Args: { p_id: string }
+        Returns: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_name: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {

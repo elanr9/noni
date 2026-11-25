@@ -73,7 +73,6 @@ export type SlotSpec = {
 const isPlaceholderName = (name: string): boolean => !name.trim() || name.trim() === 'New company';
 
 /** They (or their team) run the campaigns; false once they hand it to Noni. */
-const selfRun = (s: State): boolean => s.runBy !== 'noni';
 
 const AGENDA: Slot[] = [
   // Who they are and which company. Someone who signs up on the website
@@ -98,7 +97,7 @@ const AGENDA: Slot[] = [
   {
     key: 'website',
     kind: 'text',
-    ask: 'Ask for their company website so you can read it while you talk (if one is on file, ask them to confirm it).',
+    ask: 'Ask for their company website (if one is on file, ask them to confirm it).',
     placeholder: 'yourcompany.com',
   },
   {
@@ -110,20 +109,6 @@ const AGENDA: Slot[] = [
       { value: 'Marketing', label: 'Marketing' },
       { value: 'Growth', label: 'Growth' },
       { value: 'Something else', label: 'Something else' },
-    ],
-  },
-  // Everything after branches on this. Noni team: hands off, a couple more
-  // questions and then a call. On Noni: they answer every question themselves,
-  // then pick a plan.
-  {
-    key: 'looking_for',
-    // Ops already set it on an outbound invite.
-    when: (s) => !s.runBy,
-    kind: 'choice',
-    ask: 'Say you are reading their site now in the background. Ask what they are looking for. The two answers are shown as buttons; do not describe them.',
-    options: [
-      { value: 'diy', label: 'I want to run our UGC campaigns on Noni' },
-      { value: 'dfy', label: 'I want the Noni team to run my UGC' },
     ],
   },
   {
@@ -138,7 +123,6 @@ const AGENDA: Slot[] = [
   },
   {
     key: 'platforms',
-    when: selfRun,
     kind: 'multi',
     ask: 'Ask where the videos should go. They can pick more than one.',
     options: [
@@ -149,7 +133,6 @@ const AGENDA: Slot[] = [
   },
   {
     key: 'creators_wanted',
-    when: selfRun,
     kind: 'choice',
     ask: 'Ask how many creators they want posting. Mention Noni finds and manages them.',
     options: [
@@ -169,43 +152,24 @@ const AGENDA: Slot[] = [
       { value: 'exploring', label: 'Just exploring' },
     ],
   },
-  {
-    key: 'runs_campaigns',
-    when: selfRun,
-    kind: 'choice',
-    ask: 'Ask who will run the campaigns day to day on their side: approving videos and keeping creators on pace.',
-    options: [
-      { value: 'me', label: 'Me' },
-      { value: 'team', label: 'Someone on my team' },
-    ],
-  },
   // No questions about the brand itself (what it does, who it sells to,
   // voice, what to never say or always show, competitors): the site scan
   // reads all of that, and a company should see campaigns without being
   // quizzed first.
+  // Every company books a call with the founders next, where the plan and
+  // the creator budget are agreed. A company ops invited with a plan already
+  // in place goes straight to its dashboard.
   {
     key: 'done',
-    when: (s) => selfRun(s) && !s.planSet,
+    when: (s) => !s.planSet,
     kind: 'done',
-    ask: 'Close in one short sentence: thank them by first name, that is everything Noni needs. Never mention briefs, plans or what comes next.',
+    ask: 'Close in one or two short sentences: thank them by first name, that is everything Noni needs, and the last step is booking a quick call with the founders on the next screen.',
   },
   {
     key: 'done',
-    when: (s) => selfRun(s) && s.planSet,
+    when: (s) => s.planSet,
     kind: 'done',
-    ask: 'Close in one short sentence: thank them by first name, that is everything Noni needs. Never mention briefs, plans or what comes next.',
-  },
-  {
-    key: 'done',
-    when: (s) => !selfRun(s) && !s.planSet,
-    kind: 'done',
-    ask: 'Close in one or two short sentences: that is all Noni needs, and the last step is booking a quick call with the founders on the next screen.',
-  },
-  {
-    key: 'done',
-    when: (s) => !selfRun(s) && s.planSet,
-    kind: 'done',
-    ask: 'Close in one or two short sentences: that is all Noni needs, and the Noni team is already getting their first creators going.',
+    ask: 'Close in one short sentence: thank them by first name, that is everything Noni needs.',
   },
 ];
 
@@ -512,7 +476,7 @@ How you write:
 - The person is busy and deciding whether Noni is worth it. Every message should move fast and feel like momentum, never like a form.
 - A reaction must be specific to their business, never generic praise ("Great!", "Love it", "Awesome"). Do not repeat their answer back to them.
 - Plain words. No em dashes or en dashes, no emoji, no exclamation marks, no hype words, no filler ("seamless", "empower", "unlock", "game-changer", "dive in", "elevate").
-- Never invent facts about their company. Use only what they said and what the site scan found, given below.
+- Never invent facts about their company. Use only what they said and anything known about the company given below.
 - Never assume the company has an app; do not mention downloads or installs unless they said so.
 - Never ask about budget, spend, price or plans. Money is settled on a call, not in this chat. Noni has no free plan, free trial or free start, so never offer or mention one.
 - The answer choices are shown to them as buttons under your message. NEVER list, name or paraphrase choices in your message (no "X, Y, or Z?"); just ask the question.
@@ -539,14 +503,14 @@ const FOLLOW_UP_TOOL = {
 
 function siteContext(s: State): string {
   const snap = s.snapshot;
-  if (!snap) return 'The site scan has not finished yet.';
+  if (!snap) return 'Nothing is known about the company beyond what they said. Never say you are reading or scanning their site.';
   const lines = [
     snap.sells ? `Sells: ${snap.sells.text}` : '',
     snap.audience ? `For: ${snap.audience.text}` : '',
     snap.viral ? `Viral feature: ${snap.viral.text}` : '',
     snap.features.length ? `Features: ${snap.features.map((f) => f.title).join(', ')}` : '',
   ].filter(Boolean);
-  return lines.length ? `What the site scan found:\n${lines.join('\n')}` : 'The site scan found little.';
+  return lines.length ? `What the site scan found:\n${lines.join('\n')}` : 'Nothing is known about the company beyond what they said. Never say you are reading or scanning their site.';
 }
 
 function turnInstruction(s: State, slot: Slot | null, last: { slot: Slot; text: string; mayFollowUp: boolean } | null): string {
