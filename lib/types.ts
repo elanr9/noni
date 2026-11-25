@@ -3199,6 +3199,7 @@ export type Database = {
           gender: string | null
           instagram: string | null
           instagram_followers: number | null
+          languages: string[]
           listed: boolean
           location: string | null
           niches: string[]
@@ -3210,6 +3211,8 @@ export type Database = {
           updated_at: string
           user_id: string
           weekly_capacity: string | null
+          youtube: string | null
+          youtube_followers: number | null
         }
         Insert: {
           best_campaign?: string | null
@@ -3223,6 +3226,7 @@ export type Database = {
           gender?: string | null
           instagram?: string | null
           instagram_followers?: number | null
+          languages?: string[]
           listed?: boolean
           location?: string | null
           niches?: string[]
@@ -3234,6 +3238,8 @@ export type Database = {
           updated_at?: string
           user_id: string
           weekly_capacity?: string | null
+          youtube?: string | null
+          youtube_followers?: number | null
         }
         Update: {
           best_campaign?: string | null
@@ -3247,6 +3253,7 @@ export type Database = {
           gender?: string | null
           instagram?: string | null
           instagram_followers?: number | null
+          languages?: string[]
           listed?: boolean
           location?: string | null
           niches?: string[]
@@ -3258,6 +3265,8 @@ export type Database = {
           updated_at?: string
           user_id?: string
           weekly_capacity?: string | null
+          youtube?: string | null
+          youtube_followers?: number | null
         }
         Relationships: []
       }
@@ -6954,14 +6963,17 @@ export type Database = {
           bio: string
           campaigns_done: string
           companies_count: number
+          country: string
           creator_id: string
           experience: string
           followers: number
           full_name: string
           gender: string
           instagram: string
+          instagram_followers: number
           is_member: boolean
           joined_at: string
+          languages: string[]
           location: string
           match_ai: boolean
           match_reason: string
@@ -6975,9 +6987,12 @@ export type Database = {
           start_date: string
           styles: string[]
           tiktok: string
+          tiktok_followers: number
           total_earned_cents: number
           total_views: number
           weekly_capacity: string
+          youtube: string
+          youtube_followers: number
         }[]
       }
       marketplace_creators: {
@@ -7224,6 +7239,7 @@ export type Database = {
           gender: string | null
           instagram: string | null
           instagram_followers: number | null
+          languages: string[]
           listed: boolean
           location: string | null
           niches: string[]
@@ -7235,6 +7251,8 @@ export type Database = {
           updated_at: string
           user_id: string
           weekly_capacity: string | null
+          youtube: string | null
+          youtube_followers: number | null
         }
         SetofOptions: {
           from: "*"

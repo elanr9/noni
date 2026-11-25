@@ -13,27 +13,58 @@ export type ApplicationStatus = 'invited' | 'applied' | 'accepted' | 'declined' 
 export type Gender = 'female' | 'male' | 'nonbinary' | 'undisclosed';
 export type Experience = 'pro' | 'some' | 'new';
 
-/** The niche list the web apply chat offers (supabase/functions/apply-chat). Keep the two in step. */
+/** The interest list. Keep in step with supabase/functions/apply-chat (CREATOR niches) and noni-web src/lib/creator-profile.ts. */
 export const NICHES = [
-  { key: 'fitness', label: 'Fitness' },
-  { key: 'sports', label: 'Sports' },
-  { key: 'beauty', label: 'Beauty' },
-  { key: 'fashion', label: 'Fashion' },
-  { key: 'food', label: 'Food' },
-  { key: 'tech', label: 'Tech and apps' },
-  { key: 'gaming', label: 'Gaming' },
-  { key: 'money', label: 'Money' },
-  { key: 'school', label: 'School and study' },
+  { key: 'social', label: 'Social and communication' },
+  { key: 'finance', label: 'Finance and commerce' },
+  { key: 'entertainment', label: 'Entertainment and media' },
+  { key: 'music', label: 'Music' },
+  { key: 'fitness', label: 'Health and fitness' },
+  { key: 'education', label: 'Education and learning' },
+  { key: 'travel', label: 'Travel and local' },
   { key: 'lifestyle', label: 'Lifestyle' },
-  { key: 'parenting', label: 'Parenting' },
-  { key: 'travel', label: 'Travel' },
+  { key: 'tech', label: 'Tech and AI' },
+  { key: 'photo_video', label: 'Photo and video' },
+  { key: 'food', label: 'Food and drink' },
+  { key: 'home_family', label: 'Home and family' },
+  { key: 'fashion_beauty', label: 'Fashion and beauty' },
+  { key: 'sports', label: 'Sports' },
+  { key: 'gaming', label: 'Gaming' },
+  { key: 'other', label: 'Other' },
 ] as const;
 
+export const MAX_NICHES = 5;
+export const MAX_LANGUAGES = 5;
+export const MAX_VIDEOS = 3;
+
+export const LANGUAGES = [
+  'English', 'Spanish', 'Portuguese', 'French', 'German', 'Italian', 'Dutch',
+  'Arabic', 'Hindi', 'Urdu', 'Bengali', 'Chinese', 'Japanese', 'Korean',
+  'Vietnamese', 'Thai', 'Indonesian', 'Tagalog', 'Turkish', 'Russian',
+].map((label) => ({ key: label.toLowerCase(), label }));
+
+/** The countries offered as taps; anything else is typed. Stored as the code, or the typed name. */
+export const COUNTRIES = [
+  { key: 'US', label: 'United States' },
+  { key: 'CA', label: 'Canada' },
+  { key: 'GB', label: 'United Kingdom' },
+  { key: 'AU', label: 'Australia' },
+];
+
+export function countryLabel(c: string | null | undefined): string | null {
+  if (!c) return null;
+  return COUNTRIES.find((x) => x.key === c)?.label ?? c;
+}
+
+export function languageLabel(key: string): string {
+  return LANGUAGES.find((l) => l.key === key)?.label ?? key.charAt(0).toUpperCase() + key.slice(1);
+}
+
 export const GENDERS: { key: Gender; label: string }[] = [
-  { key: 'female', label: 'Woman' },
-  { key: 'male', label: 'Man' },
+  { key: 'female', label: 'Female' },
+  { key: 'male', label: 'Male' },
   { key: 'nonbinary', label: 'Non-binary' },
-  { key: 'undisclosed', label: 'Rather not say' },
+  { key: 'undisclosed', label: 'Prefer not to say' },
 ];
 
 export const EXPERIENCE: { key: Experience; label: string }[] = [
@@ -128,7 +159,13 @@ export type MarketCreator = {
   bio: string | null;
   instagram: string | null;
   tiktok: string | null;
+  youtube: string | null;
   followers: number | null;
+  tiktok_followers: number | null;
+  instagram_followers: number | null;
+  youtube_followers: number | null;
+  country: string | null;
+  languages: string[];
   experience: Experience | null;
   campaigns_done: string | null;
   best_campaign: string | null;
@@ -169,8 +206,12 @@ export type CreatorResume = {
   gender: Gender | null;
   birth_year: number | null;
   location: string | null;
+  country: string | null;
+  languages: string[];
+  youtube: string | null;
   tiktok_followers: number | null;
   instagram_followers: number | null;
+  youtube_followers: number | null;
   listed: boolean;
 };
 
@@ -270,8 +311,9 @@ export function birthYearFromAge(age: number, now = new Date()): number {
 }
 
 /** "22 · Woman · Austin", skipping what is missing. */
-export function creatorFactLine(c: Pick<MarketCreator, 'age' | 'gender' | 'location'>): string {
-  return [c.age !== null ? String(c.age) : null, genderLabel(c.gender), c.location].filter(Boolean).join(' · ');
+export function creatorFactLine(c: Pick<MarketCreator, 'age' | 'gender' | 'location'> & { country?: string | null }): string {
+  const place = [c.location, countryLabel(c.country)].filter(Boolean).join(', ');
+  return [c.age !== null ? String(c.age) : null, genderLabel(c.gender), place || null].filter(Boolean).join(' · ');
 }
 
 /** The handle a company sees first: TikTok, then Instagram. */

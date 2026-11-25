@@ -152,6 +152,34 @@ const CREATOR: Slot[] = [
     placeholder: 'Or type your country',
   },
   {
+    key: 'languages',
+    kind: 'multi',
+    max: 5,
+    ask: 'Ask what languages they speak, up to five.',
+    options: [
+      { value: 'english', label: 'English' },
+      { value: 'spanish', label: 'Spanish' },
+      { value: 'portuguese', label: 'Portuguese' },
+      { value: 'french', label: 'French' },
+      { value: 'german', label: 'German' },
+      { value: 'italian', label: 'Italian' },
+      { value: 'dutch', label: 'Dutch' },
+      { value: 'arabic', label: 'Arabic' },
+      { value: 'hindi', label: 'Hindi' },
+      { value: 'urdu', label: 'Urdu' },
+      { value: 'bengali', label: 'Bengali' },
+      { value: 'chinese', label: 'Chinese' },
+      { value: 'japanese', label: 'Japanese' },
+      { value: 'korean', label: 'Korean' },
+      { value: 'vietnamese', label: 'Vietnamese' },
+      { value: 'thai', label: 'Thai' },
+      { value: 'indonesian', label: 'Indonesian' },
+      { value: 'tagalog', label: 'Tagalog' },
+      { value: 'turkish', label: 'Turkish' },
+      { value: 'russian', label: 'Russian' },
+    ],
+  },
+  {
     key: 'experience',
     kind: 'choice',
     ask: 'Ask if they have done UGC before.',
@@ -210,17 +238,6 @@ const CREATOR: Slot[] = [
     placeholder: 'Paste links, one per line',
   },
   {
-    key: 'on_camera',
-    kind: 'choice',
-    when: brandNew,
-    ask: 'Ask how they feel about being on camera. Say all of these work for UGC.',
-    options: [
-      { value: 'love_it', label: 'Love it' },
-      { value: 'getting_there', label: 'Getting there' },
-      { value: 'voice_or_hands', label: 'Rather do voiceover or hands only' },
-    ],
-  },
-  {
     key: 'starter_videos',
     kind: 'choice',
     when: brandNew,
@@ -250,16 +267,6 @@ const CREATOR: Slot[] = [
       { value: 'sports', label: 'Sports' },
       { value: 'gaming', label: 'Gaming' },
       { value: 'other', label: 'Other' },
-    ],
-  },
-  {
-    key: 'weekly_capacity',
-    kind: 'choice',
-    ask: 'Ask how many videos a week they could make.',
-    options: [
-      { value: '1-2', label: '1 or 2' },
-      { value: '3-5', label: '3 to 5' },
-      { value: '6+', label: '6 or more' },
     ],
   },
   {
@@ -411,14 +418,11 @@ async function saveAnswer(admin: SupabaseClient, s: State, slot: Slot, value: st
     case 'starter_videos':
       patch.portfolio = one === 'none' ? [] : links(typed);
       break;
-    case 'on_camera':
-      patch.on_camera = typed;
-      break;
     case 'niches':
       patch.niches = Array.isArray(stored) ? stored.slice(0, 5) : stored;
       break;
-    case 'weekly_capacity':
-      patch.weekly_capacity = typed;
+    case 'languages':
+      patch.languages = (Array.isArray(stored) ? stored : [stored]).map((l) => String(l).toLowerCase().trim()).filter(Boolean).slice(0, 5);
       break;
   }
   if (Object.keys(patch).length) {
@@ -535,10 +539,9 @@ function fallbackLine(slot: Slot, s: State): string {
     campaigns_done: 'How many UGC campaigns have you done?',
     best_campaign: "What's the campaign you're proudest of?",
     portfolio: 'Paste links to your best videos. Brands see them when you apply.',
-    on_camera: 'How do you feel about being on camera?',
     starter_videos: 'Any videos you are proud of? Paste links, or skip.',
     niches: 'What do you make content about?',
-    weekly_capacity: 'How many videos a week could you make?',
+    languages: 'What languages do you speak?',
     done: "That's it. Your application is in and we'll email you soon.",
   };
   return lines[slot.key] ?? 'Next question.';

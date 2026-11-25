@@ -2,12 +2,12 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 
 import { CreatorScreen } from '../../../components/admin/v2/creator/CreatorScreen';
-import { NoCompanyYet } from '../../../components/marketplace/NoCompanyYet';
+import { MyProfile } from '../../../components/marketplace/MyProfile';
 import { useAuth } from '../../../lib/auth';
 import { postTapHref } from '../../../lib/creator-resume';
 import { useV2Data } from '../../../lib/v2-posts';
 
-/** Profile tab: the shared creator screen for me, with the settings disc. */
+/** Profile tab: the profile to fill in until a company takes them on, then the shared creator screen with the settings disc. */
 export default function CreatorProfile() {
   const { profile } = useAuth();
   const router = useRouter();
@@ -19,7 +19,7 @@ export default function CreatorProfile() {
   }, [companyId, load]);
 
   if (!profile) return null;
-  if (!companyId) return <NoCompanyYet title="Profile" line="Your posts and numbers show here once you are creating for a company. Your marketplace profile is in the Market tab." />;
+  if (!companyId) return <MyProfile />;
   return (
     <CreatorScreen
       id={profile.id}

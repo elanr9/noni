@@ -326,6 +326,7 @@ export default function CreatorSettingsScreen() {
         {/* Account */}
         <SettingsLabel>Account</SettingsLabel>
         <SettingsCard>
+          <SettingsRow icon="edit" label="Profile" onPress={() => router.push('/(creator)/market/profile')} />
           {canManage ? (
             <SettingsRow
               icon="swap_horiz"

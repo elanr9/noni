@@ -17,6 +17,7 @@ import {
   creatorStats,
   dayLabel,
   experienceLabel,
+  languageLabel,
   type CreatorFilters,
   type Experience,
   type Gender,
@@ -68,7 +69,6 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
   const about = [
     experienceLabel(c.experience),
     c.campaigns_done ? `${c.campaigns_done} campaigns` : null,
-    c.weekly_capacity ? `${c.weekly_capacity} videos a week` : null,
     c.companies_count > 0 ? `Creates for ${c.companies_count} ${c.companies_count === 1 ? 'company' : 'companies'} on Noni` : null,
   ].filter(Boolean) as string[];
 
@@ -110,8 +110,14 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
         </Block>
       ) : null}
 
+      {c.languages.length > 0 ? (
+        <Block title="Languages">
+          <Text style={text.body}>{c.languages.map(languageLabel).join(' · ')}</Text>
+        </Block>
+      ) : null}
+
       {c.niches.length > 0 ? (
-        <Block title="Makes content about">
+        <Block title="Interests">
           <NicheTags niches={c.niches} highlight={listing?.niches ?? []} max={12} />
         </Block>
       ) : null}
@@ -123,10 +129,11 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
         </Block>
       ) : null}
 
-      {c.tiktok || c.instagram ? (
-        <Block title="Accounts">
-          {c.tiktok ? <LinkRow label={`TikTok @${c.tiktok}`} url={`https://www.tiktok.com/@${c.tiktok}`} /> : null}
-          {c.instagram ? <LinkRow label={`Instagram @${c.instagram}`} url={`https://www.instagram.com/${c.instagram}`} /> : null}
+      {c.tiktok || c.instagram || c.youtube ? (
+        <Block title="Socials">
+          {c.tiktok ? <LinkRow label={withFollowers(`TikTok @${c.tiktok}`, c.tiktok_followers)} url={`https://www.tiktok.com/@${c.tiktok}`} /> : null}
+          {c.instagram ? <LinkRow label={withFollowers(`Instagram @${c.instagram}`, c.instagram_followers)} url={`https://www.instagram.com/${c.instagram}`} /> : null}
+          {c.youtube ? <LinkRow label={withFollowers(`YouTube @${c.youtube}`, c.youtube_followers)} url={`https://www.youtube.com/@${c.youtube}`} /> : null}
         </Block>
       ) : null}
 
@@ -139,6 +146,10 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
       ) : null}
     </Sheet>
   );
+}
+
+function withFollowers(label: string, n: number | null): string {
+  return n ? `${label} · ${fmt(n)}` : label;
 }
 
 function shortUrl(url: string): string {

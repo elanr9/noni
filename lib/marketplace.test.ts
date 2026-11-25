@@ -27,8 +27,8 @@ describe('creator filters', () => {
     expect(activeFilterCount(NO_FILTERS)).toBe(0);
   });
   it('filters by niche, gender, age, views, earned and followers', () => {
-    expect(matchesFilters(jordan, { ...NO_FILTERS, niches: ['school'] })).toBe(false);
-    expect(matchesFilters(maya, { ...NO_FILTERS, niches: ['school'], gender: 'female', minAge: 21, maxAge: 24 })).toBe(true);
+    expect(matchesFilters(jordan, { ...NO_FILTERS, niches: ['education'] })).toBe(false);
+    expect(matchesFilters(maya, { ...NO_FILTERS, niches: ['education'], gender: 'female', minAge: 21, maxAge: 24 })).toBe(true);
     expect(matchesFilters(priya, { ...NO_FILTERS, minAge: 21, maxAge: 24 })).toBe(false);
     expect(matchesFilters(priya, { ...NO_FILTERS, minViews: 10_000 })).toBe(false);
     expect(matchesFilters(devon, { ...NO_FILTERS, minEarnedCents: 100_000 })).toBe(false);
@@ -92,7 +92,7 @@ describe('feed', () => {
     expect(dayLabel(null)).toBeNull();
   });
   it('writes the fact line from what is known', () => {
-    expect(creatorFactLine({ age: 21, gender: 'female', location: 'Austin, TX' })).toBe('21 · Woman · Austin, TX');
+    expect(creatorFactLine({ age: 21, gender: 'female', location: 'Austin, TX' })).toBe('21 · Female · Austin, TX');
     expect(creatorFactLine({ age: null, gender: 'undisclosed', location: null })).toBe('');
   });
 });
