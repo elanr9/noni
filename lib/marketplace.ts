@@ -375,3 +375,62 @@ export function orderFeed(rows: FeedListing[]): FeedListing[] {
     (a, b) => rank(b) - rank(a) || b.niche_overlap - a.niche_overlap || (Date.parse(b.opened_at ?? '') || 0) - (Date.parse(a.opened_at ?? '') || 0),
   );
 }
+
+/** One campaign in the creator's own list (rpc creator_campaigns, migration 162). */
+export type CampaignKind = 'active' | 'invited' | 'applied' | 'past';
+
+export type CreatorCampaign = {
+  kind: CampaignKind;
+  company_id: string;
+  company_name: string;
+  logo_path: string | null;
+  listing_id: string | null;
+  title: string | null;
+  posts_per_week: number | null;
+  application_id: string | null;
+  /** On past rows: 'left', 'declined' or 'withdrawn'. */
+  application_status: string | null;
+  invite_message: string | null;
+  is_active: boolean;
+  since: string | null;
+  start_date: string | null;
+  to_fix: number;
+  to_make: number;
+  in_review: number;
+  posted: number;
+  unread: number;
+  earned_month_cents: number;
+  earned_total_cents: number;
+};
+
+export type CampaignGroups = { active: CreatorCampaign[]; applied: CreatorCampaign[]; past: CreatorCampaign[] };
+
+/** Active first by what needs doing, then the one open now; invites lead the applied group. */
+export function groupCampaigns(rows: CreatorCampaign[]): CampaignGroups {
+  const todo = (c: CreatorCampaign) => c.to_fix * 3 + c.to_make * 2 + c.unread;
+  const when = (c: CreatorCampaign) => Date.parse(c.since ?? '') || 0;
+  return {
+    active: rows
+      .filter((c) => c.kind === 'active')
+      .sort((a, b) => todo(b) - todo(a) || Number(b.is_active) - Number(a.is_active) || a.company_name.localeCompare(b.company_name)),
+    applied: rows
+      .filter((c) => c.kind === 'invited' || c.kind === 'applied')
+      .sort((a, b) => Number(b.kind === 'invited') - Number(a.kind === 'invited') || when(b) - when(a)),
+    past: rows.filter((c) => c.kind === 'past').sort((a, b) => when(b) - when(a)),
+  };
+}
+
+/** The short to-do line on an active campaign, or null when caught up. */
+export function campaignTodo(c: Pick<CreatorCampaign, 'to_fix' | 'to_make' | 'unread' | 'in_review'>): { label: string; tone: 'amber' | 'blue' | 'purple' }[] {
+  const out: { label: string; tone: 'amber' | 'blue' | 'purple' }[] = [];
+  if (c.to_make > 0) out.push({ label: `${c.to_make} to make`, tone: 'blue' });
+  if (c.to_fix > 0) out.push({ label: `${c.to_fix} to fix`, tone: 'amber' });
+  if (c.unread > 0) out.push({ label: `${c.unread} unread`, tone: 'purple' });
+  return out;
+}
+
+export function pastLabel(status: string | null): string {
+  if (status === 'declined') return 'Not this time';
+  if (status === 'withdrawn') return 'Withdrawn';
+  return 'Ended';
+}

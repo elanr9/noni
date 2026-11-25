@@ -7,13 +7,13 @@ import { useCompany } from '../../../lib/company-context';
 import { unreadCreatorDmCount } from '../../../lib/creator-inbox-api';
 import { color, screenTransition } from '../../../theme/v2';
 
-// v2 creator shell: Home, Market, Earnings, the Create button, Messages, Profile.
+// v2 creator shell: Home, Campaigns, Earnings, the Create button, Messages, Profile.
 // Create opens the sheet over whatever tab is showing.
 const POLL_MS = 20_000;
 
 const ENTRIES: TabBarEntry[] = [
   { kind: 'route', name: 'index', icon: 'home', label: 'Home' },
-  { kind: 'route', name: 'market', icon: 'storefront', label: 'Market' },
+  { kind: 'route', name: 'market', icon: 'storefront', label: 'Campaigns' },
   { kind: 'route', name: 'earnings', icon: 'payments', label: 'Earnings' },
   { kind: 'create', label: 'Create' },
   { kind: 'route', name: 'messages', icon: 'chat_bubble', label: 'Messages' },
@@ -52,7 +52,7 @@ export default function CreatorTabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
-      <Tabs.Screen name="market" options={{ title: 'Market' }} />
+      <Tabs.Screen name="market" options={{ title: 'Campaigns' }} />
       <Tabs.Screen name="earnings" options={{ title: 'Earnings' }} />
       <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

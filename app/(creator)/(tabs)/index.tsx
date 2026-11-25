@@ -48,7 +48,7 @@ export default function CreatorHome() {
   );
 
   if (!profile) return null;
-  if (!companyId) return <NoCompanyYet title="Home" line="Pick a campaign in the Market and apply. Once a company takes you on, your briefs and posts live here." />;
+  if (!companyId) return <NoCompanyYet title="Home" />;
   if (setupPending) return <CreatorSetupChecklist />;
 
   return (

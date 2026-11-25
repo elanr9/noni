@@ -6,7 +6,7 @@ import { useAuth } from '../../../lib/auth';
 export default function CreatorMessagesScreen() {
   const { profile } = useAuth();
   if (profile && !profile.active_company_id) {
-    return <NoCompanyYet title="Messages" line="Your chats with a company open here the moment you join its campaign." />;
+    return <NoCompanyYet title="Messages" />;
   }
   return <CreatorInbox />;
 }

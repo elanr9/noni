@@ -51,7 +51,7 @@ export default function CreatorEarnings() {
   );
 
   const mine = useMemo(() => posts.filter((p) => p.creatorId === meId), [posts, meId]);
-  if (profile && !companyId) return <NoCompanyYet title="Earnings" line="You earn $10 a video plus $1 for every 1,000 views. Join a campaign in the Market to start." />;
+  if (profile && !companyId) return <NoCompanyYet title="Earnings" />;
   return (
     <EarningsScreen
       posts={mine}

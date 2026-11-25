@@ -10,7 +10,7 @@ import { ListingEditor } from '../../components/marketplace/ListingEditor';
 import { ListingScreen } from '../../components/marketplace/ListingScreen';
 import { ResumeEditor, type Tab } from '../../components/marketplace/ResumeEditor';
 import { NO_FILTERS, matchesFilters, sortCreators, type CreatorFilters, type CreatorSort, type MarketCreator } from '../../lib/marketplace';
-import { PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_LISTING, PREVIEW_RESUME } from '../../lib/marketplace-preview';
+import { PREVIEW_CAMPAIGNS, PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_LISTING, PREVIEW_RESUME } from '../../lib/marketplace-preview';
 
 export default function Preview() {
   const router = useRouter();
@@ -40,7 +40,7 @@ export default function Preview() {
       />
     );
   }
-  if (view === 'profile') return <ResumeEditor resume={PREVIEW_RESUME} startTab={(tab as Tab) ?? 'you'} onBack={() => router.back()} onSave={async () => undefined} />;
+  if (view === 'profile') return <ResumeEditor resume={PREVIEW_RESUME} name="Maya Torres" startTab={(tab as Tab) ?? 'you'} onBack={() => router.back()} onSave={async () => undefined} />;
   if (view === 'editor') return <ListingEditor listing={PREVIEW_LISTING} companyName="Inkbound AI" onBack={() => router.back()} onSave={async () => undefined} />;
 
   if (view === 'admin' || view === 'applicants' || view === 'empty') {
@@ -86,6 +86,10 @@ export default function Preview() {
       listings={PREVIEW_FEED}
       resume={view === 'incomplete' ? { ...PREVIEW_RESUME, birth_year: null } : PREVIEW_RESUME}
       onOpen={(l) => go(l.application_status === 'invited' ? 'invite' : l.application_status === 'applied' ? 'applied' : 'listing')}
+      campaigns={PREVIEW_CAMPAIGNS}
+      initialTab={view === 'mine' ? 'mine' : undefined}
+      onOpenCampaign={(c) => (c.kind === 'active' ? undefined : go('applied'))}
+      onLeave={async () => undefined}
       onEditProfile={() => go('profile')}
     />
   );

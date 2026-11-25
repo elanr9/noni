@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type {
+  CreatorCampaign,
   CreatorFilters,
   CreatorResume,
   CreatorSort,
@@ -52,6 +53,23 @@ export async function signAndApply(listingId: string, signedName: string, note: 
   });
   fail(error);
   return data as { status: string; start_date: string | null };
+}
+
+/** Every campaign the creator is in, applied to or has left. */
+export async function loadMyCampaigns(): Promise<CreatorCampaign[]> {
+  const { data, error } = await db.rpc('creator_campaigns');
+  fail(error);
+  return ((data ?? []) as CreatorCampaign[]).map((c) => ({
+    ...c,
+    earned_month_cents: Number(c.earned_month_cents) || 0,
+    earned_total_cents: Number(c.earned_total_cents) || 0,
+  }));
+}
+
+/** Leaves one campaign; the others stay as they are. */
+export async function leaveCampaign(companyId: string): Promise<void> {
+  const { error } = await db.rpc('leave_campaign', { p_company_id: companyId });
+  fail(error);
 }
 
 export async function withdrawApplication(applicationId: string): Promise<void> {

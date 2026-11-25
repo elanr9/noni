@@ -1,27 +1,33 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { CreatorMarketScreen } from '../../../components/marketplace/CreatorMarketScreen';
+import { CreatorMarketScreen, type MarketTab } from '../../../components/marketplace/CreatorMarketScreen';
+import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
-import type { CreatorResume, FeedListing } from '../../../lib/marketplace';
-import { loadFeed, loadMyResume } from '../../../lib/marketplace-api';
+import { useCompany } from '../../../lib/company-context';
+import type { CreatorCampaign, CreatorResume, FeedListing } from '../../../lib/marketplace';
+import { leaveCampaign, loadFeed, loadMyCampaigns, loadMyResume } from '../../../lib/marketplace-api';
 
-/** Market tab (creator): open campaigns, invites and applications. */
+/** Campaigns tab (creator): Explore open campaigns, run every one you are in from My campaigns. */
 export default function CreatorMarket() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { tab } = useLocalSearchParams<{ tab?: string }>();
+  const { profile, refreshProfile, refreshCompanies } = useAuth();
+  const { switchToSide, refreshSummary } = useCompany();
   const meId = profile?.id;
   const [listings, setListings] = useState<FeedListing[] | null>(null);
   const [resume, setResume] = useState<CreatorResume | null>(null);
+  const [campaigns, setCampaigns] = useState<CreatorCampaign[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!meId) return;
     try {
-      const [feed, mine] = await Promise.all([loadFeed(), loadMyResume(meId)]);
+      const [feed, mine, list] = await Promise.all([loadFeed(), loadMyResume(meId), loadMyCampaigns()]);
       setListings(feed);
       setResume(mine);
+      setCampaigns(list);
       setFailed(false);
     } catch {
       setFailed(true);
@@ -36,17 +42,40 @@ export default function CreatorMarket() {
     }, [load]),
   );
 
+  const initialTab: MarketTab | undefined = tab === 'mine' ? 'mine' : undefined;
+
   return (
     <CreatorMarketScreen
+      key={initialTab ?? 'explore'}
       listings={listings}
       resume={resume}
+      campaigns={campaigns}
       failed={failed}
       refreshing={refreshing}
+      initialTab={initialTab}
       onRefresh={() => {
         setRefreshing(true);
         void load();
       }}
       onOpen={(l) => router.push({ pathname: '/(creator)/market/[id]', params: { id: l.id } })}
+      onOpenCampaign={async (c) => {
+        if (c.kind !== 'active') {
+          if (c.listing_id) router.push({ pathname: '/(creator)/market/[id]', params: { id: c.listing_id } });
+          return;
+        }
+        try {
+          await switchToSide(c.company_id, 'creator');
+          router.navigate('/(creator)/(tabs)');
+        } catch {
+          toast.error('Could not open that campaign');
+        }
+      }}
+      onLeave={async (c) => {
+        await leaveCampaign(c.company_id);
+        await Promise.all([refreshProfile(), refreshCompanies(), refreshSummary()]);
+        toast.success(`Left ${c.company_name}`);
+        await load();
+      }}
       onEditProfile={() => router.push('/(creator)/market/profile')}
     />
   );

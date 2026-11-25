@@ -142,6 +142,7 @@ const CODEPOINTS = {
   description: 0xe873,
   radio_button_unchecked: 0xe836,
   check_circle: 0xe86c,
+  more_horiz: 0xe5d3,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;

@@ -1,5 +1,6 @@
 /** Sample marketplace data for the dev-preview routes. Never imported by a real screen. */
-import type { CreatorResume, FeedListing, Listing, MarketCreator } from './marketplace';
+import type {
+  CreatorCampaign, CreatorResume, FeedListing, Listing, MarketCreator } from './marketplace';
 
 const CONTRACT = `This agreement is between Inkbound AI ("the Company") and you ("the Creator"). It starts the day the Company accepts your application.
 
@@ -275,4 +276,16 @@ export const PREVIEW_CREATORS: MarketCreator[] = [
     match_score: 41,
     match_reason: 'Huge reach, but a gym audience with little overlap with students.',
   }),
+];
+
+const CAMPAIGN_BASE: Omit<CreatorCampaign, 'kind' | 'company_id' | 'company_name' | 'logo_path'> = { listing_id: null, title: null, posts_per_week: 3, application_id: null, application_status: null, invite_message: null, is_active: false, since: '2026-11-10T12:00:00Z', start_date: null, to_fix: 0, to_make: 0, in_review: 0, posted: 0, unread: 0, earned_month_cents: 0, earned_total_cents: 0 };
+
+/** My campaigns sample: three live companies, two applications, one past. */
+export const PREVIEW_CAMPAIGNS: CreatorCampaign[] = [
+  { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-ink', company_name: 'Inkbound AI', logo_path: null, title: 'Tattoo ideas in seconds', is_active: true, to_make: 2, unread: 1, in_review: 1, posted: 14, earned_month_cents: 18400 },
+  { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-fv', company_name: 'FieldVision', logo_path: null, title: 'Soccer film breakdowns', to_fix: 1, posted: 6, earned_month_cents: 7600 },
+  { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-crumbs', company_name: 'socialcrumbs', logo_path: null, title: 'socialcrumbs', posted: 3, earned_month_cents: 3100 },
+  { ...CAMPAIGN_BASE, kind: 'invited', company_id: 'c-glow', company_name: 'Glowday', logo_path: null, title: 'Morning skincare in 30 seconds', listing_id: 'l-glow', application_status: 'invited', invite_message: 'Loved your GRWM videos. Want in?' },
+  { ...CAMPAIGN_BASE, kind: 'applied', company_id: 'c-lift', company_name: 'Liftly', logo_path: null, title: 'Gym form checks', listing_id: 'l-lift', application_status: 'applied' },
+  { ...CAMPAIGN_BASE, kind: 'past', company_id: 'c-old', company_name: 'Snackbox', logo_path: null, title: 'Snackbox', application_status: 'left', posted: 9, earned_total_cents: 12900 },
 ];

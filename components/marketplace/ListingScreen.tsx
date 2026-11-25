@@ -71,7 +71,7 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
     const joined = result.status === 'accepted';
     const start = dayLabel(result.start_date);
     return (
-      <Screen white footer={joined ? <Button label={`Open ${l.company_name}`} onPress={onEnterCompany} /> : <Button label="Back to Market" onPress={onBack} />}>
+      <Screen white footer={joined ? <Button label={`Open ${l.company_name}`} onPress={onEnterCompany} /> : <Button label="Back" onPress={onBack} />}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
           <View style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: color.greenTint, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
             <Icon name="check" size={38} weight={700} color={color.green} />

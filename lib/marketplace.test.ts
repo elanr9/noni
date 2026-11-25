@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   NO_FILTERS,
+  campaignTodo,
+  groupCampaigns,
   activeFilterCount,
   ageBandKey,
   birthYearFromAge,
@@ -17,6 +19,7 @@ import {
   type FeedListing,
   type MarketCreator,
 } from './marketplace';
+import { PREVIEW_CAMPAIGNS } from './marketplace-preview';
 import { PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_RESUME } from './marketplace-preview';
 
 const [maya, devon, priya, jordan] = PREVIEW_CREATORS as [MarketCreator, MarketCreator, MarketCreator, MarketCreator];
@@ -94,5 +97,19 @@ describe('feed', () => {
   it('writes the fact line from what is known', () => {
     expect(creatorFactLine({ age: 21, gender: 'female', location: 'Austin, TX' })).toBe('21 · Female · Austin, TX');
     expect(creatorFactLine({ age: null, gender: 'undisclosed', location: null })).toBe('');
+  });
+});
+
+describe('groupCampaigns', () => {
+  it('splits active, applied and past, with work first and invites leading', () => {
+    const g = groupCampaigns(PREVIEW_CAMPAIGNS);
+    expect(g.active.map((c) => c.company_name)).toEqual(['Inkbound AI', 'FieldVision', 'socialcrumbs']);
+    expect(g.applied.map((c) => c.kind)).toEqual(['invited', 'applied']);
+    expect(g.past).toHaveLength(1);
+  });
+
+  it('says what is waiting, or nothing when caught up', () => {
+    expect(campaignTodo({ to_make: 2, to_fix: 1, unread: 0, in_review: 3 }).map((t) => t.label)).toEqual(['2 to make', '1 to fix']);
+    expect(campaignTodo({ to_make: 0, to_fix: 0, unread: 0, in_review: 0 })).toEqual([]);
   });
 });
