@@ -505,3 +505,6 @@ verify_jwt = false
 
 [functions.budget-billing]
 verify_jwt = false
+
+[functions.email-sign-in]
+verify_jwt = false

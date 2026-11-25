@@ -2508,6 +2508,74 @@ export type Database = {
           },
         ]
       }
+      company_leads: {
+        Row: {
+          answers: Json
+          call_booked_at: string | null
+          company: string | null
+          company_id: string | null
+          created_at: string
+          email: string | null
+          finished_at: string | null
+          id: string
+          invited_at: string | null
+          name: string | null
+          note: string | null
+          role: string | null
+          status: string
+          subscribed_at: string | null
+          updated_at: string
+          user_agent: string | null
+          website: string | null
+        }
+        Insert: {
+          answers?: Json
+          call_booked_at?: string | null
+          company?: string | null
+          company_id?: string | null
+          created_at?: string
+          email?: string | null
+          finished_at?: string | null
+          id?: string
+          invited_at?: string | null
+          name?: string | null
+          note?: string | null
+          role?: string | null
+          status?: string
+          subscribed_at?: string | null
+          updated_at?: string
+          user_agent?: string | null
+          website?: string | null
+        }
+        Update: {
+          answers?: Json
+          call_booked_at?: string | null
+          company?: string | null
+          company_id?: string | null
+          created_at?: string
+          email?: string | null
+          finished_at?: string | null
+          id?: string
+          invited_at?: string | null
+          name?: string | null
+          note?: string | null
+          role?: string | null
+          status?: string
+          subscribed_at?: string | null
+          updated_at?: string
+          user_agent?: string | null
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_leads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_members: {
         Row: {
           can_create: boolean
@@ -5698,6 +5766,24 @@ export type Database = {
           },
         ]
       }
+      sign_in_link_requests: {
+        Row: {
+          created_at: string
+          email: string
+          id: number
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: never
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: never
+        }
+        Relationships: []
+      }
       signup_daily: {
         Row: {
           code: string
@@ -6546,6 +6632,7 @@ export type Database = {
       campaign_notify_at: { Args: { p_drop_date: string }; Returns: string }
       can_access_manager_chat: { Args: { p_chat_id: string }; Returns: boolean }
       can_create: { Args: never; Returns: boolean }
+      can_email_sign_in: { Args: { p_email: string }; Returns: boolean }
       chat_media_chat_id: { Args: { object_name: string }; Returns: string }
       claim_pending_invite: {
         Args: never

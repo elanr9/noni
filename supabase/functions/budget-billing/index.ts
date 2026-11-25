@@ -318,14 +318,19 @@ Deno.serve(async (req) => {
     if (!caller.platformAdmin) return jsonResponse({ error: 'forbidden' }, 403);
 
     const body = (await req.json().catch(() => null)) as
-      | { action?: string; company_id?: string; lines?: unknown }
+      | { action?: string; company_id?: string; lines?: unknown; to?: string; name?: string; invite_token?: string }
       | null;
     const companyId = body?.company_id;
     if (!companyId) return jsonResponse({ error: 'company_id is required' }, 400);
 
     if (body?.action === 'send_offer') {
       const lines = Array.isArray(body.lines) ? body.lines.map(String).filter(Boolean).slice(0, 4) : [];
-      const who = await companyAdminEmail(admin, companyId);
+      /* A lead turned into a company has no admin yet: the email goes to the
+         invited address and its button is the invite, which signs them in. */
+      const invited = typeof body.invite_token === 'string' && /^[0-9a-f]{20,}$/.test(body.invite_token);
+      const who = invited && body.to
+        ? { email: String(body.to), name: String(body.name ?? '') }
+        : await companyAdminEmail(admin, companyId);
       if (!who.email) return jsonResponse({ error: 'This company has no admin to email yet.' }, 400);
       const first = who.name.trim().split(/\s+/)[0];
       await sendEmail({
@@ -335,7 +340,7 @@ Deno.serve(async (req) => {
           preview: lines[0] ?? 'Start your plan',
           heading: first ? `${first}, your plan is ready` : 'Your plan is ready',
           paragraphs: lines,
-          cta: { label: 'Start subscription', url: `${WEB_URL}/start` },
+          cta: { label: 'Start subscription', url: invited ? `${WEB_URL}/invite/${body.invite_token}` : `${WEB_URL}/start` },
         },
       });
       await admin
