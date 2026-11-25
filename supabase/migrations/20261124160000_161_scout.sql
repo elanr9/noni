@@ -255,3 +255,8 @@ select cron.schedule(
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('scout', 'scout', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do nothing;
+
+-- Revoking from public also took it from the service role, which the web
+-- server uses for both.
+grant execute on function public.scout_join_slug(uuid) to service_role;
+grant execute on function public.marketplace_join(uuid, uuid) to service_role;

@@ -548,7 +548,7 @@ async function saveEnriched(admin: SupabaseClient, run: ScoutRun, list: Enriched
     const base = `${run.company_id}/${c.platform}/${c.handle.replace(/[^a-z0-9._-]/g, '_')}`;
     const avatar = await keepImage(admin, c.avatar, `${base}/avatar`);
     const videos = await Promise.all(
-      c.videos.map(async (v, i) => ({ ...v, cover: i < 3 ? await keepImage(admin, v.cover, `${base}/v${i}`) : null })),
+      c.videos.map(async (v, i) => ({ ...v, cover: i < VIDEOS_PER_PROFILE ? await keepImage(admin, v.cover, `${base}/v${i}`) : null })),
     );
     rows.push({
       company_id: run.company_id,
