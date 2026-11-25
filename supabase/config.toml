@@ -508,3 +508,6 @@ verify_jwt = false
 
 [functions.email-sign-in]
 verify_jwt = false
+
+[functions.scout]
+verify_jwt = false
