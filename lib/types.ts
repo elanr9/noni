@@ -3192,8 +3192,10 @@ export type Database = {
           bio: string | null
           birth_year: number | null
           campaigns_done: string | null
+          country: string | null
           created_at: string
           experience: string | null
+          found_via: string | null
           gender: string | null
           instagram: string | null
           instagram_followers: number | null
@@ -3214,8 +3216,10 @@ export type Database = {
           bio?: string | null
           birth_year?: number | null
           campaigns_done?: string | null
+          country?: string | null
           created_at?: string
           experience?: string | null
+          found_via?: string | null
           gender?: string | null
           instagram?: string | null
           instagram_followers?: number | null
@@ -3236,8 +3240,10 @@ export type Database = {
           bio?: string | null
           birth_year?: number | null
           campaigns_done?: string | null
+          country?: string | null
           created_at?: string
           experience?: string | null
+          found_via?: string | null
           gender?: string | null
           instagram?: string | null
           instagram_followers?: number | null
@@ -7211,8 +7217,10 @@ export type Database = {
           bio: string | null
           birth_year: number | null
           campaigns_done: string | null
+          country: string | null
           created_at: string
           experience: string | null
+          found_via: string | null
           gender: string | null
           instagram: string | null
           instagram_followers: number | null

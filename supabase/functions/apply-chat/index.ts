@@ -38,7 +38,7 @@ const WEB_URL = 'https://www.usenoni.app';
 
 type Kind = 'company' | 'creator';
 type Option = { value: string; label: string };
-type SlotKind = 'choice' | 'multi' | 'text' | 'done';
+type SlotKind = 'choice' | 'multi' | 'text' | 'age' | 'done';
 
 type Slot = {
   key: string;
@@ -47,12 +47,14 @@ type Slot = {
   options?: Option[];
   placeholder?: string;
   followUp?: boolean;
+  /** Most picks for a multi. */
+  max?: number;
   when?: (a: Answers) => boolean;
 };
 
 type Answers = Record<string, string | string[]>;
 
-export type SlotSpec = { key: string; kind: SlotKind; options?: Option[]; placeholder?: string; draft?: string };
+export type SlotSpec = { key: string; kind: SlotKind; options?: Option[]; placeholder?: string; draft?: string; max?: number };
 
 // ---------------------------------------------------------------- agendas
 
@@ -122,9 +124,37 @@ const brandNew = (a: Answers) => a.experience === 'new';
 
 const CREATOR: Slot[] = [
   {
+    key: 'age',
+    kind: 'age',
+    ask: "Say that brands on Noni pay creators to make short videos, and a few quick questions build their creator profile (only if nothing has been said yet in this chat, open with hi, their first name and that you are Noni). Ask how old they are, and say some campaigns are 18+. Under 35 words.",
+  },
+  {
+    key: 'gender',
+    kind: 'choice',
+    ask: 'Ask their gender, and say brands sometimes look for a certain creator.',
+    options: [
+      { value: 'female', label: 'Female' },
+      { value: 'male', label: 'Male' },
+      { value: 'nonbinary', label: 'Non-binary' },
+      { value: 'undisclosed', label: 'Prefer not to say' },
+    ],
+  },
+  {
+    key: 'country',
+    kind: 'choice',
+    ask: 'Ask where they live.',
+    options: [
+      { value: 'US', label: 'United States' },
+      { value: 'CA', label: 'Canada' },
+      { value: 'GB', label: 'United Kingdom' },
+      { value: 'AU', label: 'Australia' },
+    ],
+    placeholder: 'Or type your country',
+  },
+  {
     key: 'experience',
     kind: 'choice',
-    ask: "Say that brands on Noni pay creators to make short videos, and a few quick questions build their creator profile (only if nothing has been said yet in this chat, open with hi, their first name and that you are Noni). Ask if they have done UGC before. Under 35 words.",
+    ask: 'Ask if they have done UGC before.',
     options: [
       { value: 'pro', label: "Yes, I've done paid UGC" },
       { value: 'some', label: 'A little' },
@@ -201,26 +231,31 @@ const CREATOR: Slot[] = [
   {
     key: 'niches',
     kind: 'multi',
-    ask: 'Ask what they make content about, or would love to. They can pick a few.',
+    max: 5,
+    ask: 'Ask what they post about, up to five. Say brands use these to find them.',
     options: [
-      { value: 'fitness', label: 'Fitness' },
-      { value: 'sports', label: 'Sports' },
-      { value: 'beauty', label: 'Beauty' },
-      { value: 'fashion', label: 'Fashion' },
-      { value: 'food', label: 'Food' },
-      { value: 'tech', label: 'Tech and apps' },
-      { value: 'gaming', label: 'Gaming' },
-      { value: 'money', label: 'Money' },
-      { value: 'school', label: 'School and study' },
+      { value: 'social', label: 'Social and communication' },
+      { value: 'finance', label: 'Finance and commerce' },
+      { value: 'entertainment', label: 'Entertainment and media' },
+      { value: 'music', label: 'Music' },
+      { value: 'fitness', label: 'Health and fitness' },
+      { value: 'education', label: 'Education and learning' },
+      { value: 'travel', label: 'Travel and local' },
       { value: 'lifestyle', label: 'Lifestyle' },
-      { value: 'parenting', label: 'Parenting' },
-      { value: 'travel', label: 'Travel' },
+      { value: 'tech', label: 'Tech and AI' },
+      { value: 'photo_video', label: 'Photo and video' },
+      { value: 'food', label: 'Food and drink' },
+      { value: 'home_family', label: 'Home and family' },
+      { value: 'fashion_beauty', label: 'Fashion and beauty' },
+      { value: 'sports', label: 'Sports' },
+      { value: 'gaming', label: 'Gaming' },
+      { value: 'other', label: 'Other' },
     ],
   },
   {
     key: 'weekly_capacity',
     kind: 'choice',
-    ask: 'Last one. Ask how many videos a week they could make.',
+    ask: 'Ask how many videos a week they could make.',
     options: [
       { value: '1-2', label: '1 or 2' },
       { value: '3-5', label: '3 to 5' },
@@ -228,9 +263,30 @@ const CREATOR: Slot[] = [
     ],
   },
   {
+    key: 'found_via',
+    kind: 'choice',
+    ask: 'Last one. Ask how they found Noni.',
+    options: [
+      { value: 'tiktok', label: 'TikTok' },
+      { value: 'instagram', label: 'Instagram' },
+      { value: 'youtube', label: 'YouTube' },
+      { value: 'x', label: 'X' },
+      { value: 'facebook', label: 'Facebook' },
+      { value: 'snapchat', label: 'Snapchat' },
+      { value: 'linkedin', label: 'LinkedIn' },
+      { value: 'google', label: 'Google' },
+      { value: 'chatgpt', label: 'ChatGPT' },
+      { value: 'claude', label: 'Claude' },
+      { value: 'podcast', label: 'Podcast' },
+      { value: 'newsletter', label: 'Blog or newsletter' },
+      { value: 'friend', label: 'A friend' },
+      { value: 'invite_code', label: 'Invite code' },
+    ],
+  },
+  {
     key: 'done',
     kind: 'done',
-    ask: 'Close in two short sentences: their profile is in, the Noni team reviews it quickly and emails them when they can start applying to brands.',
+    ask: 'Close in two short sentences: their profile is done and they are in. Next they get the Noni app to browse brands and apply to campaigns.',
   },
 ];
 
@@ -284,6 +340,7 @@ function specFor(slot: Slot | null): SlotSpec | null {
     kind: slot.kind,
     ...(slot.options ? { options: slot.options } : {}),
     ...(slot.placeholder ? { placeholder: slot.placeholder } : {}),
+    ...(slot.max ? { max: slot.max } : {}),
   };
 }
 
@@ -323,6 +380,20 @@ async function saveAnswer(admin: SupabaseClient, s: State, slot: Slot, value: st
   const patch: Record<string, unknown> = {};
   const typed = typeof stored === 'string' ? stored : '';
   switch (slot.key) {
+    case 'age': {
+      const age = Math.round(Number(one));
+      if (Number.isFinite(age) && age >= 13 && age <= 100) patch.birth_year = new Date().getUTCFullYear() - age;
+      break;
+    }
+    case 'gender':
+      if (['female', 'male', 'nonbinary', 'undisclosed'].includes(one)) patch.gender = one;
+      break;
+    case 'country':
+      patch.country = typed.slice(0, 60);
+      break;
+    case 'found_via':
+      patch.found_via = typed.slice(0, 60);
+      break;
     case 'experience':
       if (['pro', 'some', 'new'].includes(one)) patch.experience = one;
       break;
@@ -344,7 +415,7 @@ async function saveAnswer(admin: SupabaseClient, s: State, slot: Slot, value: st
       patch.on_camera = typed;
       break;
     case 'niches':
-      patch.niches = stored;
+      patch.niches = Array.isArray(stored) ? stored.slice(0, 5) : stored;
       break;
     case 'weekly_capacity':
       patch.weekly_capacity = typed;
@@ -374,7 +445,10 @@ async function saveApp(admin: SupabaseClient, s: State, extra: Record<string, un
 async function submit(admin: SupabaseClient, s: State): Promise<void> {
   s.app.status = 'pending';
   await saveApp(admin, s, { status: 'pending', submitted_at: new Date().toISOString() });
-  if (s.app.kind === 'company') {
+  /* Creators are in as soon as the profile is done: there is no call and
+     no review. Brands decide who they work with when creators apply to
+     their campaigns. */
+  {
     const { error } = await admin.rpc('approve_application', { p_id: s.app.id, p_note: 'Signed up on the website' });
     if (error) console.error('apply-chat auto approve', error.message);
     else s.app.status = 'approved';
@@ -389,7 +463,7 @@ async function submit(admin: SupabaseClient, s: State): Promise<void> {
     website: s.app.kind === 'company' ? String(a.website ?? '') || null : null,
     message: s.app.kind === 'company'
       ? `Signed up on the website. Next they pick do it yourself or done for you.\n\n${lines.join('\n')}`
-      : `Applied on the website. Review in /ops/applications.\n\n${lines.join('\n')}`,
+      : `Joined as a creator on the website.\n\n${lines.join('\n')}`,
     source: 'apply',
   });
 }
