@@ -4,10 +4,11 @@ import { useState } from 'react';
 
 import { linkFrom, type Declined } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
-import { briefs, color, radius, shadow } from '../../../../theme/v2';
+import { color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Press, Toggle, tap } from '../../../v2';
+import { AiFillButton, OUTLINE_STEPS } from './AiFillButton';
 import { AiNote } from './AiNote';
-import { SpinIcon } from './GuidedForm';
+import { ShimmerLine } from './ClipFrame';
 import { TitleInput } from './TitleInput';
 import { useReference } from './useReference';
 
@@ -19,6 +20,8 @@ export interface OutlineFormProps {
   /** The AI is filling the title and notes. */
   ai: boolean;
   onFill: () => void;
+  /** Bumped by the screen when a fill has landed. */
+  doneKey?: number;
   editingExisting?: boolean;
   /** The last fill was declined: the reason shows where the outline would have gone. */
   declined?: Declined | null;
@@ -29,7 +32,7 @@ export interface OutlineFormProps {
 const FIELD = { backgroundColor: color.card, borderRadius: radius.card, ...shadow.card } as const;
 
 /** Outline compose: link row, Fill in with AI, title, Add music toggle, notes. */
-export function OutlineForm({ st, set, ai, onFill, editingExisting, declined, referenceNote }: OutlineFormProps) {
+export function OutlineForm({ st, set, ai, onFill, doneKey, editingExisting, declined, referenceNote }: OutlineFormProps) {
   const [pasting, setPasting] = useState(false);
   const hasLink = /\S/.test(st.link);
   // The post behind the link is read as soon as it is pasted, so the fill does not wait on it.
@@ -73,10 +76,9 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting, declined, re
         </View>
       )}
       {editingExisting ? null : (
-        <Press disabled={!canAi || ai} onPress={onFill} accessibilityRole="button" style={{ height: 52, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: canAi ? color.blue : color.grey1, boxShadow: canAi ? briefs.aiGlow : undefined }}>
-          <SpinIcon spinning={ai} color={canAi ? color.white : color.grey3} />
-          <Text style={{ fontSize: 15, fontWeight: '700', color: canAi ? color.white : color.grey3 }}>{ai ? 'Filling in' : st.filled ? 'Fill in again' : 'Fill in with AI'}</Text>
-        </Press>
+        <View style={{ flexDirection: 'row' }}>
+          <AiFillButton label={st.filled ? 'Fill in again' : 'Fill in with AI'} enabled={canAi} phase={ai ? 'writing' : 'idle'} steps={OUTLINE_STEPS} doneKey={doneKey} onPress={onFill} height={52} />
+        </View>
       )}
       {declined ? <AiNote body={declined.reason} lines={declined.questions} /> : null}
       {note && !editingExisting ? <AiNote icon="link_off" body={note} /> : null}
@@ -91,6 +93,14 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting, declined, re
         </View>
         <Toggle on={st.music} onChange={(v) => set({ music: v })} accessibilityLabel="Add music" />
       </View>
+      {ai && !/\S/.test(st.notes) ? (
+        <View style={[FIELD, { minHeight: hasLink ? 132 : 154, paddingVertical: 15, paddingHorizontal: 16, gap: 6 }]}>
+          <ShimmerLine width="85%" />
+          <ShimmerLine width="70%" />
+          <ShimmerLine width="78%" />
+          <ShimmerLine width="45%" />
+        </View>
+      ) : (
       <TextInput
         multiline
         value={st.notes}
@@ -100,6 +110,7 @@ export function OutlineForm({ st, set, ai, onFill, editingExisting, declined, re
         textAlignVertical="top"
         style={[FIELD, { minHeight: hasLink ? 132 : 154, paddingVertical: 15, paddingHorizontal: 16, fontSize: 16, lineHeight: 22, color: color.ink, opacity: ai ? 0.5 : 1 }]}
       />
+      )}
     </ScrollView>
   );
 }

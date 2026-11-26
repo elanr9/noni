@@ -4,12 +4,12 @@ import { ScrollView, Text, TextInput, View } from 'react-native';
 import { LONG_TEXT_NOTES, longTextPlan, type Declined, type LongTextPlan } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
 import { stText, type LongTextState, type StText } from '../../../../lib/brief-library';
-import { briefs, color, radius, shadow } from '../../../../theme/v2';
+import { color, radius, shadow } from '../../../../theme/v2';
 import { Icon, Label, Press } from '../../../v2';
+import { AiFillButton, LONG_TEXT_STEPS } from './AiFillButton';
 import { AiNote } from './AiNote';
 import { ClipFrame, ShimmerLine } from './ClipFrame';
 import type { AiState } from './GuidedForm';
-import { SpinIcon } from './GuidedForm';
 import { TextOnScreenEditor } from './TextOnScreenEditor';
 import { FIELD, TitleInput } from './TitleInput';
 
@@ -31,6 +31,7 @@ export function longTextStyle(onScreen: string): Pick<StText, 'y' | 'size' | 'w'
 export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFormProps) {
   const [edit, setEdit] = useState(false);
   const [declined, setDeclined] = useState<Declined | null>(null);
+  const [doneKey, setDoneKey] = useState(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
     const list = timers.current;
@@ -64,10 +65,12 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
       setTimeout(() => {
         set({ notes: lt.notes.trim() || LONG_TEXT_NOTES });
         setAi(null);
+        setDoneKey((k) => k + 1);
       }, 700),
     );
   };
-  const pend = (k: string) => !!ai && ai.stage === k;
+  // The text lands first, then the notes; notes the manager typed stay readable.
+  const pend = (k: string) => !!ai && (ai.stage === k || (k === 'notes' && !/\S/.test(lt.notes)));
   const style = longTextStyle(lt.onScreen);
   const text: StText = lt.doc?.texts[0] ?? stText(lt.onScreen, { id: 'lt', ...style, style: 'outline' });
   const W = 96;
@@ -76,10 +79,9 @@ export function LongTextForm({ lt, set, ai, setAi, editingExisting }: LongTextFo
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12, gap: 10, flexGrow: 1 }}>
         {editingExisting ? null : <Text style={{ textAlign: 'center', fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.grey4 }}>Long Text post</Text>}
         {editingExisting ? null : (
-          <Press disabled={!typed || !!ai} onPress={() => void fill()} accessibilityRole="button" style={{ height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? briefs.aiGlow : undefined }}>
-            <SpinIcon spinning={!!ai} size={22} color={typed ? color.white : color.grey3} />
-            <Text style={{ fontSize: 17, fontWeight: '700', color: typed ? color.white : color.grey3 }}>{ai ? 'Filling in' : 'Fill in with AI'}</Text>
-          </Press>
+          <View style={{ flexDirection: 'row' }}>
+            <AiFillButton label="Fill in with AI" enabled={typed} phase={!ai ? 'idle' : ai.stage === 'notes' ? 'filling' : 'writing'} filled={1} steps={LONG_TEXT_STEPS} doneKey={doneKey} onPress={() => void fill()} fontSize={17} />
+          </View>
         )}
         {declined ? <AiNote body={declined.reason} lines={declined.questions} /> : null}
         <TitleInput value={lt.title} onChange={(t) => set({ title: t })} placeholder="Title" noIdeas={!!editingExisting} type="Long Text" />

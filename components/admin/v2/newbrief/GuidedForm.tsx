@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, LinearTransition, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { planGuided, referenceWithin, type Declined, type GuidedPlan } from '../../../../lib/brief-ai';
 import { toast } from '../../../v2/Toast';
 import { newClip, type AudioTrack, type BriefClip, type BriefHook, type BriefType, type GsMedia, type GuidedState } from '../../../../lib/brief-library';
-import { briefs, color, editor, radius, shadow } from '../../../../theme/v2';
+import { color, editor, radius, shadow } from '../../../../theme/v2';
 import { Icon, Label, Option, Press, Sheet, Toggle } from '../../../v2';
 import { AudioCover } from '../audio/AudioCover';
 import { AudioSheet } from '../audio/AudioSheet';
+import { AiFillButton, DONE_MS, GUIDED_STEPS, SLIDES_STEPS, type AiPhase } from './AiFillButton';
 import { AiNote } from './AiNote';
 import { CaptionCard } from './CaptionCard';
 import { ClipGrid } from './ClipGrid';
@@ -35,8 +36,8 @@ export interface GuidedFormProps {
 
 /** How long Fill in with AI waits on a link that is still being read before the writer takes over. */
 const REFERENCE_WAIT_MS = 90_000;
-/** The writer can take two minutes; after this the button says it is still at it. */
-const SLOW_MS = 45_000;
+/** Tiles that shimmer while the AI writes, before it is known how many clips the post has. */
+const GHOST_CLIPS = 3;
 
 const BIG = { height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, flex: 1, minWidth: 0 } as const;
 
@@ -52,8 +53,11 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const [hookOpen, setHookOpen] = useState(false);
   const [declined, setDeclined] = useState<Declined | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [run, setRun] = useState(0);
-  const [slowRun, setSlowRun] = useState(-1);
+  const [doneKey, setDoneKey] = useState(0);
+  /** The pill is saying Done: it keeps the whole row for that beat. */
+  const [celebrating, setCelebrating] = useState(false);
+  /** Clips in the plan being placed, so the grid holds its shape while they land. */
+  const [planned, setPlanned] = useState(0);
   const reference = useReference(editingExisting ? '' : g.link);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
@@ -68,18 +72,18 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
   const typed = /\S/.test(g.title) || /\S/.test(g.link) || g.clips.some((c) => /\S/.test(c.text));
   const locked = !!(g.filled || ai) && !g.link;
 
-  const writing = !!ai && ai.n === 1 && ai.stage !== 'reference';
-  useEffect(() => {
-    if (!writing) return;
-    const t = setTimeout(() => setSlowRun(run), SLOW_MS);
-    return () => clearTimeout(t);
-  }, [writing, run]);
+  // Before the plan lands there is one step and nothing to place yet.
+  const waiting = !!ai && ai.n === 1;
+  const phase: AiPhase = !ai ? 'idle' : ai.stage === 'reference' ? 'reference' : waiting ? 'writing' : 'filling';
+  // While the AI writes, the grid shows a few shimmering tiles so the post has its shape before the words land.
+  const ghosts = useMemo(() => Array.from({ length: 12 }, () => newClip('')), []);
+  const tiles = ai ? Math.min(ghosts.length, Math.max(GHOST_CLIPS, planned)) : 0;
+  const shownClips = g.clips.length < tiles ? g.clips.concat(ghosts.slice(g.clips.length, tiles)) : g.clips;
 
   const fill = async () => {
     if (!typed || ai) return;
     setDeclined(null);
     setWarnings([]);
-    setRun((r) => r + 1);
     // The post behind the link is read from the moment it is added; wait for it when it is not done yet.
     if (g.link && reference.status === 'pending') {
       setAi({ stage: 'reference', i: 0, n: 1 });
@@ -125,17 +129,28 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
     );
     // A caption or tags typed before the fill stay; the AI only fills what is empty.
     steps.push(['caption', () => update((cur) => ({ ...cur, caption: /\S/.test(cur.caption || '') ? cur.caption : plan.caption, tags: (cur.tags || []).length ? cur.tags : plan.tags, filled: true }))]);
+    setPlanned(plan.clips.length);
     setAi({ stage: 'title', i: 0, n: steps.length });
     steps.forEach(([, run], i) =>
       timers.current.push(
         setTimeout(() => {
           run();
-          setAi(i === steps.length - 1 ? null : { stage: steps[i + 1][0], i: i + 1, n: steps.length });
+          const last = i === steps.length - 1;
+          setAi(last ? null : { stage: steps[i + 1][0], i: i + 1, n: steps.length });
+          if (last) {
+            setPlanned(0);
+            setDoneKey((k) => k + 1);
+            setCelebrating(true);
+            timers.current.push(setTimeout(() => setCelebrating(false), DONE_MS));
+          }
         }, 200 + i * 420),
       ),
     );
   };
-  const pend = (k: string) => !!ai && (ai.stage === k || (k.startsWith('clip') && ai.stage.startsWith('clip') && +ai.stage.slice(4) <= +k.slice(4)));
+  // Fields land in order: title, each clip, caption. Everything not yet landed shimmers, and while the AI is
+  // still writing that is every field it will fill. A title the manager typed stays readable.
+  const at = (k: string) => (k === 'title' ? 0 : k === 'caption' ? Number.MAX_SAFE_INTEGER : 1 + +k.slice(4));
+  const pend = (k: string) => !!ai && (k === 'title' && /\S/.test(g.title) ? false : waiting || at(k) >= at(ai.stage));
   const justFilled = (i: number) => !!ai && (ai.stage === `clip${i + 1}` || (ai.stage === 'caption' && i === g.clips.length - 1));
 
   // The other openings the fill offered for clip 1. Long Text has one clip and no hook to swap.
@@ -151,7 +166,6 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
       return { ...cur, clips: [{ ...c, text: slides ? '' : h.say, onScreen: h.onScreen, doc, ...(h.visual ? { shot: h.visual } : {}) }, ...cur.clips.slice(1)] };
     });
   const referenceNote = !g.link ? null : (declined?.referenceNote ?? g.ai?.referenceNote ?? (reference.status === 'failed' ? (reference.reason ?? null) : null));
-  const fillLabel = !ai ? 'Fill in with AI' : ai.stage === 'reference' ? 'Reading the reference' : ai.n > 1 ? `Filling ${ai.i + 1} of ${ai.n}` : slowRun === run ? 'Still writing' : 'Writing it for your brand';
 
   const gsLabel = g.gs ? (g.gs.kind === 'video' ? `Video, ${g.gs.dur}s. Creators record to its length` : 'Image, untimed') : 'Add an image or video';
 
@@ -161,23 +175,25 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
         <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 10 }}>
           <Text style={{ textAlign: 'center', fontSize: 17, lineHeight: 22, fontWeight: '700', color: color.grey4 }}>{long ? 'Long Text post' : 'Guided post'}</Text>
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Press
-              disabled={locked}
-              onPress={() => setLinkOpen(true)}
-              accessibilityRole="button"
-              style={[BIG, { backgroundColor: g.link ? color.blueTint : locked ? color.grey1 : color.card, boxShadow: g.link || locked ? undefined : shadow.card.boxShadow }]}
-            >
-              <Icon name={g.link ? 'link' : locked ? 'link_off' : 'link'} size={20} color={g.link ? color.blueDeep : locked ? color.grey3 : color.grey4} />
-              <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: g.link ? color.blueDeep : locked ? color.grey3 : color.ink }}>
-                {g.link ? (reference.status === 'pending' ? 'Reading link' : 'Link added') : 'Add link'}
-              </Text>
-            </Press>
-            <Press disabled={!typed || !!ai} onPress={() => void fill()} accessibilityRole="button" style={[BIG, { backgroundColor: typed ? color.blue : color.grey1, boxShadow: typed ? briefs.aiGlow : undefined }]}>
-              <SpinIcon spinning={!!ai} color={typed ? color.white : color.grey3} />
-              <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: typed ? color.white : color.grey3 }}>
-                {fillLabel}
-              </Text>
-            </Press>
+            {/* While the AI works the pill takes the whole row. */}
+            {ai || celebrating ? null : (
+              <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(140)} style={{ flex: 1, minWidth: 0 }}>
+                <Press
+                  disabled={locked}
+                  onPress={() => setLinkOpen(true)}
+                  accessibilityRole="button"
+                  style={[BIG, { backgroundColor: g.link ? color.blueTint : locked ? color.grey1 : color.card, boxShadow: g.link || locked ? undefined : shadow.card.boxShadow }]}
+                >
+                  <Icon name={g.link ? 'link' : locked ? 'link_off' : 'link'} size={20} color={g.link ? color.blueDeep : locked ? color.grey3 : color.grey4} />
+                  <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '700', color: g.link ? color.blueDeep : locked ? color.grey3 : color.ink }}>
+                    {g.link ? (reference.status === 'pending' ? 'Reading link' : 'Link added') : 'Add link'}
+                  </Text>
+                </Press>
+              </Animated.View>
+            )}
+            <Animated.View layout={LinearTransition.duration(260).easing(Easing.bezier(0.2, 0.8, 0.2, 1))} style={{ flex: 1, minWidth: 0 }}>
+              <AiFillButton label="Fill in with AI" enabled={typed} phase={phase} filled={ai && ai.n > 1 ? (ai.i + 1) / ai.n : 0} steps={slides ? SLIDES_STEPS : GUIDED_STEPS} doneKey={doneKey} onPress={() => void fill()} />
+            </Animated.View>
           </View>
           {g.link ? (
             <TextInput
@@ -264,14 +280,14 @@ export function GuidedForm({ g, type, update, ai, setAi, editingExisting, onOpen
           </Press>
         ) : null}
         <ClipGrid
-          clips={g.clips}
+          clips={shownClips}
           type={type}
           isGreen={isGreen}
           fullGreen={!!g.fullGreen}
           gsAll={g.gs}
           pending={(i) => pend(`clip${i}`)}
           justFilled={justFilled}
-          onOpen={onOpenClip}
+          onOpen={ai ? () => undefined : onOpenClip}
           onAdd={() => {
             const c = newClip('');
             set({ clips: g.clips.concat([c]) });

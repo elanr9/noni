@@ -105,6 +105,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
   const [editor, setEditor] = useState<{ clip: string | null } | null>(null);
   const [gai, setGai] = useState<AiState | null>(null);
   const [oai, setOai] = useState(false);
+  const [outlineDone, setOutlineDone] = useState(0);
   const [outlineNote, setOutlineNote] = useState<{ declined: Declined | null; referenceNote: string | null }>({ declined: null, referenceNote: null });
   const [party, setParty] = useState<{ id: string; twin: boolean } | null>(null);
   const [arm, setArm] = useState(false);
@@ -198,7 +199,10 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
       if (st.link) await referenceWithin(st.link, 90_000);
       const f = await planOutline({ title: st.title || '', link: st.link || '', notes: st.notes || '' });
       setOutlineNote({ declined: f.declined, referenceNote: f.referenceNote });
-      if (!f.declined) setSt((x) => (x ? { ...x, title: (x.title || '').trim() || f.title, notes: f.notes || x.notes, filled: true } : x));
+      if (!f.declined) {
+        setSt((x) => (x ? { ...x, title: (x.title || '').trim() || f.title, notes: f.notes || x.notes, filled: true } : x));
+        setOutlineDone((k) => k + 1);
+      }
     } catch {
       toast.error("Couldn't write the outline. Check your connection and try again.", { label: 'Retry', onPress: () => void fillOutline() });
     } finally {
@@ -390,6 +394,7 @@ export function NewBriefScreen({ slot, briefsHref, postHref, userId = null, comp
               set={(p) => patch(p)}
               ai={oai}
               onFill={() => void fillOutline()}
+              doneKey={outlineDone}
               editingExisting={!!st.editingExisting}
               declined={outlineNote.declined}
               referenceNote={outlineNote.referenceNote}
