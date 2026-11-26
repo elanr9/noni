@@ -13,7 +13,9 @@ import type {
   FeedListing,
   Listing,
   MarketCreator,
+  ThreadMessage,
 } from './marketplace';
+import { messageBody, unreadByApplication } from './marketplace';
 import { supabase } from './supabase';
 
 // lib/types.ts is generated and does not know migration 155 yet; these calls
@@ -149,12 +151,17 @@ export async function loadCreators(q: CreatorQuery): Promise<{ total: number; ro
   return { total: out.total, rows: out.rows.map((r) => ({ ...r, niches: r.niches ?? [], styles: r.styles ?? [], portfolio: Array.isArray(r.portfolio) ? r.portfolio : [] })) };
 }
 
+/** The Review lane: creators who signed and applied and still wait on an answer, newest first, with the campaign's colour. */
+export async function loadApplicantLane(companyId: string): Promise<{ applicants: MarketCreator[]; brandColor: string | null }> {
+  const listing = pickListing(await loadMyListings(companyId));
+  if (!listing) return { applicants: [], brandColor: null };
+  const { rows } = await loadCreators({ listingId: listing.id, scope: 'applicants', sort: 'newest' });
+  return { applicants: rows.filter((r) => r.application_status === 'applied' && r.application_id), brandColor: listing.brand_color };
+}
+
 /** Creators who signed and applied to the company's campaign and still wait on an answer, newest first. */
 export async function loadApplicants(companyId: string): Promise<MarketCreator[]> {
-  const listing = pickListing(await loadMyListings(companyId));
-  if (!listing) return [];
-  const { rows } = await loadCreators({ listingId: listing.id, scope: 'applicants', sort: 'newest' });
-  return rows.filter((r) => r.application_status === 'applied' && r.application_id);
+  return (await loadApplicantLane(companyId)).applicants;
 }
 
 export async function inviteCreator(listingId: string, creatorId: string, message: string): Promise<void> {
@@ -186,6 +193,35 @@ export async function loadSignedContract(applicationId: string): Promise<{ contr
     .maybeSingle();
   fail(error);
   return data as { contract_title: string | null; contract_body: string | null; signed_name: string | null; signed_at: string | null } | null;
+}
+
+// ----------------------------------------------------------------- messages
+// One thread per application (migration 164). The company's managers and the
+// creator both call these; the server works out which side is asking.
+
+/** The thread, oldest first. Reading it marks the other side's messages read. */
+export async function loadThread(applicationId: string): Promise<ThreadMessage[]> {
+  const { data, error } = await db.rpc('application_messages', { p_application: applicationId });
+  fail(error);
+  return (data ?? []) as ThreadMessage[];
+}
+
+export async function sendThreadMessage(applicationId: string, draft: string): Promise<ThreadMessage> {
+  const body = messageBody(draft);
+  if (!body) throw new Error('Write a message first');
+  const { data, error } = await db.rpc('send_application_message', { p_application: applicationId, p_body: body });
+  fail(error);
+  const row = data as { id: string; from_company: boolean; body: string; created_at: string; read_at: string | null };
+  return { id: row.id, from_company: row.from_company, mine: true, body: row.body, created_at: row.created_at, read_at: row.read_at };
+}
+
+/** Unread messages from the other side, by application id. */
+export async function loadThreadUnread(applicationIds: (string | null | undefined)[]): Promise<Record<string, number>> {
+  const ids = [...new Set(applicationIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return {};
+  const { data, error } = await db.rpc('application_unread', { p_applications: ids });
+  fail(error);
+  return unreadByApplication((data ?? []) as { application_id: string; unread: number }[]);
 }
 
 /**

@@ -8,6 +8,7 @@ import type { AccountApprovalItem } from '../../../../lib/creator-accounts-api';
 import { applicantStatLine, type MarketCreator } from '../../../../lib/marketplace';
 import { usePostFrame } from '../../../../lib/v2-media';
 import { color, radius, text, tone as tones } from '../../../../theme/v2';
+import { UnreadDot } from '../../../marketplace/parts';
 import { Avatar, Button, Card, Chip, Icon, Press, Thumb } from '../../../v2';
 
 function PostThumb({ post, w, r, onPress }: { post: ReviewPost; w: number; r: number; onPress?: () => void }) {
@@ -138,13 +139,16 @@ export function AccountCard({ account, photo, onPress }: { account: AccountAppro
   );
 }
 
-/** Creators lane: avatar 56, name, one line of numbers, then Decline and Accept. The card opens the profile. */
-export function ApplicantCard({ creator, photo, onPress, onDecide }: { creator: MarketCreator; photo: string | null; onPress: () => void; onDecide: (accept: boolean) => void }) {
+/** Creators lane: avatar 56, name, one line of numbers, then Decline and Accept. The card opens the profile. A pink dot means unread messages. */
+export function ApplicantCard({ creator, photo, unread, onPress, onDecide }: { creator: MarketCreator; photo: string | null; unread?: boolean; onPress: () => void; onDecide: (accept: boolean) => void }) {
   const name = creator.full_name?.trim() || 'Creator';
   return (
-    <Card onPress={onPress} accessibilityLabel={`${name}, applied`}>
+    <Card onPress={onPress} accessibilityLabel={unread ? `${name}, applied, unread messages` : `${name}, applied`}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <Avatar name={name} photo={photo} size={56} tone="green" />
+        <View>
+          <Avatar name={name} photo={photo} size={56} tone="green" />
+          {unread ? <UnreadDot style={{ position: 'absolute', top: -2, right: -2 }} /> : null}
+        </View>
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <Text numberOfLines={1} style={text.row}>
             {name}
@@ -153,6 +157,7 @@ export function ApplicantCard({ creator, photo, onPress, onDecide }: { creator: 
             {applicantStatLine(creator)}
           </Text>
         </View>
+        <Icon name="chevron_right" size={20} color={color.grey3} />
       </View>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
         <Button label="Decline" variant="quiet" onPress={() => onDecide(false)} style={{ height: 44 }} />

@@ -39,9 +39,13 @@ export interface CreatorSheetProps {
   onClose: () => void;
   onInvite: (creator: MarketCreator) => void;
   onDecide: (creator: MarketCreator, accept: boolean) => void;
+  /** Open the thread with a creator who applied or was invited. */
+  onMessage?: (creator: MarketCreator) => void;
+  /** Unread messages from this creator. */
+  unread?: boolean;
 }
 
-export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite, onDecide }: CreatorSheetProps) {
+export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite, onDecide, onMessage, unread }: CreatorSheetProps) {
   // Keep the last creator while the sheet slides shut.
   const [shown, setShown] = useState(creator);
   if (creator && creator !== shown) setShown(creator);
@@ -51,10 +55,19 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
   const name = c.full_name?.trim() || 'Creator';
   const waiting = c.application_status === 'applied';
   const invited = c.application_status === 'invited';
+  // Three across on a phone: tighter sides so no label is cut.
+  const tight = { paddingHorizontal: 8 };
+  const message = onMessage && c.application_id ? <Button label="Message" variant="secondary" dot={unread} onPress={() => onMessage(c)} style={tight} /> : null;
   const footer = waiting ? (
     <>
-      <Button label="Decline" variant="quiet" disabled={busy} onPress={() => onDecide(c, false)} />
-      <Button label="Accept" icon="check" disabled={busy} onPress={() => onDecide(c, true)} />
+      <Button label="Decline" variant="quiet" disabled={busy} onPress={() => onDecide(c, false)} style={tight} />
+      {message}
+      <Button label="Accept" icon="check" disabled={busy} onPress={() => onDecide(c, true)} style={tight} />
+    </>
+  ) : invited && message ? (
+    <>
+      <Button label="Invited" variant="quiet" disabled style={tight} />
+      {message}
     </>
   ) : invited ? (
     <Button label="Invited, waiting on them" variant="quiet" disabled />

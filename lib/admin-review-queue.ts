@@ -21,7 +21,7 @@ import {
 import { formatAge, isEditing } from './admin-queue-map';
 import { listAccountApprovalQueue, type AccountApprovalItem } from './creator-accounts-api';
 import type { MarketCreator } from './marketplace';
-import { loadApplicants, signAvatars } from './marketplace-api';
+import { loadApplicantLane, loadThreadUnread, signAvatars } from './marketplace-api';
 import { supabase } from './supabase';
 
 export type ReviewPost = {
@@ -59,6 +59,10 @@ type ReviewQueueState = {
   accounts: AccountApprovalItem[];
   /** Creators who signed and applied to the campaign and wait on a yes or no, newest first. */
   applicants: MarketCreator[];
+  /** Unread messages from applicants, by application id. */
+  unread: Record<string, number>;
+  /** The campaign's colour, worn by the message thread; null until known. */
+  brandColor: string | null;
   /** Signed avatar URL by creator id; null when the creator has no photo. */
   avatars: Record<string, string | null>;
   /** Creators on the roster (any account state); null until known. 0 means a brand-new company. */
@@ -70,6 +74,8 @@ type ReviewQueueState = {
   removeMusic: (assignmentId: string) => () => void;
   removeAccount: (accountId: string) => () => void;
   removeApplicant: (applicationId: string) => () => void;
+  /** The thread was opened, so its dot goes. */
+  markRead: (applicationId: string) => void;
 };
 
 /** Signed avatar URLs for creators in a company's roster. */
@@ -120,12 +126,14 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
   music: [],
   accounts: [],
   applicants: [],
+  unread: {},
+  brandColor: null,
   avatars: {},
   creatorCount: null,
 
   async load(companyId, opts) {
     const switched = get().companyId !== companyId;
-    if (switched) set({ companyId, posts: [], music: [], accounts: [], applicants: [], avatars: {}, creatorCount: null, status: 'loading', error: null });
+    if (switched) set({ companyId, posts: [], music: [], accounts: [], applicants: [], unread: {}, brandColor: null, avatars: {}, creatorCount: null, status: 'loading', error: null });
     else if (!opts?.quiet) set({ status: 'loading', error: null });
     void rosterCreatorCount(companyId)
       .then((n) => {
@@ -138,7 +146,7 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
         listMusicApprovalQueue(companyId),
         listAccountApprovalQueue(companyId),
         // Applicants are an extra lane: if they cannot be read the rest of the queue still shows.
-        loadApplicants(companyId).catch(() => null),
+        loadApplicantLane(companyId).catch(() => null),
       ]);
       const subs = await latestSubmissionsByAssignment(queue.map((a) => a.id));
       const posts: ReviewPost[] = queue
@@ -164,8 +172,13 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
         .slice()
         .sort((a, b) => Number(a.status === 'needs_changes') - Number(b.status === 'needs_changes'));
       if (get().companyId !== companyId) return;
-      const applicants = applied ?? get().applicants;
-      set({ posts, music, accounts: sortedAccounts, applicants, status: 'ready', error: null });
+      const applicants = applied?.applicants ?? get().applicants;
+      set({ posts, music, accounts: sortedAccounts, applicants, brandColor: applied ? applied.brandColor : get().brandColor, status: 'ready', error: null });
+      void loadThreadUnread(applicants.map((a) => a.application_id))
+        .then((unread) => {
+          if (get().companyId === companyId) set({ unread });
+        })
+        .catch(() => undefined);
       // Applicants are not on the roster yet, so their photos are signed from their own paths.
       void signAvatars(applicants.map((a) => a.avatar_path))
         .then((signed) => {
@@ -223,6 +236,13 @@ export const useReviewQueue = create<ReviewQueueState>((set, get) => ({
     if (!item) return () => undefined;
     set({ applicants: get().applicants.filter((a) => a.application_id !== applicationId) });
     return () => set({ applicants: reinsert(get().applicants, item, index, (a) => a.application_id === applicationId) });
+  },
+
+  markRead(applicationId) {
+    if (!get().unread[applicationId]) return;
+    const rest = { ...get().unread };
+    delete rest[applicationId];
+    set({ unread: rest });
   },
 }));
 

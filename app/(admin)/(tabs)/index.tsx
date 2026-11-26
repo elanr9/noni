@@ -5,10 +5,10 @@ import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-re
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
-import { InviteCreatorsSheet } from '../../../components/admin/v2/review/InviteCreatorsSheet';
 import { AccountCard, ApplicantCard, CreatorQueueCard, MusicCard } from '../../../components/admin/v2/review/ReviewCards';
-import { ErrorCard, PostsEmpty, StateCard } from '../../../components/admin/v2/review/ReviewStates';
+import { LaneEmpty } from '../../../components/admin/v2/review/ReviewStates';
 import { CreatorSheet } from '../../../components/marketplace/AdminSheets';
+import { ThreadSheet } from '../../../components/marketplace/MessageThread';
 import { ContextRow, ElsewhereStrip } from '../../../components/shared';
 import { Icon as LineIcon } from '../../../components/ui/Icon';
 import { Chip, Press, Seg, Skeleton, TabPane, useTabBarInset } from '../../../components/v2';
@@ -57,26 +57,26 @@ export default function ReviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const bottom = useTabBarInset();
-  const { profile, managerAccess } = useAuth();
+  const { profile } = useAuth();
   const { openNotifications, unreadNotifications } = useCompany();
   const companyId = profile?.active_company_id;
 
   const status = useReviewQueue((s) => s.status);
-  const error = useReviewQueue((s) => s.error);
   const posts = useReviewQueue((s) => s.posts);
   const music = useReviewQueue((s) => s.music);
   const accounts = useReviewQueue((s) => s.accounts);
   const applicants = useReviewQueue((s) => s.applicants);
+  const unread = useReviewQueue((s) => s.unread);
+  const brandColor = useReviewQueue((s) => s.brandColor);
   const avatars = useReviewQueue((s) => s.avatars);
-  const creatorCount = useReviewQueue((s) => s.creatorCount);
   const queueCompany = useReviewQueue((s) => s.companyId);
   const load = useReviewQueue((s) => s.load);
 
   const [lane, setLane] = useState<Lane>('posts');
   const [refreshing, setRefreshing] = useState(false);
   const [held, setHeld] = useState(true);
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [openApplicant, setOpenApplicant] = useState<MarketCreator | null>(null);
+  const [thread, setThread] = useState<MarketCreator | null>(null);
 
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
@@ -112,7 +112,6 @@ export default function ReviewScreen() {
   const openPost = (id: string, creatorId?: string) =>
     router.push({ pathname: '/(admin)/review/[id]', params: creatorId ? { id, creator: creatorId } : { id } });
   const openCreator = (creatorId: string) => router.push({ pathname: '/(admin)/review/creator/[creatorId]', params: { creatorId } });
-  const openCreators = () => router.push('/(admin)/creators');
   const setupIncomplete = profile?.role === 'campaign_manager' && !isManagerSetupCompleteFlag(profile.onboarding_answers, profile.active_company_id);
 
   /** Leaves the lane at once; comes back and says so if the server refuses. */
@@ -135,24 +134,25 @@ export default function ReviewScreen() {
       });
   };
 
+  /** The profile sheet shuts first; two sheets never stack. */
+  const openThread = (c: MarketCreator) => {
+    setOpenApplicant(null);
+    setTimeout(() => setThread(c), openApplicant ? 340 : 0);
+  };
+
   const body = () => {
     if (loading && !failed) {
       return [0, 1, 2, 3].map((i) => <Skeleton key={i} h={76} />);
     }
     if (failed && total === 0) {
-      return <ErrorCard message={error} onRetry={() => companyId && void load(companyId)} />;
+      return <LaneEmpty icon="cloud_off" tone="pink" title="Could not load" action="Retry" actionIcon="refresh" onAction={() => companyId && void load(companyId)} />;
     }
     if (lane === 'posts') {
       if (groups.length === 0) {
-        return (
-          <PostsEmpty
-            noCreators={creatorCount === 0}
-            canInvite={managerAccess.inviteCreators}
-            onInvite={() => setInviteOpen(true)}
-            onCreators={openCreators}
-            onNewBrief={() => router.push({ pathname: '/(admin)/new-brief', params: { slot: 'new' } })}
-            onSetup={setupIncomplete ? () => router.push('/(admin)/(tabs)/setup') : undefined}
-          />
+        return setupIncomplete ? (
+          <LaneEmpty icon="inbox" title="No posts yet" action="Finish setup" onAction={() => router.push('/(admin)/(tabs)/setup')} />
+        ) : (
+          <LaneEmpty icon="check_circle" tone="green" title="Nothing to review" action="Open Briefs" onAction={() => router.push('/(admin)/(tabs)/briefs')} />
         );
       }
       return groups.map((g, i) => (
@@ -163,7 +163,7 @@ export default function ReviewScreen() {
     }
     if (lane === 'music') {
       if (music.length === 0) {
-        return <StateCard icon="music_note" tone="purple" title="No songs waiting." body="When a creator adds the sound to a live slideshow and marks it added, the song lands here for you to check." />;
+        return <LaneEmpty icon="music_note" tone="purple" title="No songs waiting" action="Open Briefs" onAction={() => router.push('/(admin)/(tabs)/briefs')} />;
       }
       return music.map((m, i) => (
         <Item key={m.assignment.id} index={i}>
@@ -173,23 +173,16 @@ export default function ReviewScreen() {
     }
     if (lane === 'creators') {
       if (applicants.length === 0) {
-        return <StateCard icon="group" tone="green" title="No creators waiting." />;
+        return <LaneEmpty icon="group" tone="green" title="No creators waiting" action="Open Market" onAction={() => router.push('/(admin)/(tabs)/market')} />;
       }
       return applicants.map((c, i) => (
         <Item key={c.application_id ?? c.creator_id} index={i}>
-          <ApplicantCard creator={c} photo={avatars[c.creator_id] ?? null} onPress={() => setOpenApplicant(c)} onDecide={(accept) => decideApplicant(c, accept)} />
+          <ApplicantCard creator={c} photo={avatars[c.creator_id] ?? null} unread={!!c.application_id && (unread[c.application_id] ?? 0) > 0} onPress={() => setOpenApplicant(c)} onDecide={(accept) => decideApplicant(c, accept)} />
         </Item>
       ));
     }
     if (accounts.length === 0) {
-      return (
-        <StateCard
-          icon="person"
-          tone="amber"
-          title="No accounts waiting."
-          body={creatorCount === 0 ? 'Invited creators set up their TikTok and Instagram, then their accounts land here for you to approve.' : 'Every creator on the roster is linked.'}
-        />
-      );
+      return <LaneEmpty icon="person" tone="amber" title="No accounts waiting" action="Open Creators" onAction={() => router.push('/(admin)/creators')} />;
     }
     return accounts.map((a, i) => (
       <Item key={a.id} index={i}>
@@ -203,7 +196,7 @@ export default function ReviewScreen() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: bottom }}
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: bottom }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={color.grey3} />}
       >
         <ContextRow right={<BellButton count={unreadNotifications} onPress={openNotifications} />} />
@@ -217,10 +210,11 @@ export default function ReviewScreen() {
           value={lane}
           onChange={setLane}
           options={[
-            { key: 'posts', label: 'Posts', count: loading ? undefined : posts.length, tone: 'blue' },
-            { key: 'music', label: 'Music', count: loading ? undefined : music.length, tone: 'purple' },
-            { key: 'accounts', label: 'Accounts', count: loading ? undefined : pending.length, tone: 'amber' },
-            { key: 'creators', label: 'Creators', count: loading ? undefined : applicants.length, tone: 'green' },
+            // A lane with nothing waiting shows no badge.
+            { key: 'posts', label: 'Posts', count: loading ? undefined : posts.length || undefined, tone: 'blue' },
+            { key: 'music', label: 'Music', count: loading ? undefined : music.length || undefined, tone: 'purple' },
+            { key: 'accounts', label: 'Accounts', count: loading ? undefined : pending.length || undefined, tone: 'amber' },
+            { key: 'creators', label: 'Creators', count: loading ? undefined : applicants.length || undefined, tone: 'green' },
           ]}
         />
         {failed && total > 0 ? (
@@ -237,8 +231,16 @@ export default function ReviewScreen() {
         onClose={() => setOpenApplicant(null)}
         onInvite={() => undefined}
         onDecide={decideApplicant}
+        onMessage={openThread}
+        unread={!!openApplicant?.application_id && (unread[openApplicant.application_id] ?? 0) > 0}
       />
-      <InviteCreatorsSheet open={inviteOpen} companyId={companyId} onClose={() => setInviteOpen(false)} onSent={() => companyId && void load(companyId, { quiet: true })} />
+      <ThreadSheet
+        applicationId={thread?.application_id ?? null}
+        title={thread?.full_name?.trim() || 'Creator'}
+        tint={brandColor}
+        onRead={() => thread?.application_id && useReviewQueue.getState().markRead(thread.application_id)}
+        onClose={() => setThread(null)}
+      />
     </View>
   );
 }

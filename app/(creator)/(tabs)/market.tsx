@@ -6,7 +6,7 @@ import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import { useCompany } from '../../../lib/company-context';
 import type { CreatorCampaign, CreatorResume, FeedListing } from '../../../lib/marketplace';
-import { leaveCampaign, loadFeed, loadMyCampaigns, loadMyResume } from '../../../lib/marketplace-api';
+import { leaveCampaign, loadFeed, loadMyCampaigns, loadMyResume, loadThreadUnread } from '../../../lib/marketplace-api';
 
 /** Campaigns tab (creator): Explore open campaigns, run every one you are in from My campaigns. */
 export default function CreatorMarket() {
@@ -18,6 +18,7 @@ export default function CreatorMarket() {
   const [listings, setListings] = useState<FeedListing[] | null>(null);
   const [resume, setResume] = useState<CreatorResume | null>(null);
   const [campaigns, setCampaigns] = useState<CreatorCampaign[] | null>(null);
+  const [messageUnread, setMessageUnread] = useState<Record<string, number>>({});
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -29,6 +30,9 @@ export default function CreatorMarket() {
       setResume(mine);
       setCampaigns(list);
       setFailed(false);
+      void loadThreadUnread(list.filter((c) => c.kind === 'applied' || c.kind === 'invited').map((c) => c.application_id))
+        .then(setMessageUnread)
+        .catch(() => undefined);
     } catch {
       setFailed(true);
     } finally {
@@ -50,6 +54,7 @@ export default function CreatorMarket() {
       listings={listings}
       resume={resume}
       campaigns={campaigns}
+      messageUnread={messageUnread}
       failed={failed}
       refreshing={refreshing}
       initialTab={initialTab}

@@ -7,7 +7,7 @@ import { Empty, Screen } from '../../../components/v2';
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import type { CreatorResume, FeedListing } from '../../../lib/marketplace';
-import { loadFeed, loadMyResume, signAndApply, withdrawApplication } from '../../../lib/marketplace-api';
+import { loadFeed, loadMyResume, loadThreadUnread, signAndApply, withdrawApplication } from '../../../lib/marketplace-api';
 import { color } from '../../../theme/v2';
 
 /** One campaign: read it, sign its agreement, apply. */
@@ -18,13 +18,21 @@ export default function CreatorListing() {
   const meId = profile?.id;
   const [listing, setListing] = useState<FeedListing | null | undefined>(undefined);
   const [resume, setResume] = useState<CreatorResume | null>(null);
+  const [unread, setUnread] = useState(0);
 
   const load = useCallback(async () => {
     if (!meId) return;
     try {
       const [feed, mine] = await Promise.all([loadFeed(), loadMyResume(meId)]);
-      setListing(feed.find((l) => l.id === id) ?? null);
+      const found = feed.find((l) => l.id === id) ?? null;
+      setListing(found);
       setResume(mine);
+      if (found?.application_id) {
+        const appId = found.application_id;
+        void loadThreadUnread([appId])
+          .then((u) => setUnread(u[appId] ?? 0))
+          .catch(() => undefined);
+      }
     } catch {
       setListing((cur) => cur ?? null);
     }
@@ -61,6 +69,8 @@ export default function CreatorListing() {
       listing={listing}
       resume={resume}
       defaultName={profile?.full_name?.trim() ?? ''}
+      unread={unread}
+      onMessagesRead={() => setUnread(0)}
       onBack={() => router.back()}
       onEditProfile={() => router.push('/(creator)/market/profile')}
       onSign={async (name, note) => {

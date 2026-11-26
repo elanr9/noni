@@ -1,5 +1,6 @@
 // Small pieces both sides of the marketplace share.
 import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, { ZoomIn } from 'react-native-reanimated';
 
 import { nicheLabel } from '../../lib/marketplace';
 import { color, num, radius, shadow, text, tone as tones, type Tone } from '../../theme/v2';
@@ -119,6 +120,17 @@ export function MatchPill({ score, ai }: { score: number; ai: boolean }) {
       {ai ? <Icon name="auto_awesome" size={13} color={fg} /> : null}
       <Text style={{ fontSize: 13, fontWeight: '700', color: fg, fontVariant: ['tabular-nums'] }}>{score}%</Text>
     </View>
+  );
+}
+
+/** Unread messages: a pink dot that pops in, with a white edge so it reads on a photo. */
+export function UnreadDot({ size = 14, style }: { size?: number; style?: StyleProp<ViewStyle> }) {
+  return (
+    <Animated.View
+      entering={ZoomIn.springify().damping(11)}
+      accessibilityLabel="Unread messages"
+      style={[{ width: size, height: size, borderRadius: radius.pill, backgroundColor: color.pink, borderWidth: 2, borderColor: color.card }, style]}
+    />
   );
 }
 

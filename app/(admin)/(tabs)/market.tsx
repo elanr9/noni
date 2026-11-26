@@ -3,10 +3,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AdminMarketScreen, type MarketScope } from '../../../components/marketplace/AdminMarketScreen';
 import { CreatorSheet, FiltersSheet, InviteSheet } from '../../../components/marketplace/AdminSheets';
+import { ThreadSheet } from '../../../components/marketplace/MessageThread';
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import { NO_FILTERS, dayLabel, type CreatorFilters, type CreatorSort, type Listing, type MarketCreator } from '../../../lib/marketplace';
-import { decideApplication, inviteCreator, loadCreators, loadOrMakeListing, rankWithAi, signAvatars } from '../../../lib/marketplace-api';
+import { decideApplication, inviteCreator, loadCreators, loadOrMakeListing, loadThreadUnread, rankWithAi, signAvatars } from '../../../lib/marketplace-api';
 
 /** Market tab (company): browse and rank creators, review applicants, reach out. */
 export default function AdminMarket() {
@@ -32,6 +33,8 @@ export default function AdminMarket() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openCreator, setOpenCreator] = useState<MarketCreator | null>(null);
   const [inviting, setInviting] = useState<MarketCreator | null>(null);
+  const [thread, setThread] = useState<MarketCreator | null>(null);
+  const [unread, setUnread] = useState<Record<string, number>>({});
 
   // The search box waits for a pause before it asks the server.
   useEffect(() => {
@@ -62,6 +65,11 @@ export default function AdminMarket() {
       void signAvatars(page.rows.map((r) => r.avatar_path))
         .then((m) => {
           if (mine === seq.current) setPhotos(m);
+        })
+        .catch(() => undefined);
+      void loadThreadUnread(page.rows.map((r) => r.application_id))
+        .then((u) => {
+          if (mine === seq.current) setUnread(u);
         })
         .catch(() => undefined);
     } catch {
@@ -116,6 +124,12 @@ export default function AdminMarket() {
     setTimeout(() => setInviting(c), openCreator ? 340 : 0);
   };
 
+  const startThread = (c: MarketCreator) => {
+    setOpenCreator(null);
+    setTimeout(() => setThread(c), openCreator ? 340 : 0);
+  };
+  const threadId = thread?.application_id ?? null;
+
   return (
     <>
       <AdminMarketScreen
@@ -142,6 +156,7 @@ export default function AdminMarket() {
         onInvite={startInvite}
         onDecide={decide}
         onEditListing={() => router.push('/(admin)/market/listing')}
+        unread={unread}
         failed={failed}
         refreshing={refreshing}
         onRefresh={() => {
@@ -157,6 +172,15 @@ export default function AdminMarket() {
         onClose={() => setOpenCreator(null)}
         onInvite={startInvite}
         onDecide={decide}
+        onMessage={startThread}
+        unread={!!openCreator?.application_id && (unread[openCreator.application_id] ?? 0) > 0}
+      />
+      <ThreadSheet
+        applicationId={threadId}
+        title={thread?.full_name?.trim() || 'Creator'}
+        tint={listing?.brand_color}
+        onRead={() => threadId && setUnread((u) => (u[threadId] ? { ...u, [threadId]: 0 } : u))}
+        onClose={() => setThread(null)}
       />
       <FiltersSheet open={filtersOpen} filters={filters} onApply={setFilters} onClose={() => setFiltersOpen(false)} />
       <InviteSheet

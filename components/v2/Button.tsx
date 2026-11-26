@@ -1,4 +1,4 @@
-import { Text, type StyleProp, type ViewStyle } from 'react-native';
+import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { color, control, radius, text } from '../../theme/v2';
 import { Icon, type IconName } from './Icon';
@@ -21,12 +21,14 @@ export interface ButtonProps {
   /** 36 high, 700 15, sized to its label. */
   pill?: boolean;
   icon?: IconName;
+  /** Small pink dot after the label: something unread behind this button. */
+  dot?: boolean;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
 /** 52 high, r999, 700 17, flex 1 in a footer row. Disabled is 0.4 opacity. */
-export function Button({ label, onPress, variant = 'primary', pill, icon, disabled, style }: ButtonProps) {
+export function Button({ label, onPress, variant = 'primary', pill, icon, dot, disabled, style }: ButtonProps) {
   const v = VARIANT[variant];
   return (
     <Press
@@ -54,6 +56,7 @@ export function Button({ label, onPress, variant = 'primary', pill, icon, disabl
       <Text numberOfLines={1} style={{ fontSize: pill ? 15 : 17, fontWeight: '700', color: v.fg }}>
         {label}
       </Text>
+      {dot ? <View style={{ width: 8, height: 8, borderRadius: radius.pill, backgroundColor: color.pink, marginLeft: -2 }} /> : null}
     </Press>
   );
 }

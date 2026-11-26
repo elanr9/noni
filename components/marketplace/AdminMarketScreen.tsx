@@ -19,7 +19,7 @@ import {
 } from '../../lib/marketplace';
 import { color, radius, shadow, space, text } from '../../theme/v2';
 import { Avatar, Button, Card, Chip, Chips, Empty, FilterButton, Icon, Press, RootTitle, Seg, Skeleton, useTabBarInset } from '../v2';
-import { Figures, MatchPill, NicheTags, toneFor } from './parts';
+import { Figures, MatchPill, NicheTags, UnreadDot, toneFor } from './parts';
 
 export type MarketScope = 'all' | 'applicants' | 'invited';
 
@@ -45,6 +45,8 @@ export interface AdminMarketScreenProps {
   onInvite: (creator: MarketCreator) => void;
   onDecide: (creator: MarketCreator, accept: boolean) => void;
   onEditListing: () => void;
+  /** Unread messages by application id: those creators carry a dot. */
+  unread?: Record<string, number>;
   failed?: boolean;
   refreshing?: boolean;
   onRefresh?: () => void;
@@ -168,6 +170,7 @@ export function AdminMarketScreen(p: AdminMarketScreenProps) {
                 wanted={listing?.niches ?? []}
                 scope={p.scope}
                 canInvite={listing !== null}
+                unread={!!c.application_id && (p.unread?.[c.application_id] ?? 0) > 0}
                 onOpen={() => p.onOpenCreator(c)}
                 onInvite={() => p.onInvite(c)}
                 onDecide={(accept) => p.onDecide(c, accept)}
@@ -186,6 +189,7 @@ function CreatorCard({
   wanted,
   scope,
   canInvite,
+  unread,
   onOpen,
   onInvite,
   onDecide,
@@ -195,6 +199,7 @@ function CreatorCard({
   wanted: string[];
   scope: MarketScope;
   canInvite: boolean;
+  unread: boolean;
   onOpen: () => void;
   onInvite: () => void;
   onDecide: (accept: boolean) => void;
@@ -203,9 +208,12 @@ function CreatorCard({
   const facts = creatorFactLine(c);
   const handle = mainHandle(c);
   return (
-    <Card onPress={onOpen} accessibilityLabel={name}>
+    <Card onPress={onOpen} accessibilityLabel={unread ? `${name}, unread messages` : name}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Avatar name={name} photo={photo} tone={toneFor(c.creator_id)} size={48} ring={false} />
+        <View>
+          <Avatar name={name} photo={photo} tone={toneFor(c.creator_id)} size={48} ring={false} />
+          {unread ? <UnreadDot style={{ position: 'absolute', top: -2, right: -2 }} /> : null}
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={text.row}>{name}</Text>
           <Text numberOfLines={1} style={text.meta}>{facts || handle || 'New to Noni'}</Text>

@@ -1,5 +1,5 @@
 /** Sample marketplace data for the dev-preview routes. Never imported by a real screen. */
-import { DEFAULT_TERMS, type CreatorCampaign, type CreatorResume, type FeedListing, type Listing, type MarketCreator } from './marketplace';
+import { DEFAULT_TERMS, type CreatorCampaign, type CreatorResume, type FeedListing, type Listing, type MarketCreator, type ThreadMessage } from './marketplace';
 
 const CONTRACT = `This agreement is between Inkbound AI ("the Company") and you ("the Creator"). It starts the day the Company accepts your application.
 
@@ -308,7 +308,32 @@ export const PREVIEW_CAMPAIGNS: CreatorCampaign[] = [
   { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-ink', company_name: 'Inkbound AI', logo_path: null, title: 'Tattoo ideas in seconds', is_active: true, to_make: 2, unread: 1, in_review: 1, posted: 14, earned_month_cents: 18400 },
   { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-fv', company_name: 'FieldVision', logo_path: null, title: 'Soccer film breakdowns', to_fix: 1, posted: 6, earned_month_cents: 7600 },
   { ...CAMPAIGN_BASE, kind: 'active', company_id: 'c-crumbs', company_name: 'socialcrumbs', logo_path: null, title: 'socialcrumbs', posted: 3, earned_month_cents: 3100 },
-  { ...CAMPAIGN_BASE, kind: 'invited', company_id: 'c-glow', company_name: 'Glowday', logo_path: null, title: 'Morning skincare in 30 seconds', listing_id: 'l-glow', application_status: 'invited', invite_message: 'Loved your GRWM videos. Want in?' },
+  { ...CAMPAIGN_BASE, kind: 'invited', company_id: 'c-glow', company_name: 'Glowday', logo_path: null, title: 'Morning skincare in 30 seconds', listing_id: 'l-glow', application_id: 'a-glow', application_status: 'invited', invite_message: 'Loved your GRWM videos. Want in?' },
   { ...CAMPAIGN_BASE, kind: 'applied', company_id: 'c-lift', company_name: 'Liftly', logo_path: null, title: 'Gym form checks', listing_id: 'l-lift', application_status: 'applied' },
   { ...CAMPAIGN_BASE, kind: 'past', company_id: 'c-old', company_name: 'Snackbox', logo_path: null, title: 'Snackbox', application_status: 'left', posted: 9, earned_total_cents: 12900 },
 ];
+
+const minutesAgo = (n: number) => new Date(Date.now() - n * 6e4).toISOString();
+
+/** A sample thread between Inkbound AI and Maya, as the company reads it. */
+export const PREVIEW_MESSAGES: ThreadMessage[] = [
+  { id: 'm1', from_company: false, mine: false, body: 'Hi! I applied this morning. Happy to send more videos if that helps.', created_at: minutesAgo(190), read_at: minutesAgo(120) },
+  { id: 'm2', from_company: true, mine: true, body: 'Hey Maya, loved the comp lit study session one. Do you film in your dorm or the library?', created_at: minutesAgo(118), read_at: minutesAgo(90) },
+  { id: 'm3', from_company: false, mine: false, body: 'Both. Library on weekdays, dorm desk at night.', created_at: minutesAgo(88), read_at: minutesAgo(60) },
+  { id: 'm4', from_company: false, mine: false, body: 'I can start this week.', created_at: minutesAgo(87), read_at: minutesAgo(60) },
+  { id: 'm5', from_company: true, mine: true, body: 'Perfect. Two posts a day works for you?', created_at: minutesAgo(40), read_at: null },
+  { id: 'm6', from_company: false, mine: false, body: 'Yes, easily.', created_at: minutesAgo(3), read_at: null },
+];
+
+/** An in-memory thread for the previews. `side` picks whose bubbles are mine. */
+export function previewThread(side: 'company' | 'creator' = 'company', start: ThreadMessage[] = PREVIEW_MESSAGES) {
+  let rows = start.map((m) => ({ ...m, mine: m.from_company === (side === 'company') }));
+  return {
+    load: async () => rows,
+    send: async (body: string) => {
+      const sent: ThreadMessage = { id: `m-${rows.length + 1}-${Date.now()}`, from_company: side === 'company', mine: true, body, created_at: new Date().toISOString(), read_at: null };
+      rows = [...rows, sent];
+      return sent;
+    },
+  };
+}

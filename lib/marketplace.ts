@@ -533,3 +533,39 @@ export function pastLabel(status: string | null): string {
   if (status === 'withdrawn') return 'Withdrawn';
   return 'Ended';
 }
+
+/** One message on an application's thread (rpc application_messages, migration 164). */
+export type ThreadMessage = {
+  id: string;
+  from_company: boolean;
+  /** Written by the side reading it. */
+  mine: boolean;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+};
+
+/** The server trims a message and keeps at most this many characters. */
+export const MESSAGE_MAX = 1000;
+
+/** What goes to the server for a typed message, or null when there is nothing to send. */
+export function messageBody(draft: string): string | null {
+  const body = draft.trim().slice(0, MESSAGE_MAX);
+  return body.length > 0 ? body : null;
+}
+
+/** Unread counts by application id; rows with nothing unread are left out. */
+export function unreadByApplication(rows: { application_id: string; unread: number }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const n = Number(r.unread) || 0;
+    if (r.application_id && n > 0) out[r.application_id] = n;
+  }
+  return out;
+}
+
+/** A fresh read of a thread, keeping the list as it is when nothing changed so the screen does not redraw. */
+export function mergeThread(current: ThreadMessage[] | null, next: ThreadMessage[]): ThreadMessage[] {
+  if (!current || current.length !== next.length) return next;
+  return current.every((m, i) => m.id === next[i].id && m.read_at === next[i].read_at) ? current : next;
+}

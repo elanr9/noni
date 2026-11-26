@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BRAND_COLORS,
   DEFAULT_TERMS,
+  MESSAGE_MAX,
   NO_FILTERS,
   applicantStatLine,
   campaignTodo,
@@ -20,16 +21,18 @@ import {
   dayLabel,
   isFullName,
   matchesFilters,
+  mergeThread,
+  messageBody,
   missingToApply,
   orderFeed,
   sortCreators,
   spotsLabel,
   standing,
+  unreadByApplication,
   type FeedListing,
   type MarketCreator,
 } from './marketplace';
-import { PREVIEW_CAMPAIGNS } from './marketplace-preview';
-import { PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_RESUME } from './marketplace-preview';
+import { PREVIEW_CAMPAIGNS, PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_MESSAGES, PREVIEW_RESUME, previewThread } from './marketplace-preview';
 
 const [maya, devon, priya, jordan] = PREVIEW_CREATORS as [MarketCreator, MarketCreator, MarketCreator, MarketCreator];
 
@@ -174,5 +177,33 @@ describe('applicant line', () => {
     expect(applicantStatLine(maya)).toBe('24.6k followers · 842k views · 31 posts');
     expect(applicantStatLine({ followers: null, total_views: 0, posts_live: 0 })).toBe('New to Noni');
     expect(applicantStatLine({ followers: 3200, total_views: 0, posts_live: 1 })).toBe('3.2k followers · 1 post');
+  });
+});
+
+describe('application messages', () => {
+  it('trims a draft and refuses an empty one', () => {
+    expect(messageBody('  hi there \n')).toBe('hi there');
+    expect(messageBody('   ')).toBeNull();
+    expect(messageBody('x'.repeat(MESSAGE_MAX + 50))).toHaveLength(MESSAGE_MAX);
+  });
+  it('keeps only applications with something unread', () => {
+    expect(unreadByApplication([{ application_id: 'a', unread: 2 }, { application_id: 'b', unread: 0 }])).toEqual({ a: 2 });
+    expect(unreadByApplication([])).toEqual({});
+  });
+  it('keeps the same list when a poll brings nothing new', () => {
+    const next = PREVIEW_MESSAGES.map((m) => ({ ...m }));
+    expect(mergeThread(PREVIEW_MESSAGES, next)).toBe(PREVIEW_MESSAGES);
+    expect(mergeThread(null, next)).toBe(next);
+    expect(mergeThread(PREVIEW_MESSAGES, next.slice(0, 3))).toHaveLength(3);
+    const read = next.map((m) => ({ ...m, read_at: m.read_at ?? '2026-11-25T00:00:00Z' }));
+    expect(mergeThread(PREVIEW_MESSAGES, read)).toBe(read);
+  });
+  it('shows the preview thread from either side, newest last', async () => {
+    const company = previewThread('company');
+    const creator = previewThread('creator');
+    expect((await company.load()).map((m) => m.mine)).toEqual((await creator.load()).map((m) => !m.mine));
+    const sent = await creator.send('See you Monday');
+    expect(sent).toMatchObject({ mine: true, from_company: false, body: 'See you Monday' });
+    expect((await creator.load()).at(-1)).toBe(sent);
   });
 });

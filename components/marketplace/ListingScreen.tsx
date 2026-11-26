@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 
 import {
+  coverColor,
   dayLabel,
   isFullName,
   missingToApply,
@@ -18,7 +19,8 @@ import {
 import { color, radius, space, text } from '../../theme/v2';
 import { Button, Card, Chip, Field, Icon, Press, Screen } from '../v2';
 import { CampaignCover, PayBlock } from './CampaignCard';
-import { ContractText, FactRow, NicheTags } from './parts';
+import { ThreadSheet, type ThreadSource } from './MessageThread';
+import { ContractText, FactRow, NicheTags, UnreadDot } from './parts';
 
 export type SignResult = { status: string; start_date: string | null };
 
@@ -35,11 +37,19 @@ export interface ListingScreenProps {
   /** Open the company's side of the app after joining. */
   onEnterCompany: () => void;
   onBack: () => void;
+  /** Unread messages from the company on this application. */
+  unread?: number;
+  /** The thread was opened, so the dot goes. */
+  onMessagesRead?: () => void;
+  /** Where the thread reads and writes (dev preview); the server by default. */
+  messages?: ThreadSource;
+  /** Start with the thread open (dev preview). */
+  initialThread?: boolean;
 }
 
 type Step = 'view' | 'sign' | 'done';
 
-export function ListingScreen({ listing: l, resume, defaultName, initialStep = 'view', onSign, onWithdraw, onEditProfile, onEnterCompany, onBack }: ListingScreenProps) {
+export function ListingScreen({ listing: l, resume, defaultName, initialStep = 'view', onSign, onWithdraw, onEditProfile, onEnterCompany, onBack, unread = 0, onMessagesRead, messages, initialThread = false }: ListingScreenProps) {
   const [step, setStep] = useState<Step>(initialStep);
   const [name, setName] = useState(defaultName);
   const [note, setNote] = useState('');
@@ -47,6 +57,8 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SignResult | null>(null);
+  const [threadOpen, setThreadOpen] = useState(initialThread);
+  const [seen, setSeen] = useState(false);
 
   const invited = l.application_status === 'invited';
   const missing = missingToApply(resume);
@@ -135,6 +147,8 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   const spots = spotsLabel(l);
   const start = dayLabel(l.start_date);
   const closed = l.status !== 'open' && !invited;
+  // One thread per application: there is one to open once the creator applied or was invited.
+  const canMessage = !!l.application_id && (l.application_status === 'applied' || l.application_status === 'invited' || l.application_status === 'accepted');
   let footer: React.ReactNode = null;
   if (l.application_status === 'accepted' || l.is_member) {
     footer = <Button label={`Open ${l.company_name}`} onPress={onEnterCompany} />;
@@ -189,6 +203,19 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
           </Card>
         ) : null}
 
+        {canMessage ? (
+          <Card onPress={() => setThreadOpen(true)} accessibilityLabel={unread > 0 && !seen ? 'Messages, unread' : 'Messages'} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View>
+              <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: color.grey1, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="chat_bubble" size={20} color={coverColor(l.brand_color)} />
+              </View>
+              {unread > 0 && !seen ? <UnreadDot style={{ position: 'absolute', top: -3, right: -3 }} /> : null}
+            </View>
+            <Text style={[text.row, { flex: 1 }]}>Messages</Text>
+            <Icon name="chevron_right" size={22} color={color.grey3} />
+          </Card>
+        ) : null}
+
         {l.tagline ? <Text style={[text.row, { fontWeight: '400', lineHeight: 24, marginBottom: 16 }]}>{l.tagline}</Text> : null}
 
         <PayBlock terms={l} />
@@ -230,6 +257,17 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
           </Text>
         </Card>
       </ScrollView>
+      <ThreadSheet
+        applicationId={threadOpen && canMessage ? l.application_id : null}
+        title={l.company_name}
+        tint={l.brand_color}
+        source={messages}
+        onRead={() => {
+          setSeen(true);
+          onMessagesRead?.();
+        }}
+        onClose={() => setThreadOpen(false)}
+      />
     </Screen>
   );
 }

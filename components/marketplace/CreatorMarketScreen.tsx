@@ -20,7 +20,7 @@ import { money } from '../../lib/v2-format';
 import { color, space, text } from '../../theme/v2';
 import { Button, Card, Chip, Chips, Empty, Icon, IconButton, Press, RootTitle, Seg, Sheet, Skeleton, UnderlineTabs, useTabBarInset } from '../v2';
 import { CampaignCard } from './CampaignCard';
-import { CompanyMark, toneFor } from './parts';
+import { CompanyMark, UnreadDot, toneFor } from './parts';
 
 const EXPLORE = ['All', 'For you'] as const;
 type ExploreKey = (typeof EXPLORE)[number];
@@ -31,6 +31,8 @@ export interface CreatorMarketScreenProps {
   listings: FeedListing[] | null;
   resume: CreatorResume | null;
   campaigns: CreatorCampaign[] | null;
+  /** Unread messages from companies, by application id: those campaigns carry a dot. */
+  messageUnread?: Record<string, number>;
   failed?: boolean;
   refreshing?: boolean;
   initialTab?: MarketTab;
@@ -47,6 +49,7 @@ export function CreatorMarketScreen({
   listings,
   resume,
   campaigns,
+  messageUnread,
   failed,
   refreshing = false,
   initialTab,
@@ -164,7 +167,7 @@ export function CreatorMarketScreen({
                 c.kind === 'active' ? (
                   <ActiveCard key={c.company_id} c={c} onPress={() => onOpenCampaign(c)} onMore={() => setMenu(c)} />
                 ) : (
-                  <OtherCard key={`${c.kind}-${c.company_id}-${c.application_id ?? ''}`} c={c} onPress={c.listing_id ? () => onOpenCampaign(c) : undefined} />
+                  <OtherCard key={`${c.kind}-${c.company_id}-${c.application_id ?? ''}`} c={c} unread={!!c.application_id && (messageUnread?.[c.application_id] ?? 0) > 0} onPress={c.listing_id ? () => onOpenCampaign(c) : undefined} />
                 ),
               )
             )}
@@ -223,7 +226,7 @@ function Stat({ value, label, green }: { value: string; label: string; green?: b
   );
 }
 
-function OtherCard({ c, onPress }: { c: CreatorCampaign; onPress?: () => void }) {
+function OtherCard({ c, unread, onPress }: { c: CreatorCampaign; unread?: boolean; onPress?: () => void }) {
   const chip =
     c.kind === 'invited'
       ? { label: 'Invited you', tone: 'purple' as const }
@@ -231,9 +234,12 @@ function OtherCard({ c, onPress }: { c: CreatorCampaign; onPress?: () => void })
         ? { label: 'Applied', tone: 'amber' as const }
         : { label: pastLabel(c.application_status), tone: 'grey' as const };
   return (
-    <Card onPress={onPress} accessibilityLabel={`${c.company_name}, ${chip.label}`}>
+    <Card onPress={onPress} accessibilityLabel={`${c.company_name}, ${chip.label}${unread ? ', unread messages' : ''}`}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <CompanyMark name={c.company_name} tone={toneFor(c.company_id)} size={44} />
+        <View>
+          <CompanyMark name={c.company_name} tone={toneFor(c.company_id)} size={44} />
+          {unread ? <UnreadDot style={{ position: 'absolute', top: -4, right: -4 }} /> : null}
+        </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={text.row}>{c.company_name}</Text>
           {c.title && c.title !== c.company_name ? <Text numberOfLines={1} style={text.meta}>{c.title}</Text> : null}

@@ -1,7 +1,7 @@
 // Empty, error and first-run states for the Review screens.
 import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 import { color, radius, text, tone as tones, type Tone } from '../../../../theme/v2';
 import { Button, Card, Icon, type IconName } from '../../../v2';
@@ -33,42 +33,34 @@ export function ErrorCard({ message, onRetry }: { message?: string | null; onRet
   );
 }
 
-export interface FirstRunProps {
-  /** No creators on the roster yet: a brand-new company. */
-  noCreators: boolean;
-  canInvite: boolean;
-  onInvite: () => void;
-  onCreators: () => void;
-  onNewBrief: () => void;
-  /** Shown while the manager setup checklist is incomplete. */
-  onSetup?: () => void;
+export interface LaneEmptyProps {
+  icon: IconName;
+  tone?: Tone;
+  /** 2 to 4 plain words. */
+  title: string;
+  /** The one thing to do from here. */
+  action: string;
+  actionIcon?: IconName;
+  onAction: () => void;
 }
 
-/** Posts lane with nothing waiting. A fresh company gets the three steps to its first post. */
-export function PostsEmpty({ noCreators, canInvite, onInvite, onCreators, onNewBrief, onSetup }: FirstRunProps) {
-  if (noCreators) {
-    return (
-      <StateCard
-        icon="inbox"
-        title="Your review queue starts here"
-        body={
-          canInvite
-            ? 'Invite your creators, approve their accounts in the Accounts lane, then send a brief. Their posts land here for you to approve.'
-            : 'Once creators join and post from your briefs, their posts land here for you to approve.'
-        }
-      >
-        {canInvite ? <View style={{ flexDirection: 'row' }}><Button label="Invite creators" icon="send" onPress={onInvite} /></View> : null}
-        <View style={{ flexDirection: 'row' }}><Button label="Write a brief" icon="add" variant="secondary" onPress={onNewBrief} /></View>
-        {onSetup ? <View style={{ flexDirection: 'row' }}><Button label="Finish setup" icon="auto_awesome" variant="quiet" onPress={onSetup} /></View> : null}
-      </StateCard>
-    );
-  }
+/** A Review lane with nothing in it: fills the lane, a flat tinted disc that pops in, the title, one button. */
+export function LaneEmpty({ icon, tone = 'blue', title, action, actionIcon, onAction }: LaneEmptyProps) {
+  const t = tones[tone];
   return (
-    <StateCard icon="check_circle" tone="green" title="Nothing to review." body="New posts from your creators show up here the moment they submit.">
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Button label="Creators" icon="person" variant="secondary" onPress={onCreators} />
-        {canInvite ? <Button label="Invite" icon="send" variant="quiet" onPress={onInvite} /> : null}
-      </View>
-    </StateCard>
+    <View style={{ flex: 1, minHeight: 300, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 24 }}>
+      <Animated.View
+        entering={ZoomIn.springify().damping(11)}
+        style={{ width: 120, height: 120, borderRadius: radius.pill, backgroundColor: t.tint, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Icon name={icon} size={64} color={t.fg} />
+      </Animated.View>
+      <Animated.Text entering={FadeInDown.duration(260).delay(80)} style={[text.card, { fontSize: 24, lineHeight: 30, textAlign: 'center', marginTop: 24 }]}>
+        {title}
+      </Animated.Text>
+      <Animated.View entering={FadeInDown.duration(260).delay(140)} style={{ flexDirection: 'row', width: 220, marginTop: 20 }}>
+        <Button label={action} icon={actionIcon} onPress={onAction} />
+      </Animated.View>
+    </View>
   );
 }
