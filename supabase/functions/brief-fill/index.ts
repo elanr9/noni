@@ -15,6 +15,7 @@ type Body = {
   linkNotes?: string;
   notes?: string;
   typed?: string;
+  company_id?: string;
 };
 
 const MODES: BriefMode[] = ['guided', 'outline', 'titles', 'long_text'];
@@ -26,11 +27,13 @@ Deno.serve(async (req) => {
   if (pre) return pre;
   const admin = adminClient();
   const caller = await authenticate(req, admin);
-  if (!caller || caller.kind !== 'user') return jsonResponse({ error: 'unauthorized' }, 401);
-  if (caller.role !== 'campaign_manager') return jsonResponse({ error: 'forbidden' }, 403);
-  if (!caller.companyId) return jsonResponse({ error: 'no active company' }, 400);
-
+  if (!caller) return jsonResponse({ error: 'unauthorized' }, 401);
   const body = ((await req.json().catch(() => null)) ?? {}) as Body;
+  // Noni's own quality runs come in with the cron secret and name the company.
+  const companyId = caller.kind === 'cron' ? (text(body.company_id, 36) ?? null) : caller.companyId;
+  if (caller.kind === 'user' && caller.role !== 'campaign_manager') return jsonResponse({ error: 'forbidden' }, 403);
+  if (!companyId) return jsonResponse({ error: 'no active company' }, 400);
+
   const mode: BriefMode = MODES.includes(body.mode as BriefMode) ? (body.mode as BriefMode) : 'guided';
   const type: BriefType = TYPES.includes(body.type as BriefType) ? (body.type as BriefType) : 'Talking Head';
 
@@ -40,7 +43,7 @@ Deno.serve(async (req) => {
   // in the body as { error }, which the client already throws on.
   return streamJsonResponse(async () => {
     const result = await writeBrief(admin, {
-      companyId: caller.companyId,
+      companyId,
       mode,
       type,
       title: text(body.title, 300),
@@ -48,20 +51,12 @@ Deno.serve(async (req) => {
       linkNotes: text(body.linkNotes, 1000),
       notes: text(body.notes, 2000),
       typed: text(body.typed, 300),
-      userId: caller.userId ?? null,
+      userId: caller.kind === 'user' ? (caller.userId ?? null) : null,
     });
     if ('titles' in result) return { titles: result.titles };
 
-    // A decline is an answer, not a failure: 200 with the reason and the
-    // questions, so the app can show them where the brief would have gone.
-    if (result.kill_reason) {
-      return ({
-        title: result.title,
-        kill_reason: result.kill_reason,
-        questions: result.questions,
-        reference_note: result.reference_note ?? null,
-      });
-    }
+    // The engine always writes. What it would have liked to know is queued
+    // for Noni's team and never shown to the manager.
     if (mode === 'outline') {
       return ({
         title: result.title,
@@ -70,7 +65,7 @@ Deno.serve(async (req) => {
         angle: result.angle,
         hooks: result.hooks,
         kill_reason: null,
-        questions: result.questions,
+        questions: [],
         reference_note: result.reference_note ?? null,
       });
     }
@@ -85,7 +80,7 @@ Deno.serve(async (req) => {
       angle: result.angle,
       hooks: result.hooks,
       kill_reason: null,
-      questions: result.questions,
+      questions: [],
       reference_note: result.reference_note ?? null,
       warnings: result.warnings ?? [],
     });

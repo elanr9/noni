@@ -485,21 +485,20 @@ describe('writeBrief', () => {
     expect(plan.clips).toHaveLength(4);
   });
 
-  it('returns the kill reason and the questions when the strategist declines, without calling the writer', async () => {
-    const h = harness({ 'brief.angle': angle({ decision: 'decline', kill_reason: 'There is no approved claim about light.' }) });
+  it('still writes the whole brief when the strategist tries to decline, and never hands the manager a reason or a question', async () => {
+    const h = harness({ 'brief.angle': angle({ decision: 'decline', kill_reason: 'There is no approved claim about light.' }), 'brief.write': goodScript(), 'brief.critic': ship });
     const plan = (await writeBrief(admin, req, h.deps)) as BriefPlan;
-    expect(h.calls.map((c) => c.task)).toEqual(['brief.angle']);
-    expect(plan.kill_reason).toBe('There is no approved claim about light.');
-    expect(plan.clips).toEqual([]);
-    expect(plan.questions).toEqual(['Is there a free plan?']);
-    expect(h.queued).toEqual([{ companyId: req.companyId, question: 'Is there a free plan?', why: 'The ask depends on it.', entityType: 'offer', askedBy: 'brief.write' }]);
+    expect(h.calls.map((c) => c.task)).toEqual(['brief.angle', 'brief.write', 'brief.critic']);
+    expect(plan.kill_reason).toBeNull();
+    expect(plan.clips.length).toBeGreaterThan(0);
+    expect(plan.questions).toEqual([]);
   });
 
-  it('queues the questions of a brief that was written', async () => {
+  it('queues what it would have liked to know for the Noni team, not the manager', async () => {
     const h = harness({ 'brief.angle': angle(), 'brief.write': goodScript(), 'brief.critic': ship });
     const plan = (await writeBrief(admin, req, h.deps)) as BriefPlan;
-    expect(plan.questions).toEqual(['Is there a free plan?']);
-    expect(h.queued).toHaveLength(1);
+    expect(plan.questions).toEqual([]);
+    expect(h.queued).toEqual([{ companyId: req.companyId, question: 'Is there a free plan?', why: 'The ask depends on it.', entityType: 'offer', askedBy: 'brief.write' }]);
   });
 
   it('adds the legacy brand context only when coverage is low', async () => {
@@ -528,24 +527,17 @@ describe('writeBrief', () => {
     expect(plan.warnings?.join(' ')).toContain('plant parent');
   });
 
-  it('declines in code, with no model call, when nothing at all is known about the company', async () => {
-    const h = harness({}, { assembleBrainContext: async () => brain({ core: '', retrieved: '', approvedClaims: [], demoMoments: [], coverage: 0 }), loadLegacyBrand: async () => null });
+  it('writes from the idea alone when nothing at all is known about the company, and asks the Noni team for the basics', async () => {
+    const h = harness(
+      { 'brief.angle': angle({ questions: [] }), 'brief.write': goodScript(), 'brief.critic': ship },
+      { assembleBrainContext: async () => brain({ core: '', retrieved: '', approvedClaims: [], demoMoments: [], coverage: 0 }), loadLegacyBrand: async () => null },
+    );
     const plan = (await writeBrief(admin, req, h.deps)) as BriefPlan;
-    expect(h.calls).toEqual([]);
-    expect(plan.kill_reason).toContain('does not know enough');
-    expect(plan.questions.length).toBeGreaterThan(0);
-    expect(h.queued).toHaveLength(plan.questions.length);
-  });
-
-  it('declines in code when the brain is empty as the real brain renders it and the legacy sheet is blank', async () => {
-    const blank: LegacyBrand = { ...legacy, tone: null, audience: null, products: null, pillars: [], docs: { productTruth: '', audienceNiche: '', voice: '' }, approvedClaims: [], features: [], hashtagBank: [], bannedPhrases: [] };
-    const h = harness({}, {
-      assembleBrainContext: async () => brain({ core: 'Inkbound: nothing confirmed or sourced is known yet.', constraints: 'No rules have been recorded yet.', retrieved: '', approvedClaims: [], demoMoments: [], coverage: 0, bannedPhrases: [] }),
-      loadLegacyBrand: async () => blank,
-    });
-    const plan = (await writeBrief(admin, req, h.deps)) as BriefPlan;
-    expect(h.calls).toEqual([]);
-    expect(plan.kill_reason).toContain('does not know enough');
+    expect(h.calls.map((c) => c.task)).toContain('brief.write');
+    expect(plan.kill_reason).toBeNull();
+    expect(plan.clips.length).toBeGreaterThan(0);
+    expect(plan.questions).toEqual([]);
+    expect(h.queued.length).toBeGreaterThan(0);
   });
 
   it('survives a brain that throws by falling back to the legacy context', async () => {
