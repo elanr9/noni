@@ -222,29 +222,8 @@ const CREATOR: Slot[] = [
       { value: '20+', label: 'More than 20' },
     ],
   },
-  {
-    key: 'best_campaign',
-    kind: 'text',
-    when: experienced,
-    followUp: true,
-    ask: 'Ask about the campaign they are proudest of: which brand, and how it did.',
-    placeholder: 'The brand, what you made, how it did',
-  },
-  {
-    key: 'portfolio',
-    kind: 'text',
-    when: experienced,
-    ask: 'Ask them to paste links to their best videos. Say these become their resume that brands see when they apply.',
-    placeholder: 'Paste links, one per line',
-  },
-  {
-    key: 'starter_videos',
-    kind: 'choice',
-    when: brandNew,
-    ask: 'Ask if they have any videos they are proud of, even just for fun. They can paste links, or skip.',
-    options: [{ value: 'none', label: 'Not yet' }],
-    placeholder: 'Paste links, one per line',
-  },
+  // The proudest campaign and video links are not asked here: creators add
+  // them on their profile afterwards.
   {
     key: 'niches',
     kind: 'multi',
@@ -383,7 +362,15 @@ async function saveAnswer(admin: SupabaseClient, s: State, slot: Slot, value: st
   if (slot.key === 'company_name') stored = (text || one).trim().slice(0, 80);
   s.app.answers = { ...s.app.answers, [slot.key]: stored };
 
-  if (s.app.kind !== 'creator') return;
+  // A guest has no account yet: the profile is written when they claim it.
+  if (s.app.kind !== 'creator' || !s.userId) return;
+  await saveProfile(admin, s.userId, profilePatch(slot.key, stored));
+}
+
+/** What one creator answer writes on their profile. */
+function profilePatch(key: string, stored: string | string[]): Record<string, unknown> {
+  const one = Array.isArray(stored) ? stored[0] ?? '' : stored;
+  const slot = { key };
   const patch: Record<string, unknown> = {};
   const typed = typeof stored === 'string' ? stored : '';
   switch (slot.key) {
@@ -425,12 +412,15 @@ async function saveAnswer(admin: SupabaseClient, s: State, slot: Slot, value: st
       patch.languages = (Array.isArray(stored) ? stored : [stored]).map((l) => String(l).toLowerCase().trim()).filter(Boolean).slice(0, 5);
       break;
   }
-  if (Object.keys(patch).length) {
-    const { error } = await admin
-      .from('creator_profiles')
-      .upsert({ user_id: s.userId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
-    if (error) throw error;
-  }
+  return patch;
+}
+
+async function saveProfile(admin: SupabaseClient, userId: string, patch: Record<string, unknown>): Promise<void> {
+  if (!Object.keys(patch).length) return;
+  const { error } = await admin
+    .from('creator_profiles')
+    .upsert({ user_id: userId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if (error) throw error;
 }
 
 async function saveApp(admin: SupabaseClient, s: State, extra: Record<string, unknown> = {}): Promise<void> {
@@ -608,14 +598,40 @@ async function sendDecisionEmail(app: App, approved: boolean, note: string | nul
 
 // ---------------------------------------------------------------- handler
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Stands in for the user while a guest chats: no id, no email. */
+const GUEST = { id: '', email: undefined as string | undefined, user_metadata: {} as Record<string, unknown> };
+/** True only for a service role key of this project: the website's server,
+    never a browser. The key here and the website's can differ in form
+    (sb_secret_ or JWT), so it is proven by an admin-only call. */
+async function isServiceKey(token: string): Promise<boolean> {
+  if (!token) return false;
+  if (token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) return true;
+  try {
+    const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/admin/users?page=1&per_page=1`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: token },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** A guest can ask questions back for a while, not forever. */
+const GUEST_TURNS = 60;
+
 Deno.serve(async (req) => {
   const preflight = handleCors(req);
   if (preflight) return preflight;
 
   const admin = adminClient();
   const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
-  const { data: auth } = await admin.auth.getUser(token);
-  const user = auth?.user;
+  // The website relays a signed-out creator with the service key and the
+  // guest id from their cookie: the chat runs before there is an account.
+  const guestHeader = req.headers.get('x-noni-guest') ?? '';
+  const guestId = UUID.test(guestHeader) && (await isServiceKey(token)) ? guestHeader.toLowerCase() : null;
+  const { data: auth } = guestId ? { data: null } : await admin.auth.getUser(token);
+  const user = guestId ? GUEST : auth?.user;
   if (!user) return jsonResponse({ error: 'unauthorized' }, 401);
 
   const body = ((await req.json().catch(() => null)) ?? {}) as {
@@ -628,10 +644,17 @@ Deno.serve(async (req) => {
     /** What they said on the website before signing in. */
     name?: string;
     intro?: unknown;
+    /** claim: the guest id their answers were saved under. */
+    guest?: string;
   };
   const kind: Kind | null = body.kind === 'company' || body.kind === 'creator' ? body.kind : null;
 
-  const { data: profile } = await admin.from('profiles').select('id, role').eq('id', user.id).maybeSingle();
+  if (guestId && (kind !== 'creator' || !['state', 'start', 'turn'].includes(String(body.action)))) {
+    return jsonResponse({ error: 'Sign in first' }, 401);
+  }
+  const { data: profile } = guestId
+    ? { data: null }
+    : await admin.from('profiles').select('id, role').eq('id', user.id).maybeSingle();
   const platformAdmin = profile?.role === 'admin';
 
   // ------------------------------------------------ admin: list and decide
@@ -668,10 +691,52 @@ Deno.serve(async (req) => {
   }
 
   // ------------------------------------------------ applicant
-  const { data: mine } = await admin
-    .from('applications')
-    .select('id, kind, status, full_name, email, chat, answers, decision_note')
-    .eq('user_id', user.id);
+  // Signed in after the guest chat: the draft and its answers become theirs.
+  if (body.action === 'claim') {
+    const from = String(body.guest ?? '');
+    if (!UUID.test(from)) return jsonResponse({ claimed: false });
+    const { data: draft } = await admin
+      .from('applications')
+      .select('id, kind, status, full_name, email, chat, answers, decision_note')
+      .eq('guest_id', from)
+      .eq('kind', 'creator')
+      .maybeSingle();
+    if (!draft) return jsonResponse({ claimed: false });
+    const { data: own } = await admin.from('applications').select('id, status').eq('user_id', user.id).eq('kind', 'creator').maybeSingle();
+    if (own && own.status !== 'rejected') {
+      // They already have an application on this account: it stands.
+      await admin.from('applications').delete().eq('id', draft.id);
+      return jsonResponse({ claimed: false });
+    }
+    if (own) await admin.from('applications').delete().eq('id', own.id);
+    const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+    const app = draft as App;
+    const fullName = app.full_name ?? (String(meta.full_name ?? meta.name ?? '').trim() || null);
+    const email = user.email?.toLowerCase() ?? null;
+    const { error: moveError } = await admin
+      .from('applications')
+      .update({ user_id: user.id, guest_id: null, email, full_name: fullName, updated_at: new Date().toISOString() })
+      .eq('id', app.id);
+    if (moveError) return jsonResponse({ error: moveError.message }, 500);
+    app.email = email;
+    app.full_name = fullName;
+    const s = stateOf(app, user.id);
+    try {
+      let patch: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(app.answers)) {
+        patch = { ...patch, ...profilePatch(key, value as string | string[]) };
+      }
+      await saveProfile(admin, user.id, patch);
+      if (app.status === 'draft' && s.chat.answered.includes('done')) await submit(admin, s);
+    } catch (e) {
+      console.error('apply-chat claim', e instanceof Error ? e.message : e);
+      return jsonResponse({ error: 'Could not save your profile' }, 500);
+    }
+    return jsonResponse({ claimed: true, status: s.app.status });
+  }
+
+  const owned = admin.from('applications').select('id, kind, status, full_name, email, chat, answers, decision_note');
+  const { data: mine } = await (guestId ? owned.eq('guest_id', guestId) : owned.eq('user_id', user.id));
   const apps = (mine ?? []) as App[];
   const summary = apps.map((a) => ({ id: a.id, kind: a.kind, status: a.status, decision_note: a.decision_note }));
 
@@ -683,7 +748,11 @@ Deno.serve(async (req) => {
       applications: summary,
       has_profile: Boolean(profile),
       messages: s.chat.messages,
-      pending: s.chat.messages.length ? specFor(nextSlot(s)) : null,
+      pending: s.chat.messages.length
+        ? guestId && s.chat.answered.includes('done')
+          ? { key: 'done', kind: 'done' }
+          : specFor(nextSlot(s))
+        : null,
       first_name: s.firstName,
       company_name: String(app.answers.company_name ?? ''),
       progress: progressOf(s),
@@ -735,8 +804,8 @@ Deno.serve(async (req) => {
     if (existing && existing.status !== 'rejected') return jsonResponse({ application: existing });
     const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
     const fullName = name ?? (String(meta.full_name ?? meta.name ?? '').trim() || null);
-    const row = {
-      user_id: user.id,
+    const row: Record<string, unknown> = {
+      ...(guestId ? { guest_id: guestId } : { user_id: user.id }),
       kind,
       status: 'draft',
       email: user.email?.toLowerCase() ?? null,
@@ -748,7 +817,9 @@ Deno.serve(async (req) => {
       decided_by: null,
       decision_note: null,
     };
-    const { data, error } = await admin.from('applications').upsert(row, { onConflict: 'user_id,kind' }).select('*').single();
+    const { data, error } = guestId
+      ? await admin.from('applications').insert(row).select('*').single()
+      : await admin.from('applications').upsert(row, { onConflict: 'user_id,kind' }).select('*').single();
     if (error) return jsonResponse({ error: error.message }, 500);
     return jsonResponse({ application: data });
   }
@@ -816,6 +887,12 @@ Deno.serve(async (req) => {
   if (!app) return jsonResponse({ error: 'Start the application first' }, 400);
   if (app.status !== 'draft') return jsonResponse({ error: 'This application is already in' }, 400);
   const s = stateOf(app, user.id);
+  if (guestId) {
+    if (s.chat.answered.includes('done')) return jsonResponse({ error: 'The conversation is finished' }, 400);
+    const turns = Number((app.chat as { turns?: number }).turns ?? 0);
+    if (turns >= GUEST_TURNS) return jsonResponse({ error: 'Sign in to keep going' }, 429);
+    (s.chat as ChatState & { turns?: number }).turns = turns + 1;
+  }
 
   // 1. Save the answer to the open question.
   let last: { slot: Slot; text: string; mayFollowUp: boolean } | null = null;
@@ -859,6 +936,10 @@ Deno.serve(async (req) => {
           } else history.push({ role, content: m.text });
         }
         let instruction = turnInstruction(s, slot, last);
+        if (guestId && slot?.kind === 'done') {
+          instruction +=
+            '\n\nThey have no account yet. Instead of saying they are in, say their profile is done and the last step is saving it with Google. Two short sentences. Do not mention the app.';
+        }
         if (askedBack) instruction += '\n\nThey asked a question about UGC. Answer it plainly in one or two sentences, then ask if they are in.';
         if (history.length && history[history.length - 1].role === 'user') {
           history[history.length - 1] = {
@@ -919,7 +1000,9 @@ Deno.serve(async (req) => {
       try {
         if (pendingSlot?.kind === 'done') {
           s.chat.answered.push('done');
-          await submit(admin, s);
+          // A guest's application goes in once they sign in (claim).
+          if (guestId) await saveApp(admin, s);
+          else await submit(admin, s);
         } else await saveApp(admin, s);
       } catch (e) {
         console.error('apply-chat save', e instanceof Error ? e.message : e);
