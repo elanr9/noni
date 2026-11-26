@@ -2,14 +2,19 @@
 //
 //   planning   Claude turns the company brain and the brief into searches.
 //   searching  Apify searches TikTok (keywords, hashtags) and Instagram
-//              (hashtags). Accounts are grouped, filtered and the strongest
-//              ~80 shortlisted.
+//              (hashtags). Accounts are grouped, filtered and up to ~400
+//              shortlisted.
 //   enriching  Apify reads each shortlisted profile and its latest videos.
-//              Avatars and covers are copied to storage (platform links expire).
-//   vetting    Claude looks at each account's covers, captions and numbers,
-//              scores fit, then writes a personal first message for the
-//              good ones.
+//              How often they post, how recently and how their audience
+//              responds are worked out here.
+//   vetting    Avatars and covers are copied to storage (platform links
+//              expire). Claude looks at each account's covers, captions and
+//              numbers, scores fit, says who they are, then writes a personal
+//              first message for the good ones.
 //   done
+//
+// A search is sized to return hundreds of people: creators who already make
+// UGC, small creators, and everyday people in the niche.
 //
 // Every step is short and resumable: tick() does the next bit of work for a
 // run and returns. The scout-tick cron and the web page both call tick.
@@ -44,7 +49,10 @@ type ApifyJob = {
   started_at: string;
 };
 
-type Jobs = { search?: ApifyJob[]; enrich?: ApifyJob[]; shortlist?: Shortlisted[] };
+/** An Apify run waiting for room on the account. */
+type Queued = { kind: 'search' | 'enrich'; platform: Platform; actor: string; input: Record<string, unknown>; max_items: number };
+
+type Jobs = { search?: ApifyJob[]; enrich?: ApifyJob[]; queue?: Queued[]; shortlist?: Shortlisted[] };
 
 type Counts = { posts?: number; accounts?: number; shortlisted?: number; vetted?: number; matches?: number };
 
@@ -60,7 +68,15 @@ export type ScoutRun = {
   updated_at: string;
 };
 
-type Video = { url: string; cover: string | null; views: number | null; caption: string; posted_at: string | null };
+type Video = {
+  url: string;
+  cover: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  caption: string;
+  posted_at: string | null;
+};
 
 type Shortlisted = {
   platform: Platform;
@@ -75,15 +91,30 @@ type Shortlisted = {
 
 // ---------------------------------------------------------------- limits
 
-const SEARCH_PER_TERM_TIKTOK = 40;
-const SEARCH_PER_TAG_INSTAGRAM = 40;
-const MAX_SEARCH_ITEMS = 600;
-const SHORTLIST_TIKTOK = 50;
-const SHORTLIST_INSTAGRAM = 30;
+const SEARCH_PER_TERM_TIKTOK = 60;
+const SEARCH_PER_TAG_INSTAGRAM = 80;
+const MAX_TIKTOK_QUERIES = 10;
+const MAX_TIKTOK_HASHTAGS = 8;
+const MAX_INSTAGRAM_HASHTAGS = 10;
+const MAX_DATASET_ITEMS = 2000;
+// TikTok search results carry follower counts, so its shortlist is already
+// in range. Instagram's do not: more profiles are read and filtered after.
+const SHORTLIST_TIKTOK = 150;
+const SHORTLIST_INSTAGRAM = 250;
+const ENRICH_CHUNK_TIKTOK = 50;
+const ENRICH_CHUNK_INSTAGRAM = 125;
 const VIDEOS_PER_PROFILE = 6;
+// Instagram's profile reader returns this many latest posts.
+const INSTAGRAM_LATEST = 12;
+const IMAGE_BATCH = 24;
+const IMAGE_POOL = 16;
 const VET_BATCH = 6;
+const VET_PARALLEL = 4;
 const WRITE_BATCH = 8;
-const MATCH_SCORE = 60;
+const WRITE_PARALLEL = 3;
+const MATCH_SCORE = 55;
+// Nothing posted in this long: not worth a message.
+const STALE_DAYS = 120;
 // An Apify run still not finished after this long is given up on.
 const JOB_TIMEOUT_MS = 12 * 60 * 1000;
 const LEASE_MS = 140 * 1000;
@@ -113,9 +144,9 @@ async function apifyStatus(runId: string): Promise<string> {
   return data.status;
 }
 
-async function apifyItems(datasetId: string, limit: number): Promise<Record<string, unknown>[]> {
+async function apifyItems(datasetId: string, fields: string): Promise<Record<string, unknown>[]> {
   const res = await fetch(
-    `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apifyToken()}&clean=true&format=json&limit=${limit}`,
+    `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apifyToken()}&clean=true&format=json&limit=${MAX_DATASET_ITEMS}&fields=${fields}`,
     { signal: AbortSignal.timeout(60_000) },
   );
   if (!res.ok) throw new Error(`Apify dataset ${datasetId} ${res.status}`);
@@ -140,12 +171,39 @@ async function settle(jobs: ApifyJob[]): Promise<boolean> {
   return jobs.every((j) => FINISHED.has(j.status));
 }
 
+/** Starts queued Apify runs until the account has no room for another. */
+async function launch(queue: Queued[], running: ApifyJob[]): Promise<{ started: ApifyJob[]; left: Queued[] }> {
+  const started: ApifyJob[] = [];
+  const left = [...queue];
+  while (left.length) {
+    const q = left[0];
+    try {
+      const r = await apifyStart(q.actor, q.input, q.max_items);
+      started.push({ kind: q.kind, platform: q.platform, ...r, started_at: new Date().toISOString() });
+      left.shift();
+    } catch (e) {
+      // Out of room while other runs are going: try again when one finishes.
+      const busy = [...running, ...started].some((j) => !FINISHED.has(j.status));
+      if (!busy) throw e;
+      console.error('scout apify queue', e instanceof Error ? e.message : e);
+      break;
+    }
+  }
+  return { started, left };
+}
+
+// Only what the engine reads; whole items are several kB each.
+const TIKTOK_FIELDS = 'authorMeta,webVideoUrl,videoMeta,playCount,diggCount,commentCount,text,createTimeISO';
+const INSTAGRAM_POST_FIELDS = 'ownerUsername,ownerFullName,url,displayUrl,videoPlayCount,videoViewCount,likesCount,commentsCount,caption,timestamp';
+const INSTAGRAM_PROFILE_FIELDS =
+  'username,fullName,followersCount,private,profilePicUrlHD,profilePicUrl,biography,businessEmail,publicEmail,latestPosts';
+
 /** Items of every job that produced any (a timed out run keeps what it got). */
-async function itemsOf(jobs: ApifyJob[], platform: Platform): Promise<Record<string, unknown>[]> {
+async function itemsOf(jobs: ApifyJob[], platform: Platform, fields: string): Promise<Record<string, unknown>[]> {
   const lists = await Promise.all(
     jobs
       .filter((j) => j.platform === platform)
-      .map((j) => apifyItems(j.dataset_id, MAX_SEARCH_ITEMS).catch((e) => {
+      .map((j) => apifyItems(j.dataset_id, fields).catch((e) => {
         console.error('scout apify items', e instanceof Error ? e.message : e);
         return [];
       })),
@@ -186,6 +244,52 @@ function median(xs: number[]): number | null {
 
 type Found = Shortlisted & { views: number[]; newest: number };
 
+const DAY = 86_400_000;
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * How often and how recently an account posts, and how its audience
+ * responds, from its latest posts.
+ *
+ * posts_per_week counts posts from the last 90 days over the days they
+ * span. When every post asked for came back recent, the span is the whole
+ * story; otherwise the account's full recent history is in view, so the
+ * window is at least two weeks (one post yesterday is not a daily poster).
+ *
+ * engagement_rate is a percent: likes and comments over views on TikTok,
+ * over followers on Instagram (which rarely reports views).
+ */
+export function signals(
+  platform: Platform,
+  followers: number | null,
+  videos: Video[],
+  now = Date.now(),
+): { posts_per_week: number | null; last_post_at: string | null; engagement_rate: number | null } {
+  const times = videos.map((v) => (v.posted_at ? Date.parse(v.posted_at) : NaN)).filter((t) => Number.isFinite(t) && t <= now + DAY);
+  let posts_per_week: number | null = null;
+  let last_post_at: string | null = null;
+  if (times.length) {
+    last_post_at = new Date(Math.max(...times)).toISOString();
+    const recent = times.filter((t) => t > now - 90 * DAY);
+    if (!recent.length) posts_per_week = 0;
+    else {
+      const asked = platform === 'tiktok' ? VIDEOS_PER_PROFILE : INSTAGRAM_LATEST;
+      const full = times.length >= asked && recent.length === times.length;
+      const span = (now - Math.min(...recent)) / DAY;
+      posts_per_week = Math.min(21, round1((recent.length * 7) / Math.max(full ? 2 : 14, span)));
+    }
+  }
+  const rates: number[] = [];
+  for (const v of videos) {
+    const base = platform === 'tiktok' ? v.views : followers;
+    if (v.likes === null || v.likes === undefined || !base) continue;
+    rates.push(((v.likes + (v.comments ?? 0)) / base) * 100);
+  }
+  rates.sort((a, b) => a - b);
+  const mid = rates.length ? (rates.length % 2 ? rates[(rates.length - 1) / 2] : (rates[rates.length / 2 - 1] + rates[rates.length / 2]) / 2) : null;
+  return { posts_per_week, last_post_at, engagement_rate: mid === null ? null : Math.min(99.9, round1(mid)) };
+}
+
 function tiktokPost(item: Record<string, unknown>): { handle: string; author: Record<string, unknown>; video: Video } | null {
   const author = obj(item.authorMeta);
   const handle = str(author.name);
@@ -199,6 +303,8 @@ function tiktokPost(item: Record<string, unknown>): { handle: string; author: Re
       url,
       cover: str(vm.coverUrl) ?? str(vm.originalCoverUrl),
       views: num(item.playCount),
+      likes: num(item.diggCount),
+      comments: num(item.commentCount),
       caption: wellFormed((str(item.text) ?? '').slice(0, 300)),
       posted_at: str(item.createTimeISO),
     },
@@ -216,6 +322,9 @@ function instagramPost(item: Record<string, unknown>): { handle: string; name: s
       url,
       cover: str(item.displayUrl),
       views: num(item.videoPlayCount) ?? num(item.videoViewCount),
+      // Instagram reports hidden like counts as -1, which num() drops.
+      likes: num(item.likesCount),
+      comments: num(item.commentsCount),
       caption: wellFormed((str(item.caption) ?? '').slice(0, 300)),
       posted_at: str(item.timestamp),
     },
@@ -265,15 +374,19 @@ async function companyContext(admin: SupabaseClient, companyId: string): Promise
 
 // ---------------------------------------------------------------- planning
 
-const PLAN_SYSTEM = `You plan a creator search for a UGC marketplace. A company wants everyday people who already post short videos in its niche to make videos about its product. They do not need to be influencers; small accounts that post often and talk to camera are often the best fit.
+const PLAN_SYSTEM = `You plan a creator search for a UGC marketplace. A company wants people in its niche to make short videos about its product. It is not looking for the biggest influencer. It wants people who are cheap and easy to work with and right for the niche, and it wants hundreds of them to choose from:
 
-From the company and the brief, write the searches that will surface those people on TikTok and Instagram.
+1. People who already make UGC or brand videos in the niche.
+2. Small creators who post often in the niche and are comfortable on camera.
+3. Everyday people who simply are the niche and post their life (for a college soccer product: college soccer players, whether or not they think of themselves as creators).
+
+From the company and the brief, write searches that together surface all three kinds on TikTok and Instagram. Spread the terms: some for each kind, each term reaching different people. Cover the natural variations of the niche (levels, divisions, men's and women's, roles, seasons) rather than repeating one idea.
 
 - ideal: one plain sentence describing the person to find (who they are and what they post), 25 words at most.
-- tiktok_queries: 3 to 6 search phrases a real poster in this niche would have in their captions or that TikTok search would match to their videos. Phrases people actually type, not marketing words. Example for a study app: "study with me", "finals week routine".
-- tiktok_hashtags: 3 to 6 hashtags without the #, specific to the niche, not giant generic tags like fyp or viral.
-- instagram_hashtags: 3 to 6 hashtags without the #, niche specific, used on Reels.
-- min_followers and max_followers: the follower range worth contacting. Default 500 to 250000 unless the brief says otherwise.
+- tiktok_queries: 8 to 10 search phrases a real poster in this niche would have in their captions or that TikTok search would match to their videos. Phrases people actually type, not marketing words. Example for a study app: "study with me", "finals week routine", "ugc creator student".
+- tiktok_hashtags: 6 to 8 hashtags without the #, specific to the niche, not giant generic tags like fyp or viral.
+- instagram_hashtags: 8 to 10 hashtags without the #, niche specific, used on Reels by ordinary people in the niche.
+- min_followers and max_followers: the follower range worth contacting. Default 300 to 100000 unless the brief says otherwise.
 
 If the brief names the kind of person (for example college soccer players), follow the brief over the company context. Never target anyone under 18.`;
 
@@ -316,12 +429,12 @@ export async function makePlan(
     companyId,
     timeoutMs: 90_000,
   });
-  const uniq = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))].slice(0, 6);
+  const uniq = (xs: string[], n: number) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))].slice(0, n);
   return {
     ideal: stripDashes(data.ideal).slice(0, 240),
-    tiktok_queries: opts.platforms.includes('tiktok') ? uniq(data.tiktok_queries.map((q) => q.toLowerCase().slice(0, 60))) : [],
-    tiktok_hashtags: opts.platforms.includes('tiktok') ? uniq(data.tiktok_hashtags.map(tag)) : [],
-    instagram_hashtags: opts.platforms.includes('instagram') ? uniq(data.instagram_hashtags.map(tag)) : [],
+    tiktok_queries: opts.platforms.includes('tiktok') ? uniq(data.tiktok_queries.map((q) => q.toLowerCase().slice(0, 60)), MAX_TIKTOK_QUERIES) : [],
+    tiktok_hashtags: opts.platforms.includes('tiktok') ? uniq(data.tiktok_hashtags.map(tag), MAX_TIKTOK_HASHTAGS) : [],
+    instagram_hashtags: opts.platforms.includes('instagram') ? uniq(data.instagram_hashtags.map(tag), MAX_INSTAGRAM_HASHTAGS) : [],
     min_followers: opts.min_followers ?? Math.max(0, data.min_followers),
     max_followers: opts.max_followers ?? Math.max(data.min_followers + 1, data.max_followers),
     platforms: opts.platforms,
@@ -331,59 +444,76 @@ export async function makePlan(
 
 // ---------------------------------------------------------------- search
 
-async function startSearch(plan: ScoutPlan): Promise<ApifyJob[]> {
-  const now = new Date().toISOString();
-  const jobs: ApifyJob[] = [];
-  const terms = plan.tiktok_queries.length + plan.tiktok_hashtags.length;
-  if (terms > 0) {
-    const r = await apifyStart(
-      'clockworks~tiktok-scraper',
-      {
-        searchQueries: plan.tiktok_queries,
-        hashtags: plan.tiktok_hashtags,
-        resultsPerPage: SEARCH_PER_TERM_TIKTOK,
-        shouldDownloadVideos: false,
-        shouldDownloadCovers: false,
-        shouldDownloadSubtitles: false,
-        shouldDownloadSlideshowImages: false,
-      },
-      Math.min(MAX_SEARCH_ITEMS, terms * SEARCH_PER_TERM_TIKTOK),
-    );
-    jobs.push({ kind: 'search', platform: 'tiktok', ...r, started_at: now });
+const TIKTOK_QUIET = {
+  shouldDownloadVideos: false,
+  shouldDownloadCovers: false,
+  shouldDownloadSubtitles: false,
+  shouldDownloadSlideshowImages: false,
+};
+
+/** The Apify runs of a search: TikTok phrases, TikTok hashtags, Instagram hashtags. */
+function searchQueue(plan: ScoutPlan): Queued[] {
+  const queue: Queued[] = [];
+  if (plan.tiktok_queries.length) {
+    queue.push({
+      kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
+      input: { searchQueries: plan.tiktok_queries, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
+      max_items: plan.tiktok_queries.length * SEARCH_PER_TERM_TIKTOK,
+    });
   }
-  if (plan.instagram_hashtags.length > 0) {
-    const r = await apifyStart(
-      'apify~instagram-hashtag-scraper',
-      { hashtags: plan.instagram_hashtags, resultsLimit: SEARCH_PER_TAG_INSTAGRAM },
-      Math.min(MAX_SEARCH_ITEMS, plan.instagram_hashtags.length * SEARCH_PER_TAG_INSTAGRAM),
-    );
-    jobs.push({ kind: 'search', platform: 'instagram', ...r, started_at: now });
+  if (plan.tiktok_hashtags.length) {
+    queue.push({
+      kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
+      input: { hashtags: plan.tiktok_hashtags, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
+      max_items: plan.tiktok_hashtags.length * SEARCH_PER_TERM_TIKTOK,
+    });
   }
-  if (!jobs.length) throw new Error('No searches to run');
-  return jobs;
+  if (plan.instagram_hashtags.length) {
+    queue.push({
+      kind: 'search', platform: 'instagram', actor: 'apify~instagram-hashtag-scraper',
+      input: { hashtags: plan.instagram_hashtags, resultsLimit: SEARCH_PER_TAG_INSTAGRAM },
+      max_items: plan.instagram_hashtags.length * SEARCH_PER_TAG_INSTAGRAM,
+    });
+  }
+  if (!queue.length) throw new Error('No searches to run');
+  return queue;
+}
+
+/** Every row of a query, past the API's 1000 row page. */
+async function allRows<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < 50_000; from += 1000) {
+    const { data } = await page(from, from + 999);
+    out.push(...(data ?? []));
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  return out;
 }
 
 /** Handles this company has already seen, plus creators already on Noni. */
 async function knownHandles(admin: SupabaseClient, companyId: string): Promise<Set<string>> {
-  const [{ data: seen }, { data: onNoni }] = await Promise.all([
-    admin.from('scout_creators').select('platform, handle').eq('company_id', companyId).limit(20000),
-    admin.from('creator_profiles').select('instagram, tiktok').limit(20000),
+  const [seen, onNoni] = await Promise.all([
+    allRows<{ platform: string; handle: string }>((from, to) =>
+      admin.from('scout_creators').select('platform, handle').eq('company_id', companyId).order('id').range(from, to)),
+    allRows<{ instagram: string | null; tiktok: string | null }>((from, to) =>
+      admin.from('creator_profiles').select('instagram, tiktok').order('user_id').range(from, to)),
   ]);
   const known = new Set<string>();
-  for (const s of seen ?? []) known.add(`${s.platform}:${s.handle}`);
-  for (const c of onNoni ?? []) {
+  for (const s of seen) known.add(`${s.platform}:${s.handle}`);
+  for (const c of onNoni) {
     if (c.tiktok) known.add(`tiktok:${cleanHandle(c.tiktok as string)}`);
     if (c.instagram) known.add(`instagram:${cleanHandle(c.instagram as string)}`);
   }
   return known;
 }
 
-const DAY = 86_400_000;
-
 async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlist: Shortlisted[]; posts: number; accounts: number }> {
   const plan = run.plan as ScoutPlan;
   const jobs = run.jobs.search ?? [];
-  const [tt, ig] = await Promise.all([itemsOf(jobs, 'tiktok'), itemsOf(jobs, 'instagram')]);
+  const [tt, ig] = await Promise.all([
+    itemsOf(jobs, 'tiktok', TIKTOK_FIELDS),
+    itemsOf(jobs, 'instagram', INSTAGRAM_POST_FIELDS),
+  ]);
   const map = new Map<string, Found>();
   for (const item of tt) {
     const p = tiktokPost(item);
@@ -404,7 +534,7 @@ async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlis
   const known = await knownHandles(admin, run.company_id);
   const lo = plan.min_followers * 0.6;
   const hi = plan.max_followers * 1.5;
-  const fresh = Date.now() - 120 * DAY;
+  const fresh = Date.now() - STALE_DAYS * DAY;
   const pool = [...map.values()].filter((f) => {
     if (known.has(`${f.platform}:${f.handle}`)) return false;
     if (f.followers !== null && (f.followers < lo || f.followers > hi)) return false;
@@ -422,51 +552,67 @@ async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlis
   if (tiktok.length < SHORTLIST_TIKTOK) instagram = pick('instagram', SHORTLIST_INSTAGRAM + SHORTLIST_TIKTOK - tiktok.length);
   else if (instagram.length < SHORTLIST_INSTAGRAM) tiktok = pick('tiktok', SHORTLIST_TIKTOK + SHORTLIST_INSTAGRAM - instagram.length);
 
+  // The profile read replaces these videos; three are kept in case it fails.
   const shortlist = [...tiktok, ...instagram].map(({ views: _v, newest: _n, ...s }) => ({
     ...s,
-    videos: s.videos.slice(0, VIDEOS_PER_PROFILE),
+    videos: s.videos.slice(0, 3),
   }));
   return { shortlist, posts: tt.length + ig.length, accounts: map.size };
 }
 
 // ---------------------------------------------------------------- enrich
 
-async function startEnrich(shortlist: Shortlisted[]): Promise<ApifyJob[]> {
-  const now = new Date().toISOString();
-  const jobs: ApifyJob[] = [];
+function chunks<T>(xs: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+}
+
+/** Profile reads in chunks, so each Apify run finishes in minutes. */
+function enrichQueue(shortlist: Shortlisted[]): Queued[] {
   const tt = shortlist.filter((s) => s.platform === 'tiktok').map((s) => s.handle);
   const ig = shortlist.filter((s) => s.platform === 'instagram').map((s) => s.handle);
-  if (tt.length) {
-    const r = await apifyStart(
-      'clockworks~tiktok-scraper',
-      {
-        profiles: tt,
+  return [
+    ...chunks(tt, ENRICH_CHUNK_TIKTOK).map((profiles): Queued => ({
+      kind: 'enrich', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
+      input: {
+        profiles,
         resultsPerPage: VIDEOS_PER_PROFILE,
         profileScrapeSections: ['videos'],
         profileSorting: 'latest',
         excludePinnedPosts: true,
-        shouldDownloadVideos: false,
-        shouldDownloadCovers: false,
-        shouldDownloadSubtitles: false,
-        shouldDownloadSlideshowImages: false,
+        ...TIKTOK_QUIET,
       },
-      tt.length * VIDEOS_PER_PROFILE,
-    );
-    jobs.push({ kind: 'enrich', platform: 'tiktok', ...r, started_at: now });
-  }
-  if (ig.length) {
-    const r = await apifyStart('apify~instagram-profile-scraper', { usernames: ig }, ig.length);
-    jobs.push({ kind: 'enrich', platform: 'instagram', ...r, started_at: now });
-  }
-  return jobs;
+      max_items: profiles.length * VIDEOS_PER_PROFILE,
+    })),
+    ...chunks(ig, ENRICH_CHUNK_INSTAGRAM).map((usernames): Queued => ({
+      kind: 'enrich', platform: 'instagram', actor: 'apify~instagram-profile-scraper',
+      input: { usernames },
+      max_items: usernames.length,
+    })),
+  ];
 }
 
-type Enriched = Shortlisted & { email: string | null; median_views: number | null };
+type Enriched = Shortlisted & {
+  email: string | null;
+  median_views: number | null;
+  posts_per_week: number | null;
+  last_post_at: string | null;
+  engagement_rate: number | null;
+};
 
+/** Shortlisted accounts with their profile read merged in; the ones outside the plan's range, private or gone quiet are dropped. */
 async function mergeEnrich(run: ScoutRun): Promise<Enriched[]> {
+  const plan = run.plan as ScoutPlan;
   const jobs = run.jobs.enrich ?? [];
   const shortlist = run.jobs.shortlist ?? [];
-  const [tt, ig] = await Promise.all([itemsOf(jobs, 'tiktok'), itemsOf(jobs, 'instagram')]);
+  const [tt, ig] = await Promise.all([
+    itemsOf(jobs, 'tiktok', TIKTOK_FIELDS),
+    itemsOf(jobs, 'instagram', INSTAGRAM_PROFILE_FIELDS),
+  ]);
+  const lo = plan.min_followers * 0.6;
+  const hi = plan.max_followers * 1.5;
+  const stale = Date.now() - STALE_DAYS * DAY;
 
   const ttBy = new Map<string, { author: Record<string, unknown>; videos: Video[] }>();
   for (const item of tt) {
@@ -482,7 +628,8 @@ async function mergeEnrich(run: ScoutRun): Promise<Enriched[]> {
     if (h) igBy.set(cleanHandle(h), item);
   }
 
-  return shortlist.map((s): Enriched => {
+  const out: Enriched[] = [];
+  for (const s of shortlist) {
     let videos = s.videos;
     let { name, followers, avatar, bio } = s;
     let email: string | null = null;
@@ -498,6 +645,7 @@ async function mergeEnrich(run: ScoutRun): Promise<Enriched[]> {
       }
     } else {
       const p = igBy.get(s.handle);
+      if (p?.private === true) continue;
       if (p) {
         name = str(p.fullName) ?? name;
         followers = num(p.followersCount) ?? followers;
@@ -509,12 +657,16 @@ async function mergeEnrich(run: ScoutRun): Promise<Enriched[]> {
         if (mapped.length) videos = mapped;
       }
     }
-    videos = [...videos]
-      .sort((a, b) => (b.posted_at ? Date.parse(b.posted_at) : 0) - (a.posted_at ? Date.parse(a.posted_at) : 0))
-      .slice(0, VIDEOS_PER_PROFILE);
+    if (followers !== null && (followers < lo || followers > hi)) continue;
+    videos = [...videos].sort((a, b) => (b.posted_at ? Date.parse(b.posted_at) : 0) - (a.posted_at ? Date.parse(a.posted_at) : 0));
+    // Measured on every post read, before the list is cut for display.
+    const sig = signals(s.platform, followers, videos);
+    if (sig.last_post_at && Date.parse(sig.last_post_at) < stale) continue;
+    videos = videos.slice(0, VIDEOS_PER_PROFILE);
     const views = videos.map((v) => v.views).filter((v): v is number => v !== null);
-    return { ...s, name, followers, avatar, bio, videos, email, median_views: median(views) };
-  });
+    out.push({ ...s, name, followers, avatar, bio, videos, email, median_views: median(views), ...sig });
+  }
+  return out;
 }
 
 /** Copies one image into the scout bucket; null when it cannot be fetched. */
@@ -542,49 +694,75 @@ async function pool<T>(items: T[], size: number, fn: (t: T) => Promise<void>): P
   }));
 }
 
-async function saveEnriched(admin: SupabaseClient, run: ScoutRun, list: Enriched[]): Promise<number> {
-  const rows: Record<string, unknown>[] = [];
-  await pool(list, 8, async (c) => {
-    const base = `${run.company_id}/${c.platform}/${c.handle.replace(/[^a-z0-9._-]/g, '_')}`;
-    const avatar = await keepImage(admin, c.avatar, `${base}/avatar`);
-    const videos = await Promise.all(
-      c.videos.map(async (v, i) => ({ ...v, cover: i < VIDEOS_PER_PROFILE ? await keepImage(admin, v.cover, `${base}/v${i}`) : null })),
-    );
-    rows.push({
-      company_id: run.company_id,
-      run_id: run.id,
-      source: 'search',
-      platform: c.platform,
-      handle: c.handle,
-      name: c.name ? wellFormed(c.name.slice(0, 120)) : null,
-      avatar_url: avatar,
-      bio: c.bio ? wellFormed(c.bio.slice(0, 500)) : null,
-      followers: c.followers,
-      median_views: c.median_views,
-      posts_found: c.posts_found,
-      email: c.email,
-      videos,
-      status: 'vetting',
-    });
+/** Saves what the profile reads found. Pictures still point at the platforms; keepImages copies them. */
+async function saveFound(admin: SupabaseClient, run: ScoutRun, list: Enriched[]): Promise<number> {
+  const rows = list.map((c) => ({
+    company_id: run.company_id,
+    run_id: run.id,
+    source: 'search',
+    platform: c.platform,
+    handle: c.handle,
+    name: c.name ? wellFormed(c.name.slice(0, 120)) : null,
+    avatar_url: c.avatar,
+    bio: c.bio ? wellFormed(c.bio.slice(0, 500)) : null,
+    followers: c.followers,
+    median_views: c.median_views,
+    posts_found: c.posts_found,
+    posts_per_week: c.posts_per_week,
+    last_post_at: c.last_post_at,
+    engagement_rate: c.engagement_rate,
+    email: c.email,
+    videos: c.videos,
+    status: 'found',
+  }));
+  for (const part of chunks(rows, 100)) {
+    const { error } = await admin.from('scout_creators').upsert(part, { onConflict: 'company_id,platform,handle', ignoreDuplicates: true });
+    if (error) throw new Error(`save creators: ${error.message}`);
+  }
+  const { count } = await admin.from('scout_creators').select('id', { count: 'exact', head: true }).eq('run_id', run.id);
+  return count ?? 0;
+}
+
+type Unkept = { id: string; platform: Platform; handle: string; avatar_url: string | null; videos: Video[] };
+
+/** Copies a batch's avatars and covers into storage and hands the rows to vetting. */
+async function keepImages(admin: SupabaseClient, run: ScoutRun, rows: Unkept[]): Promise<void> {
+  const kept = new Map<string, string | null>();
+  const jobs: { url: string | null; path: string }[] = [];
+  const base = (r: Unkept) => `${run.company_id}/${r.platform}/${r.handle.replace(/[^a-z0-9._-]/g, '_')}`;
+  for (const r of rows) {
+    jobs.push({ url: r.avatar_url, path: `${base(r)}/avatar` });
+    r.videos.slice(0, VIDEOS_PER_PROFILE).forEach((v, i) => jobs.push({ url: v.cover, path: `${base(r)}/v${i}` }));
+  }
+  await pool(jobs, IMAGE_POOL, async (j) => {
+    kept.set(j.path, await keepImage(admin, j.url, j.path));
   });
-  if (!rows.length) return 0;
-  const { error } = await admin.from('scout_creators').upsert(rows, { onConflict: 'company_id,platform,handle', ignoreDuplicates: true });
-  if (error) throw new Error(`save creators: ${error.message}`);
-  return rows.length;
+  await Promise.all(rows.map((r) =>
+    admin.from('scout_creators').update({
+      avatar_url: kept.get(`${base(r)}/avatar`) ?? null,
+      videos: r.videos.map((v, i) => ({ ...v, cover: kept.get(`${base(r)}/v${i}`) ?? null })),
+      status: 'vetting',
+      updated_at: new Date().toISOString(),
+    }).eq('id', r.id).eq('status', 'found')
+  ));
 }
 
 // ---------------------------------------------------------------- vetting
 
-const VET_SYSTEM = `You vet creators for a brand on a UGC marketplace. The brand pays everyday people to post short videos about its product. You see each account's numbers, bio, recent captions and up to three video covers.
+const VET_SYSTEM = `You vet people for a brand on a UGC marketplace. The brand pays everyday people to post short videos about its product. It is not looking for big influencers. It wants people who are right for its niche, comfortable on camera, and cheap and easy to work with: people already making UGC, small creators, and ordinary people who simply are the niche. You see each account's numbers, bio, recent captions and up to two video covers.
 
-For every creator decide:
-- score 0 to 100: how well this person fits the brand's ideal creator. Weigh, in order: their content is clearly in the niche the brand wants; they are a real individual who shows up on camera (covers with a face, talking, filming themselves); they post regularly and recently; their views are healthy for their size. 85 and up: message them today. 60 to 84: good fit. Under 60: skip.
-- is_person: false for brands, businesses, meme or repost pages, fan pages, news pages, and faceless compilation accounts.
+For every person decide:
+- score 0 to 100: how well this person fits who the brand is looking for. Judge the content and the person, not the size of the account; the brand sees followers, posting and engagement itself and small accounts are welcome. 85 and up: exactly the niche and films themselves, talks to camera or already makes brand style videos. 70 to 84: in the niche and on camera often. 55 to 69: clearly the person the brief describes and posts themselves, even if casual, unpolished or not thinking of themselves as a creator. Under 55: wrong niche, not on camera at all, or not a real individual.
+- is_person: false for brands, businesses, teams, clubs, schools, coaches selling a service, meme or repost pages, fan pages, news pages, and faceless compilation accounts.
 - likely_minor: true if they look or say they are under 18 (high school freshman to junior, "15", "16 yo", "class of" a year that makes them under 18). When unsure and they look young, true.
+- kind: "ugc" if they already make UGC or brand videos (says UGC or creator for brands in the bio, posts sponsored or product videos). "creator" if they post made for an audience content regularly (series, tips, vlogs, talking to camera). "niche" if they are simply a person in the niche posting their own life.
+- on_camera: true if they appear in their own videos (face on the covers, filming themselves, talking).
+- gender: "female" or "male" when the profile makes it plain (pronouns, a men's or women's team, how they describe themselves, how they present on their covers). Otherwise "unknown". This is only so the brand can filter; it never changes the score.
+- age: "under 18", "18-24", "25-34" or "35+" when the profile makes it plain (class year, college year, stated age, life stage). A current college student or college athlete is "18-24". Otherwise "unknown".
 - why: one short sentence to the brand, 12 words at most, naming the concrete thing about their content ("Films his 5am gym routine and talks to camera daily"). Do not repeat follower or view counts, the brand sees those. No names, no semicolons, no hype.
 - tags: one to three short niche tags, lowercase ("gym", "college soccer", "morning routine").
 
-Never score on looks, race, gender or anything not about the content and fit. Return every creator exactly once, by number.`;
+Never score on looks, race, gender or age. Return every person exactly once, by number.`;
 
 const VET_SCHEMA = {
   type: 'object',
@@ -596,18 +774,35 @@ const VET_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['n', 'score', 'is_person', 'likely_minor', 'why', 'tags'],
+        required: ['n', 'score', 'is_person', 'likely_minor', 'kind', 'on_camera', 'gender', 'age', 'why', 'tags'],
         properties: {
           n: { type: 'integer' },
           score: { type: 'integer' },
           is_person: { type: 'boolean' },
           likely_minor: { type: 'boolean' },
+          kind: { type: 'string', enum: ['ugc', 'creator', 'niche'] },
+          on_camera: { type: 'boolean' },
+          gender: { type: 'string', enum: ['female', 'male', 'unknown'] },
+          age: { type: 'string', enum: ['under 18', '18-24', '25-34', '35+', 'unknown'] },
           why: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
         },
       },
     },
   },
+};
+
+type Vetted = {
+  n: number;
+  score: number;
+  is_person: boolean;
+  likely_minor: boolean;
+  kind: string;
+  on_camera: boolean;
+  gender: string;
+  age: string;
+  why: string;
+  tags: string[];
 };
 
 const WRITE_SYSTEM = `You write the first message a brand sends a creator, as a DM on TikTok or Instagram, sent by hand from the brand's own account. It must read like one real person writing to another, never like a template or a mass blast.
@@ -651,6 +846,7 @@ type Row = {
   bio: string | null;
   followers: number | null;
   median_views: number | null;
+  posts_per_week: number | null;
   posts_found: number;
   videos: Video[];
   why: string | null;
@@ -661,7 +857,7 @@ function creatorText(n: number, r: Row): string {
   const caps = r.videos.slice(0, 4).map((v) => `"${v.caption.replace(/\s+/g, ' ').slice(0, 140)}"${v.views !== null ? ` (${v.views} views)` : ''}`);
   const text = [
     `${n}. ${r.platform} @${r.handle}${r.name ? ` (${r.name})` : ''}`,
-    `followers: ${r.followers ?? 'unknown'}; median views of recent videos: ${r.median_views ?? 'unknown'}; came up on ${r.posts_found} searched posts`,
+    `followers: ${r.followers ?? 'unknown'}; median views of recent videos: ${r.median_views ?? 'unknown'}; posts a week: ${r.posts_per_week ?? 'unknown'}; came up on ${r.posts_found} searched posts`,
     r.bio ? `bio: ${r.bio.replace(/\s+/g, ' ').slice(0, 200)}` : null,
     caps.length ? `recent captions: ${caps.join(' | ')}` : null,
   ].filter(Boolean).join('\n');
@@ -680,7 +876,7 @@ async function vetBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, rows:
     return creatorText(i + 1, r) + imgNote;
   });
   const plan = run.plan as ScoutPlan;
-  const { data } = await generate<{ creators: { n: number; score: number; is_person: boolean; likely_minor: boolean; why: string; tags: string[] }[] }>({
+  const { data } = await generate<{ creators: Vetted[] }>({
     task: 'scout.vet',
     tier: 'fast',
     system: VET_SYSTEM,
@@ -688,7 +884,7 @@ async function vetBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, rows:
     input: `Creators\n\n${lines.join('\n\n')}`,
     images,
     schema: VET_SCHEMA,
-    maxTokens: 4000,
+    maxTokens: 5000,
     companyId: run.company_id,
     timeoutMs: 100_000,
   });
@@ -698,12 +894,17 @@ async function vetBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, rows:
     if (!r || seen.has(c.n)) return;
     seen.add(c.n);
     const score = Math.max(0, Math.min(100, Math.round(c.score)));
-    const match = score >= MATCH_SCORE && c.is_person && !c.likely_minor;
+    const minor = c.likely_minor || c.age === 'under 18';
+    const match = score >= MATCH_SCORE && c.is_person && !minor;
     await admin.from('scout_creators').update({
       score,
       why: clip(c.why, 160),
       tags: c.tags.map((t) => t.toLowerCase().trim().slice(0, 30)).filter(Boolean).slice(0, 3),
-      likely_minor: c.likely_minor,
+      likely_minor: minor,
+      kind: c.kind === 'ugc' || c.kind === 'creator' || c.kind === 'niche' ? c.kind : null,
+      on_camera: c.on_camera,
+      gender: c.gender === 'female' || c.gender === 'male' ? c.gender : null,
+      age: c.age === '18-24' || c.age === '25-34' || c.age === '35+' ? c.age : null,
       status: match ? 'match' : 'skipped',
       updated_at: new Date().toISOString(),
     }).eq('id', r.id);
@@ -739,35 +940,41 @@ async function writeBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, row
   }));
 }
 
-const ROW_COLUMNS = 'id, platform, handle, name, bio, followers, median_views, posts_found, videos, why, tags';
+const ROW_COLUMNS = 'id, platform, handle, name, bio, followers, median_views, posts_per_week, posts_found, videos, why, tags';
 
-/** One slice of vetting; true when the run has nothing left to vet or write. */
-async function vetStep(admin: SupabaseClient, run: ScoutRun): Promise<boolean> {
-  const ctx = (await companyContext(admin, run.company_id)).text;
-  const { data: toVet } = await admin.from('scout_creators').select(ROW_COLUMNS)
-    .eq('run_id', run.id).eq('status', 'vetting').limit(VET_BATCH * 3);
-  if (toVet?.length) {
-    const batches: Row[][] = [];
-    for (let i = 0; i < toVet.length; i += VET_BATCH) batches.push(toVet.slice(i, i + VET_BATCH) as Row[]);
+/** One slice of vetting; true when the run has nothing left to copy, vet or write. */
+async function vetStep(admin: SupabaseClient, run: ScoutRun, ctx: string): Promise<boolean> {
+  const [{ data: toKeep }, { data: toVet }] = await Promise.all([
+    admin.from('scout_creators').select('id, platform, handle, avatar_url, videos')
+      .eq('run_id', run.id).eq('status', 'found').limit(IMAGE_BATCH),
+    admin.from('scout_creators').select(ROW_COLUMNS)
+      .eq('run_id', run.id).eq('status', 'vetting').limit(VET_BATCH * VET_PARALLEL),
+  ]);
+  if (toKeep?.length || toVet?.length) {
+    // Pictures for the next accounts are copied while Claude vets these.
+    const keeping = toKeep?.length
+      ? keepImages(admin, run, toKeep as Unkept[]).catch(async (e) => {
+        console.error('scout keep images', e instanceof Error ? e.message : e);
+        // Never stuck here: vetted without pictures instead.
+        await admin.from('scout_creators').update({ avatar_url: null, status: 'vetting' })
+          .in('id', toKeep.map((x) => x.id as string)).eq('status', 'found');
+      })
+      : null;
+    const batches = chunks((toVet ?? []) as Row[], VET_BATCH);
     const results = await Promise.allSettled(batches.map((b) => vetBatch(admin, run, ctx, b)));
-    results.forEach((r, i) => {
-      if (r.status === 'rejected') {
-        console.error('scout vet batch', r.reason instanceof Error ? r.reason.message : r.reason);
-      }
-    });
     // Do not loop on a batch that failed: those creators are skipped.
-    await Promise.all(results.map((r, i) =>
-      r.status === 'rejected'
-        ? admin.from('scout_creators').update({ status: 'skipped' }).in('id', batches[i].map((x) => x.id))
-        : null
-    ));
+    await Promise.all(results.map((r, i) => {
+      if (r.status !== 'rejected') return null;
+      console.error('scout vet batch', r.reason instanceof Error ? r.reason.message : r.reason);
+      return admin.from('scout_creators').update({ status: 'skipped' }).in('id', batches[i].map((x) => x.id));
+    }));
+    await keeping;
     return false;
   }
   const { data: toWrite } = await admin.from('scout_creators').select(ROW_COLUMNS)
-    .eq('run_id', run.id).eq('status', 'match').is('dm', null).order('score', { ascending: false }).limit(WRITE_BATCH * 2);
+    .eq('run_id', run.id).eq('status', 'match').is('dm', null).order('score', { ascending: false }).limit(WRITE_BATCH * WRITE_PARALLEL);
   if (toWrite?.length) {
-    const batches: Row[][] = [];
-    for (let i = 0; i < toWrite.length; i += WRITE_BATCH) batches.push(toWrite.slice(i, i + WRITE_BATCH) as Row[]);
+    const batches = chunks(toWrite as Row[], WRITE_BATCH);
     const results = await Promise.allSettled(batches.map((b) => writeBatch(admin, run, ctx, b)));
     let wrote = false;
     for (const r of results) {
@@ -789,7 +996,7 @@ async function vetStep(admin: SupabaseClient, run: ScoutRun): Promise<boolean> {
 
 async function countsOf(admin: SupabaseClient, runId: string): Promise<{ vetted: number; matches: number }> {
   const [{ count: vetted }, { count: matches }] = await Promise.all([
-    admin.from('scout_creators').select('id', { count: 'exact', head: true }).eq('run_id', runId).neq('status', 'vetting'),
+    admin.from('scout_creators').select('id', { count: 'exact', head: true }).eq('run_id', runId).not('status', 'in', '(found,vetting)'),
     admin.from('scout_creators').select('id', { count: 'exact', head: true }).eq('run_id', runId).in('status', ['match', 'contacted', 'replied', 'applied', 'joined']),
   ]);
   return { vetted: vetted ?? 0, matches: matches ?? 0 };
@@ -825,15 +1032,18 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
         const plan = await makePlan(admin, run.company_id, run.brief, { platforms: ['tiktok', 'instagram'], seeds: [] });
         run.plan = plan;
       }
-      const search = await startSearch(run.plan as ScoutPlan);
-      await save(admin, run, { plan: run.plan, status: 'searching', jobs: { search }, lease_until: null });
+      const { started, left } = await launch(searchQueue(run.plan as ScoutPlan), []);
+      await save(admin, run, { plan: run.plan, status: 'searching', jobs: { search: started, queue: left }, lease_until: null });
       return;
     }
 
     if (run.status === 'searching') {
       const search = run.jobs.search ?? [];
-      if (!(await settle(search))) {
-        await save(admin, run, { jobs: { ...run.jobs, search }, lease_until: null });
+      await settle(search);
+      const { started, left } = await launch(run.jobs.queue ?? [], search);
+      search.push(...started);
+      if (left.length || !search.every((j) => FINISHED.has(j.status))) {
+        await save(admin, run, { jobs: { ...run.jobs, search, queue: left }, lease_until: null });
         return;
       }
       const { shortlist, posts, accounts } = await collect(admin, { ...run, jobs: { ...run.jobs, search } });
@@ -844,9 +1054,9 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
         });
         return;
       }
-      const enrich = await startEnrich(shortlist);
+      const first = await launch(enrichQueue(shortlist), []);
       await save(admin, run, {
-        status: 'enriching', jobs: { search, enrich, shortlist },
+        status: 'enriching', jobs: { search, enrich: first.started, queue: first.left, shortlist },
         counts: { posts, accounts, shortlisted: shortlist.length }, lease_until: null,
       });
       return;
@@ -854,12 +1064,15 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
 
     if (run.status === 'enriching') {
       const enrich = run.jobs.enrich ?? [];
-      if (!(await settle(enrich))) {
-        await save(admin, run, { jobs: { ...run.jobs, enrich }, lease_until: null });
+      await settle(enrich);
+      const { started, left } = await launch(run.jobs.queue ?? [], enrich);
+      enrich.push(...started);
+      if (left.length || !enrich.every((j) => FINISHED.has(j.status))) {
+        await save(admin, run, { jobs: { ...run.jobs, enrich, queue: left }, lease_until: null });
         return;
       }
       const list = await mergeEnrich({ ...run, jobs: { ...run.jobs, enrich } });
-      const saved = await saveEnriched(admin, run, list);
+      const saved = await saveFound(admin, run, list);
       await save(admin, run, {
         status: 'vetting', jobs: { search: run.jobs.search, enrich },
         counts: { ...run.counts, shortlisted: saved }, lease_until: null,
@@ -870,10 +1083,11 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
     if (run.status === 'vetting') {
       // Keep going while there is time left in the lease.
       const t0 = Date.now();
-      let finished = await vetStep(admin, run);
+      const ctx = (await companyContext(admin, run.company_id)).text;
+      let finished = await vetStep(admin, run, ctx);
       while (!finished && Date.now() - t0 < 40_000) {
         await admin.from('scout_runs').update({ lease_until: new Date(Date.now() + LEASE_MS).toISOString() }).eq('id', run.id);
-        finished = await vetStep(admin, run);
+        finished = await vetStep(admin, run, ctx);
       }
       const c = await countsOf(admin, run.id);
       await save(admin, run, {
