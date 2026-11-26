@@ -4,13 +4,13 @@ import { useRef, type ReactElement } from 'react';
 import { ScrollView, StyleSheet, Text, View, type RefreshControlProps, type ScrollViewInstance } from 'react-native';
 import { useScrollToTop } from 'expo-router';
 
-import { credit, signupsLabel, fmt, sales } from '../../../../lib/v2-format';
+import { creditLine, fmt, type SalesView } from '../../../../lib/v2-format';
 import type { V2Creator } from '../../../../lib/v2-posts';
 import { color, text } from '../../../../theme/v2';
 import { Avatar, Icon, Press } from '../../../v2';
 import { CreatorsButton } from './CreatorsButton';
 
-export function CreatorsPane({ creators, onCreator, onManage, stripeConnected = false, bottomInset, refreshControl }: { /** Stripe is linked: rows show each creator's code and the sales on it. */ stripeConnected?: boolean; creators: V2Creator[]; onCreator: (id: string) => void; /** Pushes the roster, where Invite lives. */ onManage?: () => void; bottomInset: number; refreshControl?: ReactElement<RefreshControlProps> }) {
+export function CreatorsPane({ creators, onCreator, onManage, view = { signups: false, sales: false }, bottomInset, refreshControl }: { /** Which of sign-ups and sales this viewer sees on each row. */ view?: SalesView; creators: V2Creator[]; onCreator: (id: string) => void; /** Pushes the roster, where Invite lives. */ onManage?: () => void; bottomInset: number; refreshControl?: ReactElement<RefreshControlProps> }) {
   const ranked = creators.slice().sort((a, b) => b.views - a.views);
   const ref = useRef<ScrollViewInstance>(null);
   useScrollToTop(ref);
@@ -37,11 +37,11 @@ export function CreatorsPane({ creators, onCreator, onManage, stripeConnected = 
             </Text>
             <Text numberOfLines={1} style={text.meta}>
               {c.posts} {c.posts === 1 ? 'post' : 'posts'}
-              {stripeConnected ? ` · ${c.code ?? 'no code yet'}` : ''}
+              {(view.signups || view.sales) && c.code ? ` · ${c.code}` : ''}
             </Text>
-            {stripeConnected && (c.salesCents > 0 || c.signups > 0) ? (
+            {creditLine(view, c.salesCents, c.signups) ? (
               <Text numberOfLines={1} style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: color.green }}>
-                {[c.salesCents > 0 ? `${sales(c.salesCents)} sales` : null, c.signups > 0 ? signupsLabel(c.signups) : null].filter(Boolean).join(' · ')}
+                {creditLine(view, c.salesCents, c.signups)}
               </Text>
             ) : null}
           </View>

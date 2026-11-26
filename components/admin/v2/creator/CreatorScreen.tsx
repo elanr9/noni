@@ -12,6 +12,7 @@ import { color, shadow } from '../../../../theme/v2';
 import { Avatar, Button, Field, Icon, IconToggle, Press, Screen, Sheet, Skeleton, TabPane, TextButton } from '../../../v2';
 import { LoadError, StateCard } from '../posts/LoadError';
 import { useV2Failed } from '../posts/useV2Refresh';
+import { useSalesView } from '../useSalesView';
 import { PostCard } from '../posts/PostCard';
 import { DayCell, HOT_VIEWS, WeekCard, weekDays, type DayMark } from '../posts/WeekCard';
 
@@ -84,7 +85,7 @@ export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPo
   const [k, setK] = useState(0);
   const [sel, setSel] = useState<Date | null>(null);
   const [grid, setGrid] = useState(false);
-  const stripeConnected = useV2Data((s) => s.stripeConnected);
+  const view = useSalesView();
   const setCreatorCode = useV2Data((s) => s.setCreatorCode);
   const [codeOpen, setCodeOpen] = useState(false);
   const [codeDraft, setCodeDraft] = useState('');
@@ -207,7 +208,7 @@ export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPo
           <Figure v={fmt(likes)} label="likes" />
           <Figure v={live.length} label="posts" />
         </View>
-        {onMessage && stripeConnected && c ? (
+        {onMessage && c && (c.code ? view.any : view.sales) ? (
           <Press
             accessibilityRole="button"
             accessibilityLabel={c.code ? `Promo code ${c.code}` : 'Add a promo code'}
@@ -223,7 +224,7 @@ export function CreatorScreen({ id, onMessage, onSettings, tabRoot = false, onPo
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text numberOfLines={1} style={styles.codeTitle}>
-                {c.code ? `${sales(c.salesCents)} sales · ${signupsLabel(c.signups)}` : 'Add a promo code'}
+                {c.code ? [view.sales ? `${sales(c.salesCents)} sales` : null, view.signups ? signupsLabel(c.signups) : null].filter(Boolean).join(' · ') : 'Add a promo code'}
               </Text>
               <Text numberOfLines={1} style={styles.codeMeta}>
                 {c.code ? `On code ${c.code}` : 'See the sales this creator brings in'}

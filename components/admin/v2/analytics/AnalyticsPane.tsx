@@ -5,7 +5,7 @@ import { useMemo, useState, type ReactElement } from 'react';
 import { ScrollView, StyleSheet, Text, View, type RefreshControlProps } from 'react-native';
 
 import type { AnalyticsDay } from '../../../../lib/analytics-api';
-import { credit, signupsLabel, fmt, sales, shortDate } from '../../../../lib/v2-format';
+import { credit, creditLine, fmt, sales, shortDate, type SalesView } from '../../../../lib/v2-format';
 import type { V2Post } from '../../../../lib/v2-posts';
 import { color, radius, text } from '../../../../theme/v2';
 import { Card, Icon, PillTabs, Press, TabPane } from '../../../v2';
@@ -19,17 +19,14 @@ export interface AnalyticsPaneProps {
   days: AnalyticsDay[];
   onPost: (id: string) => void;
   onSeeAll: () => void;
-  /** The company linked Stripe on the web: the hero adds sign-ups and sales from creator codes. */
-  stripeConnected?: boolean;
-  /** At least one creator has a promo code. */
-  hasCodes?: boolean;
-  /** Opens the Creators pane, where codes are set. */
-  onCodes?: () => void;
+  /** Which of sign-ups and sales this viewer sees. The hero strip holds both, one, or is gone. */
+  view?: SalesView;
   bottomInset: number;
   /** Pull to refresh; the pane still fits the screen without scrolling. */
   refreshControl?: ReactElement<RefreshControlProps>;
 }
 
+const NO_SALES: SalesView = { signups: false, sales: false };
 const HERO_GRADIENT = `linear-gradient(140deg, ${color.blue} 0%, ${color.blueDeep} 100%)`;
 
 function Arrow({ dir, on, onPress }: { dir: 'left' | 'right'; on: boolean; onPress: () => void }) {
@@ -40,7 +37,7 @@ function Arrow({ dir, on, onPress }: { dir: 'left' | 'right'; on: boolean; onPre
   );
 }
 
-export function AnalyticsPane({ posts, days, onPost, onSeeAll, stripeConnected = false, hasCodes = false, onCodes, bottomInset, refreshControl }: AnalyticsPaneProps) {
+export function AnalyticsPane({ posts, days, onPost, onSeeAll, view = NO_SALES, bottomInset, refreshControl }: AnalyticsPaneProps) {
   const [range, setRange] = useState<Range>('week');
   const [off, setOff] = useState(0);
   const [sel, setSel] = useState<number | null>(null);
@@ -96,25 +93,23 @@ export function AnalyticsPane({ posts, days, onPost, onSeeAll, stripeConnected =
             <Text style={styles.bigLabel}>{inPeriod.length === 1 ? 'post' : 'posts'}</Text>
           </View>
         </TabPane>
-        {stripeConnected && hasCodes ? (
-          <View style={styles.heroSales}>
-            <View style={styles.heroSale}>
-              <Icon name="person_add" size={16} color={color.white} />
-              <Text style={styles.heroSaleNum}>{credit(sold.codedSignups)}</Text>
-              <Text style={styles.heroSaleLabel}>{sold.codedSignups === 1 ? 'sign-up' : 'sign-ups'}</Text>
-            </View>
-            <View style={styles.heroSale}>
-              <Icon name="payments" size={16} color={color.white} />
-              <Text style={styles.heroSaleNum}>{sales(sold.codedSalesCents)}</Text>
-              <Text style={styles.heroSaleLabel}>sales</Text>
-            </View>
-          </View>
-        ) : stripeConnected ? (
-          <Press accessibilityRole="button" onPress={onCodes} style={styles.heroHint}>
-            <Icon name="payments" size={16} color={color.white} />
-            <Text style={styles.heroHintText}>Give creators a promo code to see sales by post</Text>
-            <Icon name="chevron_right" size={18} color={color.white} />
-          </Press>
+        {view.signups || view.sales ? (
+          <TabPane k={periodKey} style={styles.heroSales}>
+            {view.signups ? (
+              <View style={styles.heroSale}>
+                <Icon name="person_add" size={16} color={color.white} />
+                <Text style={styles.heroSaleNum}>{credit(sold.signups)}</Text>
+                <Text style={styles.heroSaleLabel}>{Math.round(sold.signups) === 1 ? 'sign-up' : 'sign-ups'}</Text>
+              </View>
+            ) : null}
+            {view.sales ? (
+              <View style={styles.heroSale}>
+                <Icon name="payments" size={16} color={color.white} />
+                <Text style={styles.heroSaleNum}>{sales(sold.salesCents)}</Text>
+                <Text style={styles.heroSaleLabel}>sales</Text>
+              </View>
+            ) : null}
+          </TabPane>
         ) : null}
       </View>
 
@@ -149,9 +144,9 @@ export function AnalyticsPane({ posts, days, onPost, onSeeAll, stripeConnected =
                 <Text numberOfLines={1} style={{ fontSize: 12, lineHeight: 16, fontWeight: '500', color: color.grey4 }}>
                   {p.creatorName} {'·'} {shortDate(p.date)}
                 </Text>
-                {stripeConnected && (p.signups > 0 || p.salesCents > 0) ? (
+                {creditLine(view, p.salesCents, p.signups) ? (
                   <Text numberOfLines={1} style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: color.green }}>
-                    {[p.salesCents > 0 ? `${sales(p.salesCents)} sales` : null, p.signups > 0 ? signupsLabel(p.signups) : null].filter(Boolean).join(' · ')}
+                    {creditLine(view, p.salesCents, p.signups)}
                   </Text>
                 ) : null}
               </View>
@@ -176,12 +171,10 @@ const styles = StyleSheet.create({
   heroNums: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', flexDirection: 'row', gap: 12, paddingTop: 12 },
   big: { fontSize: 36, lineHeight: 40, fontWeight: '800', letterSpacing: -1, color: color.white, fontVariant: ['tabular-nums'] },
   bigLabel: { fontSize: 13, lineHeight: 18, fontWeight: '500', color: color.white, opacity: 0.85 },
-  heroSales: { flexDirection: 'row', gap: 12, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.22)' },
+  heroSales: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', flexDirection: 'row', gap: 12, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.22)' },
   heroSale: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
   heroSaleNum: { fontSize: 17, lineHeight: 22, fontWeight: '800', color: color.white, fontVariant: ['tabular-nums'] },
   heroSaleLabel: { fontSize: 13, lineHeight: 18, fontWeight: '500', color: color.white, opacity: 0.85 },
-  heroHint: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.22)' },
-  heroHintText: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '600', color: color.white },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   rowLine: { borderTopWidth: 1, borderTopColor: color.grey1 },
 });

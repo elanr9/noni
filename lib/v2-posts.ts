@@ -96,11 +96,15 @@ type DataState = {
   days: AnalyticsDay[];
   /** The company linked Stripe on the web: sign-ups and sales exist. */
   stripeConnected: boolean;
+  /** Stripe itself is linked: sales in dollars exist. */
+  salesConnected: boolean;
+  /** Dev preview only: stands in for the signed in manager's access. */
+  previewAccess: { viewSignups: boolean; viewFinancials: boolean } | null;
   loaded: boolean;
   loading: boolean;
   error: string | null;
   load(companyId: string, force?: boolean): Promise<void>;
-  seed(data: { posts: V2Post[]; creators: V2Creator[]; days: AnalyticsDay[]; stripeConnected?: boolean }): void;
+  seed(data: { posts: V2Post[]; creators: V2Creator[]; days: AnalyticsDay[]; stripeConnected?: boolean; salesConnected?: boolean }): void;
   /** Sets or clears a creator's promo code. Returns an error message, or null when saved. */
   setCreatorCode(creatorId: string, code: string): Promise<string | null>;
 };
@@ -124,6 +128,8 @@ export const useV2Data = create<DataState>((set, get) => ({
   creators: [],
   days: [],
   stripeConnected: false,
+  salesConnected: false,
+  previewAccess: null,
   loaded: false,
   loading: false,
   error: null,
@@ -256,7 +262,7 @@ export const useV2Data = create<DataState>((set, get) => ({
           };
         });
 
-      set({ posts, creators, days: analytics.days, stripeConnected: analytics.stripeConnected, loaded: true, loading: false });
+      set({ posts, creators, days: analytics.days, stripeConnected: analytics.stripeConnected, salesConnected: analytics.salesConnected, loaded: true, loading: false });
     } catch (e) {
       set({ loading: false, loaded: true, error: e instanceof Error ? e.message : 'Could not load' });
     }
@@ -266,7 +272,7 @@ export const useV2Data = create<DataState>((set, get) => ({
   },
 
   seed(data) {
-    set({ ...data, stripeConnected: data.stripeConnected ?? false, loaded: true, loading: false, companyId: get().companyId ?? 'preview' });
+    set({ ...data, stripeConnected: data.stripeConnected ?? false, salesConnected: data.salesConnected ?? data.stripeConnected ?? false, loaded: true, loading: false, companyId: get().companyId ?? 'preview' });
   },
 
   async setCreatorCode(creatorId, raw) {

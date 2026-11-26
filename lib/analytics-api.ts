@@ -79,6 +79,8 @@ export type CompanyAnalytics = {
   payouts: PayoutDay[];
   /** Sign-ups and sales exist: the company linked Stripe on the web, or its own app reports sign-ups. */
   stripeConnected: boolean;
+  /** Stripe itself is linked: sales in dollars exist. Sign-ups alone can come from the company's own app. */
+  salesConnected: boolean;
   /** Sign-ups and sales on each creator's code, by creator id. */
   creatorSales: Map<string, { signups: number; salesCents: number }>;
 };
@@ -624,6 +626,7 @@ export async function fetchCompanyAnalytics(
   // The connect date is a courtesy read: a failure hides sales, never the views.
   // Either source counts: Stripe linked on the web, or the company's own app
   // reporting sign-ups.
-  const stripeConnected = (!connectedRes.error && !!connectedRes.data) || (!trackingRes.error && trackingRes.data === true);
-  return { posts, days, totals, payouts, stripeConnected, creatorSales };
+  const salesConnected = !connectedRes.error && !!connectedRes.data;
+  const stripeConnected = salesConnected || (!trackingRes.error && trackingRes.data === true);
+  return { posts, days, totals, payouts, stripeConnected, salesConnected, creatorSales };
 }

@@ -16,6 +16,7 @@ import { Avatar, Icon, InstagramFill, InstagramMark, Press, Screen, Skeleton, Ti
 import { usePresence } from '../newbrief/usePresence';
 import { LoadError, StateCard } from './LoadError';
 import { useV2Failed } from './useV2Refresh';
+import { useSalesView } from '../useSalesView';
 import { PostFrame } from './PostFrame';
 
 type Platform = 'all' | 'tt' | 'ig';
@@ -197,7 +198,7 @@ export function BriefPostScreen({ id, onCreator, refreshing = false, onRefresh, 
   const loaded = useV2Data((s) => s.loaded);
   const loading = useV2Data((s) => s.loading);
   const failed = useV2Failed();
-  const stripeConnected = useV2Data((s) => s.stripeConnected);
+  const view = useSalesView();
   const [plat, setPlat] = useState<Platform>('all');
   const [modal, setModal] = useState(false);
   const p = posts.find((x) => x.id === id);
@@ -294,11 +295,11 @@ export function BriefPostScreen({ id, onCreator, refreshing = false, onRefresh, 
             ) : null}
             {plat !== 'all' ? <NoLink copy={noLinkCopy(links, plat)} /> : null}
           </Animated.View>
-          {stripeConnected ? (
+          {(c.code ? view.any : view.sales) ? (
             <View style={[styles.card, { marginTop: 12 }]}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
-                <Mini v={sales(p.salesCents)} label="sales" icon="payments" t="green" />
-                <Mini v={credit(p.signups)} label="sign-ups" icon="person_add" t="green" />
+                {view.sales ? <Mini v={sales(p.salesCents)} label="sales" icon="payments" t="green" /> : null}
+                {view.signups ? <Mini v={credit(p.signups)} label={p.signups > 0 && Math.round(p.signups) <= 1 ? 'sign-up' : 'sign-ups'} icon="person_add" t="green" /> : null}
               </View>
               <Text style={{ marginTop: 12, fontSize: 12, lineHeight: 17, fontWeight: '500', color: color.grey4 }}>
                 {c.code

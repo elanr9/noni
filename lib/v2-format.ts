@@ -33,6 +33,15 @@ export function signupsLabel(n: number): string {
   return `${credit(n)} ${n > 0 && Math.round(n) <= 1 ? 'sign-up' : 'sign-ups'}`;
 }
 
+/** What the viewer may see of sign-ups and sales: the source is connected and the company lets them. */
+export type SalesView = { signups: boolean; sales: boolean };
+
+/** "$840 sales · 3 sign-ups" from the parts the viewer may see that are above zero, or null with nothing to say. */
+export function creditLine(view: SalesView, salesCents: number, signups: number): string | null {
+  const parts = [view.sales && salesCents > 0 ? `${sales(salesCents)} sales` : null, view.signups && signups > 0 ? signupsLabel(signups) : null].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
 export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 export const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;

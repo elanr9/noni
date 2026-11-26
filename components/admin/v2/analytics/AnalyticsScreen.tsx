@@ -11,6 +11,7 @@ import { ContextRow } from '../../../shared/ContextRow';
 import { Icon, Press, Skeleton, TabPane, UnderlineTabs, useTabBarInset } from '../../../v2';
 import { LoadError } from '../posts/LoadError';
 import { useV2Failed } from '../posts/useV2Refresh';
+import { useSalesView } from '../useSalesView';
 import { AnalyticsPane } from './AnalyticsPane';
 import { CreatorsPane } from './CreatorsPane';
 import { scopedPosts } from './periods';
@@ -45,7 +46,7 @@ export function AnalyticsScreen({ onSettings, onCreators, onCreator, onPost, ref
   const posts = useV2Data((s) => s.posts);
   const creators = useV2Data((s) => s.creators);
   const days = useV2Data((s) => s.days);
-  const stripeConnected = useV2Data((s) => s.stripeConnected);
+  const view = useSalesView();
   const loaded = useV2Data((s) => s.loaded);
   // A retry after a failure has nothing to show yet: skeleton, never zeros.
   const empty = useV2Data((s) => s.loading && s.posts.length === 0 && s.creators.length === 0);
@@ -85,11 +86,11 @@ export function AnalyticsScreen({ onSettings, onCreators, onCreator, onPost, ref
         </View>
       ) : tab === 'analytics' ? (
         <TabPane k="a">
-          <AnalyticsPane posts={live} days={days} onPost={onPost} onSeeAll={() => setTab('posts')} stripeConnected={stripeConnected} hasCodes={creators.some((c) => !!c.code)} onCodes={() => setTab('creators')} bottomInset={bottomInset} refreshControl={refresh} />
+          <AnalyticsPane posts={live} days={days} onPost={onPost} onSeeAll={() => setTab('posts')} view={view} bottomInset={bottomInset} refreshControl={refresh} />
         </TabPane>
       ) : tab === 'creators' ? (
         <TabPane k="c">
-          <CreatorsPane creators={creators} onCreator={onCreator} onManage={onCreators} stripeConnected={stripeConnected} bottomInset={bottomInset} refreshControl={refresh} />
+          <CreatorsPane creators={creators} onCreator={onCreator} onManage={onCreators} view={view} bottomInset={bottomInset} refreshControl={refresh} />
         </TabPane>
       ) : (
         <TabPane k="p">

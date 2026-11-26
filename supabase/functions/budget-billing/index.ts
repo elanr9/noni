@@ -1,30 +1,36 @@
-// budget-billing: the monthly creator budget, and the plan link ops sends
-// after the call.
+// budget-billing: the monthly creator budget invoice, and the plan link ops
+// sends after the call.
 //
-// Cron (x-cron-secret, every 15 minutes, migration 157): for every company
-// whose budget_next_invoice_at has come round, bills that month's creator
-// budget. Leftover rolls over: what is billed is the agreed budget minus
-// what is still on the balance, minus any earlier budget bill not paid yet.
-// A company with nothing to top up gets a "skipped" row and no bill. The
-// bill is charged to the card saved at checkout; without one, Stripe emails
-// an invoice due in 7 days. The paid invoice (metadata kind "budget") is
-// credited to the balance by the noni-web Stripe webhook.
+// The budget is agreed on a call and saved by ops. Each calendar month ops
+// goes through the Invoices page in the ops console and sends every
+// company its invoice: nothing is billed until ops presses Send. Leftover
+// carries over: the invoice is the agreed budget minus what is still on the
+// balance, minus any earlier budget invoice not paid yet. A company whose
+// balance already covers the budget gets a "skipped" row and no invoice.
+// The invoice is charged to the card saved at checkout; without one, Stripe
+// emails an invoice due in 7 days. The paid invoice (metadata kind "budget")
+// is credited to the balance by the noni-web Stripe webhook, and creator pay
+// is taken from that balance.
 //
 // Platform ops (user JWT):
-//   { action: "bill_now", company_id }   bill this month now
+//   { action: "send_month", company_id, period? }
+//                                       send that month's invoice (period is
+//                                       the month's first day, default now)
 //   { action: "send_offer", company_id, lines: string[] }
 //                                       email the admin the link to start
 //                                       the plan agreed on the call
 //
-// Safe to repeat: one company_budget_invoices row per company per period,
-// the period is claimed by moving budget_next_invoice_at forward with a
-// compare-and-set, and Stripe calls carry idempotency keys.
+// Cron (x-cron-secret, every 15 minutes): only finishes invoices ops already
+// sent that Stripe refused or a crashed run left half made.
+//
+// Safe to repeat: one company_budget_invoices row per company per month,
+// and Stripe calls carry idempotency keys.
 
 import Stripe from 'npm:stripe@17';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
 import { sendEmail } from '../_shared/email.ts';
-import { budgetTopUp, nextPeriod } from '../_shared/budget.ts';
+import { budgetTopUp, monthStart, nextMonthStart } from '../_shared/budget.ts';
 
 const WEB_URL = 'https://www.usenoni.app';
 const BILLABLE = new Set(['active', 'trialing']);
@@ -41,11 +47,10 @@ type BillingRow = {
   monthly_budget_cents: number;
   subscription_status: string;
   billing_simulated: boolean;
-  budget_next_invoice_at: string | null;
 };
 
 const BILLING_COLUMNS =
-  'company_id, stripe_customer_id, stripe_subscription_id, credit_balance_cents, monthly_budget_cents, subscription_status, billing_simulated, budget_next_invoice_at';
+  'company_id, stripe_customer_id, stripe_subscription_id, credit_balance_cents, monthly_budget_cents, subscription_status, billing_simulated';
 
 function stripeClient(): Stripe {
   const key = Deno.env.get('STRIPE_SECRET_KEY');
@@ -115,16 +120,22 @@ async function ensureCustomer(
 
 type Outcome = { company_id: string; period: string; status: string; amount_cents?: number; error?: string };
 
-/** Bills one period for one company. The period row is the lock: a second
-    run for the same period finds it and stops, unless it failed before. */
-async function billPeriod(admin: SupabaseClient, stripe: Stripe, row: BillingRow, period: string): Promise<Outcome> {
+/** Sends one month's invoice to one company. The month's row is the lock: a
+    second send for the same month finds it and stops, unless it failed
+    before. `month` is the month's first day; a row made on another day of
+    that month (the older per company billing day) counts as that month's. */
+async function billPeriod(admin: SupabaseClient, stripe: Stripe, row: BillingRow, month: string): Promise<Outcome> {
   const budget = row.monthly_budget_cents;
   const { data: existing } = await admin
     .from('company_budget_invoices')
-    .select('id, status, updated_at')
+    .select('id, status, updated_at, period_start')
     .eq('company_id', row.company_id)
-    .eq('period_start', period)
+    .gte('period_start', month)
+    .lt('period_start', nextMonthStart(month))
+    .order('period_start', { ascending: true })
+    .limit(1)
     .maybeSingle();
+  const period = existing?.period_start ?? month;
   /* A failed bill is retried; so is one a crashed run left half made (the
      Stripe idempotency keys stop it billing twice). */
   const stale = existing?.status === 'billing' && Date.parse(existing.updated_at) < Date.now() - 30 * 60_000;
@@ -239,51 +250,9 @@ async function billPeriod(admin: SupabaseClient, stripe: Stripe, row: BillingRow
   }
 }
 
-/** Claims the company's current period by moving its next date a month on,
-    then bills it. A run that loses the race does nothing. */
-async function billDue(admin: SupabaseClient, stripe: Stripe, row: BillingRow): Promise<Outcome | null> {
-  const at = row.budget_next_invoice_at;
-  if (!at) return null;
-  if (row.monthly_budget_cents <= 0 || !BILLABLE.has(row.subscription_status) || row.billing_simulated) {
-    /* Nothing to bill now: hold the date so it bills once it applies. */
-    return null;
-  }
-  const { data: first } = await admin
-    .from('company_budget_invoices')
-    .select('period_start')
-    .eq('company_id', row.company_id)
-    .order('period_start', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const anchorDay = first ? new Date(`${first.period_start}T00:00:00Z`).getUTCDate() : new Date(at).getUTCDate();
-
-  const { data: claimed } = await admin
-    .from('company_billing')
-    .update({ budget_next_invoice_at: nextPeriod(at, anchorDay) })
-    .eq('company_id', row.company_id)
-    .eq('budget_next_invoice_at', at)
-    .select('company_id');
-  if (!claimed?.length) return null;
-  return billPeriod(admin, stripe, row, at.slice(0, 10));
-}
-
 async function runCron(admin: SupabaseClient): Promise<Outcome[]> {
   const stripe = stripeClient();
   const out: Outcome[] = [];
-
-  const { data: due, error } = await admin
-    .from('company_billing')
-    .select(BILLING_COLUMNS)
-    .lte('budget_next_invoice_at', new Date().toISOString())
-    .gt('monthly_budget_cents', 0)
-    .in('subscription_status', [...BILLABLE])
-    .eq('billing_simulated', false)
-    .limit(200);
-  if (error) throw error;
-  for (const row of (due ?? []) as BillingRow[]) {
-    const r = await billDue(admin, stripe, row);
-    if (r) out.push(r);
-  }
 
   /* Bills Stripe refused (or a crashed run left) in the last 30 days get another go. */
   const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
@@ -297,7 +266,7 @@ async function runCron(admin: SupabaseClient): Promise<Outcome[]> {
     const { data: row } = await admin.from('company_billing').select(BILLING_COLUMNS).eq('company_id', f.company_id).maybeSingle();
     const r = row as BillingRow | null;
     if (!r || r.monthly_budget_cents <= 0 || !BILLABLE.has(r.subscription_status) || r.billing_simulated) continue;
-    out.push(await billPeriod(admin, stripe, r, f.period_start));
+    out.push(await billPeriod(admin, stripe, r, monthStart(f.period_start)));
   }
   return out;
 }
@@ -318,7 +287,7 @@ Deno.serve(async (req) => {
     if (!caller.platformAdmin) return jsonResponse({ error: 'forbidden' }, 403);
 
     const body = (await req.json().catch(() => null)) as
-      | { action?: string; company_id?: string; lines?: unknown; to?: string; name?: string; invite_token?: string }
+      | { action?: string; company_id?: string; period?: string; lines?: unknown; to?: string; name?: string; invite_token?: string }
       | null;
     const companyId = body?.company_id;
     if (!companyId) return jsonResponse({ error: 'company_id is required' }, 400);
@@ -350,18 +319,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, email: who.email });
     }
 
-    if (body?.action === 'bill_now') {
+    if (body?.action === 'send_month' || body?.action === 'bill_now') {
+      const month = typeof body.period === 'string' && /^\d{4}-\d{2}-01$/.test(body.period) ? body.period : monthStart(new Date().toISOString());
+      if (month > monthStart(new Date().toISOString())) return jsonResponse({ error: 'That month has not started.' }, 400);
       const { data } = await admin.from('company_billing').select(BILLING_COLUMNS).eq('company_id', companyId).maybeSingle();
       const row = data as BillingRow | null;
       if (!row) return jsonResponse({ error: 'No billing for this company yet.' }, 400);
       if (row.monthly_budget_cents <= 0) return jsonResponse({ error: 'Set a monthly creator budget first.' }, 400);
       if (!BILLABLE.has(row.subscription_status)) return jsonResponse({ error: 'The company has no active plan yet.' }, 400);
       if (row.billing_simulated) return jsonResponse({ error: 'This company is in test mode. Add credits from the Test mode tab.' }, 400);
-      /* Bring the date to now; the period it starts is billed right away. */
-      const now = new Date().toISOString();
-      await admin.from('company_billing').update({ budget_next_invoice_at: now }).eq('company_id', companyId);
-      const result = await billDue(admin, stripeClient(), { ...row, budget_next_invoice_at: now });
-      if (result?.status === 'failed') return jsonResponse({ error: result.error ?? 'Stripe refused the bill.' }, 502);
+      const result = await billPeriod(admin, stripeClient(), row, month);
+      if (result.status === 'failed') return jsonResponse({ error: result.error ?? 'Stripe refused the invoice.' }, 502);
       return jsonResponse({ ok: true, result });
     }
 
