@@ -230,7 +230,9 @@ function OtherCard({ c, unread, onPress }: { c: CreatorCampaign; unread?: boolea
   const chip =
     c.kind === 'invited'
       ? { label: 'Invited you', tone: 'purple' as const }
-      : c.kind === 'applied'
+      : c.kind === 'offered'
+        ? { label: 'Sign to start', tone: 'green' as const }
+        : c.kind === 'applied'
         ? { label: 'Applied', tone: 'amber' as const }
         : { label: pastLabel(c.application_status), tone: 'grey' as const };
   return (

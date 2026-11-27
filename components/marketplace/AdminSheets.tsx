@@ -107,13 +107,7 @@ export function CreatorSheet({ creator, photo, listing, busy, onClose, onInvite,
 
       {waiting ? (
         <Block title={`Applied ${dayLabel(c.applied_at) ?? ''}`.trim()}>
-          {c.application_note ? <Text style={[text.body, { marginBottom: 8 }]}>“{c.application_note}”</Text> : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Icon name="verified" size={18} color={color.green} />
-            <Text style={[text.meta, { color: color.green, flex: 1 }]}>
-              Signed your agreement as {c.signed_name ?? name}{c.signed_at ? ` on ${dayLabel(c.signed_at)}` : ''}
-            </Text>
-          </View>
+          {c.application_note ? <Text style={text.body}>“{c.application_note}”</Text> : null}
         </Block>
       ) : null}
 

@@ -16,7 +16,7 @@ import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import { firstName, groupByCreator, pendingAccounts, reviewTotal, useReviewQueue } from '../../../lib/admin-review-queue';
 import { useCompany } from '../../../lib/company-context';
-import { dayLabel, type MarketCreator } from '../../../lib/marketplace';
+import { type MarketCreator } from '../../../lib/marketplace';
 import { decideApplication } from '../../../lib/marketplace-api';
 import { isManagerSetupCompleteFlag } from '../../../lib/profile';
 import { color, radius, shadow, text } from '../../../theme/v2';
@@ -122,10 +122,9 @@ export default function ReviewScreen() {
     const first = firstName(c.full_name?.trim() || 'Creator');
     if (accept) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     void decideApplication(c.application_id, accept)
-      .then((r) => {
+      .then(() => {
         if (!accept) return toast.show(`Declined ${first}`);
-        const due = dayLabel(r.start_date);
-        toast.success(due ? `${first} is on your team. First post due ${due}.` : `${first} is on your team`);
+        toast.success('Agreement sent');
         if (companyId) void load(companyId, { quiet: true });
       })
       .catch((e: unknown) => {

@@ -46,12 +46,22 @@ export async function saveMyResume(patch: Partial<Omit<CreatorResume, 'user_id'>
   return data as CreatorResume;
 }
 
-/** Sign the agreement and apply; on an invite this also joins the company. */
-export async function signAndApply(listingId: string, signedName: string, note: string): Promise<{ status: string; start_date: string | null }> {
+/** Apply to a campaign. Nothing is signed until the company accepts (migration 169). */
+export async function applyToListing(listingId: string, note = ''): Promise<{ status: string; start_date: string | null }> {
   const { data, error } = await db.rpc('apply_to_listing', {
     p_listing_id: listingId,
-    p_signed_name: signedName,
+    p_signed_name: null,
     p_note: note.trim() || null,
+  });
+  fail(error);
+  return data as { status: string; start_date: string | null };
+}
+
+/** Sign the agreement written for this creator, after an accept or an invite, and join the company. */
+export async function signAgreement(applicationId: string, signedName: string): Promise<{ status: string; start_date: string | null }> {
+  const { data, error } = await db.rpc('sign_creator_agreement', {
+    p_application_id: applicationId,
+    p_signed_name: signedName,
   });
   fail(error);
   return data as { status: string; start_date: string | null };

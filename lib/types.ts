@@ -6925,7 +6925,7 @@ export type Database = {
         Returns: boolean
       }
       apply_to_listing: {
-        Args: { p_listing_id: string; p_note?: string; p_signed_name: string }
+        Args: { p_listing_id: string; p_note?: string; p_signed_name?: string }
         Returns: {
           company_id: string
           contract_body: string | null
@@ -7102,6 +7102,13 @@ export type Database = {
           to_make: number
           unread: number
         }[]
+      }
+      creator_contract: {
+        Args: {
+          p_creator: string
+          p_listing: Database["public"]["Tables"]["marketplace_listings"]["Row"]
+        }
+        Returns: string
       }
       creator_earnings_by_company: {
         Args: never
@@ -7848,6 +7855,40 @@ export type Database = {
         Returns: undefined
       }
       shares_company_with: { Args: { p_profile_id: string }; Returns: boolean }
+      sign_creator_agreement: {
+        Args: { p_application_id: string; p_signed_name: string }
+        Returns: {
+          company_id: string
+          contract_body: string | null
+          contract_sha256: string | null
+          contract_title: string | null
+          contract_version: number | null
+          created_at: string
+          creator_id: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          invite_message: string | null
+          invited_by: string | null
+          listing_id: string
+          note: string | null
+          origin: string
+          signed_at: string | null
+          signed_ip: string | null
+          signed_name: string | null
+          signed_user_agent: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_applications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       signup_tracking_on: { Args: never; Returns: boolean }
       slot_publish_time: {
         Args: { p_rank: number; p_total: number }

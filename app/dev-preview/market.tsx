@@ -1,5 +1,5 @@
 // Dev only: the marketplace screens with sample data. ?view= picks one:
-// creator (default), listing, sign, invite, applied, profile, admin, applicants, editor.
+// creator (default), listing, offered, sign, invite, applied, profile, admin, applicants, editor.
 // ?sheet=creator|filters|invite|thread opens a sheet on the admin and applied views.
 import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,7 +12,7 @@ import { ListingScreen } from '../../components/marketplace/ListingScreen';
 import { ThreadSheet } from '../../components/marketplace/MessageThread';
 import { ResumeEditor, type Tab } from '../../components/marketplace/ResumeEditor';
 import { NO_FILTERS, matchesFilters, sortCreators, type CreatorFilters, type CreatorSort, type MarketCreator } from '../../lib/marketplace';
-import { PREVIEW_CAMPAIGNS, PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_LISTING, PREVIEW_RESUME, previewThread } from '../../lib/marketplace-preview';
+import { PREVIEW_CAMPAIGNS, PREVIEW_CREATORS, PREVIEW_FEED, PREVIEW_LISTING, PREVIEW_OFFER_CONTRACT, PREVIEW_RESUME, previewThread } from '../../lib/marketplace-preview';
 
 export default function Preview() {
   const router = useRouter();
@@ -30,8 +30,10 @@ export default function Preview() {
   const [creatorSide] = useState(() => previewThread('creator'));
   const go = (v: string) => router.push({ pathname: '/dev-preview/market', params: { view: v } });
 
-  if (view === 'listing' || view === 'sign' || view === 'invite' || view === 'applied') {
-    const listing = view === 'invite' ? PREVIEW_FEED[1] : view === 'applied' ? PREVIEW_FEED[2] : PREVIEW_FEED[0];
+  if (view === 'listing' || view === 'sign' || view === 'offered' || view === 'invite' || view === 'applied') {
+    // sign and offered: the company accepted, the creator's own agreement is waiting.
+    const offer = { ...PREVIEW_FEED[0], application_id: 'a-offer', application_status: 'offered' as const, contract_body: PREVIEW_OFFER_CONTRACT };
+    const listing = view === 'invite' ? PREVIEW_FEED[1] : view === 'applied' ? PREVIEW_FEED[2] : view === 'sign' || view === 'offered' ? offer : PREVIEW_FEED[0];
     return (
       <ListingScreen
         listing={listing}
@@ -45,7 +47,8 @@ export default function Preview() {
         unread={listing.application_id ? 1 : 0}
         messages={creatorSide}
         initialThread={sheet === 'thread'}
-        onSign={async () => ({ status: listing.application_status === 'invited' ? 'accepted' : 'applied', start_date: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10) })}
+        onApply={async () => ({ status: 'applied', start_date: null })}
+        onSign={async () => ({ status: 'accepted', start_date: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10) })}
       />
     );
   }

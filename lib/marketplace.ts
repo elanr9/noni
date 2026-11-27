@@ -9,7 +9,8 @@
 import { fmt, money } from './v2-format';
 
 export type ListingStatus = 'draft' | 'open' | 'paused' | 'closed';
-export type ApplicationStatus = 'invited' | 'applied' | 'accepted' | 'declined' | 'withdrawn';
+/** 'offered': the company accepted and the creator's agreement is waiting to be signed. */
+export type ApplicationStatus = 'invited' | 'applied' | 'offered' | 'accepted' | 'declined' | 'withdrawn';
 export type Gender = 'female' | 'male' | 'nonbinary' | 'undisclosed';
 export type Experience = 'pro' | 'some' | 'new';
 
@@ -461,6 +462,7 @@ export function spotsLabel(l: Pick<FeedListing, 'spots' | 'spots_left'>): string
 /** Where a creator stands on a listing, as a chip. */
 export function standing(l: Pick<FeedListing, 'application_status' | 'is_member'>): { label: string; tone: 'blue' | 'green' | 'amber' | 'grey' | 'purple' } | null {
   if (l.application_status === 'accepted' || l.is_member) return { label: 'You are in', tone: 'green' };
+  if (l.application_status === 'offered') return { label: 'Sign to start', tone: 'green' };
   if (l.application_status === 'invited') return { label: 'Invited you', tone: 'purple' };
   if (l.application_status === 'applied') return { label: 'Applied', tone: 'amber' };
   if (l.application_status === 'declined') return { label: 'Not this time', tone: 'grey' };
@@ -469,14 +471,14 @@ export function standing(l: Pick<FeedListing, 'application_status' | 'is_member'
 
 /** Feed order: invites first, then the closest niche fit, then the newest. */
 export function orderFeed(rows: FeedListing[]): FeedListing[] {
-  const rank = (l: FeedListing) => (l.application_status === 'invited' ? 2 : 0) + (l.application_status === null && !l.is_member ? 1 : 0);
+  const rank = (l: FeedListing) => (l.application_status === 'offered' ? 4 : 0) + (l.application_status === 'invited' ? 2 : 0) + (l.application_status === null && !l.is_member ? 1 : 0);
   return [...rows].sort(
     (a, b) => rank(b) - rank(a) || b.niche_overlap - a.niche_overlap || (Date.parse(b.opened_at ?? '') || 0) - (Date.parse(a.opened_at ?? '') || 0),
   );
 }
 
 /** One campaign in the creator's own list (rpc creator_campaigns, migration 162). */
-export type CampaignKind = 'active' | 'invited' | 'applied' | 'past';
+export type CampaignKind = 'active' | 'invited' | 'applied' | 'offered' | 'past';
 
 export type CreatorCampaign = {
   kind: CampaignKind;
@@ -513,8 +515,8 @@ export function groupCampaigns(rows: CreatorCampaign[]): CampaignGroups {
       .filter((c) => c.kind === 'active')
       .sort((a, b) => todo(b) - todo(a) || Number(b.is_active) - Number(a.is_active) || a.company_name.localeCompare(b.company_name)),
     applied: rows
-      .filter((c) => c.kind === 'invited' || c.kind === 'applied')
-      .sort((a, b) => Number(b.kind === 'invited') - Number(a.kind === 'invited') || when(b) - when(a)),
+      .filter((c) => c.kind === 'invited' || c.kind === 'applied' || c.kind === 'offered')
+      .sort((a, b) => Number(b.kind !== 'applied') - Number(a.kind !== 'applied') || when(b) - when(a)),
     past: rows.filter((c) => c.kind === 'past').sort((a, b) => when(b) - when(a)),
   };
 }

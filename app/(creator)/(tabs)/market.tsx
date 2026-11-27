@@ -30,7 +30,7 @@ export default function CreatorMarket() {
       setResume(mine);
       setCampaigns(list);
       setFailed(false);
-      void loadThreadUnread(list.filter((c) => c.kind === 'applied' || c.kind === 'invited').map((c) => c.application_id))
+      void loadThreadUnread(list.filter((c) => c.kind === 'applied' || c.kind === 'invited' || c.kind === 'offered').map((c) => c.application_id))
         .then(setMessageUnread)
         .catch(() => undefined);
     } catch {

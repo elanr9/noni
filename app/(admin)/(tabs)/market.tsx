@@ -6,7 +6,7 @@ import { CreatorSheet, FiltersSheet, InviteSheet } from '../../../components/mar
 import { ThreadSheet } from '../../../components/marketplace/MessageThread';
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
-import { NO_FILTERS, dayLabel, type CreatorFilters, type CreatorSort, type Listing, type MarketCreator } from '../../../lib/marketplace';
+import { NO_FILTERS, type CreatorFilters, type CreatorSort, type Listing, type MarketCreator } from '../../../lib/marketplace';
 import { decideApplication, inviteCreator, loadCreators, loadOrMakeListing, loadThreadUnread, rankWithAi, signAvatars } from '../../../lib/marketplace-api';
 
 /** Market tab (company): browse and rank creators, review applicants, reach out. */
@@ -91,9 +91,9 @@ export default function AdminMarket() {
     if (!c.application_id || busy) return;
     setBusy(true);
     try {
-      const r = await decideApplication(c.application_id, accept);
+      await decideApplication(c.application_id, accept);
       const first = c.full_name?.trim().split(/\s+/)[0] || 'They';
-      if (accept) toast.success(`${first} is on your team. First post due ${dayLabel(r.start_date) ?? 'soon'}.`);
+      if (accept) toast.success('Agreement sent');
       else toast.show(`Declined ${first}`);
       setOpenCreator(null);
       await load();

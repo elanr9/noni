@@ -7,10 +7,10 @@ import { Empty, Screen } from '../../../components/v2';
 import { toast } from '../../../components/v2/Toast';
 import { useAuth } from '../../../lib/auth';
 import type { CreatorResume, FeedListing } from '../../../lib/marketplace';
-import { loadFeed, loadMyResume, loadThreadUnread, signAndApply, withdrawApplication } from '../../../lib/marketplace-api';
+import { applyToListing, loadFeed, loadMyResume, loadThreadUnread, signAgreement, withdrawApplication } from '../../../lib/marketplace-api';
 import { color } from '../../../theme/v2';
 
-/** One campaign: read it, sign its agreement, apply. */
+/** One campaign: read it and apply; once accepted, sign the agreement made for you. */
 export default function CreatorListing() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -73,9 +73,15 @@ export default function CreatorListing() {
       onMessagesRead={() => setUnread(0)}
       onBack={() => router.back()}
       onEditProfile={() => router.push('/(creator)/market/profile')}
-      onSign={async (name, note) => {
-        const result = await signAndApply(listing.id, name, note);
-        // An invite joins on the spot: the new company must be in the switcher.
+      onApply={async () => {
+        const result = await applyToListing(listing.id);
+        await load();
+        return result;
+      }}
+      onSign={async (name) => {
+        if (!listing.application_id) throw new Error('There is nothing to sign yet');
+        const result = await signAgreement(listing.application_id, name);
+        // Signing joins on the spot: the new company must be in the switcher.
         if (result.status === 'accepted') await Promise.all([refreshCompanies(), refreshProfile()]).catch(() => undefined);
         return result;
       }}

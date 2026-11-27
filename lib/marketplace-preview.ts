@@ -1,19 +1,23 @@
 /** Sample marketplace data for the dev-preview routes. Never imported by a real screen. */
 import { DEFAULT_TERMS, type CreatorCampaign, type CreatorResume, type FeedListing, type Listing, type MarketCreator, type ThreadMessage } from './marketplace';
 
-const CONTRACT = `This agreement is between Inkbound AI ("the Company") and you ("the Creator"). It starts the day the Company accepts your application.
+const CONTRACT = `1. The work. The Creator makes short videos and posts for the Company from the briefs in Noni and posts them on the Creator's own accounts. The target is 2 to 3 posts a day. The first post is due within 3 days of signing.
 
-1. The work. You make short videos and posts for the Company from the briefs it gives you in Noni, and post them on your own accounts. The target is 2 to 3 posts a day. Your first post is due within 3 days of being accepted.
+2. Pay. Noni tracks views and pays the Creator on the Company's behalf.
+Video: $10 once it is live and has 500 views
+Slideshow: $5 once it is live and has 500 views
+Views: $1 for every 1,000 views in the 30 days after posting, up to $300 a post
+Payout: every Sunday to the Creator's bank
+Only posts approved in Noni are paid. Drafts and unpublished posts are not paid.
 
-2. Pay. You earn $10 for each video and $5 for each slideshow once it is live and has 500 views, plus $1 for every 1,000 views in the first 30 days, up to $300 in view pay per post. Noni pays out to your bank every Sunday.
+3. Approval. Every post is reviewed in Noni before it goes live. Posts stay up for at least 90 days.
 
-3. Approval. Every post is reviewed in Noni before it goes live. Only approved posts are paid. Posts must stay up for at least 90 days.
+4. Content rights. The Creator keeps ownership of the content. The Creator gives the Company a worldwide, royalty free licence with no end date to use, copy, edit and share the content made under this agreement. The Company may repost it on its own social accounts, website and app store pages, run it as paid ads, cut it together with other clips, and add captions, music or its logo.
 
-4. Content rights. You keep ownership of what you make. You give the Company a worldwide, royalty free licence to repost, edit and run your content as ads, with no end date, for the content you make under this agreement.
+12. Ending it. Either side can end this agreement at any time in Noni. Posts approved before it ends are still paid.`;
 
-5. Ending it. Either side can end this agreement at any time in Noni. Posts approved before it ends are still paid.
-
-Typing your name below and tapping Sign has the same effect as a handwritten signature.`;
+/** The agreement as written for one creator once the company accepts. */
+export const PREVIEW_OFFER_CONTRACT = `This Creator Agreement is made on November 26, 2026 between Inkbound AI ("the Company") and Maya Torres ("the Creator") for the campaign "Tattoo ideas in seconds". It starts the day the Creator signs.\n\n${CONTRACT}`;
 
 const day = (n: number) => new Date(Date.now() - n * 864e5).toISOString();
 

@@ -31,7 +31,10 @@ export interface ListingScreenProps {
   defaultName: string;
   /** Start on the signing step (dev preview). */
   initialStep?: Step;
-  onSign: (signedName: string, note: string) => Promise<SignResult>;
+  /** One tap: nothing is signed until the company accepts. */
+  onApply: () => Promise<SignResult>;
+  /** Signs the agreement made for this creator (after an accept or an invite). */
+  onSign: (signedName: string) => Promise<SignResult>;
   onWithdraw: () => Promise<void>;
   onEditProfile: () => void;
   /** Open the company's side of the app after joining. */
@@ -49,10 +52,9 @@ export interface ListingScreenProps {
 
 type Step = 'view' | 'sign' | 'done';
 
-export function ListingScreen({ listing: l, resume, defaultName, initialStep = 'view', onSign, onWithdraw, onEditProfile, onEnterCompany, onBack, unread = 0, onMessagesRead, messages, initialThread = false }: ListingScreenProps) {
+export function ListingScreen({ listing: l, resume, defaultName, initialStep = 'view', onApply, onSign, onWithdraw, onEditProfile, onEnterCompany, onBack, unread = 0, onMessagesRead, messages, initialThread = false }: ListingScreenProps) {
   const [step, setStep] = useState<Step>(initialStep);
   const [name, setName] = useState(defaultName);
-  const [note, setNote] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,9 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   const [seen, setSeen] = useState(false);
 
   const invited = l.application_status === 'invited';
+  const offered = l.application_status === 'offered';
+  // An invite or an accepted application carries this creator's own agreement.
+  const signing = invited || offered;
   const missing = missingToApply(resume);
   const state = standing(l);
 
@@ -69,7 +74,22 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
     setBusy(true);
     setError(null);
     try {
-      const r = await onSign(name.trim().replace(/\s+/g, ' '), note);
+      const r = await onSign(name.trim().replace(/\s+/g, ' '));
+      setResult(r);
+      setStep('done');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not go through. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await onApply();
       setResult(r);
       setStep('done');
     } catch (e) {
@@ -88,12 +108,10 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
           <View style={{ width: 72, height: 72, borderRadius: radius.pill, backgroundColor: color.greenTint, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
             <Icon name="check" size={38} weight={700} color={color.green} />
           </View>
-          <Text style={[text.title, { fontSize: 28, lineHeight: 34, textAlign: 'center' }]}>{joined ? `You are in with ${l.company_name}` : 'Signed and sent'}</Text>
-          <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: 10 }]}>
-            {joined
-              ? `Your agreement is signed.${start ? ` Your first post is due ${start}.` : ''} Briefs are waiting for you.`
-              : `${l.company_name} has your profile and your signed agreement. If they say yes you start right away, nothing more to sign.`}
-          </Text>
+          <Text style={[text.title, { fontSize: 28, lineHeight: 34, textAlign: 'center' }]}>{joined ? `You are in with ${l.company_name}` : 'Applied'}</Text>
+          {joined && start ? (
+            <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: 10 }]}>First post due {start}</Text>
+          ) : null}
         </View>
       </Screen>
     );
@@ -106,7 +124,7 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
         white
         back={() => setStep('view')}
         title={l.contract_title}
-        footer={<Button label={busy ? 'Signing' : invited ? 'Sign and join' : 'Sign and apply'} disabled={!ready} onPress={sign} />}
+        footer={<Button label={busy ? 'Signing' : 'Sign and join'} disabled={!ready} onPress={sign} />}
       >
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: 24 }}>
@@ -118,12 +136,6 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
 
             <Text style={[text.meta, { marginBottom: 6 }]}>Your full legal name</Text>
             <SignatureField value={name} onChange={setName} />
-            {!invited ? (
-              <>
-                <Text style={[text.meta, { marginBottom: 6, marginTop: 4 }]}>Why you (optional)</Text>
-                <Field value={note} onChange={setNote} multiline maxLength={600} placeholder={`One or two lines for ${l.company_name}`} style={{ marginBottom: 0 }} />
-              </>
-            ) : null}
 
             <Press
               onPress={() => setAgreed((v) => !v)}
@@ -146,9 +158,9 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   // ------------------------------------------------------------- the campaign
   const spots = spotsLabel(l);
   const start = dayLabel(l.start_date);
-  const closed = l.status !== 'open' && !invited;
+  const closed = l.status !== 'open' && !signing;
   // One thread per application: there is one to open once the creator applied or was invited.
-  const canMessage = !!l.application_id && (l.application_status === 'applied' || l.application_status === 'invited' || l.application_status === 'accepted');
+  const canMessage = !!l.application_id && (l.application_status === 'applied' || signing || l.application_status === 'accepted');
   let footer: React.ReactNode = null;
   if (l.application_status === 'accepted' || l.is_member) {
     footer = <Button label={`Open ${l.company_name}`} onPress={onEnterCompany} />;
@@ -168,12 +180,12 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
         }}
       />
     );
+  } else if (signing) {
+    footer = <Button label="Sign agreement" onPress={() => setStep('sign')} />;
   } else if (missing.length > 0) {
     footer = <Button label="Finish your profile to apply" variant="secondary" onPress={onEditProfile} />;
   } else if (!closed && l.spots_left !== 0) {
-    footer = <Button label={invited ? 'Read and sign to join' : 'Apply'} onPress={() => setStep('sign')} />;
-  } else if (invited) {
-    footer = <Button label="Read and sign to join" onPress={() => setStep('sign')} />;
+    footer = <Button label={busy ? 'Applying' : 'Apply'} disabled={busy} onPress={apply} />;
   }
 
   return (
@@ -187,13 +199,17 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
         {l.application_status === 'accepted' && start ? (
           <Card style={{ backgroundColor: color.greenTint }}>
             <Text style={[text.row, { color: color.green }]}>First post due {start}</Text>
-            <Text style={[text.meta, { color: color.green }]}>Your agreement is signed. Open {l.company_name} to see your briefs.</Text>
           </Card>
         ) : null}
+        {offered ? (
+          <Card onPress={() => setStep('sign')} style={{ backgroundColor: color.greenTint }}>
+            <Text style={[text.row, { color: color.green }]}>{l.company_name} accepted you</Text>
+          </Card>
+        ) : null}
+        {error && step === 'view' ? <Text style={[text.body, { color: color.pink, marginBottom: 12 }]}>{error}</Text> : null}
         {l.application_status === 'applied' ? (
           <Card style={{ backgroundColor: color.amberTint }}>
             <Text style={[text.row, { color: color.amber }]}>Waiting on {l.company_name}</Text>
-            <Text style={[text.meta, { color: color.amber }]}>You signed {dayLabel(l.signed_at) ?? 'already'}. If they say yes you start with nothing more to sign.</Text>
           </Card>
         ) : null}
         {invited && l.invite_message ? (
@@ -249,12 +265,10 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
             <Icon name="description" size={20} color={color.grey4} />
             <Text style={[text.row, { flex: 1 }]}>{l.contract_title}</Text>
           </View>
-          <ContractText body={l.contract_body} lines={5} />
-          <Text style={[text.meta, { marginTop: 10 }]}>
-            {l.application_status === 'applied' || l.application_status === 'accepted'
-              ? 'You signed this.'
-              : 'You read and sign this when you apply. Get accepted and you start, no back and forth.'}
-          </Text>
+          <ContractText body={l.contract_body} lines={signing ? 8 : 5} />
+          {l.application_status === 'accepted' && l.signed_at ? (
+            <Text style={[text.meta, { marginTop: 10 }]}>Signed {dayLabel(l.signed_at) ?? ''}</Text>
+          ) : null}
         </Card>
       </ScrollView>
       <ThreadSheet

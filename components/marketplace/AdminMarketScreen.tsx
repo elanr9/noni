@@ -242,11 +242,15 @@ function CreatorCard({
         </View>
       ) : scope === 'invited' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
-          <Chip label="Waiting on them" tone="purple" />
+          <Chip label={c.application_status === 'offered' ? 'Signing' : 'Waiting on them'} tone={c.application_status === 'offered' ? 'amber' : 'purple'} />
         </View>
       ) : c.application_status === 'applied' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
           <Chip label={`Applied ${dayLabel(c.applied_at) ?? ''}`.trim()} tone="amber" />
+        </View>
+      ) : c.application_status === 'offered' ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+          <Chip label="Signing" tone="amber" />
         </View>
       ) : c.application_status === 'invited' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
