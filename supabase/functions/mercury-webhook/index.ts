@@ -153,10 +153,11 @@ async function markSent(
     .maybeSingle();
   if (!wallet) throw new Error(`wallet missing for payout ${payout.id}`);
 
-  const { error: balError } = await admin
-    .from('creator_wallets')
-    .update({ pending_cents: Math.max(0, wallet.pending_cents - payout.amount_cents) })
-    .eq('id', wallet.id);
+  const { error: balError } = await admin.rpc('wallet_move', {
+    p_wallet: wallet.id,
+    p_available: 0,
+    p_pending: -payout.amount_cents,
+  });
   if (balError) throw balError;
 
   const { error } = await admin
@@ -198,13 +199,12 @@ async function markFailed(
   });
   if (ledgerError) throw ledgerError;
 
-  const { error: balError } = await admin
-    .from('creator_wallets')
-    .update({
-      available_cents: wallet.available_cents + payout.amount_cents,
-      pending_cents: Math.max(0, wallet.pending_cents - payout.amount_cents),
-    })
-    .eq('id', wallet.id);
+  // Relative, so pay credited while the payout was in flight is kept.
+  const { error: balError } = await admin.rpc('wallet_move', {
+    p_wallet: wallet.id,
+    p_available: payout.amount_cents,
+    p_pending: -payout.amount_cents,
+  });
   if (balError) throw balError;
 
   const { error } = await admin

@@ -76,6 +76,23 @@ async function payCreator(
   testMode = false,
 ): Promise<PayResult> {
   const amountCents = wallet.available_cents;
+
+  // Never send a balance the ledger cannot account for. Every cent in
+  // available_cents has a ledger row behind it (pay credits in, holds out), so
+  // a mismatch means the wallet was changed some other way. It is left unpaid
+  // and reported on the run for a person to look at.
+  const { data: ledgerCents, error: ledgerError } = await admin.rpc('wallet_ledger_balance', {
+    p_company: wallet.company_id,
+    p_creator: wallet.creator_id,
+  });
+  if (ledgerError) throw ledgerError;
+  if (Number(ledgerCents) !== amountCents) {
+    return {
+      outcome: 'rejected',
+      reason: `balance ${amountCents} does not match ledger ${ledgerCents}; not paid`,
+    };
+  }
+
   // A test company can be paid out more than once a day from ops, so its key
   // carries the run time; real payouts stay one per creator per week.
   const idempotencyKey = await computeIdempotencyKey(
@@ -144,10 +161,11 @@ async function payCreator(
   //     real ACH that cleared.
   if (testMode) {
     const now = new Date().toISOString();
-    const { error: settleError } = await admin
-      .from('creator_wallets')
-      .update({ pending_cents: wallet.pending_cents })
-      .eq('id', wallet.id);
+    const { error: settleError } = await admin.rpc('wallet_move', {
+      p_wallet: wallet.id,
+      p_available: 0,
+      p_pending: -amountCents,
+    });
     if (settleError) throw settleError;
     const { error: testError } = await admin
       .from('mercury_payouts')
@@ -189,13 +207,12 @@ async function payCreator(
         mercury_payout_id: payout.id,
         note: reason.slice(0, 500),
       });
-      await admin
-        .from('creator_wallets')
-        .update({
-          available_cents: wallet.available_cents,
-          pending_cents: wallet.pending_cents,
-        })
-        .eq('id', wallet.id);
+      // Relative, so pay credited since the hold is kept.
+      await admin.rpc('wallet_move', {
+        p_wallet: wallet.id,
+        p_available: amountCents,
+        p_pending: -amountCents,
+      });
       await admin
         .from('mercury_payouts')
         .update({ status: 'failed', failure_reason: reason.slice(0, 500) })

@@ -61,7 +61,8 @@ Deno.serve(async (req) => {
           creator_id: caller.userId,
           payout_ready: true,
           payout_rail: 'mercury',
-          mercury_recipient_id: `test-${caller.userId}`,
+          // The column is a uuid, and this id is never sent to Mercury.
+          mercury_recipient_id: caller.userId,
           mercury_invite_status: 'completed',
           mercury_invite_sent_at: now,
           mercury_onboarded_at: now,
@@ -70,6 +71,46 @@ Deno.serve(async (req) => {
       );
       if (upsertError) throw upsertError;
       return jsonResponse({ success: true, already_set_up: true, test_mode: true });
+    }
+
+    // Already set up with Mercury for another company: the same bank account
+    // and tax form cover this one, so there is nothing to fill in again.
+    const { data: other, error: otherError } = await admin
+      .from('creator_wallets')
+      .select('company_id, mercury_recipient_id, mercury_w9_status, mercury_onboarded_at')
+      .eq('creator_id', caller.userId)
+      .eq('payout_ready', true)
+      .eq('payout_rail', 'mercury')
+      .not('mercury_recipient_id', 'is', null)
+      .neq('company_id', caller.companyId);
+    if (otherError) throw otherError;
+    if (other && other.length > 0) {
+      const { data: testCompanies, error: testError } = await admin
+        .from('companies')
+        .select('id')
+        .eq('payout_test_mode', true)
+        .in('id', other.map((w) => w.company_id as string));
+      if (testError) throw testError;
+      const testIds = new Set((testCompanies ?? []).map((c) => c.id as string));
+      // A test company's recipient is a placeholder, never a real Mercury one.
+      const real = other.find((w) => !testIds.has(w.company_id as string));
+      if (real) {
+        const { error: reuseError } = await admin.from('creator_wallets').upsert(
+          {
+            company_id: caller.companyId,
+            creator_id: caller.userId,
+            payout_ready: true,
+            payout_rail: 'mercury',
+            mercury_recipient_id: real.mercury_recipient_id,
+            mercury_invite_status: 'completed',
+            mercury_w9_status: real.mercury_w9_status,
+            mercury_onboarded_at: real.mercury_onboarded_at ?? new Date().toISOString(),
+          },
+          { onConflict: 'company_id,creator_id' },
+        );
+        if (reuseError) throw reuseError;
+        return jsonResponse({ success: true, already_set_up: true });
+      }
     }
 
     await createInviteForCreator(admin, caller.userId, caller.companyId);
