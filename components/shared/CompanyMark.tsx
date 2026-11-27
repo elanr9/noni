@@ -29,7 +29,7 @@ export interface CompanyMarkProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/** Square company logo; first letter on the company tint until a logo exists. */
+/** Square company logo on white; first letter on the company tint until a logo exists. */
 export function CompanyMark({
   companyId,
   name,
@@ -44,17 +44,18 @@ export function CompanyMark({
   const failed = failedUrl !== null && failedUrl === url;
   const r = radius ?? Math.round(size * 0.32);
   const letter = name.trim().charAt(0).toUpperCase() || '?';
+  const showLogo = Boolean(url) && !failed;
 
   return (
     <View
       accessibilityLabel={name}
       style={[
         styles.box,
-        { width: size, height: size, borderRadius: r, backgroundColor: bg },
+        { width: size, height: size, borderRadius: r, backgroundColor: showLogo ? '#FFFFFF' : bg },
         style,
       ]}
     >
-      {url && !failed ? (
+      {url && showLogo ? (
         <Image
           source={{ uri: url }}
           onError={() => setFailedUrl(url)}
