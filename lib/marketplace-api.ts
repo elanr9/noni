@@ -58,13 +58,28 @@ export async function applyToListing(listingId: string, note = ''): Promise<{ st
 }
 
 /** Sign the agreement written for this creator, after an accept or an invite, and join the company. */
-export async function signAgreement(applicationId: string, signedName: string): Promise<{ status: string; start_date: string | null }> {
+export async function signAgreement(applicationId: string, signedName: string, signature: string): Promise<{ status: string; start_date: string | null }> {
   const { data, error } = await db.rpc('sign_creator_agreement', {
     p_application_id: applicationId,
     p_signed_name: signedName,
+    p_signature: signature || null,
   });
   fail(error);
   return data as { status: string; start_date: string | null };
+}
+
+/** The newest agreement waiting on this creator's signature (a company accepted them), if any. */
+export async function loadPendingAgreement(creatorId: string): Promise<{ id: string; listing_id: string } | null> {
+  const { data, error } = await db
+    .from('marketplace_applications')
+    .select('id, listing_id')
+    .eq('creator_id', creatorId)
+    .eq('status', 'offered')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  return data as { id: string; listing_id: string } | null;
 }
 
 /** Every campaign the creator is in, applied to or has left. */

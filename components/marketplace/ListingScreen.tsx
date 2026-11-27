@@ -17,10 +17,11 @@ import {
   type FeedListing,
 } from '../../lib/marketplace';
 import { color, radius, space, text } from '../../theme/v2';
-import { Button, Card, Chip, Field, Icon, Press, Screen } from '../v2';
+import { Button, Card, Chip, Field, Icon, Screen } from '../v2';
 import { CampaignCover, PayBlock } from './CampaignCard';
 import { ThreadSheet, type ThreadSource } from './MessageThread';
 import { ContractText, FactRow, NicheTags, UnreadDot } from './parts';
+import { SignaturePad, isDrawn } from './SignaturePad';
 
 export type SignResult = { status: string; start_date: string | null };
 
@@ -34,7 +35,7 @@ export interface ListingScreenProps {
   /** One tap: nothing is signed until the company accepts. */
   onApply: () => Promise<SignResult>;
   /** Signs the agreement made for this creator (after an accept or an invite). */
-  onSign: (signedName: string) => Promise<SignResult>;
+  onSign: (signedName: string, signature: string) => Promise<SignResult>;
   onWithdraw: () => Promise<void>;
   onEditProfile: () => void;
   /** Open the company's side of the app after joining. */
@@ -53,9 +54,11 @@ export interface ListingScreenProps {
 type Step = 'view' | 'sign' | 'done';
 
 export function ListingScreen({ listing: l, resume, defaultName, initialStep = 'view', onApply, onSign, onWithdraw, onEditProfile, onEnterCompany, onBack, unread = 0, onMessagesRead, messages, initialThread = false }: ListingScreenProps) {
-  const [step, setStep] = useState<Step>(initialStep);
+  // Accepted and not signed yet: the agreement is the first thing they see.
+  const [step, setStep] = useState<Step>(l.application_status === 'offered' ? 'sign' : initialStep);
   const [name, setName] = useState(defaultName);
-  const [agreed, setAgreed] = useState(false);
+  const [signature, setSignature] = useState('');
+  const [drawing, setDrawing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SignResult | null>(null);
@@ -74,7 +77,7 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
     setBusy(true);
     setError(null);
     try {
-      const r = await onSign(name.trim().replace(/\s+/g, ' '));
+      const r = await onSign(name.trim().replace(/\s+/g, ' '), signature);
       setResult(r);
       setStep('done');
     } catch (e) {
@@ -118,16 +121,16 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
   }
 
   if (step === 'sign') {
-    const ready = isFullName(name) && agreed && !busy;
+    const ready = isFullName(name) && isDrawn(signature) && !busy;
     return (
       <Screen
         white
         back={() => setStep('view')}
         title={l.contract_title}
-        footer={<Button label={busy ? 'Signing' : 'Sign and join'} disabled={!ready} onPress={sign} />}
+        footer={<Button label={busy ? 'Submitting' : 'Submit'} disabled={!ready} onPress={sign} />}
       >
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: 24 }}>
+          <ScrollView scrollEnabled={!drawing} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.screen, paddingBottom: 24 }}>
             <CampaignCover campaign={l} round="all" style={{ marginBottom: 12 }} />
             <PayBlock terms={l} />
             <View style={{ backgroundColor: color.grey1, borderRadius: radius.card, padding: 16, marginBottom: 20 }}>
@@ -137,17 +140,8 @@ export function ListingScreen({ listing: l, resume, defaultName, initialStep = '
             <Text style={[text.meta, { marginBottom: 6 }]}>Your full legal name</Text>
             <SignatureField value={name} onChange={setName} />
 
-            <Press
-              onPress={() => setAgreed((v) => !v)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: agreed }}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16 }}
-            >
-              <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: agreed ? color.blue : color.card, borderWidth: agreed ? 0 : 2, borderColor: color.grey3, alignItems: 'center', justifyContent: 'center' }}>
-                {agreed ? <Icon name="check" size={18} weight={700} color={color.white} /> : null}
-              </View>
-              <Text style={[text.body, { flex: 1 }]}>I read this agreement and I agree to it. Typing my name is my signature.</Text>
-            </Press>
+            <Text style={[text.meta, { marginBottom: 6, marginTop: 4 }]}>Signature</Text>
+            <SignaturePad value={signature} onChange={setSignature} onDrawing={setDrawing} />
             {error ? <Text style={[text.body, { color: color.pink }]}>{error}</Text> : null}
           </ScrollView>
         </KeyboardAvoidingView>

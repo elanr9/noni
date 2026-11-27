@@ -9,6 +9,7 @@ import {
 } from '../../lib/active-mode';
 import { useAuth } from '../../lib/auth';
 import { CreatorQueueProvider } from '../../lib/creator-queue';
+import { usePendingAgreement } from '../../lib/pending-agreement';
 import { trackPresence } from '../../lib/presence';
 import { isSetupCompleteFlag, useSetupState } from '../../lib/setup';
 import { color, motion, screenTransition } from '../../theme/v2';
@@ -74,6 +75,9 @@ export default function CreatorLayout() {
     if (presenceCompanyId === null || presenceProfileId === null) return;
     return trackPresence(presenceCompanyId, presenceProfileId);
   }, [presenceCompanyId, presenceProfileId]);
+
+  // A company said yes: the agreement to sign opens first.
+  usePendingAgreement(inCreatorMode ? profile.id : null);
 
   if (loading) return <LoadingScreen />;
   if (!session) return <Redirect href="/(auth)/login" />;

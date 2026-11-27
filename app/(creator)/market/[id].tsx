@@ -78,9 +78,9 @@ export default function CreatorListing() {
         await load();
         return result;
       }}
-      onSign={async (name) => {
+      onSign={async (name, signature) => {
         if (!listing.application_id) throw new Error('There is nothing to sign yet');
-        const result = await signAgreement(listing.application_id, name);
+        const result = await signAgreement(listing.application_id, name, signature);
         // Signing joins on the spot: the new company must be in the switcher.
         if (result.status === 'accepted') await Promise.all([refreshCompanies(), refreshProfile()]).catch(() => undefined);
         return result;

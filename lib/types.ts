@@ -4386,6 +4386,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
@@ -4411,6 +4412,7 @@ export type Database = {
           listing_id: string
           note?: string | null
           origin: string
+          signature_svg?: string | null
           signed_at?: string | null
           signed_ip?: string | null
           signed_name?: string | null
@@ -4436,6 +4438,7 @@ export type Database = {
           listing_id?: string
           note?: string | null
           origin?: string
+          signature_svg?: string | null
           signed_at?: string | null
           signed_ip?: string | null
           signed_name?: string | null
@@ -6943,6 +6946,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
@@ -7186,6 +7190,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
@@ -7316,6 +7321,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
@@ -7856,7 +7862,11 @@ export type Database = {
       }
       shares_company_with: { Args: { p_profile_id: string }; Returns: boolean }
       sign_creator_agreement: {
-        Args: { p_application_id: string; p_signed_name: string }
+        Args: {
+          p_application_id: string
+          p_signature?: string
+          p_signed_name: string
+        }
         Returns: {
           company_id: string
           contract_body: string | null
@@ -7874,6 +7884,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
@@ -8061,6 +8072,7 @@ export type Database = {
           listing_id: string
           note: string | null
           origin: string
+          signature_svg: string | null
           signed_at: string | null
           signed_ip: string | null
           signed_name: string | null
