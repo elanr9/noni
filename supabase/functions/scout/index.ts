@@ -43,6 +43,8 @@ async function startAutoRuns(admin: ReturnType<typeof adminClient>): Promise<voi
     if (!manual) continue;
     if (list.some((r) => ACTIVE.includes(r.status))) continue;
     if (Date.now() - Date.parse(list[0].created_at) < AUTO_EVERY_MS) continue;
+    // The last automatic one failed (Apify out of credit, say): wait for a search someone starts to work again.
+    if (list[0].auto && list[0].status === 'failed') continue;
     const { error } = await admin.from('scout_runs').insert({
       company_id: companyId, brief: manual.brief, plan: {}, status: 'planning', auto: true,
     });
