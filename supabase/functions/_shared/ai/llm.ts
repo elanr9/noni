@@ -167,7 +167,11 @@ export interface LlmClient {
       stream(
         body: StreamParams,
         options?: StreamOptions,
-      ): { finalMessage(): Promise<Message>; readonly request_id?: string | null };
+      ): {
+        finalMessage(): Promise<Message>;
+        readonly request_id?: string | null;
+        on?(event: 'text', listener: (delta: string, snapshot: string) => void): unknown;
+      };
     };
   };
 }
@@ -191,6 +195,15 @@ export type LlmRequest = {
   images?: LlmImage[];
   /** PDFs the model reads natively, pages and pictures included. */
   documents?: LlmDocument[];
+  /**
+   * Index of the context block the files follow. Set when several calls share
+   * the same files and the context up to that block, so the files are read
+   * from the cache: the block's breakpoint moves to the last file. Without it
+   * the files sit after all context and are never cached.
+   */
+  filesAfter?: number;
+  /** Called with each piece of the answer as it is written, and the whole answer so far. */
+  onText?: (delta: string, snapshot: string) => void;
   effort?: Effort;
   maxTokens?: number;
   companyId?: string | null;
@@ -237,7 +250,7 @@ function systemBlocks(system: string): StreamParams['system'] {
  * Effort is part of the cached prefix: keep it fixed per task.
  */
 export function buildRequest(
-  req: Pick<LlmRequest, 'system' | 'context' | 'input' | 'images' | 'documents'> & {
+  req: Pick<LlmRequest, 'system' | 'context' | 'input' | 'images' | 'documents' | 'filesAfter'> & {
     model: string;
     effort: Effort;
     maxTokens: number;
@@ -245,7 +258,28 @@ export function buildRequest(
   },
 ): StreamParams {
   const context = (req.context ?? []).filter((text) => text.trim());
-  const marked = (i: number) => context.length <= 3 || i < 2 || i === context.length - 1;
+  const cached = { cache_control: { type: 'ephemeral' as const } };
+  const files = [
+    ...(req.documents ?? []).map((doc) => ({
+      type: 'document' as const,
+      source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: doc.base64 },
+      ...(doc.title ? { title: doc.title } : {}),
+    })),
+    ...(req.images ?? []).map((img) => ({
+      type: 'image' as const,
+      source: 'url' in img
+        ? { type: 'url' as const, url: img.url }
+        : { type: 'base64' as const, media_type: img.mediaType, data: img.base64 },
+    })),
+  ];
+  // Files placed inside the context take the breakpoint of the block they follow.
+  const after = files.length && req.filesAfter !== undefined && req.filesAfter >= 0 && req.filesAfter < context.length ? req.filesAfter : -1;
+  const marked = (i: number) => i !== after && (context.length <= 3 || i < 2 || i === context.length - 1);
+  const placed = after >= 0 ? files.map((f, i) => (i === files.length - 1 ? { ...f, ...cached } : f)) : files;
+  const blocks = context.flatMap((text, i) => [
+    { type: 'text' as const, text, ...(marked(i) ? cached : {}) },
+    ...(i === after ? placed : []),
+  ]);
   return {
     model: req.model,
     max_tokens: req.maxTokens,
@@ -258,25 +292,7 @@ export function buildRequest(
     messages: [
       {
         role: 'user',
-        content: [
-          ...context.map((text, i) => ({
-            type: 'text' as const,
-            text,
-            ...(marked(i) ? { cache_control: { type: 'ephemeral' as const } } : {}),
-          })),
-          ...(req.documents ?? []).map((doc) => ({
-            type: 'document' as const,
-            source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: doc.base64 },
-            ...(doc.title ? { title: doc.title } : {}),
-          })),
-          ...(req.images ?? []).map((img) => ({
-            type: 'image' as const,
-            source: 'url' in img
-              ? { type: 'url' as const, url: img.url }
-              : { type: 'base64' as const, media_type: img.mediaType, data: img.base64 },
-          })),
-          { type: 'text' as const, text: req.input },
-        ],
+        content: [...blocks, ...(after >= 0 ? [] : files), { type: 'text' as const, text: req.input }],
       },
     ],
     ...fallbackParams(req.model),
@@ -327,9 +343,18 @@ class Run {
   }
 
   /** Sends one request, records it, and turns the stop reasons that are failures into errors. */
-  async send(body: StreamParams): Promise<Message> {
+  async send(body: StreamParams, onText?: LlmRequest['onText']): Promise<Message> {
     // Always streamed: a large max_tokens would otherwise hit HTTP timeouts.
     const stream = this.client.beta.messages.stream(body, { timeout: this.info.timeoutMs, signal: this.signal });
+    if (onText) {
+      stream.on?.('text', (delta, snapshot) => {
+        try {
+          onText(delta, snapshot);
+        } catch (e) {
+          console.error('llm: onText failed', e);
+        }
+      });
+    }
     const message = await stream.finalMessage();
     const u = message.usage;
     const tokens: TokenCounts = {
@@ -441,6 +466,7 @@ async function complete<R>(
         maxTokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
         schema,
       }),
+      req.onText,
     );
     const text = textOf(message);
     if (!text.trim()) throw new LlmInvalidOutputError(`Claude returned no text (stop_reason ${message.stop_reason})`);

@@ -13,20 +13,29 @@ const SAMPLE: [string, BriefType, 'document' | 'new', string][] = [
   ['Stop guessing when to repot', 'Greenscreen', 'new', 'This is what roots look like when they are begging you.'],
 ];
 
+let failedOnce = false;
+
 /** Dev only: the Upload brief flow with canned answers, no session and no model. */
 const api: ImportApi = {
   pick: async () => ({ sources: [{ id: uid(), kind: 'file', name: 'Plantly UGC brief Q4.pdf', uri: 'preview://brief.pdf', mime: 'application/pdf', size: 1_840_000 }], tooLarge: [] }),
-  plan: async (_company, _sources, count) => {
-    await wait(2600);
-    const posts: PlannedPost[] = Array.from({ length: count }, (_, index) => {
-      const [title, type, origin, hook] = SAMPLE[index % SAMPLE.length];
-      return { index, title: index < SAMPLE.length ? title : `${title}, take ${Math.floor(index / SAMPLE.length) + 1}`, type, origin, angle: '', hook };
-    });
-    return { importId: 'preview', summary: 'Read a 6 page brief with three scripted posts and the brand rules, and planned new posts in the same voice.', posts, skipped: [] };
+  plan: async (_company, _sources, handlers = {}) => {
+    await wait(900);
+    handlers.onSources?.([]);
+    await wait(1400);
+    const found: PlannedPost[] = SAMPLE.map(([title, type, origin, hook], index) => ({ index, title, type, origin, angle: '', hook }));
+    for (const post of found) {
+      handlers.onPost?.(post);
+      if (post.index === 1) handlers.onReady?.('preview');
+      await wait(450);
+    }
+    return { importId: 'preview', count: found.length, skipped: [] };
   },
   write: async (_id, post) => {
     await wait(1800 + Math.random() * 3200);
-    if (post.index === 4 && Math.random() < 0.7) throw new Error('preview failure');
+    if (post.index === 4 && !failedOnce) {
+      failedOnce = true;
+      throw new Error('preview failure');
+    }
     const spoken = post.type === 'Talking Head' || post.type === 'Greenscreen';
     const clips = [
       newClip(spoken ? post.hook : '', { onScreen: spoken ? 'I killed six ferns' : post.hook }),
@@ -40,6 +49,7 @@ const api: ImportApi = {
       plan: { title: post.title, phrase: 'how to keep ferns alive', clips, caption: 'How to keep ferns alive when you have killed every one so far.', tags: ['#planttok', '#ferns', '#plantcare'], angle: '', ai: { hooks: [], warnings: [], referenceNote: null, questions: [], draft: null }, declined: null },
     };
   },
+  finish: () => undefined,
 };
 
 export default function ImportBriefPreview() {

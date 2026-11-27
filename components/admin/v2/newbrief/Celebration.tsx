@@ -10,7 +10,7 @@ const CONFETTI = briefs.confetti;
 const BURST = Easing.bezier(0.2, 0.8, 0.3, 1);
 
 /** Blue flood, white disc pops in, the check draws, 18 pieces burst, then the copy rises. */
-export function Celebration({ twin }: { twin: boolean }) {
+export function Celebration({ twin, title, sub }: { twin: boolean; title?: string; sub?: string }) {
   const pop = useSharedValue(0);
   const draw = useSharedValue(60);
   const t1 = useSharedValue(0);
@@ -35,9 +35,9 @@ export function Celebration({ twin }: { twin: boolean }) {
           <AnimatedPath d="M16 33 L27 44 L48 21" stroke={color.blue} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={60} animatedProps={check} />
         </Svg>
       </Animated.View>
-      <Animated.Text style={[{ marginTop: 28, fontSize: 28, lineHeight: 34, fontWeight: '800', letterSpacing: -0.4, textAlign: 'center', color: color.white }, rise1]}>Your post has been created!</Animated.Text>
+      <Animated.Text style={[{ marginTop: 28, fontSize: 28, lineHeight: 34, fontWeight: '800', letterSpacing: -0.4, textAlign: 'center', color: color.white }, rise1]}>{title ?? 'Your post has been created!'}</Animated.Text>
       <Animated.View style={rise2}>
-        <Text style={{ marginTop: 8, fontSize: 15, lineHeight: 20, fontWeight: '500', color: color.white }}>{twin ? 'Saved as Guided and Outline' : 'Saved to Briefs'}</Text>
+        <Text style={{ marginTop: 8, fontSize: 15, lineHeight: 20, fontWeight: '500', color: color.white }}>{sub ?? (twin ? 'Saved as Guided and Outline' : 'Saved to Briefs')}</Text>
       </Animated.View>
     </Animated.View>
   );

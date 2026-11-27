@@ -137,6 +137,21 @@ Deno.test('cache layout: system and each of up to three context blocks end in a 
   assertEquals(breakpoints(body), 4);
 });
 
+Deno.test('cache layout: files placed after a context block take its breakpoint', () => {
+  const body = buildRequest({ ...base, context: ['playbook', 'company and documents', 'this post'], documents: [{ base64: 'AAAA', title: 'b.pdf' }], images: [{ url: 'https://x/y.png' }], filesAfter: 1 });
+  assertEquals(body.messages[0].content, [
+    { type: 'text', text: 'playbook', cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'company and documents' },
+    { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AAAA' }, title: 'b.pdf' },
+    { type: 'image', source: { type: 'url', url: 'https://x/y.png' }, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'this post', cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'IN' },
+  ]);
+  assertEquals(breakpoints(body), 4);
+  // With no files the block keeps its own breakpoint.
+  assertEquals(breakpoints(buildRequest({ ...base, context: ['a', 'b', 'c'], filesAfter: 1 })), 4);
+});
+
 Deno.test('cache layout: more than three context blocks still use four breakpoints', () => {
   const body = buildRequest({ ...base, context: ['a', 'b', 'c', 'd', 'e'] });
   const content = body.messages[0].content as Array<{ text: string; cache_control?: unknown }>;

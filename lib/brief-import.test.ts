@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
 vi.mock('expo-document-picker', () => ({ getDocumentAsync: vi.fn() }));
 vi.mock('expo-file-system', () => ({ File: class {} }));
+vi.mock('expo/fetch', () => ({ fetch: vi.fn() }));
 vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
 import { guidedPlanOf } from './brief-ai';
 import { emptyGuided, outlineTwinId } from './brief-library';
-import { fileSizeLabel, importSaveInput, linkSource, pool, textSource } from './brief-import';
+import { fileSizeLabel, guidedOf, importSaveInput, linkSource, parseSseBlock, pool } from './brief-import';
 
 const answer = (type: 'Talking Head' | 'Slideshow' | 'Long Text') => ({
   title: 'I killed six ferns',
@@ -36,10 +37,11 @@ describe('sources', () => {
     expect(linkSource('')).toBeNull();
   });
 
-  it('takes pasted text once there is enough of it', () => {
-    expect(textSource('too short')).toBeNull();
-    expect(textSource('UGC brief for Fernly\nHook: I killed six ferns')).toMatchObject({ kind: 'text', name: 'UGC brief for Fernly' });
+  it('labels sizes and reads stream events', () => {
     expect([fileSizeLabel(null), fileSizeLabel(900), fileSizeLabel(1_840_000)]).toEqual(['', '1 KB', '1.8 MB']);
+    expect(parseSseBlock('event: post\ndata: {"index":0,"title":"One"}')).toEqual({ event: 'post', data: { index: 0, title: 'One' } });
+    expect(parseSseBlock(': keepalive')).toBeNull();
+    expect(parseSseBlock('event: post\ndata: {"half')).toBeNull();
   });
 });
 
@@ -53,6 +55,14 @@ describe('importSaveInput', () => {
     expect(input.notes).toBe('Search: how to keep ferns alive\nHook: I killed six ferns.\nClip 1: Search Fernly.');
     expect(input.clips?.map((c) => [c.text, c.onScreen, c.cta, c.green])).toEqual([['I killed six ferns.', 'I killed six ferns', false, false], ['Search Fernly.', 'Search Fernly', true, false]]);
     expect(input.g).toMatchObject({ filled: true, phrase: 'how to keep ferns alive', angle: 'For new plant owners.' });
+  });
+
+  it('saves what the manager changed in review', () => {
+    const post = { index: 0, type: 'Talking Head' as const, plan: guidedPlanOf(answer('Talking Head'), emptyGuided(), 'Talking Head') };
+    const g = guidedOf(post);
+    const input = importSaveInput(post, 'b9', { ...g, title: 'Six ferns, one fix', caption: 'New caption.' });
+    expect(input).toMatchObject({ id: 'b9', title: 'Six ferns, one fix', caption: 'New caption.' });
+    expect(input.g?.clips.length).toBe(2);
   });
 
   it('saves a long text post the way Create does, with no twin', () => {

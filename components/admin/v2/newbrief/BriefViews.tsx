@@ -20,8 +20,8 @@ function NotesCard({ label, body, tags }: { label: string; body: string; tags?: 
   );
 }
 
-/** Read-only template: full title, 3-column dark clip cards, Notes and Caption. */
-export function TemplateView({ g, type, onOpenClip }: { g: GuidedState; type: BriefType; onOpenClip: (id: string) => void }) {
+/** Read-only template: full title, 3-column dark clip cards, Notes and Caption. `script` adds what the creator says, clip by clip. */
+export function TemplateView({ g, type, onOpenClip, script }: { g: GuidedState; type: BriefType; onOpenClip: (id: string) => void; script?: boolean }) {
   const { width } = useWindowDimensions();
   const cols = type === 'Long Text' ? 2 : 3;
   const gap = 8;
@@ -40,6 +40,19 @@ export function TemplateView({ g, type, onOpenClip }: { g: GuidedState; type: Br
           </Press>
         ))}
       </View>
+      {script && g.clips.some((c) => /\S/.test(c.text)) ? (
+        <View style={CARD18}>
+          <Label>Script</Label>
+          {g.clips.map((c, i) =>
+            /\S/.test(c.text) ? (
+              <View key={c.id} style={{ gap: 1 }}>
+                <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '700', color: c.cta ? color.blueDeep : color.grey4 }}>{c.cta ? 'CTA' : clipLabel(i, type)}</Text>
+                <Text style={{ fontSize: 15, lineHeight: 21, color: color.ink }}>{c.text}</Text>
+              </View>
+            ) : null,
+          )}
+        </View>
+      ) : null}
       {g.angle ? <NotesCard label="Angle" body={g.angle} /> : null}
       {g.notes ? <NotesCard label="Notes" body={g.notes} /> : null}
       {g.caption ? <NotesCard label="Caption" body={g.caption} tags={g.tags} /> : null}

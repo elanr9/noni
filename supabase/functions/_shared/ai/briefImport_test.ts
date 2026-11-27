@@ -5,7 +5,8 @@ import { expect } from 'jsr:@std/expect@1';
 import { zipSync } from 'npm:fflate@0.8.2';
 
 import type { AdminClient, GenerateArgs } from './briefEngine.ts';
-import { clampCount, type ImportDeps, type ImportPlan, ImportUnreadableError, planImport, planInput, tidyPlan, writeImport } from './briefImport.ts';
+import { arrayItemScanner, type ImportDeps, type ImportPost, type ImportRules, ImportUnreadableError, liftRules, listInput, listPosts, tidyPosts, writeImport } from './briefImport.ts';
+import type { ReadDoc } from './docText.ts';
 import type { BrainContext } from './contracts.ts';
 import { DocReadError, docxToText, googleExport, htmlToText, notionPageId, notionToText, readBytes, readLink } from './docText.ts';
 
@@ -22,7 +23,7 @@ const base = (): ImportDeps => ({
 });
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
-const rawPost = (title: string, over: Record<string, unknown> = {}) => ({ title, type: 'Talking Head', origin: 'document', angle: 'For new plant owners.', hook: 'I killed six ferns.', material: 'Hook: I killed six ferns.', direction: '', ...over });
+const rawPost = (title: string, over: Record<string, unknown> = {}) => ({ title, type: 'Talking Head', origin: 'document', angle: 'For new plant owners.', hook: 'I killed six ferns.', source: 'Script 1', direction: '', ...over });
 
 describe('document reader', () => {
   it('reads a Word file, keeping headings and list items', () => {
@@ -84,56 +85,78 @@ describe('document reader', () => {
   });
 });
 
-describe('planImport', () => {
-  it('sends files to the model, and tidies, caps and numbers what comes back', async () => {
+describe('listPosts', () => {
+  const docs: ReadDoc[] = [{ kind: 'text', name: 'brief.txt', text: 'Hook one' }, { kind: 'pdf', name: 'b.pdf', base64: 'AAAA' }, { kind: 'image', name: 'p.png', base64: 'BBBB', mediaType: 'image/png' }];
+
+  it('sends the files, lets the documents set the count, and shows each post once as it is found', async () => {
     let seen: Record<string, unknown> = {};
-    const plan = await planImport(admin, {
-      companyId: 'co-1',
-      count: 3,
-      docs: [{ kind: 'text', name: 'brief.txt', text: 'Hook one' }, { kind: 'pdf', name: 'b.pdf', base64: 'AAAA' }, { kind: 'image', name: 'p.png', base64: 'BBBB', mediaType: 'image/png' }],
-    }, {
+    const shown: [string, number][] = [];
+    const raw = [rawPost('One'), rawPost('one'), rawPost('Two', { type: 'Nonsense' }), rawPost('Three', { origin: 'new' })];
+    const posts = await listPosts(admin, { companyId: 'co-1', docs, onPost: (p, i) => shown.push([p.title, i]) }, {
       ...base(),
-      generateWithFiles: (async (args: Record<string, unknown>) => {
-        seen = args;
-        return {
-          data: {
-            readable: true, unreadable_reason: '', summary: 'Three scripts.', product: 'Fernly waters plants.', guidance: 'Never say guaranteed.',
-            claims: [{ wording: 'Reminds you when to water.', qualifier: '' }, { wording: 'reminds you when to water.', qualifier: '' }, { wording: 'Free for three plants.', qualifier: 'on the free plan' }],
-            posts: [rawPost('One'), rawPost('one'), rawPost('Two', { type: 'Nonsense' }), rawPost('Three', { origin: 'new' }), rawPost('Four')],
-          },
-        };
+      generateWithFiles: (async (args: { onText?: (d: string, s: string) => void }) => {
+        seen = args as Record<string, unknown>;
+        // The answer arrives in pieces; the last post is only in the finished answer.
+        const text = JSON.stringify({ readable: true, unreadable_reason: '', posts: raw.slice(0, 3) });
+        for (let i = 7; i < text.length; i += 7) args.onText?.(text.slice(i - 7, i), text.slice(0, i));
+        args.onText?.('', text);
+        return { data: { readable: true, unreadable_reason: '', posts: raw } };
       }) as never,
     });
     expect((seen.documents as unknown[]).length).toBe(1);
     expect((seen.images as unknown[]).length).toBe(1);
     expect(String(seen.input)).toContain('<document name="brief.txt">\nHook one');
-    expect(String(seen.input)).toContain('Return up to 3 posts');
-    expect(plan.posts.map((p) => [p.title, p.type, p.origin])).toEqual([['One', 'Talking Head', 'document'], ['Two', 'Talking Head', 'document'], ['Three', 'Talking Head', 'new']]);
-    expect(plan.claims).toEqual([{ id: 'doc:1', wording: 'Reminds you when to water.', qualifier: null }, { id: 'doc:2', wording: 'Free for three plants.', qualifier: 'on the free plan' }]);
+    expect(String(seen.input)).toContain('Attached PDF files: b.pdf.');
+    expect(String(seen.input)).toContain('the documents decide it');
+    expect(posts.map((p) => [p.title, p.type, p.origin])).toEqual([['One', 'Talking Head', 'document'], ['Two', 'Talking Head', 'document'], ['Three', 'Talking Head', 'new']]);
+    expect(shown).toEqual([['One', 0], ['Two', 1], ['Three', 2]]);
   });
 
   it('turns an unreadable document into a reason for the manager', async () => {
-    const run = planImport(admin, { companyId: 'co-1', docs: [{ kind: 'text', name: 'a', text: 'x' }] }, {
+    const run = listPosts(admin, { companyId: 'co-1', docs: [{ kind: 'text', name: 'a', text: 'x' }] }, {
       ...base(),
-      generateWithFiles: (async () => ({ data: { readable: false, unreadable_reason: 'This is a parking receipt.', summary: '', product: '', guidance: '', claims: [], posts: [] } })) as never,
+      generateWithFiles: (async () => ({ data: { readable: false, unreadable_reason: 'This is a parking receipt.', posts: [] } })) as never,
     });
     await expect(run).rejects.toThrow(ImportUnreadableError);
     await expect(run).rejects.toThrow('parking receipt');
   });
 
-  it('keeps the count inside its limits', () => {
-    expect([clampCount(1), clampCount(12), clampCount(400), clampCount('x')]).toEqual([3, 12, 24, 12]);
-    expect(planInput([{ kind: 'pdf', name: 'b.pdf', base64: 'A' }], 6, '')).toContain('Attached PDF files: b.pdf.');
-    expect(tidyPlan({ readable: true, unreadable_reason: '', summary: '', product: '', guidance: '', claims: [], posts: [] }, 6).posts).toEqual([]);
+  it('caps the list and reads items out of a half written answer', () => {
+    expect(tidyPosts(Array.from({ length: 40 }, (_, i) => rawPost(`Post ${i}`))).length).toBe(24);
+    expect(tidyPosts(null)).toEqual([]);
+    expect(listInput([{ kind: 'pdf', name: 'b.pdf', base64: 'A' }])).toContain('Attached PDF files: b.pdf.');
+    const items: unknown[] = [];
+    const scan = arrayItemScanner((x) => items.push(x));
+    const text = '{"readable":true,"unreadable_reason":"a ] } [ { \\" trap","posts":[{"title":"A {1}","tags":["x"]},{"title":"B"},{"tit';
+    scan('', text.slice(0, 20));
+    scan('', text);
+    expect(items).toEqual([{ title: 'A {1}', tags: ['x'] }, { title: 'B' }]);
+  });
+});
+
+describe('liftRules', () => {
+  it('numbers the claims, drops repeats, and comes back empty when the model fails', async () => {
+    const rules = await liftRules({ companyId: 'co-1', docs: [{ kind: 'text', name: 'a', text: 'x' }] }, {
+      generateWithFiles: (async () => ({
+        data: {
+          product: 'Fernly waters plants.', guidance: 'Never say guaranteed.',
+          claims: [{ wording: 'Reminds you when to water.', qualifier: '' }, { wording: 'reminds you when to water.', qualifier: '' }, { wording: 'Free for three plants.', qualifier: 'on the free plan' }],
+        },
+      })) as never,
+    });
+    expect(rules.claims).toEqual([{ id: 'doc:1', wording: 'Reminds you when to water.', qualifier: null }, { id: 'doc:2', wording: 'Free for three plants.', qualifier: 'on the free plan' }]);
+    const none = await liftRules({ companyId: 'co-1', docs: [] }, { generateWithFiles: (async () => { throw new Error('model down'); }) as never });
+    expect(none).toEqual({ product: '', guidance: '', claims: [] });
   });
 });
 
 describe('writeImport', () => {
-  const plan: ImportPlan = {
-    summary: '', product: 'Fernly tells you when to water.', guidance: 'Never say guaranteed.',
+  const rules: ImportRules = {
+    product: 'Fernly tells you when to water.', guidance: 'Never say guaranteed.',
     claims: [{ id: 'doc:1', wording: 'Reminds you when to water.', qualifier: null }],
-    posts: [{ title: 'I killed six ferns', type: 'Talking Head', origin: 'document', angle: 'For new plant owners.', hook: 'I killed six ferns.', material: 'Hook: I killed six ferns.\nPoint: water by soil.', direction: 'Film at the window.' }],
   };
+  const post: ImportPost = { title: 'I killed six ferns', type: 'Talking Head', origin: 'document', angle: 'For new plant owners.', hook: 'I killed six ferns.', source: 'Script 1: six ferns', direction: 'Film at the window.' };
+  const docs: ReadDoc[] = [{ kind: 'text', name: 'brief.txt', text: 'Script 1: six ferns\nPoint: water by soil.' }, { kind: 'pdf', name: 'b.pdf', base64: 'AAAA' }];
   const script = (over: Record<string, unknown> = {}) => ({
     title: 'I killed six ferns', phrase: 'How to keep ferns alive', angle: 'For new plant owners who keep losing ferns.',
     clips: [
@@ -148,8 +171,8 @@ describe('writeImport', () => {
   });
 
   it('writes from the document, lets its claims stand and repairs what code can', async () => {
-    const calls: GenerateArgs[] = [];
-    const out = await writeImport(admin, { companyId: 'co-1', plan, index: 0 }, {
+    const calls: (GenerateArgs & { documents?: unknown[]; filesAfter?: number })[] = [];
+    const out = await writeImport(admin, { companyId: 'co-1', rules, post, docs }, {
       ...base(),
       generate: (async (args: GenerateArgs) => {
         calls.push(args);
@@ -158,10 +181,14 @@ describe('writeImport', () => {
     });
     // The empty brain did not stop it: the document is what is known.
     expect(calls[0].task).toBe('brief.import.write');
-    expect(calls[0].context[2]).toContain('[doc:1] Reminds you when to water.');
-    expect(calls[0].context[3]).toContain("The manager's own brief document");
-    expect(calls[0].context[3]).toContain('Never say guaranteed.');
-    expect(calls[0].input).toContain('Point: water by soil.');
+    expect(calls[0].context.length).toBe(3);
+    expect(calls[0].context[1]).toContain('[doc:1] Reminds you when to water.');
+    // The writer reads the documents itself, in the block every post of the import shares.
+    expect(calls[0].context[1]).toContain('Point: water by soil.');
+    expect(calls[0].context[1]).toContain('Never say guaranteed.');
+    expect(calls[0].documents?.length).toBe(1);
+    expect(calls[0].filesAfter).toBe(1);
+    expect(calls[0].input).toContain('where it is called: Script 1: six ferns');
     // Unknown ids fail the code check, so one revision is asked for.
     expect(calls[1].task).toBe('brief.import.revise');
     expect(calls[1].input).toContain('made-up');
@@ -174,9 +201,9 @@ describe('writeImport', () => {
     expect(out.kill_reason).toBeNull();
   });
 
-  it('keeps the draft when the revision fails, and throws on an empty plan or a missing post', async () => {
+  it('keeps the draft when the revision fails, and throws on an empty plan', async () => {
     let n = 0;
-    const out = await writeImport(admin, { companyId: 'co-1', plan, index: 0 }, {
+    const out = await writeImport(admin, { companyId: 'co-1', rules, post, docs }, {
       ...base(),
       generate: (async () => {
         n += 1;
@@ -185,7 +212,6 @@ describe('writeImport', () => {
       }) as never,
     });
     expect(out.title).toBe('I killed six ferns');
-    await expect(writeImport(admin, { companyId: 'co-1', plan, index: 0 }, { ...base(), generate: (async () => ({ data: script({ clips: [] }) })) as never })).rejects.toThrow('empty plan');
-    await expect(writeImport(admin, { companyId: 'co-1', plan, index: 5 }, base())).rejects.toThrow('not in the import');
+    await expect(writeImport(admin, { companyId: 'co-1', rules, post, docs }, { ...base(), generate: (async () => ({ data: script({ clips: [] }) })) as never })).rejects.toThrow('empty plan');
   });
 });
