@@ -1,17 +1,23 @@
 // Scout engine: finds creators for one company outside Noni.
 //
 //   planning   Claude turns the company brain and the brief into searches.
+//              The pool (scout_pool: everyone Scout has ever read) is asked
+//              first, so people it already knows land on the board in
+//              seconds and cost nothing to read.
 //   searching  Apify searches TikTok (keywords, hashtags) and Instagram
 //              (hashtags), a few terms per Apify run so each finishes fast.
-//              Accounts are grouped, filtered and up to ~1200 shortlisted.
+//              Accounts already in the pool are taken from it; the rest are
+//              shortlisted for a profile read.
 //   enriching  Apify reads each shortlisted profile and its latest videos.
 //              How often they post, how recently and how their audience
 //              responds are worked out here.
 //   vetting    Avatars and covers are copied to storage (platform links
-//              expire). Claude looks at each account's covers, captions and
-//              numbers, scores fit, says who they are, then writes a personal
-//              first message for the good ones.
+//              expire). Claude says who each new person is (once, kept in
+//              the pool) and scores how well they fit this company.
 //   done
+//
+// The first message is written when the company opens someone (writeOne),
+// not for every match.
 //
 // A search is sized to return hundreds of matches: creators who already make
 // UGC, small creators, and everyday people in the niche. A search can carry a
@@ -42,7 +48,15 @@ export type ScoutPlan = {
   seeds: string[];
   /** Who the search must reach, from the board's filters, e.g. "Only women." */
   want?: string;
+  /** Plain phrases for what these people post, matched against the pool. */
+  topics?: string[];
+  /** The board's filters as values, applied to the pool. */
+  filters?: PoolFilters;
+  /** small: the automatic daily search. */
+  size?: 'small' | 'full';
 };
+
+export type PoolFilters = { gender?: string[]; age?: string[]; kind?: string[]; on_camera?: boolean };
 
 type ApifyJob = {
   kind: 'search' | 'enrich';
@@ -51,6 +65,8 @@ type ApifyJob = {
   dataset_id: string;
   status: string;
   started_at: string;
+  /** What Apify charged for the run, once it has finished. */
+  usd?: number;
 };
 
 /** An Apify run waiting for room on the account. */
@@ -58,7 +74,7 @@ type Queued = { kind: 'search' | 'enrich'; platform: Platform; actor: string; in
 
 type Jobs = { search?: ApifyJob[]; enrich?: ApifyJob[]; queue?: Queued[]; shortlist?: Shortlisted[] };
 
-type Counts = { posts?: number; accounts?: number; shortlisted?: number; vetted?: number; matches?: number };
+type Counts = { posts?: number; accounts?: number; shortlisted?: number; vetted?: number; matches?: number; pool?: number; apify_usd?: number };
 
 export type ScoutRun = {
   id: string;
@@ -68,6 +84,7 @@ export type ScoutRun = {
   status: 'planning' | 'searching' | 'enriching' | 'vetting' | 'done' | 'failed';
   jobs: Jobs;
   counts: Counts;
+  auto?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -95,18 +112,24 @@ type Shortlisted = {
 
 // ---------------------------------------------------------------- limits
 
-const SEARCH_PER_TERM_TIKTOK = 100;
-const SEARCH_PER_TAG_INSTAGRAM = 150;
 const MAX_TIKTOK_QUERIES = 12;
 const MAX_TIKTOK_HASHTAGS = 10;
 const MAX_INSTAGRAM_HASHTAGS = 15;
+// What a search reads. full: one a company starts. small: the automatic
+// daily one. "fresh" is how many profiles may be read from the platforms;
+// people already in the pool do not count against it.
+const SIZES = {
+  full: { ttQueries: 10, ttTags: 8, igTags: 12, perTikTok: 80, perInstagram: 120, freshTikTok: 250, freshInstagram: 500, pool: 400 },
+  small: { ttQueries: 3, ttTags: 2, igTags: 5, perTikTok: 50, perInstagram: 60, freshTikTok: 50, freshInstagram: 100, pool: 100 },
+} as const;
+const sizeOf = (plan: ScoutPlan) => SIZES[plan.size === 'small' ? 'small' : 'full'];
+// A pool read older than this is not trusted; the profile is read again.
+const POOL_FRESH_DAYS = 45;
 // Terms per Apify search run: small runs finish in minutes and run side by side.
 const TERMS_PER_SEARCH = 4;
 const MAX_DATASET_ITEMS = 2000;
 // TikTok search results carry follower counts, so its shortlist is already
 // in range. Instagram's do not: more profiles are read and filtered after.
-const SHORTLIST_TIKTOK = 400;
-const SHORTLIST_INSTAGRAM = 800;
 const ENRICH_CHUNK_TIKTOK = 50;
 const ENRICH_CHUNK_INSTAGRAM = 125;
 const VIDEOS_PER_PROFILE = 6;
@@ -116,8 +139,6 @@ const IMAGE_BATCH = 36;
 const IMAGE_POOL = 16;
 const VET_BATCH = 6;
 const VET_PARALLEL = 6;
-const WRITE_BATCH = 8;
-const WRITE_PARALLEL = 3;
 const MATCH_SCORE = 55;
 // Nothing posted in this long: not worth a message.
 const STALE_DAYS = 120;
@@ -143,11 +164,11 @@ async function apifyStart(actor: string, input: Record<string, unknown>, maxItem
   return { run_id: data.id, dataset_id: data.defaultDatasetId, status: data.status };
 }
 
-async function apifyStatus(runId: string): Promise<string> {
+async function apifyStatus(runId: string): Promise<{ status: string; usd: number | null }> {
   const res = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${apifyToken()}`, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`Apify run ${runId} ${res.status}`);
-  const { data } = (await res.json()) as { data: { status: string } };
-  return data.status;
+  const { data } = (await res.json()) as { data: { status: string; usageTotalUsd?: number } };
+  return { status: data.status, usd: typeof data.usageTotalUsd === 'number' ? data.usageTotalUsd : null };
 }
 
 async function apifyItems(datasetId: string, fields: string): Promise<Record<string, unknown>[]> {
@@ -167,7 +188,9 @@ async function settle(jobs: ApifyJob[]): Promise<boolean> {
     jobs.map(async (j) => {
       if (FINISHED.has(j.status)) return;
       try {
-        j.status = await apifyStatus(j.run_id);
+        const r = await apifyStatus(j.run_id);
+        j.status = r.status;
+        if (r.usd !== null) j.usd = r.usd;
       } catch (e) {
         console.error('scout apify status', e instanceof Error ? e.message : e);
       }
@@ -392,6 +415,7 @@ From the company and the brief, write searches that together surface all three k
 - tiktok_queries: 10 to 12 search phrases a real poster in this niche would have in their captions or that TikTok search would match to their videos. Phrases people actually type, not marketing words. Example for a study app: "study with me", "finals week routine", "ugc creator student".
 - tiktok_hashtags: 8 to 10 hashtags without the #, specific to the niche, not giant generic tags like fyp or viral.
 - instagram_hashtags: 12 to 15 hashtags without the #, niche specific, used on Reels by ordinary people in the niche.
+- topics: 6 to 10 plain phrases, one to three words each, for what these people post about and who they are ("college soccer", "soccer recruiting", "student athlete", "dorm life"). These are matched against bios and captions, so use the words the people themselves write.
 - min_followers and max_followers: the follower range worth contacting. Default 300 to 100000 unless the brief says otherwise.
 
 If the brief names the kind of person (for example college soccer players), follow the brief over the company context. Never target anyone under 18.
@@ -401,12 +425,13 @@ When a "Must be" line is given, every term has to reach those people and nobody 
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['ideal', 'tiktok_queries', 'tiktok_hashtags', 'instagram_hashtags', 'min_followers', 'max_followers'],
+  required: ['ideal', 'tiktok_queries', 'tiktok_hashtags', 'instagram_hashtags', 'topics', 'min_followers', 'max_followers'],
   properties: {
     ideal: { type: 'string' },
     tiktok_queries: { type: 'array', items: { type: 'string' } },
     tiktok_hashtags: { type: 'array', items: { type: 'string' } },
     instagram_hashtags: { type: 'array', items: { type: 'string' } },
+    topics: { type: 'array', items: { type: 'string' } },
     min_followers: { type: 'integer' },
     max_followers: { type: 'integer' },
   },
@@ -418,10 +443,21 @@ export async function makePlan(
   admin: SupabaseClient,
   companyId: string,
   brief: string,
-  opts: { platforms: Platform[]; seeds: string[]; min_followers?: number | null; max_followers?: number | null; want?: string },
+  opts: {
+    platforms: Platform[];
+    seeds: string[];
+    min_followers?: number | null;
+    max_followers?: number | null;
+    want?: string;
+    filters?: PoolFilters;
+    size?: 'small' | 'full';
+    /** Terms earlier searches used; this one should reach other people. */
+    avoid?: string[];
+  },
 ): Promise<ScoutPlan> {
   const ctx = await companyContext(admin, companyId);
-  const { data } = await generate<Omit<ScoutPlan, 'platforms' | 'seeds'>>({
+  const size = SIZES[opts.size === 'small' ? 'small' : 'full'];
+  const { data } = await generate<Omit<ScoutPlan, 'platforms' | 'seeds'> & { topics: string[] }>({
     task: 'scout.plan',
     tier: 'writer',
     effort: 'low',
@@ -430,6 +466,7 @@ export async function makePlan(
     input: [
       `Brief: ${brief.trim() || 'Find the best creators for this company.'}`,
       opts.want ? `Must be: ${opts.want}` : null,
+      opts.avoid?.length ? `Earlier searches already used these terms. Write different ones that reach other people in the same niche: ${opts.avoid.slice(0, 80).join(', ')}` : null,
       opts.seeds.length ? `Accounts the company likes, find people like them: ${opts.seeds.map((s) => '@' + s).join(', ')}` : null,
       `Platforms: ${opts.platforms.join(', ')}`,
     ].filter(Boolean).join('\n'),
@@ -441,14 +478,17 @@ export async function makePlan(
   const uniq = (xs: string[], n: number) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))].slice(0, n);
   return {
     ideal: stripDashes(data.ideal).slice(0, 240),
-    tiktok_queries: opts.platforms.includes('tiktok') ? uniq(data.tiktok_queries.map((q) => q.toLowerCase().slice(0, 60)), MAX_TIKTOK_QUERIES) : [],
-    tiktok_hashtags: opts.platforms.includes('tiktok') ? uniq(data.tiktok_hashtags.map(tag), MAX_TIKTOK_HASHTAGS) : [],
-    instagram_hashtags: opts.platforms.includes('instagram') ? uniq(data.instagram_hashtags.map(tag), MAX_INSTAGRAM_HASHTAGS) : [],
+    tiktok_queries: opts.platforms.includes('tiktok') ? uniq(data.tiktok_queries.map((q) => q.toLowerCase().slice(0, 60)), Math.min(MAX_TIKTOK_QUERIES, size.ttQueries)) : [],
+    tiktok_hashtags: opts.platforms.includes('tiktok') ? uniq(data.tiktok_hashtags.map(tag), Math.min(MAX_TIKTOK_HASHTAGS, size.ttTags)) : [],
+    instagram_hashtags: opts.platforms.includes('instagram') ? uniq(data.instagram_hashtags.map(tag), Math.min(MAX_INSTAGRAM_HASHTAGS, size.igTags)) : [],
+    topics: uniq((data.topics ?? []).map((t) => t.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').slice(0, 40)), 10),
     min_followers: opts.min_followers ?? Math.max(0, data.min_followers),
     max_followers: opts.max_followers ?? Math.max(data.min_followers + 1, data.max_followers),
     platforms: opts.platforms,
     seeds: opts.seeds,
     ...(opts.want ? { want: opts.want } : {}),
+    ...(opts.filters ? { filters: opts.filters } : {}),
+    size: opts.size === 'small' ? 'small' : 'full',
   };
 }
 
@@ -464,6 +504,7 @@ const TIKTOK_QUIET = {
 /** The Apify runs of a search: TikTok phrases, TikTok hashtags, Instagram hashtags, a few terms each. */
 function searchQueue(plan: ScoutPlan): Queued[] {
   const queue: Queued[] = [];
+  const size = sizeOf(plan);
   const parts = (xs: string[]) => {
     const out: string[][] = [];
     for (let i = 0; i < xs.length; i += TERMS_PER_SEARCH) out.push(xs.slice(i, i + TERMS_PER_SEARCH));
@@ -472,22 +513,22 @@ function searchQueue(plan: ScoutPlan): Queued[] {
   for (const searchQueries of parts(plan.tiktok_queries)) {
     queue.push({
       kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
-      input: { searchQueries, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
-      max_items: searchQueries.length * SEARCH_PER_TERM_TIKTOK,
+      input: { searchQueries, resultsPerPage: size.perTikTok, ...TIKTOK_QUIET },
+      max_items: searchQueries.length * size.perTikTok,
     });
   }
   for (const hashtags of parts(plan.tiktok_hashtags)) {
     queue.push({
       kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
-      input: { hashtags, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
-      max_items: hashtags.length * SEARCH_PER_TERM_TIKTOK,
+      input: { hashtags, resultsPerPage: size.perTikTok, ...TIKTOK_QUIET },
+      max_items: hashtags.length * size.perTikTok,
     });
   }
   for (const hashtags of parts(plan.instagram_hashtags)) {
     queue.push({
       kind: 'search', platform: 'instagram', actor: 'apify~instagram-hashtag-scraper',
-      input: { hashtags, resultsLimit: SEARCH_PER_TAG_INSTAGRAM },
-      max_items: hashtags.length * SEARCH_PER_TAG_INSTAGRAM,
+      input: { hashtags, resultsLimit: size.perInstagram },
+      max_items: hashtags.length * size.perInstagram,
     });
   }
   if (!queue.length) throw new Error('No searches to run');
@@ -522,7 +563,119 @@ async function knownHandles(admin: SupabaseClient, companyId: string): Promise<S
   return known;
 }
 
-async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlist: Shortlisted[]; posts: number; accounts: number }> {
+// ---------------------------------------------------------------- pool
+
+type PoolRow = {
+  platform: Platform;
+  handle: string;
+  name: string | null;
+  avatar_url: string | null;
+  bio: string | null;
+  followers: number | null;
+  median_views: number | null;
+  posts_per_week: number | null;
+  last_post_at: string | null;
+  engagement_rate: number | null;
+  email: string | null;
+  videos: Video[];
+  is_person: boolean | null;
+  likely_minor: boolean;
+  kind: string | null;
+  on_camera: boolean | null;
+  gender: string | null;
+  age: string | null;
+  topics: string[];
+  classified_at: string | null;
+};
+
+const POOL_COLUMNS =
+  'platform, handle, name, avatar_url, bio, followers, median_views, posts_per_week, last_post_at, engagement_rate, email, videos, is_person, likely_minor, kind, on_camera, gender, age, topics, classified_at';
+
+/** Puts people from the pool on the company's board, ready to be scored. Returns how many were new to it. */
+async function saveFromPool(admin: SupabaseClient, run: ScoutRun, people: PoolRow[]): Promise<number> {
+  let added = 0;
+  const rows = people.map((p) => {
+    const known = p.classified_at !== null;
+    return {
+      company_id: run.company_id,
+      run_id: run.id,
+      source: 'pool',
+      platform: p.platform,
+      handle: p.handle,
+      name: p.name,
+      avatar_url: p.avatar_url,
+      bio: p.bio,
+      followers: p.followers,
+      median_views: p.median_views,
+      posts_found: 0,
+      posts_per_week: p.posts_per_week,
+      last_post_at: p.last_post_at,
+      engagement_rate: p.engagement_rate,
+      email: p.email,
+      videos: p.videos ?? [],
+      kind: known ? p.kind : null,
+      on_camera: known ? p.on_camera : null,
+      gender: known ? p.gender : null,
+      age: known ? p.age : null,
+      // Their pictures are already in storage: straight to scoring.
+      status: 'vetting',
+    };
+  });
+  for (const part of chunks(rows, 100)) {
+    const { data, error } = await admin.from('scout_creators')
+      .upsert(part, { onConflict: 'company_id,platform,handle', ignoreDuplicates: true }).select('id');
+    if (error) throw new Error(`save pool creators: ${error.message}`);
+    added += data?.length ?? 0;
+  }
+  return added;
+}
+
+/** Asks the pool for people who post about the plan's topics. Free and immediate. */
+async function poolFirst(admin: SupabaseClient, run: ScoutRun): Promise<number> {
+  const plan = run.plan as ScoutPlan;
+  const topics = plan.topics ?? [];
+  if (!topics.length) return 0;
+  const f = plan.filters ?? {};
+  const { data, error } = await admin.rpc('scout_pool_search', {
+    p_company_id: run.company_id,
+    p_topics: topics,
+    p_platforms: plan.platforms,
+    p_min: Math.round(plan.min_followers * 0.6),
+    p_max: Math.round(plan.max_followers * 1.5),
+    p_genders: f.gender ?? [],
+    p_ages: f.age ?? [],
+    p_kinds: f.kind ?? [],
+    p_on_camera: f.on_camera === true,
+    p_limit: sizeOf(plan).pool,
+  });
+  if (error) {
+    // The pool is a shortcut, never a reason for a search to fail.
+    console.error('scout pool search', error.message);
+    return 0;
+  }
+  return saveFromPool(admin, run, (data ?? []) as PoolRow[]);
+}
+
+/** The pool's fresh read of each of these accounts, by "platform:handle". */
+async function poolLookup(admin: SupabaseClient, found: { platform: Platform; handle: string }[]): Promise<Map<string, PoolRow>> {
+  const cutoff = new Date(Date.now() - POOL_FRESH_DAYS * DAY).toISOString();
+  const out = new Map<string, PoolRow>();
+  for (const platform of ['tiktok', 'instagram'] as const) {
+    const handles = found.filter((f) => f.platform === platform).map((f) => f.handle);
+    for (const part of chunks(handles, 150)) {
+      const { data, error } = await admin.from('scout_pool').select(POOL_COLUMNS)
+        .eq('platform', platform).in('handle', part).gt('read_at', cutoff);
+      if (error) {
+        console.error('scout pool lookup', error.message);
+        continue;
+      }
+      for (const row of (data ?? []) as PoolRow[]) out.set(`${row.platform}:${row.handle}`, row);
+    }
+  }
+  return out;
+}
+
+async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlist: Shortlisted[]; hits: PoolRow[]; posts: number; accounts: number }> {
   const plan = run.plan as ScoutPlan;
   const jobs = run.jobs.search ?? [];
   const [tt, ig] = await Promise.all([
@@ -559,20 +712,36 @@ async function collect(admin: SupabaseClient, run: ScoutRun): Promise<{ shortlis
 
   // Accounts that came up on several searches and get real views first.
   const rank = (f: Found) => f.posts_found * 2 + Math.log10((median(f.views) ?? 0) + 10);
-  const pick = (platform: Platform, n: number) =>
-    pool.filter((f) => f.platform === platform).sort((a, b) => rank(b) - rank(a)).slice(0, n);
-  let tiktok = pick('tiktok', SHORTLIST_TIKTOK);
-  let instagram = pick('instagram', SHORTLIST_INSTAGRAM);
+  const ranked = pool.sort((a, b) => rank(b) - rank(a)).slice(0, 4000);
+  // Anyone the pool has read lately is taken from it: no profile read, no
+  // second classification. Only the rest are read from the platforms.
+  const have = await poolLookup(admin, ranked);
+  const hits: PoolRow[] = [];
+  const unread: Found[] = [];
+  for (const f of ranked) {
+    const p = have.get(`${f.platform}:${f.handle}`);
+    if (!p) {
+      unread.push(f);
+      continue;
+    }
+    if (p.classified_at !== null && (p.is_person === false || p.likely_minor)) continue;
+    if (p.followers !== null && (p.followers < lo || p.followers > hi)) continue;
+    hits.push(p);
+  }
+  const size = sizeOf(plan);
+  const pick = (platform: Platform, n: number) => unread.filter((f) => f.platform === platform).slice(0, n);
+  let tiktok = pick('tiktok', size.freshTikTok);
+  let instagram = pick('instagram', size.freshInstagram);
   // One platform came back thin: give the other its room.
-  if (tiktok.length < SHORTLIST_TIKTOK) instagram = pick('instagram', SHORTLIST_INSTAGRAM + SHORTLIST_TIKTOK - tiktok.length);
-  else if (instagram.length < SHORTLIST_INSTAGRAM) tiktok = pick('tiktok', SHORTLIST_TIKTOK + SHORTLIST_INSTAGRAM - instagram.length);
+  if (tiktok.length < size.freshTikTok) instagram = pick('instagram', size.freshInstagram + size.freshTikTok - tiktok.length);
+  else if (instagram.length < size.freshInstagram) tiktok = pick('tiktok', size.freshTikTok + size.freshInstagram - instagram.length);
 
   // The profile read replaces these videos; three are kept in case it fails.
   const shortlist = [...tiktok, ...instagram].map(({ views: _v, newest: _n, ...s }) => ({
     ...s,
     videos: s.videos.slice(0, 3),
   }));
-  return { shortlist, posts: tt.length + ig.length, accounts: map.size };
+  return { shortlist, hits, posts: tt.length + ig.length, accounts: map.size };
 }
 
 // ---------------------------------------------------------------- enrich
@@ -764,7 +933,7 @@ async function keepImages(admin: SupabaseClient, run: ScoutRun, rows: Unkept[]):
 
 // ---------------------------------------------------------------- vetting
 
-const VET_SYSTEM = `You vet people for a brand on a UGC marketplace. The brand pays everyday people to post short videos about its product. It is not looking for big influencers. It wants people who are right for its niche, comfortable on camera, and cheap and easy to work with: people already making UGC, small creators, and ordinary people who simply are the niche. You see each account's numbers, bio, recent captions and up to two video covers.
+const VET_SYSTEM = `You vet people for a brand on a UGC marketplace. The brand pays everyday people to post short videos about its product. It is not looking for big influencers. It wants people who are right for its niche, comfortable on camera, and cheap and easy to work with: people already making UGC, small creators, and ordinary people who simply are the niche. You see each account's numbers, bio and recent captions, and one video cover for people not seen before.
 
 For every person decide:
 - score 0 to 100: how well this person fits who the brand is looking for. Judge the content and the person, not the size of the account; the brand sees followers, posting and engagement itself and small accounts are welcome. 85 and up: exactly the niche and films themselves, talks to camera or already makes brand style videos. 70 to 84: in the niche and on camera often. 55 to 69: clearly the person the brief describes and posts themselves, even if casual, unpolished or not thinking of themselves as a creator. Under 55: wrong niche, not on camera at all, or not a real individual.
@@ -776,6 +945,8 @@ For every person decide:
 - age: "under 18", "18-24", "25-34" or "35+" when the profile makes it plain (class year, college year, stated age, life stage). A current college student or college athlete is "18-24". Otherwise "unknown".
 - why: one short sentence to the brand, 12 words at most, naming the concrete thing about their content ("Films his 5am gym routine and talks to camera daily"). Do not repeat follower or view counts, the brand sees those. No names, no semicolons, no hype.
 - tags: one to three short niche tags, lowercase ("gym", "college soccer", "morning routine").
+
+Some people carry a line starting "known:". They were classified before: return is_person true, likely_minor false and the kind, on_camera, gender and age given on that line unchanged, and judge only score, why and tags.
 
 Never score on looks, race, gender or age. Return every person exactly once, by number.`;
 
@@ -866,7 +1037,20 @@ type Row = {
   videos: Video[];
   why: string | null;
   tags: string[];
+  source: string;
+  kind: string | null;
+  on_camera: boolean | null;
+  gender: string | null;
+  age: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  last_post_at: string | null;
+  engagement_rate: number | null;
+  created_at: string;
 };
+
+/** Came from the pool already classified: only the fit is left to judge. */
+const isKnown = (r: Row) => r.source === 'pool' && r.kind !== null;
 
 function creatorText(n: number, r: Row): string {
   const caps = r.videos.slice(0, 4).map((v) => `"${v.caption.replace(/\s+/g, ' ').slice(0, 140)}"${v.views !== null ? ` (${v.views} views)` : ''}`);
@@ -884,11 +1068,14 @@ const clip = (s: string, n: number) => wellFormed(stripDashes(s).replace(/\s+/g,
 async function vetBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, rows: Row[]): Promise<void> {
   const images: LlmImage[] = [];
   const lines = rows.map((r, i) => {
-    const covers = r.videos.map((v) => v.cover).filter((c): c is string => Boolean(c)).slice(0, 2);
-    const first = images.length + 1;
-    for (const c of covers) images.push({ url: c });
-    const imgNote = covers.length ? `\nvideo covers: images ${first}${covers.length > 1 ? ` and ${first + 1}` : ''}` : '\nno covers';
-    return creatorText(i + 1, r) + imgNote;
+    if (isKnown(r)) {
+      return `${creatorText(i + 1, r)}\nknown: kind ${r.kind}; on_camera ${r.on_camera === true}; gender ${r.gender ?? 'unknown'}; age ${r.age ?? 'unknown'}`;
+    }
+    // One cover is enough to tell who films themselves; it is looked at once per person, ever.
+    const cover = r.videos.map((v) => v.cover).find((c): c is string => Boolean(c));
+    if (!cover) return `${creatorText(i + 1, r)}\nno cover`;
+    images.push({ url: cover });
+    return `${creatorText(i + 1, r)}\nvideo cover: image ${images.length}`;
   });
   const plan = run.plan as ScoutPlan;
   const { data } = await generate<{ creators: Vetted[] }>({
@@ -904,26 +1091,60 @@ async function vetBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, rows:
     timeoutMs: 100_000,
   });
   const seen = new Set<number>();
+  const now = new Date().toISOString();
+  const toPool: Record<string, unknown>[] = [];
   await Promise.all(data.creators.map(async (c) => {
     const r = rows[c.n - 1];
     if (!r || seen.has(c.n)) return;
     seen.add(c.n);
     const score = Math.max(0, Math.min(100, Math.round(c.score)));
+    const tags = c.tags.map((t) => t.toLowerCase().trim().slice(0, 30)).filter(Boolean).slice(0, 3);
+    if (isKnown(r)) {
+      await admin.from('scout_creators').update({
+        score, why: clip(c.why, 160), tags, status: score >= MATCH_SCORE ? 'match' : 'skipped', updated_at: now,
+      }).eq('id', r.id);
+      return;
+    }
     const minor = c.likely_minor || c.age === 'under 18';
     const match = score >= MATCH_SCORE && c.is_person && !minor;
-    await admin.from('scout_creators').update({
-      score,
-      why: clip(c.why, 160),
-      tags: c.tags.map((t) => t.toLowerCase().trim().slice(0, 30)).filter(Boolean).slice(0, 3),
+    const who = {
       likely_minor: minor,
       kind: c.kind === 'ugc' || c.kind === 'creator' || c.kind === 'niche' ? c.kind : null,
       on_camera: c.on_camera,
       gender: c.gender === 'female' || c.gender === 'male' ? c.gender : null,
       age: c.age === '18-24' || c.age === '25-34' || c.age === '35+' ? c.age : null,
-      status: match ? 'match' : 'skipped',
-      updated_at: new Date().toISOString(),
+    };
+    await admin.from('scout_creators').update({
+      score, why: clip(c.why, 160), tags, ...who, status: match ? 'match' : 'skipped', updated_at: now,
     }).eq('id', r.id);
+    // Who they are is kept in the pool, so no search classifies them again.
+    const cls = { ...who, is_person: c.is_person, topics: tags, classified_at: now, updated_at: now };
+    if (r.source === 'pool') {
+      await admin.from('scout_pool').update(cls).eq('platform', r.platform).eq('handle', r.handle);
+      return;
+    }
+    toPool.push({
+      platform: r.platform,
+      handle: r.handle,
+      name: r.name,
+      avatar_url: r.avatar_url,
+      bio: r.bio,
+      followers: r.followers,
+      median_views: r.median_views,
+      posts_per_week: r.posts_per_week,
+      last_post_at: r.last_post_at,
+      engagement_rate: r.engagement_rate,
+      email: r.email,
+      videos: r.videos,
+      ...cls,
+      search_text: wellFormed([r.name, r.bio, tags.join(' '), ...r.videos.map((v) => v.caption)].filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 4000)),
+      read_at: r.created_at,
+    });
   }));
+  if (toPool.length) {
+    const { error } = await admin.from('scout_pool').upsert(toPool, { onConflict: 'platform,handle' });
+    if (error) console.error('scout pool save', error.message);
+  }
   // Anything Claude left out is skipped, never left in vetting forever.
   const missed = rows.filter((_, i) => !seen.has(i + 1)).map((r) => r.id);
   if (missed.length) await admin.from('scout_creators').update({ status: 'skipped' }).in('id', missed);
@@ -955,9 +1176,10 @@ async function writeBatch(admin: SupabaseClient, run: ScoutRun, ctx: string, row
   }));
 }
 
-const ROW_COLUMNS = 'id, platform, handle, name, bio, followers, median_views, posts_per_week, posts_found, videos, why, tags';
+const ROW_COLUMNS =
+  'id, platform, handle, name, bio, followers, median_views, posts_per_week, posts_found, videos, why, tags, source, kind, on_camera, gender, age, avatar_url, email, last_post_at, engagement_rate, created_at';
 
-/** One slice of vetting; true when the run has nothing left to copy, vet or write. */
+/** One slice of vetting; true when the run has nothing left to copy or vet. */
 async function vetStep(admin: SupabaseClient, run: ScoutRun, ctx: string): Promise<boolean> {
   const [{ data: toKeep }, { data: toVet }] = await Promise.all([
     admin.from('scout_creators').select('id, platform, handle, avatar_url, videos')
@@ -986,26 +1208,54 @@ async function vetStep(admin: SupabaseClient, run: ScoutRun, ctx: string): Promi
     await keeping;
     return false;
   }
-  const { data: toWrite } = await admin.from('scout_creators').select(ROW_COLUMNS)
-    .eq('run_id', run.id).eq('status', 'match').is('dm', null).order('score', { ascending: false }).limit(WRITE_BATCH * WRITE_PARALLEL);
-  if (toWrite?.length) {
-    const batches = chunks(toWrite as Row[], WRITE_BATCH);
-    const results = await Promise.allSettled(batches.map((b) => writeBatch(admin, run, ctx, b)));
-    let wrote = false;
-    for (const r of results) {
-      if (r.status === 'fulfilled') wrote = true;
-      else console.error('scout write batch', r.reason instanceof Error ? r.reason.message : r.reason);
-    }
-    // Nothing written at all: fall back to a plain message rather than spin.
-    if (!wrote) {
-      for (const b of batches) {
-        await admin.from('scout_creators').update({ dm: 'hey, loved your recent videos. we want to pay you to make a few about our app, details here: {link}' }).in('id', b.map((x) => x.id));
-      }
-    }
-    return false;
-  }
   return true;
 }
+
+/** Vets for a while, inside one tick; true when nothing is left. */
+async function vetSome(admin: SupabaseClient, run: ScoutRun, ms: number): Promise<boolean> {
+  const t0 = Date.now();
+  const ctx = (await companyContext(admin, run.company_id)).text;
+  let finished = await vetStep(admin, run, ctx);
+  while (!finished && Date.now() - t0 < ms) {
+    await admin.from('scout_runs').update({ lease_until: new Date(Date.now() + LEASE_MS).toISOString() }).eq('id', run.id);
+    finished = await vetStep(admin, run, ctx);
+  }
+  return finished;
+}
+
+/** People from the pool are scored while Apify is still searching, so the board fills at once. */
+async function vetWhileWaiting(admin: SupabaseClient, run: ScoutRun): Promise<Counts> {
+  const { count } = await admin.from('scout_creators').select('id', { count: 'exact', head: true })
+    .eq('run_id', run.id).eq('status', 'vetting');
+  if (!count) return {};
+  await vetSome(admin, run, 30_000);
+  return countsOf(admin, run.id);
+}
+
+/** Writes the first message for one creator, when the company opens them. */
+export async function writeOne(admin: SupabaseClient, creatorId: string): Promise<{ dm: string | null; email_subject: string | null; email_body: string | null } | null> {
+  const { data: row } = await admin.from('scout_creators').select(`${ROW_COLUMNS}, company_id, dm, email_subject, email_body`).eq('id', creatorId).maybeSingle();
+  if (!row) return null;
+  if (!row.dm) {
+    const ctx = (await companyContext(admin, row.company_id as string)).text;
+    await writeBatch(admin, { company_id: row.company_id as string } as ScoutRun, ctx, [row as unknown as Row]);
+  }
+  const { data } = await admin.from('scout_creators').select('dm, email_subject, email_body').eq('id', creatorId).maybeSingle();
+  return (data as { dm: string | null; email_subject: string | null; email_body: string | null } | null) ?? null;
+}
+
+/** Terms this company's earlier searches used. */
+async function usedTerms(admin: SupabaseClient, companyId: string): Promise<string[]> {
+  const { data } = await admin.from('scout_runs').select('plan').eq('company_id', companyId).order('created_at', { ascending: false }).limit(12);
+  const out = new Set<string>();
+  for (const r of data ?? []) {
+    const p = r.plan as Partial<ScoutPlan> | null;
+    for (const t of [...(p?.tiktok_queries ?? []), ...(p?.tiktok_hashtags ?? []), ...(p?.instagram_hashtags ?? [])]) out.add(t);
+  }
+  return [...out];
+}
+
+const usdOf = (jobs: ApifyJob[]) => Math.round(jobs.reduce((sum, j) => sum + (j.usd ?? 0), 0) * 1000) / 1000;
 
 // ---------------------------------------------------------------- tick
 
@@ -1044,11 +1294,21 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
       // Planning happens when the run is created; a run left here lost its
       // worker. Plan again from the brief.
       if (!('ideal' in run.plan)) {
-        const plan = await makePlan(admin, run.company_id, run.brief, { platforms: ['tiktok', 'instagram'], seeds: [] });
+        // The automatic daily search is small and looks where earlier ones did not.
+        const plan = await makePlan(admin, run.company_id, run.brief, {
+          platforms: ['tiktok', 'instagram'],
+          seeds: [],
+          size: run.auto ? 'small' : 'full',
+          avoid: run.auto ? await usedTerms(admin, run.company_id) : [],
+        });
         run.plan = plan;
       }
+      const fromPool = await poolFirst(admin, run);
       const { started, left } = await launch(searchQueue(run.plan as ScoutPlan), []);
-      await save(admin, run, { plan: run.plan, status: 'searching', jobs: { search: started, queue: left }, lease_until: null });
+      await save(admin, run, {
+        plan: run.plan, status: 'searching', jobs: { search: started, queue: left },
+        counts: { pool: fromPool, shortlisted: fromPool }, lease_until: null,
+      });
       return;
     }
 
@@ -1058,21 +1318,26 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
       const { started, left } = await launch(run.jobs.queue ?? [], search);
       search.push(...started);
       if (left.length || !search.every((j) => FINISHED.has(j.status))) {
-        await save(admin, run, { jobs: { ...run.jobs, search, queue: left }, lease_until: null });
+        await save(admin, run, { jobs: { ...run.jobs, search, queue: left } });
+        const c = await vetWhileWaiting(admin, run);
+        await save(admin, run, { counts: { ...run.counts, ...c }, lease_until: null });
         return;
       }
-      const { shortlist, posts, accounts } = await collect(admin, { ...run, jobs: { ...run.jobs, search } });
+      const { shortlist, hits, posts, accounts } = await collect(admin, { ...run, jobs: { ...run.jobs, search } });
+      const pool = (run.counts.pool ?? 0) + await saveFromPool(admin, run, hits);
+      const apify_usd = usdOf(search);
       if (!shortlist.length) {
+        // Nobody new to read: whoever the pool gave is scored and the search ends.
         await save(admin, run, {
-          status: 'done', jobs: { search }, counts: { posts, accounts, shortlisted: 0, vetted: 0, matches: 0 },
-          finished_at: new Date().toISOString(), lease_until: null,
+          status: 'vetting', jobs: { search }, counts: { ...run.counts, posts, accounts, pool, shortlisted: pool, apify_usd },
+          lease_until: null,
         });
         return;
       }
       const first = await launch(enrichQueue(shortlist), []);
       await save(admin, run, {
         status: 'enriching', jobs: { search, enrich: first.started, queue: first.left, shortlist },
-        counts: { posts, accounts, shortlisted: shortlist.length }, lease_until: null,
+        counts: { ...run.counts, posts, accounts, pool, shortlisted: pool + shortlist.length, apify_usd }, lease_until: null,
       });
       return;
     }
@@ -1083,27 +1348,23 @@ export async function tick(admin: SupabaseClient, runId: string): Promise<void> 
       const { started, left } = await launch(run.jobs.queue ?? [], enrich);
       enrich.push(...started);
       if (left.length || !enrich.every((j) => FINISHED.has(j.status))) {
-        await save(admin, run, { jobs: { ...run.jobs, enrich, queue: left }, lease_until: null });
+        await save(admin, run, { jobs: { ...run.jobs, enrich, queue: left } });
+        const c = await vetWhileWaiting(admin, run);
+        await save(admin, run, { counts: { ...run.counts, ...c }, lease_until: null });
         return;
       }
       const list = await mergeEnrich({ ...run, jobs: { ...run.jobs, enrich } });
       const saved = await saveFound(admin, run, list);
       await save(admin, run, {
         status: 'vetting', jobs: { search: run.jobs.search, enrich },
-        counts: { ...run.counts, shortlisted: saved }, lease_until: null,
+        counts: { ...run.counts, shortlisted: saved, apify_usd: usdOf([...(run.jobs.search ?? []), ...enrich]) }, lease_until: null,
       });
       return;
     }
 
     if (run.status === 'vetting') {
       // Keep going while there is time left in the lease.
-      const t0 = Date.now();
-      const ctx = (await companyContext(admin, run.company_id)).text;
-      let finished = await vetStep(admin, run, ctx);
-      while (!finished && Date.now() - t0 < 40_000) {
-        await admin.from('scout_runs').update({ lease_until: new Date(Date.now() + LEASE_MS).toISOString() }).eq('id', run.id);
-        finished = await vetStep(admin, run, ctx);
-      }
+      const finished = await vetSome(admin, run, 40_000);
       const c = await countsOf(admin, run.id);
       await save(admin, run, {
         counts: { ...run.counts, ...c },
