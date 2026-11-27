@@ -4387,7 +4387,9 @@ export type Database = {
           note: string | null
           origin: string
           signed_at: string | null
+          signed_ip: string | null
           signed_name: string | null
+          signed_user_agent: string | null
           start_date: string | null
           status: string
           updated_at: string
@@ -4410,7 +4412,9 @@ export type Database = {
           note?: string | null
           origin: string
           signed_at?: string | null
+          signed_ip?: string | null
           signed_name?: string | null
+          signed_user_agent?: string | null
           start_date?: string | null
           status: string
           updated_at?: string
@@ -4433,7 +4437,9 @@ export type Database = {
           note?: string | null
           origin?: string
           signed_at?: string | null
+          signed_ip?: string | null
           signed_name?: string | null
+          signed_user_agent?: string | null
           start_date?: string | null
           status?: string
           updated_at?: string
@@ -6938,7 +6944,9 @@ export type Database = {
           note: string | null
           origin: string
           signed_at: string | null
+          signed_ip: string | null
           signed_name: string | null
+          signed_user_agent: string | null
           start_date: string | null
           status: string
           updated_at: string
@@ -7172,7 +7180,9 @@ export type Database = {
           note: string | null
           origin: string
           signed_at: string | null
+          signed_ip: string | null
           signed_name: string | null
+          signed_user_agent: string | null
           start_date: string | null
           status: string
           updated_at: string
@@ -7300,7 +7310,9 @@ export type Database = {
           note: string | null
           origin: string
           signed_at: string | null
+          signed_ip: string | null
           signed_name: string | null
+          signed_user_agent: string | null
           start_date: string | null
           status: string
           updated_at: string
@@ -8009,7 +8021,9 @@ export type Database = {
           note: string | null
           origin: string
           signed_at: string | null
+          signed_ip: string | null
           signed_name: string | null
+          signed_user_agent: string | null
           start_date: string | null
           status: string
           updated_at: string
