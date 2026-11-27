@@ -229,8 +229,8 @@ async function handleCompanyCreditTopup(
       : `$${dollars.toFixed(2)}`;
     const recipients = await adminRecipients(admin, companyId);
     await sendPush(admin, recipients, {
-      title: 'Budget added',
-      body: `${label} added to your creator budget.`,
+      title: 'Credits added',
+      body: `${label} added to your UGC credits`,
       data: {
         event: 'company_topup',
         company_id: companyId,

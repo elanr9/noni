@@ -34,8 +34,8 @@ export async function payOnLive(
     if (paid > 0 && result.creator_id && result.company_id) {
       const recipients = await creatorRecipients(admin, result.creator_id, result.company_id);
       await sendPush(admin, recipients, {
-        title: `${formatCentsDollars(paid)} earned`,
-        body: 'Your post got paid.',
+        title: 'Your post is live',
+        body: `${formatCentsDollars(paid)} is in your balance. Views earn $1 per 1,000 for 30 days.`,
         data: {
           event: 'bounty_earned',
           company_id: result.company_id,

@@ -227,30 +227,17 @@ async function postPlatformUrls(
   return urls;
 }
 
-/** " $10 at 500 views." from the company's campaign; empty when pay does not wait on views. */
-async function postPayLine(admin: SupabaseClient, subject: Subject): Promise<string> {
-  if (!subject.data.assignment_id) return '';
-  const { data, error } = await admin.rpc('company_pay_rates', { p_company_id: subject.company_id });
-  if (error || !data) return '';
-  const rates = data as { video_post_cents?: number; static_post_cents?: number; min_views?: number };
-  const cents = subject.format === 'photo_carousel' ? rates.static_post_cents : rates.video_post_cents;
-  const minViews = rates.min_views ?? 0;
-  if (!cents || minViews <= 0) return '';
-  return ` ${formatCentsLabel(cents)} at ${minViews.toLocaleString('en-US')} views.`;
-}
-
 /** post_live: platform deep links ride in the data payload. */
 function postLiveMessage(
   subject: Subject,
   urls: Record<string, string>,
-  payLine: string,
 ): PushMessage {
   const needsMusic = subject.format === 'photo_carousel';
   return {
     title: 'Your post is live',
     body: needsMusic
       ? `Time to add the music to ${subject.title}.`
-      : `${subject.title} just posted.${payLine}`,
+      : `${subject.title} just posted.`,
     data: {
       ...subject.data,
       ...urls,
@@ -423,8 +410,8 @@ Deno.serve(async (req) => {
       if (body.event === 'credits_low') {
         const recipients = await adminRecipients(admin, companyId);
         const sent = await sendPush(admin, recipients, {
-          title: 'Budget low',
-          body: 'Creator pay is on hold until the next invoice is paid.',
+          title: 'Credits low',
+          body: 'Add credits to keep paying bounties.',
           data: {
             event: body.event,
             company_id: companyId,
@@ -439,11 +426,11 @@ Deno.serve(async (req) => {
           typeof body.amount_cents === 'number' ? body.amount_cents : 0;
         const recipients = await adminRecipients(admin, companyId);
         const sent = await sendPush(admin, recipients, {
-          title: 'Budget added',
+          title: 'Credits added',
           body:
             amountCents > 0
-              ? `${formatCentsLabel(amountCents)} added to your creator budget.`
-              : 'Your creator budget was topped up.',
+              ? `${formatCentsLabel(amountCents)} added to your credits.`
+              : 'Credits were added to your account.',
           data: {
             event: body.event,
             company_id: companyId,
@@ -463,8 +450,8 @@ Deno.serve(async (req) => {
         typeof body.amount_cents === 'number' ? body.amount_cents : 0;
       const recipients = await creatorRecipients(admin, creatorId, companyId);
       const sent = await sendPush(admin, recipients, {
-        title: `${formatCentsLabel(amountCents)} earned`,
-        body: 'It is in your balance.',
+        title: 'Bounty paid',
+        body: `${formatCentsLabel(amountCents)} just hit your wallet.`,
         data: {
           event: body.event,
           company_id: companyId,
@@ -652,7 +639,7 @@ Deno.serve(async (req) => {
         const sent = await sendPush(admin, recipients, {
           title: approved ? 'Accounts approved' : 'Accounts need changes',
           body: approved
-            ? 'Make your first post.'
+            ? 'You are all set, time to make your first post!'
             : 'Open account setup to see what to fix.',
           data: {
             creator_id: creatorId,
@@ -814,8 +801,7 @@ Deno.serve(async (req) => {
 
     if (body.event === 'post_live') {
       const urls = await postPlatformUrls(admin, subject);
-      const payLine = await postPayLine(admin, subject);
-      const creatorSent = await sendPush(admin, recipients, postLiveMessage(subject, urls, payLine));
+      const creatorSent = await sendPush(admin, recipients, postLiveMessage(subject, urls));
       const creatorName = await profileName(admin, subject.creator_id, 'A creator');
       const managerRecipients = await adminRecipients(admin, subject.company_id);
       const managerSent = await sendPush(admin, managerRecipients, {
@@ -842,7 +828,7 @@ Deno.serve(async (req) => {
     if (body.event === 'music_approved') {
       message = {
         title: 'Music approved',
-        body: `${subject.title} can start earning.`,
+        body: 'Your music got approved, time to start earning!',
         data: {
           ...subject.data,
           event: body.event,

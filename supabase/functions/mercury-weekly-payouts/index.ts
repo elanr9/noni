@@ -313,7 +313,7 @@ async function payWallets(
             admin,
             await creatorRecipients(admin, wallet.creator_id, wallet.company_id),
             {
-              title: 'Payout sent',
+              title: 'You got paid!',
               body: `${formatCentsDollars(wallet.available_cents)} is on its way to your bank.`,
               data: {
                 event: 'payout_sent',

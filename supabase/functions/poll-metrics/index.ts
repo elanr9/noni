@@ -137,8 +137,8 @@ async function notifyCreditsLow(
   try {
     const recipients = await adminRecipients(admin, companyId);
     await sendPush(admin, recipients, {
-      title: 'Budget low',
-      body: 'Creator pay is on hold until the next invoice is paid.',
+      title: 'Credits low',
+      body: 'Add credits so creators keep getting paid for their posts and views.',
       data: {
         event: 'credits_low',
         company_id: companyId,
@@ -169,8 +169,8 @@ async function notifyPostPaid(
       params.companyId,
     );
     await sendPush(admin, recipients, {
-      title: `${formatCentsDollars(params.amountCents)} earned`,
-      body: `Your post got paid.${params.viewLine}`,
+      title: 'You got paid for your post',
+      body: `${formatCentsDollars(params.amountCents)} is in your balance.${params.viewLine}`,
       data: {
         event: 'bounty_earned',
         company_id: params.companyId,
@@ -190,7 +190,7 @@ async function viewPayLine(admin: SupabaseClient, companyId: string): Promise<st
   const { data, error } = await admin.rpc('company_pay_rates', { p_company_id: companyId });
   if (error || !data) return '';
   const cents = (data as { cents_per_1k_views?: number }).cents_per_1k_views ?? 0;
-  return cents > 0 ? ` Views pay ${formatCentsDollars(cents)} per 1,000.` : '';
+  return cents > 0 ? ` Views earn ${formatCentsDollars(cents)} per 1,000 for 30 days.` : '';
 }
 
 /** One push per creator per poll for view pay on posts already paid their base. */
@@ -205,8 +205,8 @@ async function notifyViewsEarned(
     try {
       const recipients = await creatorRecipients(admin, creatorId, companyId);
       await sendPush(admin, recipients, {
-        title: `${formatCentsDollars(earned.cents)} earned`,
-        body: earned.posts === 1 ? 'From views on 1 post.' : `From views on ${earned.posts} posts.`,
+        title: 'You got paid for your views',
+        body: `${formatCentsDollars(earned.cents)} just hit your wallet.`,
         data: {
           event: 'views_earned',
           company_id: companyId,

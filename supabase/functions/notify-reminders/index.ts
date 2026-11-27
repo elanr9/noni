@@ -203,13 +203,8 @@ type DayAssignment = {
   creator_id: string;
   slot_index: number;
   status: string;
-  briefs: { format: string; title?: string } | { format: string; title?: string }[] | null;
+  briefs: { format: string } | { format: string }[] | null;
 };
-
-function dayBriefTitle(row: DayAssignment): string {
-  const b = Array.isArray(row.briefs) ? row.briefs[0] : row.briefs;
-  return b?.title?.trim() || 'Open it to start.';
-}
 
 function briefFormat(row: DayAssignment): string {
   const b = row.briefs;
@@ -255,7 +250,7 @@ async function loadTodayAssignments(
   const today = todayInTz('America/New_York');
   const { data, error } = await admin
     .from('assignments')
-    .select('id, company_id, creator_id, slot_index, status, briefs(format, title)')
+    .select('id, company_id, creator_id, slot_index, status, briefs(format)')
     .eq('scheduled_date', today)
     .not('campaign_id', 'is', null);
   if (error) throw new Error(error.message);
@@ -305,8 +300,8 @@ async function sendSlotReminders(
       const label = postLabel(format, videoRank);
       const recipients = await creatorRecipients(admin, row.creator_id, row.company_id);
       slotPushes += await sendPush(admin, recipients, {
-        title: `Time for your ${label}`,
-        body: dayBriefTitle(row),
+        title: `It's time for your ${label}`,
+        body: `It's time for your ${label}`,
         data: {
           event: 'slot_due',
           company_id: row.company_id,
@@ -353,10 +348,11 @@ async function sendAfternoonNudge(
     if (!claimed) continue;
     afternoonClaimed += 1;
     const name = names.get(first.creator_id) ?? 'Hey';
+    const line = `${name}, don't forget about today's posts!`;
     const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
     afternoonPushes += await sendPush(admin, recipients, {
-      title: list.length === 1 ? '1 post left today' : `${list.length} posts left today`,
-      body: `${name}, send ${list.length === 1 ? 'it' : 'them'} before midnight.`,
+      title: line,
+      body: line,
       data: {
         event: 'afternoon_nudge',
         company_id: first.company_id,
@@ -391,7 +387,7 @@ async function sendPostsReady(
     const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
     readyPushes += await sendPush(admin, recipients, {
       title: "Today's posts are ready",
-      body: list.length === 1 ? '1 post to make today.' : `${list.length} posts to make today.`,
+      body: "Today's posts are ready",
       data: {
         event: 'posts_ready',
         company_id: first.company_id,
@@ -450,11 +446,11 @@ async function sendDailyPosts(
   const today = todayInTz('America/New_York');
   const kind = evening ? 'daily_posts_evening' : 'daily_posts';
 
-  const creators = await fetchAll<{ id: string; company_id: string; expo_push_token: string | null }>(
+  const creators = await fetchAll<{ id: string; company_id: string; expo_push_token: string | null; full_name: string | null }>(
     (from, to) =>
       admin
         .from('company_roster')
-        .select('id, company_id, expo_push_token')
+        .select('id, company_id, expo_push_token, full_name')
         .eq('member_role', 'creator')
         .range(from, to),
   );
@@ -544,17 +540,17 @@ async function sendDailyPosts(
     if (!evening && sent > 0) continue;
     if (!(await claimReminder(admin, creator.company_id, creator.id, kind, today))) continue;
     claimed += 1;
-    const left = goal - sent;
-    const company = names.get(creator.company_id) || 'your campaign';
-    const title = evening
-      ? left === 1 ? '1 post left today' : `${left} posts left today`
-      : goal === 1 ? '1 post today' : `${goal} posts today`;
-    const body = evening
-      ? `${sent} of ${goal} sent for ${company}.`
-      : `Make ${goal === 1 ? 'it' : 'them'} for ${company}.`;
+    // Same voice as the older reminders: first name, one line, title and body alike.
+    const name = firstName(creator.full_name);
+    const company = names.get(creator.company_id);
+    const line = evening
+      ? `${name}, don't forget about today's posts!`
+      : company
+        ? `${name}, it's time for today's ${company} posts!`
+        : `${name}, it's time for today's posts!`;
     pushes += await sendPush(admin, [{ profileId: creator.id, token: creator.expo_push_token }], {
-      title,
-      body,
+      title: line,
+      body: line,
       data: {
         event: kind,
         company_id: creator.company_id,
@@ -607,8 +603,10 @@ async function sendFixPost(admin: Admin): Promise<{ fix_claimed: number; fix_pus
     claimed += 1;
     const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
     pushes += await sendPush(admin, recipients, {
-      title: list.length === 1 ? '1 post needs changes' : `${list.length} posts need changes`,
-      body: list.length === 1 ? 'Open it to see the notes.' : 'Open them to see the notes.',
+      title: "Don't forget your changes!",
+      body: list.length === 1
+        ? 'Your post needs another take. Open it to see the notes.'
+        : `${list.length} posts need another take. Open them to see the notes.`,
       data: {
         event: 'fix_post',
         company_id: first.company_id,
@@ -644,8 +642,8 @@ async function sendSignAgreement(admin: Admin): Promise<{ sign_claimed: number; 
     // Not a member of the company until they sign, so no roster lookup.
     const recipients = await recipientsForProfiles(admin, [row.creator_id]);
     pushes += await sendPush(admin, recipients, {
-      title: 'Sign your agreement',
-      body: row.status === 'invited' ? `${company} invited you. Sign to start.` : `${company} accepted you. Sign to start.`,
+      title: row.status === 'invited' ? `${company} invited you!` : `${company} accepted you!`,
+      body: 'Sign your agreement, time to start earning!',
       data: {
         event: 'sign_agreement',
         company_id: row.company_id,
