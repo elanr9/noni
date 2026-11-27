@@ -54,7 +54,7 @@ export async function deleteMyAccount(): Promise<void> {
 }
 
 /** Push categories. A missing key means on. */
-export type NotificationCategory = 'submissions' | 'reviews' | 'messages' | 'live' | 'streaks' | 'briefs';
+export type NotificationCategory = 'submissions' | 'reviews' | 'messages' | 'live' | 'streaks' | 'briefs' | 'reminders' | 'earnings';
 export type NotificationPrefs = Partial<Record<NotificationCategory, boolean>>;
 
 function parsePrefs(raw: unknown): NotificationPrefs {

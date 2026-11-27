@@ -10,7 +10,7 @@ import { formatCentsDollars } from '../_shared/credits.ts';
 import {
   adminRecipients,
   creatorRecipients,
-  sendPush,
+  sendPushWithPrefs as sendPush,
 } from '../_shared/push.ts';
 import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 
@@ -137,8 +137,8 @@ async function notifyCreditsLow(
   try {
     const recipients = await adminRecipients(admin, companyId);
     await sendPush(admin, recipients, {
-      title: 'Credits low',
-      body: 'Add credits so creators keep getting paid for their posts and views.',
+      title: 'Budget low',
+      body: 'Creator pay is on hold until the next invoice is paid.',
       data: {
         event: 'credits_low',
         company_id: companyId,
@@ -158,6 +158,8 @@ async function notifyPostPaid(
     assignmentId: string;
     postId: string;
     amountCents: number;
+    /** " Views pay $1 per 1,000." from the company's campaign. */
+    viewLine: string;
   },
 ): Promise<void> {
   try {
@@ -167,8 +169,8 @@ async function notifyPostPaid(
       params.companyId,
     );
     await sendPush(admin, recipients, {
-      title: 'You got paid for your post',
-      body: `${formatCentsDollars(params.amountCents)} is in your balance. Views earn $1 per 1,000 for 30 days.`,
+      title: `${formatCentsDollars(params.amountCents)} earned`,
+      body: `Your post got paid.${params.viewLine}`,
       data: {
         event: 'bounty_earned',
         company_id: params.companyId,
@@ -180,6 +182,42 @@ async function notifyPostPaid(
     });
   } catch (e) {
     console.error(`post paid push ${params.postId}:`, e);
+  }
+}
+
+/** " Views pay $1 per 1,000." for the company's campaign; empty when it pays nothing for views. */
+async function viewPayLine(admin: SupabaseClient, companyId: string): Promise<string> {
+  const { data, error } = await admin.rpc('company_pay_rates', { p_company_id: companyId });
+  if (error || !data) return '';
+  const cents = (data as { cents_per_1k_views?: number }).cents_per_1k_views ?? 0;
+  return cents > 0 ? ` Views pay ${formatCentsDollars(cents)} per 1,000.` : '';
+}
+
+/** One push per creator per poll for view pay on posts already paid their base. */
+async function notifyViewsEarned(
+  admin: SupabaseClient,
+  companyId: string,
+  byCreator: Map<string, { cents: number; posts: number; assignmentId: string }>,
+): Promise<void> {
+  for (const [creatorId, earned] of byCreator) {
+    // Under a dollar is noise; it still shows in Earnings.
+    if (earned.cents < 100) continue;
+    try {
+      const recipients = await creatorRecipients(admin, creatorId, companyId);
+      await sendPush(admin, recipients, {
+        title: `${formatCentsDollars(earned.cents)} earned`,
+        body: earned.posts === 1 ? 'From views on 1 post.' : `From views on ${earned.posts} posts.`,
+        data: {
+          event: 'views_earned',
+          company_id: companyId,
+          deep_link: `noni://creator/${companyId}/earnings`,
+          assignment_id: earned.posts === 1 ? earned.assignmentId : null,
+          amount_cents: String(earned.cents),
+        },
+      });
+    } catch (e) {
+      console.error(`views earned push ${creatorId}:`, e);
+    }
   }
 }
 
@@ -578,6 +616,8 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
 
   // Pay every assignment with a live post: base pay once, view pay as the
   // 30-day count grows. Before the milestone pushes, so they can quote it.
+  const viewLine = payable.size > 0 ? await viewPayLine(admin, companyId) : '';
+  const viewsEarned = new Map<string, { cents: number; posts: number; assignmentId: string }>();
   for (const [assignmentId, { windowViews, postId }] of payable) {
     const assignment = assignmentById.get(assignmentId);
     if (!assignment) continue;
@@ -597,7 +637,13 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
         assignmentId,
         postId,
         amountCents: paidBase + paidViews,
+        viewLine,
       });
+    } else if (paidViews > 0) {
+      const sum = viewsEarned.get(assignment.creator_id) ?? { cents: 0, posts: 0, assignmentId };
+      sum.cents += paidViews;
+      sum.posts += 1;
+      viewsEarned.set(assignment.creator_id, sum);
     }
     if (result.reason === 'insufficient_credits') {
       console.warn(
@@ -609,6 +655,8 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       }
     }
   }
+
+  await notifyViewsEarned(admin, companyId, viewsEarned);
 
   // One push per post that crossed something, naming the highest new
   // threshold. Sent only for claims this poll actually won.

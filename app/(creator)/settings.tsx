@@ -33,7 +33,9 @@ import { color, radius, shadow, space, text, type Tone } from '../../theme/v2';
 
 type OpenSheet = 'name' | 'signout' | 'delete' | null;
 
-const NOTIF_ROWS: { key: NotificationCategory; label: string; sub: string; icon: 'check_circle' | 'mark_chat_unread' | 'trending_up' | 'bookmark' }[] = [
+const NOTIF_ROWS: { key: NotificationCategory; label: string; sub: string; icon: 'check_circle' | 'mark_chat_unread' | 'trending_up' | 'bookmark' | 'schedule' | 'payments' }[] = [
+  { key: 'reminders', label: 'Reminders', sub: 'Posts left to make today', icon: 'schedule' },
+  { key: 'earnings', label: 'Earnings', sub: 'A post gets paid or a payout is sent', icon: 'payments' },
   { key: 'briefs', label: 'New briefs', sub: 'Your team publishes a new brief', icon: 'bookmark' },
   { key: 'reviews', label: 'Post reviews', sub: 'A post is approved or needs changes', icon: 'check_circle' },
   { key: 'messages', label: 'Messages', sub: 'Your campaign managers write to you', icon: 'mark_chat_unread' },

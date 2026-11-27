@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
   const res = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(tokens.map((to) => ({ to, title: 'New brief', body, data }))),
+    body: JSON.stringify(tokens.map((to) => ({ to, title: 'New brief', body, sound: 'default', data }))),
   });
   if (!res.ok) return jsonResponse({ error: `expo push failed: ${res.status} ${await res.text()}` }, 502);
   return jsonResponse({ sent: tokens.length });

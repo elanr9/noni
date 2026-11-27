@@ -50,22 +50,94 @@ export async function sendPush(
     .filter((t): t is string => Boolean(t));
   if (tokens.length === 0) return 0;
 
-  const res = await fetch('https://exp.host/--/api/v2/push/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(
-      tokens.map((to) => ({
-        to,
-        title: message.title,
-        body: message.body,
-        data: message.data,
-      })),
-    ),
-  });
-  if (!res.ok) {
-    throw new Error(`expo push failed: ${res.status} ${await res.text()}`);
+  // Expo takes at most 100 messages a request. Without `sound` iOS delivers silently.
+  for (let i = 0; i < tokens.length; i += 100) {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        tokens.slice(i, i + 100).map((to) => ({
+          to,
+          title: message.title,
+          body: message.body,
+          sound: 'default',
+          data: message.data,
+        })),
+      ),
+    });
+    if (!res.ok) {
+      throw new Error(`expo push failed: ${res.status} ${await res.text()}`);
+    }
   }
   return tokens.length;
+}
+
+/**
+ * profiles.notification_prefs category per event. An event with no category
+ * (billing, marketplace decisions) always pushes.
+ */
+export const PREF_CATEGORY: Partial<Record<string, string>> = {
+  submitted: 'submissions',
+  music_pending: 'submissions',
+  account_submitted: 'submissions',
+  approved: 'reviews',
+  changes_requested: 'reviews',
+  comment: 'reviews',
+  music_approved: 'reviews',
+  music_changes: 'reviews',
+  account_decided: 'reviews',
+  message: 'messages',
+  manager_message: 'messages',
+  post_live: 'live',
+  published: 'live',
+  streak_bonus: 'streaks',
+  streak_progress: 'streaks',
+  bounty_earned: 'earnings',
+  views_earned: 'earnings',
+  milestone: 'earnings',
+  payout_sent: 'earnings',
+  daily_posts: 'reminders',
+  daily_posts_evening: 'reminders',
+  fix_post: 'reminders',
+  sign_agreement: 'reminders',
+  due_today: 'reminders',
+  slot_due: 'reminders',
+  afternoon_nudge: 'reminders',
+  posts_ready: 'reminders',
+  account_warmup: 'reminders',
+};
+
+/**
+ * sendPush that respects each recipient's notification_prefs: everyone still
+ * gets the row in the in-app feed, but a recipient who turned the event's
+ * category off gets no push.
+ */
+export async function sendPushWithPrefs(
+  admin: SupabaseClient,
+  recipients: Recipient[],
+  message: PushMessage,
+): Promise<number> {
+  const category = PREF_CATEGORY[message.data.event];
+  if (!category || recipients.length === 0) return await sendPush(admin, recipients, message);
+  const ids = [...new Set(recipients.map((r) => r.profileId))];
+  const { data, error } = await admin.from('profiles').select('id, notification_prefs').in('id', ids);
+  if (error) {
+    console.error('notification prefs lookup failed', error.message);
+    return await sendPush(admin, recipients, message);
+  }
+  const off = new Set(
+    (data ?? [])
+      .filter((p) => {
+        const prefs = p.notification_prefs as Record<string, unknown> | null;
+        return prefs !== null && typeof prefs === 'object' && prefs[category] === false;
+      })
+      .map((p) => p.id as string),
+  );
+  return await sendPush(
+    admin,
+    recipients.map((r) => (off.has(r.profileId) ? { ...r, token: null } : r)),
+    message,
+  );
 }
 
 /** Manager-side roles, matching the is_campaign_manager() SQL helper. */

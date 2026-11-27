@@ -17,6 +17,8 @@ import {
   handleCors,
   jsonResponse,
 } from '../_shared/wp8.ts';
+import { formatCentsDollars } from '../_shared/credits.ts';
+import { creatorRecipients, sendPushWithPrefs } from '../_shared/push.ts';
 import { addDays, etParts, inEtWindow } from '../_shared/et-window.ts';
 import {
   callProxy,
@@ -305,6 +307,25 @@ async function payWallets(
       if (result.outcome === 'sent') {
         creatorsPaid += 1;
         sentCents += wallet.available_cents;
+        // The money already moved: a failed push must never read as a failed payout.
+        try {
+          await sendPushWithPrefs(
+            admin,
+            await creatorRecipients(admin, wallet.creator_id, wallet.company_id),
+            {
+              title: 'Payout sent',
+              body: `${formatCentsDollars(wallet.available_cents)} is on its way to your bank.`,
+              data: {
+                event: 'payout_sent',
+                company_id: wallet.company_id,
+                deep_link: `noni://creator/${wallet.company_id}/earnings`,
+                amount_cents: String(wallet.available_cents),
+              },
+            },
+          );
+        } catch (e) {
+          console.error(`payout push ${wallet.creator_id}:`, e);
+        }
       } else if (result.outcome === 'rejected') {
         rejected.push(`${wallet.creator_id}: ${result.reason}`);
       } else if (result.outcome === 'unknown') {

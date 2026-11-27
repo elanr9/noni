@@ -9,11 +9,13 @@ import { Icon } from '../ui/Icon';
 import { CompanyMark } from './CompanyMark';
 import { WAIT_RED } from './WaitBadge';
 
-const MESSAGE_EVENTS = new Set(['message', 'manager_message']);
+const MESSAGE_EVENTS = new Set(['message', 'manager_message', 'marketplace_message']);
 
+/** Titles carry the news ("$10 earned", "Inkbound accepted you"), so the row shows both. */
 function rowText(n: CompanyNotification): string {
-  if (MESSAGE_EVENTS.has(n.event) && n.title && n.body) return `${n.title}: ${n.body}`;
-  return n.body || n.title;
+  if (!n.title || !n.body || n.title === n.body) return n.body || n.title;
+  if (MESSAGE_EVENTS.has(n.event)) return `${n.title}: ${n.body}`;
+  return `${n.title}. ${n.body}`;
 }
 
 function whenLabel(iso: string, now = new Date()): string {

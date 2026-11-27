@@ -1,12 +1,26 @@
-// Morning due-today pushes for creators. Hourly cron at :15; only
-// acts in America/New_York hour 8–9. Account warm-up pushes fire in hour 14
+// Creator reminders, all in America/New_York hours, cron at :00 and :15.
+//
+// Creators on a campaign start their own posts, so nothing is scheduled for
+// them ahead of time. They are reminded against the campaign's posts a day:
+//   11  daily_posts          nothing sent yet today
+//   12  sign_agreement       accepted or invited, agreement still unsigned
+//   13  fix_post             a post was sent back and is still waiting
+//   18  daily_posts_evening  still short of today's posts
+//
+// Posts a manager scheduled ahead (assignments with a campaign_id) keep the
+// older reminders: due-today at 8–9, one per slot, a 4pm nudge. Account warm-up pushes fire in hour 14
 // every 3 days starting 2026-09-28, only to creators whose warm-up is still
 // open (no creator_accounts row yet, or sent back), with each company's own
 // niche and search phrases in the body. Claims via creator_reminders insert
 // so concurrent runs cannot double-send. One push per creator per kind per day.
 
 import { adminClient, authenticate, handleCors, jsonResponse } from '../_shared/wp8.ts';
-import { adminRecipients, creatorRecipients, sendPush } from '../_shared/push.ts';
+import {
+  adminRecipients,
+  creatorRecipients,
+  recipientsForProfiles,
+  sendPushWithPrefs as sendPush,
+} from '../_shared/push.ts';
 import { creatorLink, managerLink } from '../_shared/deep-link.ts';
 import { loadNiches, warmupPushBody } from '../_shared/brandVoice.ts';
 
@@ -189,8 +203,13 @@ type DayAssignment = {
   creator_id: string;
   slot_index: number;
   status: string;
-  briefs: { format: string } | { format: string }[] | null;
+  briefs: { format: string; title?: string } | { format: string; title?: string }[] | null;
 };
+
+function dayBriefTitle(row: DayAssignment): string {
+  const b = Array.isArray(row.briefs) ? row.briefs[0] : row.briefs;
+  return b?.title?.trim() || 'Open it to start.';
+}
 
 function briefFormat(row: DayAssignment): string {
   const b = row.briefs;
@@ -236,8 +255,9 @@ async function loadTodayAssignments(
   const today = todayInTz('America/New_York');
   const { data, error } = await admin
     .from('assignments')
-    .select('id, company_id, creator_id, slot_index, status, briefs(format)')
-    .eq('scheduled_date', today);
+    .select('id, company_id, creator_id, slot_index, status, briefs(format, title)')
+    .eq('scheduled_date', today)
+    .not('campaign_id', 'is', null);
   if (error) throw new Error(error.message);
   return { today, rows: (data ?? []) as DayAssignment[] };
 }
@@ -285,8 +305,8 @@ async function sendSlotReminders(
       const label = postLabel(format, videoRank);
       const recipients = await creatorRecipients(admin, row.creator_id, row.company_id);
       slotPushes += await sendPush(admin, recipients, {
-        title: `It's time for your ${label}`,
-        body: `It's time for your ${label}`,
+        title: `Time for your ${label}`,
+        body: dayBriefTitle(row),
         data: {
           event: 'slot_due',
           company_id: row.company_id,
@@ -333,11 +353,10 @@ async function sendAfternoonNudge(
     if (!claimed) continue;
     afternoonClaimed += 1;
     const name = names.get(first.creator_id) ?? 'Hey';
-    const line = `${name}, don't forget about today's posts!`;
     const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
     afternoonPushes += await sendPush(admin, recipients, {
-      title: line,
-      body: line,
+      title: list.length === 1 ? '1 post left today' : `${list.length} posts left today`,
+      body: `${name}, send ${list.length === 1 ? 'it' : 'them'} before midnight.`,
       data: {
         event: 'afternoon_nudge',
         company_id: first.company_id,
@@ -372,7 +391,7 @@ async function sendPostsReady(
     const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
     readyPushes += await sendPush(admin, recipients, {
       title: "Today's posts are ready",
-      body: "Today's posts are ready",
+      body: list.length === 1 ? '1 post to make today.' : `${list.length} posts to make today.`,
       data: {
         event: 'posts_ready',
         company_id: first.company_id,
@@ -382,6 +401,261 @@ async function sendPostsReady(
     });
   }
   return { ready_claimed: readyClaimed, ready_pushes: readyPushes };
+}
+
+// --- Campaign creators: posts they start themselves --------------------------
+
+const DAILY_HOUR = 11;
+const SIGN_HOUR = 12;
+const FIX_HOUR = 13;
+const EVENING_HOUR = 18;
+/** A company with no campaign card yet still expects the default 2 a day. */
+const DEFAULT_POSTS_PER_DAY = 2;
+const HOUR_MS = 3_600_000;
+
+type Admin = ReturnType<typeof adminClient>;
+
+async function fetchAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+async function companyNames(admin: Admin, ids: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (ids.length === 0) return names;
+  const { data, error } = await admin.from('companies').select('id, name').in('id', ids);
+  if (error) throw new Error(error.message);
+  for (const c of data ?? []) names.set(c.id as string, ((c.name as string | null) ?? '').trim());
+  return names;
+}
+
+/**
+ * Creators short of their campaign's posts for today. Morning goes to those
+ * who have sent nothing; evening to anyone still short.
+ */
+async function sendDailyPosts(
+  admin: Admin,
+  evening: boolean,
+): Promise<{ daily_claimed: number; daily_pushes: number }> {
+  const today = todayInTz('America/New_York');
+  const kind = evening ? 'daily_posts_evening' : 'daily_posts';
+
+  const creators = await fetchAll<{ id: string; company_id: string; expo_push_token: string | null }>(
+    (from, to) =>
+      admin
+        .from('company_roster')
+        .select('id, company_id, expo_push_token')
+        .eq('member_role', 'creator')
+        .range(from, to),
+  );
+  if (creators.length === 0) return { daily_claimed: 0, daily_pushes: 0 };
+
+  // Posting is gated on account setup; the warm-up reminder covers the rest.
+  const ready = new Set(
+    (
+      await fetchAll<{ company_id: string; creator_id: string }>((from, to) =>
+        admin.from('creator_accounts').select('company_id, creator_id').eq('status', 'approved').range(from, to),
+      )
+    ).map((r) => `${r.company_id}:${r.creator_id}`),
+  );
+
+  // Posts a day, from the company's campaign (the open one first).
+  const listings = await fetchAll<{ company_id: string; posts_per_day_min: number | null; status: string; updated_at: string }>(
+    (from, to) =>
+      admin.from('marketplace_listings').select('company_id, posts_per_day_min, status, updated_at').range(from, to),
+  );
+  listings.sort(
+    (a, b) => Number(b.status === 'open') - Number(a.status === 'open') || b.updated_at.localeCompare(a.updated_at),
+  );
+  const target = new Map<string, number>();
+  for (const l of listings) {
+    if (!target.has(l.company_id)) target.set(l.company_id, l.posts_per_day_min ?? DEFAULT_POSTS_PER_DAY);
+  }
+
+  // A signed creator who has not reached their start date is not due yet.
+  const notStarted = new Set(
+    (
+      await fetchAll<{ company_id: string; creator_id: string }>((from, to) =>
+        admin
+          .from('marketplace_applications')
+          .select('company_id, creator_id')
+          .eq('status', 'accepted')
+          .gt('start_date', today)
+          .range(from, to),
+      )
+    ).map((r) => `${r.company_id}:${r.creator_id}`),
+  );
+
+  // Creators with posts scheduled ahead for today get the slot reminders.
+  const scheduled = new Set(
+    (
+      await fetchAll<{ company_id: string; creator_id: string }>((from, to) =>
+        admin
+          .from('assignments')
+          .select('company_id, creator_id')
+          .eq('scheduled_date', today)
+          .not('campaign_id', 'is', null)
+          .range(from, to),
+      )
+    ).map((r) => `${r.company_id}:${r.creator_id}`),
+  );
+
+  // Posts sent today: any submission made since midnight Eastern.
+  type Sent = { assignment_id: string | null; created_at: string; assignments: { company_id: string; creator_id: string } | { company_id: string; creator_id: string }[] | null };
+  const recent = await fetchAll<Sent>((from, to) =>
+    admin
+      .from('submissions')
+      // assignments also points back at submissions, so the embed names its key.
+      .select('assignment_id, created_at, assignments!submissions_assignment_id_fkey!inner(company_id, creator_id)')
+      .gte('created_at', new Date(Date.now() - 30 * HOUR_MS).toISOString())
+      .range(from, to),
+  );
+  const sentToday = new Map<string, Set<string>>();
+  for (const row of recent) {
+    if (!row.assignment_id) continue;
+    if (todayInTz('America/New_York', new Date(row.created_at)) !== today) continue;
+    const a = Array.isArray(row.assignments) ? row.assignments[0] : row.assignments;
+    if (!a) continue;
+    const key = `${a.company_id}:${a.creator_id}`;
+    const set = sentToday.get(key) ?? new Set<string>();
+    set.add(row.assignment_id);
+    sentToday.set(key, set);
+  }
+
+  const names = await companyNames(admin, [...new Set(creators.map((c) => c.company_id))]);
+  let claimed = 0;
+  let pushes = 0;
+  for (const creator of creators) {
+    const key = `${creator.company_id}:${creator.id}`;
+    if (!ready.has(key) || notStarted.has(key) || scheduled.has(key)) continue;
+    const goal = target.get(creator.company_id) ?? DEFAULT_POSTS_PER_DAY;
+    const sent = sentToday.get(key)?.size ?? 0;
+    if (sent >= goal) continue;
+    if (!evening && sent > 0) continue;
+    if (!(await claimReminder(admin, creator.company_id, creator.id, kind, today))) continue;
+    claimed += 1;
+    const left = goal - sent;
+    const company = names.get(creator.company_id) || 'your campaign';
+    const title = evening
+      ? left === 1 ? '1 post left today' : `${left} posts left today`
+      : goal === 1 ? '1 post today' : `${goal} posts today`;
+    const body = evening
+      ? `${sent} of ${goal} sent for ${company}.`
+      : `Make ${goal === 1 ? 'it' : 'them'} for ${company}.`;
+    pushes += await sendPush(admin, [{ profileId: creator.id, token: creator.expo_push_token }], {
+      title,
+      body,
+      data: {
+        event: kind,
+        company_id: creator.company_id,
+        deep_link: creatorLink(creator.company_id, 'home'),
+      },
+    });
+  }
+  return { daily_claimed: claimed, daily_pushes: pushes };
+}
+
+/** A post sent back at least 12 hours ago and still not redone. Stops after 5 days. */
+async function sendFixPost(admin: Admin): Promise<{ fix_claimed: number; fix_pushes: number }> {
+  const today = todayInTz('America/New_York');
+  const { data: open, error } = await admin
+    .from('assignments')
+    .select('id, company_id, creator_id, submission_id')
+    .eq('status', 'changes_requested')
+    .not('submission_id', 'is', null);
+  if (error) throw new Error(error.message);
+  const rows = (open ?? []) as { id: string; company_id: string; creator_id: string; submission_id: string }[];
+  if (rows.length === 0) return { fix_claimed: 0, fix_pushes: 0 };
+
+  const { data: events, error: eventsError } = await admin
+    .from('review_events')
+    .select('submission_id, created_at')
+    .eq('action', 'changes_requested')
+    .in('submission_id', rows.map((r) => r.submission_id));
+  if (eventsError) throw new Error(eventsError.message);
+  const askedAt = new Map<string, number>();
+  for (const e of events ?? []) {
+    const at = new Date(e.created_at as string).getTime();
+    const id = e.submission_id as string;
+    if (at > (askedAt.get(id) ?? 0)) askedAt.set(id, at);
+  }
+
+  const now = Date.now();
+  const byCreator = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const at = askedAt.get(row.submission_id);
+    if (!at || now - at < 12 * HOUR_MS || now - at > 5 * 24 * HOUR_MS) continue;
+    const key = `${row.company_id}:${row.creator_id}`;
+    byCreator.set(key, [...(byCreator.get(key) ?? []), row]);
+  }
+
+  let claimed = 0;
+  let pushes = 0;
+  for (const list of byCreator.values()) {
+    const first = list[0];
+    if (!(await claimReminder(admin, first.company_id, first.creator_id, 'fix_post', today))) continue;
+    claimed += 1;
+    const recipients = await creatorRecipients(admin, first.creator_id, first.company_id);
+    pushes += await sendPush(admin, recipients, {
+      title: list.length === 1 ? '1 post needs changes' : `${list.length} posts need changes`,
+      body: list.length === 1 ? 'Open it to see the notes.' : 'Open them to see the notes.',
+      data: {
+        event: 'fix_post',
+        company_id: first.company_id,
+        assignment_id: first.id,
+        deep_link: creatorLink(first.company_id, 'assignment', first.id),
+      },
+    });
+  }
+  return { fix_claimed: claimed, fix_pushes: pushes };
+}
+
+/** Accepted or invited at least 20 hours ago and the agreement is still unsigned. Stops after 4 days. */
+async function sendSignAgreement(admin: Admin): Promise<{ sign_claimed: number; sign_pushes: number }> {
+  const today = todayInTz('America/New_York');
+  const { data, error } = await admin
+    .from('marketplace_applications')
+    .select('id, listing_id, company_id, creator_id, status, updated_at')
+    .in('status', ['offered', 'invited'])
+    .is('signed_at', null)
+    .lte('updated_at', new Date(Date.now() - 20 * HOUR_MS).toISOString())
+    .gte('updated_at', new Date(Date.now() - 4 * 24 * HOUR_MS).toISOString());
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { id: string; listing_id: string; company_id: string; creator_id: string; status: string }[];
+  if (rows.length === 0) return { sign_claimed: 0, sign_pushes: 0 };
+
+  const names = await companyNames(admin, [...new Set(rows.map((r) => r.company_id))]);
+  let claimed = 0;
+  let pushes = 0;
+  for (const row of rows) {
+    if (!(await claimReminder(admin, row.company_id, row.creator_id, 'sign_agreement', today))) continue;
+    claimed += 1;
+    const company = names.get(row.company_id) || 'A company';
+    // Not a member of the company until they sign, so no roster lookup.
+    const recipients = await recipientsForProfiles(admin, [row.creator_id]);
+    pushes += await sendPush(admin, recipients, {
+      title: 'Sign your agreement',
+      body: row.status === 'invited' ? `${company} invited you. Sign to start.` : `${company} accepted you. Sign to start.`,
+      data: {
+        event: 'sign_agreement',
+        company_id: row.company_id,
+        listing_id: row.listing_id,
+        application_id: row.id,
+        deep_link: `noni://creator/${row.company_id}/market/${row.listing_id}`,
+      },
+    });
+  }
+  return { sign_claimed: claimed, sign_pushes: pushes };
 }
 
 function overdueBody(count: number, streak: number): string {
@@ -408,8 +682,11 @@ Deno.serve(async (req) => {
   let force = false;
   let warmupForce = false;
   let ready = false;
+  // Manual run of one campaign reminder, whatever the hour: daily | evening | sign | fix.
+  let run: string | null = null;
   try {
-    const body = (await req.json()) as { force?: boolean; warmup?: boolean; ready?: boolean };
+    const body = (await req.json()) as { force?: boolean; warmup?: boolean; ready?: boolean; run?: string };
+    run = typeof body.run === 'string' ? body.run : null;
     force = body.force === true;
     warmupForce = body.warmup === true;
     ready = body.ready === true;
@@ -428,6 +705,12 @@ Deno.serve(async (req) => {
 
     const slotResult = await sendSlotReminders(admin, nyHour);
     const afternoonResult = nyHour === 16 ? await sendAfternoonNudge(admin) : null;
+    const campaignResult = {
+      ...(nyHour === DAILY_HOUR || run === 'daily' ? await sendDailyPosts(admin, false) : {}),
+      ...(nyHour === EVENING_HOUR || run === 'evening' ? await sendDailyPosts(admin, true) : {}),
+      ...(nyHour === SIGN_HOUR || run === 'sign' ? await sendSignAgreement(admin) : {}),
+      ...(nyHour === FIX_HOUR || run === 'fix' ? await sendFixPost(admin) : {}),
+    };
 
     const warmupResult =
       nyHour === 14 || warmupForce ? await sendAccountWarmup(admin, warmupForce) : null;
@@ -439,6 +722,7 @@ Deno.serve(async (req) => {
         ny_hour: nyHour,
         ...slotResult,
         ...(afternoonResult ?? {}),
+        ...campaignResult,
         ...(warmupResult ?? {}),
       });
     }
@@ -459,6 +743,7 @@ Deno.serve(async (req) => {
     const { data: rows, error } = await admin
       .from('assignments')
       .select('id, company_id, creator_id, scheduled_date, briefs(title)')
+      .not('campaign_id', 'is', null)
       .in('status', [...INCOMPLETE]);
     if (error) throw new Error(error.message);
 

@@ -125,6 +125,15 @@ export function routeNotificationTap(
     }
     return;
   }
+  if (event === 'payout_sent' || event === 'views_earned') {
+    router.push('/(creator)/(tabs)/earnings');
+    return;
+  }
+  if (event === 'sign_agreement' || (event !== null && event.startsWith('marketplace_'))) {
+    const listingId = str(data, 'listing_id');
+    router.push(listingId ? `/(creator)/market/${listingId}` : '/(creator)/(tabs)/market');
+    return;
+  }
   if (event === 'post_live' || event === 'milestone') {
     const tiktok = str(data, 'tiktok_url');
     const ig = str(data, 'instagram_url');

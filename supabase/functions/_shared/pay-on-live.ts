@@ -4,7 +4,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { formatCentsDollars } from './credits.ts';
 import { creatorLink } from './deep-link.ts';
-import { creatorRecipients, sendPush } from './push.ts';
+import { creatorRecipients, sendPushWithPrefs as sendPush } from './push.ts';
 
 /**
  * Post pay ($10 video, $5 static) lands the moment a post goes live, not at
@@ -34,8 +34,8 @@ export async function payOnLive(
     if (paid > 0 && result.creator_id && result.company_id) {
       const recipients = await creatorRecipients(admin, result.creator_id, result.company_id);
       await sendPush(admin, recipients, {
-        title: 'Your post is live',
-        body: `${formatCentsDollars(paid)} is in your balance. Views earn $1 per 1,000 for 30 days.`,
+        title: `${formatCentsDollars(paid)} earned`,
+        body: 'Your post got paid.',
         data: {
           event: 'bounty_earned',
           company_id: result.company_id,
