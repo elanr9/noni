@@ -10,6 +10,8 @@ import {
   SCRIPT_SCHEMA,
   TITLES_SCHEMA,
   WRITER_EFFORT,
+  askBrief,
+  tidyAnswers,
   budgetFor,
   buildContext,
   checkScript,
@@ -26,6 +28,7 @@ import {
   type Critique,
   type GenerateArgs,
   type LegacyBrand,
+  type ManagerAnswer,
   type QueuedQuestion,
   type Script,
 } from './briefEngine.ts';
@@ -151,6 +154,7 @@ type Reply = (args: GenerateArgs) => unknown;
 function harness(replies: Record<string, Reply | unknown>, over: Partial<BriefEngineDeps> = {}) {
   const calls: GenerateArgs[] = [];
   const queued: QueuedQuestion[] = [];
+  const recorded: { companyId: string; topic: string; answers: ManagerAnswer[] }[] = [];
   let legacyLoads = 0;
   const deps: BriefEngineDeps = {
     generate: (async (args: GenerateArgs) => {
@@ -166,6 +170,9 @@ function harness(replies: Record<string, Reply | unknown>, over: Partial<BriefEn
     queueQuestion: async (_admin, q) => {
       queued.push(q);
     },
+    recordAnswers: async (_admin, input) => {
+      recorded.push(input);
+    },
     loadLegacyBrand: async () => {
       legacyLoads += 1;
       return legacy;
@@ -174,7 +181,7 @@ function harness(replies: Record<string, Reply | unknown>, over: Partial<BriefEn
     now: () => 0,
     ...over,
   };
-  return { deps, calls, queued, legacyLoads: () => legacyLoads };
+  return { deps, calls, queued, recorded, legacyLoads: () => legacyLoads };
 }
 
 const admin = { from: () => ({}) } as unknown as AdminClient;
@@ -413,7 +420,7 @@ describe('enforceScript', () => {
 // ---------------------------------------------------------------- the engine with a fake model
 
 describe('writeBrief', () => {
-  const req = { companyId: 'co-1', mode: 'guided' as const, type: 'Talking Head' as const, title: 'Why your fern keeps dying' };
+  const req = { companyId: 'co-1', mode: 'guided' as const, type: 'Talking Head' as const, title: 'Why your fern keeps dying', thorough: true };
 
   it('runs strategist, writer, critic on one cached prefix and skips the revision when nothing is wrong', async () => {
     const h = harness({ 'brief.angle': angle(), 'brief.write': goodScript(), 'brief.critic': ship });
@@ -596,7 +603,7 @@ describe('writeBrief', () => {
       'brief.critic': ship,
       'brief.revise': { ...goodScript(), clips: [clip({ say: '', onScreen: text })] },
     });
-    const plan = (await writeBrief(admin, { companyId: 'co-1', mode: 'long_text', title: 'Fern' }, h.deps)) as BriefPlan;
+    const plan = (await writeBrief(admin, { companyId: 'co-1', mode: 'long_text', title: 'Fern', thorough: true }, h.deps)) as BriefPlan;
     expect(h.calls[0].context[1]).toBe(playbookForType('Long Text'));
     expect(plan.clips).toHaveLength(1);
     expect(plan.clips[0]).toMatchObject({ say: '', cta: false });
@@ -628,6 +635,61 @@ describe('writeBrief', () => {
     expect(h.calls[0].context).not.toContain(PLAYBOOK_CORE);
     expect(h.calls[0].input).toContain('"fern"');
     expect(out).toEqual({ titles: ['Why your fern keeps dying', 'Stop watering on Sundays, here is why'] });
+  });
+});
+
+describe('ask first, then one call', () => {
+  const req = { companyId: 'co-1', mode: 'guided' as const, type: 'Talking Head' as const, title: 'Why your fern keeps dying' };
+  const draft = () => ({ ...goodScript(), angle: 'For Sunday waterers.', hooks: angle().hooks, questions: [] });
+
+  it('asks up to three tappable questions on the fast tier and drops ones with nothing to tap', async () => {
+    const h = harness({
+      'brief.ask': {
+        questions: [
+          { question: 'Which mistakes go in?', options: ['Watering on a schedule', 'Pot with no drainage', 'Direct afternoon sun', 'Misting the leaves', 'A fifth'], many: true },
+          { question: 'No options', options: ['Only one'], many: false },
+          { question: 'What does the app do here?', options: ['Shows the week', 'The product is not shown'], many: false },
+        ],
+      },
+    });
+    const { questions } = await askBrief(admin, req, h.deps);
+    expect(h.calls.map((c) => [c.task, c.tier])).toEqual([['brief.ask', 'fast']]);
+    expect(questions.map((q) => q.question)).toEqual(['Which mistakes go in?', 'What does the app do here?']);
+    expect(questions[0].options).toHaveLength(4);
+    expect(questions[0].many).toBe(true);
+  });
+
+  it('asks nothing when the model fails or there is no idea yet', async () => {
+    expect((await askBrief(admin, req, harness({}).deps)).questions).toEqual([]);
+    expect((await askBrief(admin, { ...req, title: ' ' }, harness({ 'brief.ask': { questions: [] } }).deps)).questions).toEqual([]);
+  });
+
+  it('writes in one call when the checks pass, with the answers in the request and stored in the brain', async () => {
+    const answers = [{ question: 'Which mistakes go in?', answers: ['Watering on a schedule', 'Pot with no drainage'] }];
+    const h = harness({ 'brief.draft': draft() });
+    const plan = (await writeBrief(admin, { ...req, answers }, h.deps)) as BriefPlan;
+    expect(h.calls.map((c) => c.task)).toEqual(['brief.draft']);
+    expect(h.calls[0].input).toContain('What the manager decided');
+    expect(h.calls[0].input).toContain('Pot with no drainage');
+    expect(plan.clips.length).toBeGreaterThan(0);
+    expect(plan.kill_reason).toBeNull();
+    expect(plan.questions).toEqual([]);
+    expect(h.recorded).toEqual([{ companyId: 'co-1', userId: null, topic: req.title, answers }]);
+  });
+
+  it('revises once when a line reads machine written', async () => {
+    const sloppy = draft();
+    sloppy.clips[1].say = 'In this video I show you a game changer.';
+    const h = harness({ 'brief.draft': sloppy, 'brief.revise': goodScript() });
+    const plan = (await writeBrief(admin, req, h.deps)) as BriefPlan;
+    expect(h.calls.map((c) => c.task)).toEqual(['brief.draft', 'brief.revise']);
+    expect(h.calls[1].input).toContain('in this video');
+    expect(plan.clips.map((c) => c.say).join(' ')).not.toContain('game changer');
+    expect(h.recorded).toEqual([]);
+  });
+
+  it('keeps only answers that say something', () => {
+    expect(tidyAnswers([{ question: 'Q', answers: [' a ', 'a', ''] }, { question: '', answers: ['x'] }, { question: 'Empty', answers: [] }, 'junk'])).toEqual([{ question: 'Q', answers: ['a'] }]);
   });
 });
 

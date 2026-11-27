@@ -4,11 +4,12 @@
 // brief engine (_shared/ai/briefEngine.ts) from the company brain; this file
 // is auth, the request body and the response the app reads.
 import { adminClient, authenticate, handleCors, jsonResponse, streamJsonResponse } from '../_shared/wp8.ts';
-import { writeBrief } from '../_shared/ai/briefEngine.ts';
+import { askBrief, tidyAnswers, writeBrief } from '../_shared/ai/briefEngine.ts';
 import type { BriefMode, BriefType } from '../_shared/ai/contracts.ts';
 
 type Body = {
-  mode?: BriefMode;
+  mode?: BriefMode | 'questions';
+  answers?: unknown;
   type?: BriefType;
   title?: string;
   link?: string;
@@ -37,6 +38,13 @@ Deno.serve(async (req) => {
   const mode: BriefMode = MODES.includes(body.mode as BriefMode) ? (body.mode as BriefMode) : 'guided';
   const type: BriefType = TYPES.includes(body.type as BriefType) ? (body.type as BriefType) : 'Talking Head';
 
+  // The questions the manager taps through before the brief is written: one
+  // fast call, answered as plain JSON.
+  if (body.mode === 'questions') {
+    const asked = await askBrief(admin, { companyId, type, title: text(body.title, 300), notes: text(body.notes, 2000) });
+    return jsonResponse(asked);
+  }
+
   // A guided brief runs several model steps and can pass a minute. The app's
   // native fetch drops a connection that is silent for 60 s on iOS, so the
   // response trickles whitespace until the brief is ready. Failures come back
@@ -51,6 +59,7 @@ Deno.serve(async (req) => {
       linkNotes: text(body.linkNotes, 1000),
       notes: text(body.notes, 2000),
       typed: text(body.typed, 300),
+      answers: tidyAnswers(body.answers),
       userId: caller.kind === 'user' ? (caller.userId ?? null) : null,
     });
     if ('titles' in result) return { titles: result.titles };

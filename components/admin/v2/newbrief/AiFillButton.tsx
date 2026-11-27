@@ -10,26 +10,24 @@ import Animated, { Easing, FadeInDown, useAnimatedStyle, useSharedValue, withRep
 import { briefs, color, motion, radius } from '../../../../theme/v2';
 import { Icon, Press } from '../../../v2';
 
-export type AiPhase = 'idle' | 'reference' | 'writing' | 'filling';
+export type AiPhase = 'idle' | 'thinking' | 'reference' | 'writing' | 'filling';
 
 /** What the writer is doing, by seconds into the run. The last line holds. */
 export type AiSteps = readonly (readonly [number, string])[];
 
 export const GUIDED_STEPS: AiSteps = [
   [0, 'Reading your brand'],
-  [5, 'Finding the angle'],
-  [20, 'Writing the hook'],
-  [32, 'Writing the clips'],
-  [50, 'Checking every line'],
-  [72, 'Polishing'],
+  [3, 'Writing the hook'],
+  [8, 'Writing the clips'],
+  [17, 'Checking every line'],
+  [30, 'Polishing'],
 ];
 export const SLIDES_STEPS: AiSteps = [
   [0, 'Reading your brand'],
-  [5, 'Finding the angle'],
-  [20, 'Writing slide one'],
-  [32, 'Writing the slides'],
-  [50, 'Checking every line'],
-  [72, 'Polishing'],
+  [3, 'Writing slide one'],
+  [8, 'Writing the slides'],
+  [17, 'Checking every line'],
+  [30, 'Polishing'],
 ];
 export const OUTLINE_STEPS: AiSteps = [
   [0, 'Reading your brand'],
@@ -86,7 +84,8 @@ export function AiFillButton({ label, enabled, phase, filled = 0, steps, doneKey
   }, [phase, steps]);
 
   useEffect(() => {
-    if (phase === 'reference') p.set(withTiming(0.12, { duration: 40_000, easing: Easing.out(Easing.cubic) }));
+    if (phase === 'thinking') p.set(withTiming(0.1, { duration: 6000, easing: Easing.out(Easing.cubic) }));
+    else if (phase === 'reference') p.set(withTiming(0.12, { duration: 40_000, easing: Easing.out(Easing.cubic) }));
     else if (phase === 'writing') p.set(withTiming(WRITING_TO, { duration: (steps[steps.length - 1][0] + 18) * 1000, easing: Easing.out(Easing.quad) }));
     else if (phase === 'filling') p.set(withTiming(WRITING_TO + (1 - WRITING_TO) * Math.min(1, filled), { duration: 320, easing: motion.tabEase }));
     else p.set(withTiming(0, { duration: 0 }));
@@ -117,7 +116,7 @@ export function AiFillButton({ label, enabled, phase, filled = 0, steps, doneKey
 
   const on = enabled || busy || done;
   const fg = on ? color.white : color.grey3;
-  const text = done ? 'Done' : phase === 'reference' ? 'Reading the link' : phase === 'filling' ? 'Filling in' : phase === 'writing' ? steps[Math.min(step, steps.length - 1)][1] : label;
+  const text = done ? 'Done' : phase === 'thinking' ? 'Thinking' : phase === 'reference' ? 'Reading the link' : phase === 'filling' ? 'Filling in' : phase === 'writing' ? steps[Math.min(step, steps.length - 1)][1] : label;
 
   return (
     <Animated.View style={[{ flex: 1, minWidth: 0 }, pill]}>

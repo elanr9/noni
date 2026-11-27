@@ -40,9 +40,9 @@ export type FillResponse = {
 };
 
 /**
- * The writer plans, writes, reviews and revises inside 132 seconds, after
- * reading the company and the reference, and the edge runtime ends a request
- * at 150. Title ideas are one short call.
+ * The writer plans and writes in one call and revises once when a check
+ * fails, after reading the company and the reference; the edge runtime ends
+ * a request at 150 seconds. Title ideas and questions are one short call.
  */
 export const FILL_TIMEOUT_MS = 150_000;
 const TITLES_TIMEOUT_MS = 25_000;
@@ -121,8 +121,8 @@ function greenify(clips: BriefClip[], g: GuidedState, type: BriefType): BriefCli
 }
 
 /** A guided plan (title, search phrase, clips, caption, tags) for this company, or why the writer declined. Throws on failure. */
-export async function planGuided(g: GuidedState, type: BriefType): Promise<GuidedPlan> {
-  const res = await callFill({ mode: 'guided', type, title: g.title, link: g.link, linkNotes: g.linkNotes, notes: g.notes });
+export async function planGuided(g: GuidedState, type: BriefType, answers: AskAnswer[] = []): Promise<GuidedPlan> {
+  const res = await callFill({ mode: 'guided', type, title: g.title, link: g.link, linkNotes: g.linkNotes, notes: g.notes, answers });
   return guidedPlanOf(res, g, type);
 }
 
@@ -155,6 +155,41 @@ export async function planOutline(input: { title: string; link: string; notes?: 
   // With a link, the notes field holds what changes from the reference.
   const res = await callFill({ mode: 'outline', title: input.title, link: input.link, ...(input.link ? { linkNotes: input.notes } : { notes: input.notes }) });
   return { title: (res.title || '').trim(), notes: (res.notes || '').trim(), declined: declinedOf(res), referenceNote: res.reference_note?.trim() || null };
+}
+
+/** A question the writer puts to the manager before it writes, answered with a tap. */
+export type AskQuestion = { id: string; question: string; options: string[]; many: boolean };
+/** What the manager tapped or typed for one question. */
+export type AskAnswer = { question: string; answers: string[] };
+
+const ASK_TIMEOUT_MS = 14_000;
+const askCache = new Map<string, Promise<AskQuestion[]>>();
+
+/**
+ * The few questions to ask before writing this idea. Asked once per idea and
+ * kept, so it can start while the manager is still on the title and be ready
+ * when they tap Fill in with AI. Any failure is no questions: the writer
+ * then writes straight away.
+ */
+export function askGuided(title: string, type: BriefType, notes = ''): Promise<AskQuestion[]> {
+  const idea = title.trim();
+  if (idea.length < 4) return Promise.resolve([]);
+  const key = `${type}|${idea.toLowerCase()}`;
+  const hit = askCache.get(key);
+  if (hit) return hit;
+  const run = callAi<{ questions?: AskQuestion[]; error?: string }>('brief-fill', { mode: 'questions', type, title: idea, notes }, ASK_TIMEOUT_MS)
+    .then((res) =>
+      (Array.isArray(res.questions) ? res.questions : [])
+        .filter((q) => q && typeof q.question === 'string' && Array.isArray(q.options) && q.options.length >= 2)
+        .slice(0, 3)
+        .map((q, i) => ({ id: q.id || `q${i + 1}`, question: q.question, options: q.options.filter((o) => typeof o === 'string' && /\S/.test(o)).slice(0, 4), many: q.many === true })),
+    )
+    .catch(() => {
+      askCache.delete(key);
+      return [] as AskQuestion[];
+    });
+  askCache.set(key, run);
+  return run;
 }
 
 export type LongTextPlan = { onScreen: string; ai: BriefAi; declined: Declined | null };
