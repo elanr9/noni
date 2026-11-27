@@ -313,10 +313,11 @@ type PayOutcome = {
 };
 
 /**
- * Creator pay v2 (migration 144): $10 video / $5 static per post plus $1 per
- * 1,000 views (first 30 days, capped at $500), creator take-home; the company
- * pays +13%. pay_assignment is cumulative and idempotent, so calling it every
- * poll pays only what is newly owed and retries a credits shortfall later.
+ * Creator pay: the campaign's rate per post once it reaches the minimum views,
+ * plus pay per 1,000 views in the first 30 days up to the cap. The company's
+ * budget is debited exactly what the creator earns, no fee (migration 174).
+ * pay_assignment is cumulative and idempotent, so calling it every poll pays
+ * only what is newly owed and retries a budget shortfall later.
  */
 async function payAssignment(
   admin: SupabaseClient,
