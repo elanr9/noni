@@ -2,8 +2,8 @@
 //
 //   planning   Claude turns the company brain and the brief into searches.
 //   searching  Apify searches TikTok (keywords, hashtags) and Instagram
-//              (hashtags). Accounts are grouped, filtered and up to ~400
-//              shortlisted.
+//              (hashtags), a few terms per Apify run so each finishes fast.
+//              Accounts are grouped, filtered and up to ~1200 shortlisted.
 //   enriching  Apify reads each shortlisted profile and its latest videos.
 //              How often they post, how recently and how their audience
 //              responds are worked out here.
@@ -13,8 +13,10 @@
 //              first message for the good ones.
 //   done
 //
-// A search is sized to return hundreds of people: creators who already make
-// UGC, small creators, and everyday people in the niche.
+// A search is sized to return hundreds of matches: creators who already make
+// UGC, small creators, and everyday people in the niche. A search can carry a
+// "want" (only women, 18 to 24, already making UGC), set from the board's
+// filters, which steers the search terms toward those people.
 //
 // Every step is short and resumable: tick() does the next bit of work for a
 // run and returns. The scout-tick cron and the web page both call tick.
@@ -38,6 +40,8 @@ export type ScoutPlan = {
   max_followers: number;
   platforms: Platform[];
   seeds: string[];
+  /** Who the search must reach, from the board's filters, e.g. "Only women." */
+  want?: string;
 };
 
 type ApifyJob = {
@@ -91,25 +95,27 @@ type Shortlisted = {
 
 // ---------------------------------------------------------------- limits
 
-const SEARCH_PER_TERM_TIKTOK = 60;
-const SEARCH_PER_TAG_INSTAGRAM = 80;
-const MAX_TIKTOK_QUERIES = 10;
-const MAX_TIKTOK_HASHTAGS = 8;
-const MAX_INSTAGRAM_HASHTAGS = 10;
+const SEARCH_PER_TERM_TIKTOK = 100;
+const SEARCH_PER_TAG_INSTAGRAM = 150;
+const MAX_TIKTOK_QUERIES = 12;
+const MAX_TIKTOK_HASHTAGS = 10;
+const MAX_INSTAGRAM_HASHTAGS = 15;
+// Terms per Apify search run: small runs finish in minutes and run side by side.
+const TERMS_PER_SEARCH = 4;
 const MAX_DATASET_ITEMS = 2000;
 // TikTok search results carry follower counts, so its shortlist is already
 // in range. Instagram's do not: more profiles are read and filtered after.
-const SHORTLIST_TIKTOK = 150;
-const SHORTLIST_INSTAGRAM = 250;
+const SHORTLIST_TIKTOK = 400;
+const SHORTLIST_INSTAGRAM = 800;
 const ENRICH_CHUNK_TIKTOK = 50;
 const ENRICH_CHUNK_INSTAGRAM = 125;
 const VIDEOS_PER_PROFILE = 6;
 // Instagram's profile reader returns this many latest posts.
 const INSTAGRAM_LATEST = 12;
-const IMAGE_BATCH = 24;
+const IMAGE_BATCH = 36;
 const IMAGE_POOL = 16;
 const VET_BATCH = 6;
-const VET_PARALLEL = 4;
+const VET_PARALLEL = 6;
 const WRITE_BATCH = 8;
 const WRITE_PARALLEL = 3;
 const MATCH_SCORE = 55;
@@ -383,12 +389,14 @@ const PLAN_SYSTEM = `You plan a creator search for a UGC marketplace. A company 
 From the company and the brief, write searches that together surface all three kinds on TikTok and Instagram. Spread the terms: some for each kind, each term reaching different people. Cover the natural variations of the niche (levels, divisions, men's and women's, roles, seasons) rather than repeating one idea.
 
 - ideal: one plain sentence describing the person to find (who they are and what they post), 25 words at most.
-- tiktok_queries: 8 to 10 search phrases a real poster in this niche would have in their captions or that TikTok search would match to their videos. Phrases people actually type, not marketing words. Example for a study app: "study with me", "finals week routine", "ugc creator student".
-- tiktok_hashtags: 6 to 8 hashtags without the #, specific to the niche, not giant generic tags like fyp or viral.
-- instagram_hashtags: 8 to 10 hashtags without the #, niche specific, used on Reels by ordinary people in the niche.
+- tiktok_queries: 10 to 12 search phrases a real poster in this niche would have in their captions or that TikTok search would match to their videos. Phrases people actually type, not marketing words. Example for a study app: "study with me", "finals week routine", "ugc creator student".
+- tiktok_hashtags: 8 to 10 hashtags without the #, specific to the niche, not giant generic tags like fyp or viral.
+- instagram_hashtags: 12 to 15 hashtags without the #, niche specific, used on Reels by ordinary people in the niche.
 - min_followers and max_followers: the follower range worth contacting. Default 300 to 100000 unless the brief says otherwise.
 
-If the brief names the kind of person (for example college soccer players), follow the brief over the company context. Never target anyone under 18.`;
+If the brief names the kind of person (for example college soccer players), follow the brief over the company context. Never target anyone under 18.
+
+When a "Must be" line is given, every term has to reach those people and nobody else. Only women: the women's side of the niche (women's teams, leagues, clubs and the tags women in it use), never the general tag alone. An age band: the life stage that age is in. Small accounts: tags and phrases ordinary people use, not the ones big pages own. Already making UGC: terms UGC creators in the niche tag themselves with.`;
 
 const PLAN_SCHEMA = {
   type: 'object',
@@ -410,7 +418,7 @@ export async function makePlan(
   admin: SupabaseClient,
   companyId: string,
   brief: string,
-  opts: { platforms: Platform[]; seeds: string[]; min_followers?: number | null; max_followers?: number | null },
+  opts: { platforms: Platform[]; seeds: string[]; min_followers?: number | null; max_followers?: number | null; want?: string },
 ): Promise<ScoutPlan> {
   const ctx = await companyContext(admin, companyId);
   const { data } = await generate<Omit<ScoutPlan, 'platforms' | 'seeds'>>({
@@ -421,6 +429,7 @@ export async function makePlan(
     context: [ctx.text],
     input: [
       `Brief: ${brief.trim() || 'Find the best creators for this company.'}`,
+      opts.want ? `Must be: ${opts.want}` : null,
       opts.seeds.length ? `Accounts the company likes, find people like them: ${opts.seeds.map((s) => '@' + s).join(', ')}` : null,
       `Platforms: ${opts.platforms.join(', ')}`,
     ].filter(Boolean).join('\n'),
@@ -439,6 +448,7 @@ export async function makePlan(
     max_followers: opts.max_followers ?? Math.max(data.min_followers + 1, data.max_followers),
     platforms: opts.platforms,
     seeds: opts.seeds,
+    ...(opts.want ? { want: opts.want } : {}),
   };
 }
 
@@ -451,28 +461,33 @@ const TIKTOK_QUIET = {
   shouldDownloadSlideshowImages: false,
 };
 
-/** The Apify runs of a search: TikTok phrases, TikTok hashtags, Instagram hashtags. */
+/** The Apify runs of a search: TikTok phrases, TikTok hashtags, Instagram hashtags, a few terms each. */
 function searchQueue(plan: ScoutPlan): Queued[] {
   const queue: Queued[] = [];
-  if (plan.tiktok_queries.length) {
+  const parts = (xs: string[]) => {
+    const out: string[][] = [];
+    for (let i = 0; i < xs.length; i += TERMS_PER_SEARCH) out.push(xs.slice(i, i + TERMS_PER_SEARCH));
+    return out;
+  };
+  for (const searchQueries of parts(plan.tiktok_queries)) {
     queue.push({
       kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
-      input: { searchQueries: plan.tiktok_queries, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
-      max_items: plan.tiktok_queries.length * SEARCH_PER_TERM_TIKTOK,
+      input: { searchQueries, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
+      max_items: searchQueries.length * SEARCH_PER_TERM_TIKTOK,
     });
   }
-  if (plan.tiktok_hashtags.length) {
+  for (const hashtags of parts(plan.tiktok_hashtags)) {
     queue.push({
       kind: 'search', platform: 'tiktok', actor: 'clockworks~tiktok-scraper',
-      input: { hashtags: plan.tiktok_hashtags, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
-      max_items: plan.tiktok_hashtags.length * SEARCH_PER_TERM_TIKTOK,
+      input: { hashtags, resultsPerPage: SEARCH_PER_TERM_TIKTOK, ...TIKTOK_QUIET },
+      max_items: hashtags.length * SEARCH_PER_TERM_TIKTOK,
     });
   }
-  if (plan.instagram_hashtags.length) {
+  for (const hashtags of parts(plan.instagram_hashtags)) {
     queue.push({
       kind: 'search', platform: 'instagram', actor: 'apify~instagram-hashtag-scraper',
-      input: { hashtags: plan.instagram_hashtags, resultsLimit: SEARCH_PER_TAG_INSTAGRAM },
-      max_items: plan.instagram_hashtags.length * SEARCH_PER_TAG_INSTAGRAM,
+      input: { hashtags, resultsLimit: SEARCH_PER_TAG_INSTAGRAM },
+      max_items: hashtags.length * SEARCH_PER_TAG_INSTAGRAM,
     });
   }
   if (!queue.length) throw new Error('No searches to run');

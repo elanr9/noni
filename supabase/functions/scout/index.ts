@@ -1,6 +1,6 @@
 // Scout: Noni finds creators for a company outside Noni. See engine.ts.
 //
-// POST { action: 'start', brief, platforms?, seeds?, min_followers?, max_followers?, company_id? }
+// POST { action: 'start', brief, platforms?, seeds?, min_followers?, max_followers?, want?, company_id? }
 //   Campaign managers for their company; the platform admin for any company
 //   (company_id). Creates the run and plans it in the background.
 //   200 { run }
@@ -15,7 +15,7 @@ declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 const ACTIVE = ['planning', 'searching', 'enriching', 'vetting'];
 // Runs a company can start itself in 30 days (each one costs real money).
-const COMPANY_RUNS_PER_MONTH = 8;
+const COMPANY_RUNS_PER_MONTH = 20;
 
 type Body = {
   action?: string;
@@ -26,6 +26,8 @@ type Body = {
   seeds?: string[];
   min_followers?: number | null;
   max_followers?: number | null;
+  /** Who the search must reach, from the board's filters. */
+  want?: string;
 };
 
 Deno.serve(async (req) => {
@@ -80,6 +82,7 @@ Deno.serve(async (req) => {
   if (!platforms.length) return jsonResponse({ error: 'Pick TikTok or Instagram' }, 400);
   const seeds = [...new Set((body.seeds ?? []).map(cleanHandle).filter((s) => /^[a-z0-9._]{2,40}$/.test(s)))].slice(0, 5);
   const brief = (body.brief ?? '').trim().slice(0, 600);
+  const want = typeof body.want === 'string' ? body.want.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
   const bound = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.round(n) : null);
 
   const { data: run, error } = await admin.from('scout_runs').insert({
@@ -100,6 +103,7 @@ Deno.serve(async (req) => {
         seeds,
         min_followers: bound(body.min_followers),
         max_followers: bound(body.max_followers),
+        ...(want ? { want } : {}),
       });
       await admin.from('scout_runs').update({ plan, lease_until: null, updated_at: new Date().toISOString() }).eq('id', run.id);
       await tick(admin, run.id);
