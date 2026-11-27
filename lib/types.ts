@@ -214,12 +214,13 @@ export type Database = {
           decision_note: string | null
           email: string | null
           full_name: string | null
+          guest_id: string | null
           id: string
           kind: string
           status: string
           submitted_at: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           answers?: Json
@@ -231,12 +232,13 @@ export type Database = {
           decision_note?: string | null
           email?: string | null
           full_name?: string | null
+          guest_id?: string | null
           id?: string
           kind: string
           status?: string
           submitted_at?: string | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           answers?: Json
@@ -248,12 +250,13 @@ export type Database = {
           decision_note?: string | null
           email?: string | null
           full_name?: string | null
+          guest_id?: string | null
           id?: string
           kind?: string
           status?: string
           submitted_at?: string | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2144,6 +2147,7 @@ export type Database = {
           does_ugc: boolean
           id: string
           intake: Json
+          join_slug: string | null
           logo_path: string | null
           manager_count: number
           name: string
@@ -2164,6 +2168,7 @@ export type Database = {
           does_ugc?: boolean
           id?: string
           intake?: Json
+          join_slug?: string | null
           logo_path?: string | null
           manager_count?: number
           name: string
@@ -2184,6 +2189,7 @@ export type Database = {
           does_ugc?: boolean
           id?: string
           intake?: Json
+          join_slug?: string | null
           logo_path?: string | null
           manager_count?: number
           name?: string
@@ -4652,6 +4658,68 @@ export type Database = {
           },
         ]
       }
+      marketplace_messages: {
+        Row: {
+          application_id: string
+          body: string
+          company_id: string
+          created_at: string
+          from_company: boolean
+          id: string
+          read_at: string | null
+          sender_id: string | null
+        }
+        Insert: {
+          application_id: string
+          body: string
+          company_id: string
+          created_at?: string
+          from_company: boolean
+          id?: string
+          read_at?: string | null
+          sender_id?: string | null
+        }
+        Update: {
+          application_id?: string
+          body?: string
+          company_id?: string
+          created_at?: string
+          from_company?: boolean
+          id?: string
+          read_at?: string | null
+          sender_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_messages_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_library: {
         Row: {
           company_id: string
@@ -5097,6 +5165,29 @@ export type Database = {
             columns: ["creator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_stripe_companies: {
+        Row: {
+          company_id: string
+          created_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_stripe_companies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -5757,6 +5848,222 @@ export type Database = {
             columns: ["submission_id"]
             isOneToOne: false
             referencedRelation: "submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scout_creators: {
+        Row: {
+          age: string | null
+          avatar_url: string | null
+          bio: string | null
+          code: string
+          company_id: string
+          contacted_at: string | null
+          created_at: string
+          dm: string | null
+          email: string | null
+          email_body: string | null
+          email_subject: string | null
+          engagement_rate: number | null
+          followers: number | null
+          gender: string | null
+          handle: string
+          id: string
+          joined_at: string | null
+          kind: string | null
+          last_post_at: string | null
+          likely_minor: boolean
+          median_views: number | null
+          name: string | null
+          on_camera: boolean | null
+          platform: string
+          posts_found: number
+          posts_per_week: number | null
+          profile_id: string | null
+          replied_at: string | null
+          run_id: string | null
+          score: number | null
+          source: string
+          status: string
+          tags: string[]
+          updated_at: string
+          videos: Json
+          why: string | null
+        }
+        Insert: {
+          age?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          code?: string
+          company_id: string
+          contacted_at?: string | null
+          created_at?: string
+          dm?: string | null
+          email?: string | null
+          email_body?: string | null
+          email_subject?: string | null
+          engagement_rate?: number | null
+          followers?: number | null
+          gender?: string | null
+          handle: string
+          id?: string
+          joined_at?: string | null
+          kind?: string | null
+          last_post_at?: string | null
+          likely_minor?: boolean
+          median_views?: number | null
+          name?: string | null
+          on_camera?: boolean | null
+          platform: string
+          posts_found?: number
+          posts_per_week?: number | null
+          profile_id?: string | null
+          replied_at?: string | null
+          run_id?: string | null
+          score?: number | null
+          source?: string
+          status?: string
+          tags?: string[]
+          updated_at?: string
+          videos?: Json
+          why?: string | null
+        }
+        Update: {
+          age?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          code?: string
+          company_id?: string
+          contacted_at?: string | null
+          created_at?: string
+          dm?: string | null
+          email?: string | null
+          email_body?: string | null
+          email_subject?: string | null
+          engagement_rate?: number | null
+          followers?: number | null
+          gender?: string | null
+          handle?: string
+          id?: string
+          joined_at?: string | null
+          kind?: string | null
+          last_post_at?: string | null
+          likely_minor?: boolean
+          median_views?: number | null
+          name?: string | null
+          on_camera?: boolean | null
+          platform?: string
+          posts_found?: number
+          posts_per_week?: number | null
+          profile_id?: string | null
+          replied_at?: string | null
+          run_id?: string | null
+          score?: number | null
+          source?: string
+          status?: string
+          tags?: string[]
+          updated_at?: string
+          videos?: Json
+          why?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scout_creators_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scout_creators_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scout_creators_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scout_creators_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "scout_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scout_runs: {
+        Row: {
+          brief: string
+          company_id: string
+          counts: Json
+          created_at: string
+          created_by: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          jobs: Json
+          lease_until: string | null
+          plan: Json
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          brief?: string
+          company_id: string
+          counts?: Json
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          jobs?: Json
+          lease_until?: string | null
+          plan?: Json
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          brief?: string
+          company_id?: string
+          counts?: Json
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          jobs?: Json
+          lease_until?: string | null
+          plan?: Json
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scout_runs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scout_runs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "company_roster"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scout_runs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -6588,6 +6895,25 @@ export type Database = {
     Functions: {
       active_membership_can_create: { Args: never; Returns: boolean }
       active_membership_role: { Args: never; Returns: string }
+      application_messages: {
+        Args: { p_application: string }
+        Returns: {
+          body: string
+          created_at: string
+          from_company: boolean
+          id: string
+          mine: boolean
+          read_at: string
+        }[]
+      }
+      application_side: { Args: { p_application: string }; Returns: string }
+      application_unread: {
+        Args: { p_applications: string[] }
+        Returns: {
+          application_id: string
+          unread: number
+        }[]
+      }
       apply_invite_membership: {
         Args: { p_invite_id: string; p_profile_id: string }
         Returns: boolean
@@ -6636,12 +6962,13 @@ export type Database = {
           decision_note: string | null
           email: string | null
           full_name: string | null
+          guest_id: string | null
           id: string
           kind: string
           status: string
           submitted_at: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -6672,6 +6999,7 @@ export type Database = {
       can_access_manager_chat: { Args: { p_chat_id: string }; Returns: boolean }
       can_create: { Args: never; Returns: boolean }
       can_email_sign_in: { Args: { p_email: string }; Returns: boolean }
+      cents_label: { Args: { p_cents: number }; Returns: string }
       chat_media_chat_id: { Args: { object_name: string }; Returns: string }
       claim_pending_invite: {
         Args: never
@@ -6716,6 +7044,7 @@ export type Database = {
       }
       company_attention: { Args: { p_company_id: string }; Returns: Json }
       company_local_date: { Args: { p_company_id: string }; Returns: string }
+      company_pay_rates: { Args: { p_company_id: string }; Returns: Json }
       company_status_summary: {
         Args: never
         Returns: {
@@ -6740,6 +7069,31 @@ export type Database = {
       creator_assignment_for_brief: {
         Args: { p_brief_id: string }
         Returns: string
+      }
+      creator_campaigns: {
+        Args: never
+        Returns: {
+          application_id: string
+          application_status: string
+          company_id: string
+          company_name: string
+          earned_month_cents: number
+          earned_total_cents: number
+          in_review: number
+          invite_message: string
+          is_active: boolean
+          kind: string
+          listing_id: string
+          logo_path: string
+          posted: number
+          posts_per_week: number
+          since: string
+          start_date: string
+          title: string
+          to_fix: number
+          to_make: number
+          unread: number
+        }[]
       }
       creator_earnings_by_company: {
         Args: never
@@ -6968,6 +7322,7 @@ export type Database = {
         Args: { p_label?: string; p_reason?: string; p_trend_id: string }
         Returns: undefined
       }
+      leave_campaign: { Args: { p_company_id: string }; Returns: undefined }
       library_brief_post_copy: {
         Args: { p_company_id: string; p_library_brief_id: string }
         Returns: {
@@ -7009,6 +7364,14 @@ export type Database = {
           used_count: number
           views: number
         }[]
+      }
+      listing_color: { Args: { p_name: string }; Returns: string }
+      listing_contract: {
+        Args: {
+          l: Database["public"]["Tables"]["marketplace_listings"]["Row"]
+          p_company: string
+        }
+        Returns: string
       }
       mark_all_notifications_read: { Args: never; Returns: undefined }
       mark_notification_read: { Args: { p_id: string }; Returns: undefined }
@@ -7274,12 +7637,13 @@ export type Database = {
           decision_note: string | null
           email: string | null
           full_name: string | null
+          guest_id: string | null
           id: string
           kind: string
           status: string
           submitted_at: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -7380,6 +7744,9 @@ export type Database = {
         Args: { p_assignment_id: string }
         Returns: string
       }
+      scout_claim: { Args: { p_code?: string; p_slug: string }; Returns: Json }
+      scout_join_page: { Args: { p_slug: string }; Returns: Json }
+      scout_join_slug: { Args: { p_company_id: string }; Returns: string }
       seed_company_post_types: {
         Args: { p_company_id: string }
         Returns: undefined
@@ -7411,6 +7778,25 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      send_application_message: {
+        Args: { p_application: string; p_body: string }
+        Returns: {
+          application_id: string
+          body: string
+          company_id: string
+          created_at: string
+          from_company: boolean
+          id: string
+          read_at: string | null
+          sender_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "marketplace_messages"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       set_active_company: {
         Args: { p_company_id: string }
         Returns: {
@@ -7420,6 +7806,7 @@ export type Database = {
           does_ugc: boolean
           id: string
           intake: Json
+          join_slug: string | null
           logo_path: string | null
           manager_count: number
           name: string

@@ -285,6 +285,8 @@ async function syncStripe(
   companyId: string,
   account: string,
   days: number,
+  /** Customers to leave out: on Noni's own account, the companies paying Noni. */
+  skipCustomers?: Set<string>,
 ): Promise<{ rows: number }> {
   const admin = adminClient();
   const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -303,7 +305,7 @@ async function syncStripe(
   }
 
   const hasCodes = creatorByCode.size > 0;
-  const [customers, subscriptions, charges, promos, invoices, sessions] = await Promise.all([
+  const [allCustomers, allSubscriptions, allCharges, promos, invoices, sessions] = await Promise.all([
     stripeList<StripeCustomer>(account, 'customers', since),
     stripeList<StripeSubscription>(account, 'subscriptions', since, { status: 'all' }),
     stripeList<StripeCharge>(account, 'charges', since),
@@ -316,6 +318,11 @@ async function syncStripe(
       ? stripeList<StripeSession>(account, 'checkout/sessions', since, { status: 'complete', 'expand[]': 'data.discounts' })
       : Promise.resolve([]),
   ]);
+
+  const skipped = (customer: string | null) => !!customer && !!skipCustomers?.has(customer);
+  const customers = allCustomers.filter((c) => !skipped(c.id));
+  const subscriptions = allSubscriptions.filter((s) => !skipped(s.customer));
+  const charges = allCharges.filter((c) => !skipped(c.customer));
 
   const creatorOf = (code: string | null): string | null =>
     code ? (creatorByCode.get(code) ?? null) : null;
@@ -428,9 +435,28 @@ function realAccount(id: string | null | undefined): string | null {
   return id && id.startsWith('acct_') && !id.includes('simulated') ? id : null;
 }
 
-/** The company Noni runs in house; the only one allowed to report on Noni's own Stripe account. */
-const IN_HOUSE_COMPANY_ID =
-  Deno.env.get('IN_HOUSE_COMPANY_ID') ?? '59f83fa9-8c5b-44aa-814e-f7cc863eac3b';
+/** Whether Noni runs this company itself: the only kind allowed to report on
+ *  Noni's own Stripe account (Stripe Connect cannot link a platform to itself). */
+async function runsOnPlatformStripe(companyId: string): Promise<boolean> {
+  const { data, error } = await adminClient()
+    .from('platform_stripe_companies')
+    .select('company_id')
+    .eq('company_id', companyId)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/** Stripe customers that are companies paying Noni. They live in Noni's own
+ *  account and are Noni's revenue, never an in-house company's sales. */
+async function noniCustomerIds(): Promise<Set<string>> {
+  const { data, error } = await adminClient()
+    .from('company_billing')
+    .select('stripe_customer_id')
+    .not('stripe_customer_id', 'is', null);
+  if (error) throw error;
+  return new Set((data ?? []).map((r) => r.stripe_customer_id as string));
+}
 
 let platformAccount: string | null | undefined;
 
@@ -584,12 +610,13 @@ async function syncSources(companyId: string, days: number): Promise<SyncResult>
     const account = realAccount(billing?.stripe_account_id as string | null | undefined);
     // Noni's own Stripe account must never feed a customer company's numbers
     // (an old web build could attach it). Fail closed if it cannot be told apart.
-    if (account && companyId !== IN_HOUSE_COMPANY_ID && account === (await platformAccountId())) {
+    const onPlatform = !!account && account === (await platformAccountId());
+    if (onPlatform && !(await runsOnPlatformStripe(companyId))) {
       console.warn(`sync-conversions ${companyId}: skipped, linked to the platform Stripe account`);
       return { company_id: companyId, source: 'none', rows: 0 };
     }
     if (account) {
-      const { rows } = await syncStripe(companyId, account, days);
+      const { rows } = await syncStripe(companyId, account, days, onPlatform ? await noniCustomerIds() : undefined);
       return { company_id: companyId, source: 'stripe', rows };
     }
     if (
