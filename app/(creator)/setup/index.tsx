@@ -32,18 +32,16 @@ type StepView = {
   key: StepKey;
   icon: IconName;
   title: string;
-  sub: string;
+  /** Only what is left when the step is half done. */
+  sub: string | null;
   status: SetupStepStatus;
 };
 
-function connectSub(state: SetupState): string {
-  if (state.accounts !== 'done') {
-    return 'Save your handles, then link the apps so we can post for you.';
-  }
-  if (state.connect === 'done') return 'Instagram and TikTok are linked.';
+function connectSub(state: SetupState): string | null {
+  if (state.accounts !== 'done' || state.connect === 'done') return null;
   if (state.instagramConnected) return 'Instagram is linked. TikTok is left.';
   if (state.tiktokConnected) return 'TikTok is linked. Instagram is left.';
-  return 'Link TikTok and Instagram so we can post for you.';
+  return null;
 }
 
 function stepViews(state: SetupState, submitting: boolean): StepView[] {
@@ -62,10 +60,7 @@ function stepViews(state: SetupState, submitting: boolean): StepView[] {
       key: 'warmup',
       icon: 'bolt',
       title: 'Warm up accounts',
-      sub:
-        warmup === 'in_review'
-          ? 'Your accounts are with the team. We will let you know once they are approved.'
-          : 'Scroll and like for a few days so your accounts look human.',
+      sub: null,
       status: warmup,
     },
   ];
@@ -84,13 +79,13 @@ function StepCard({ step, index, onPress }: { step: StepView; index: number; onP
   const icon: IconName = step.status === 'done' ? 'check' : step.status === 'in_review' ? 'schedule' : step.icon;
   return (
     <Animated.View entering={FadeInDown.duration(260).delay(index * 60)}>
-      <Card onPress={onPress} accessibilityLabel={`${step.title}, ${s.label}`} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+      <Card onPress={onPress} accessibilityLabel={`${step.title}, ${s.label}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
         <View style={{ width: 40, height: 40, borderRadius: radius.pill, backgroundColor: tint, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={20} color={t} />
         </View>
         <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
           <Text style={text.row}>{step.title}</Text>
-          <Text style={text.meta}>{step.sub}</Text>
+          {step.sub ? <Text style={text.meta}>{step.sub}</Text> : null}
         </View>
         <Chip small tone={s.tone} label={s.label} />
       </Card>
@@ -113,7 +108,7 @@ function Progress({ value }: { value: number }) {
 
 export function CreatorSetupChecklist() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, activeCompany } = useAuth();
   const { openNotifications, unreadNotifications } = useCompany();
   const { state, refresh } = useSetupState(profile);
   const submission = useAccountSubmission();
@@ -206,7 +201,6 @@ export function CreatorSetupChecklist() {
               </Press>
             }
           />
-          <Text style={[text.body, { color: color.grey4, marginTop: -8 }]}>Two steps and your queue unlocks.</Text>
           <ElsewhereStrip style={{ marginTop: space[3] }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: space[4], marginBottom: space[6] }}>
             <Progress value={doneCount / 2} />
@@ -260,10 +254,8 @@ export function CreatorSetupChecklist() {
 
       <Sheet open={inviteOpen} onClose={acceptInvite} footer={<Button label="Accept invite" onPress={acceptInvite} />}>
         <View style={{ alignItems: 'center', paddingTop: 4 }}>
-          {profile ? <CompanyMark companyId={profile.active_company_id} name={company} size={64} /> : null}
-          <Text style={[text.card, { fontSize: 24, lineHeight: 30, textAlign: 'center', marginTop: space[4] }]}>{`You've been invited to join ${company}'s team`}</Text>
-          <Text style={[text.body, { color: color.grey4, textAlign: 'center', marginTop: space[2] }]}>{`You record, ${company} handles editing and posting.`}</Text>
-          <Text style={[text.meta, { marginTop: space[3] }]}>Joining as a creator</Text>
+          {profile ? <CompanyMark companyId={profile.active_company_id} name={company} logoPath={activeCompany?.logoPath} size={64} /> : null}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={[text.card, { fontSize: 24, lineHeight: 30, textAlign: 'center', alignSelf: 'stretch', marginTop: space[4] }]}>{`You've been invited to ${company}!`}</Text>
         </View>
       </Sheet>
     </>
