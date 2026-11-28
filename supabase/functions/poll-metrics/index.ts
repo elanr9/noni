@@ -313,8 +313,8 @@ type PayOutcome = {
 };
 
 /**
- * Creator pay: the campaign's rate per post once it reaches the minimum views,
- * plus pay per 1,000 views in the first 30 days up to the cap. The company's
+ * Creator pay: the campaign's rate per post once one platform's post alone
+ * reaches the minimum views, plus pay per 1,000 combined views in the first 30 days up to the cap. The company's
  * budget is debited exactly what the creator earns, no fee (migration 174).
  * pay_assignment is cumulative and idempotent, so calling it every poll pays
  * only what is newly owed and retries a budget shortfall later.
@@ -323,12 +323,14 @@ async function payAssignment(
   admin: SupabaseClient,
   assignmentId: string,
   windowViews: number,
+  bestPostViews: number,
   postId: string,
 ): Promise<PayOutcome> {
   const { data, error } = await admin.rpc('pay_assignment', {
     p_assignment: assignmentId,
     p_views: windowViews,
     p_post_id: postId,
+    p_best_post_views: bestPostViews,
   });
   if (error) {
     console.error(`pay_assignment ${assignmentId}:`, error.message);
@@ -513,8 +515,12 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   const rollups = new Map<string, AssignmentRollup>();
   const milestoneClaims: MilestoneClaim[] = [];
   // Per assignment: views inside the pay window, summed across its live
-  // platform posts, and the post earnings are attributed to.
-  const payable = new Map<string, { windowViews: number; postId: string }>();
+  // platform posts (view pay), the best single platform post (the minimum
+  // views for post pay, migration 182), and the post earnings are attributed to.
+  const payable = new Map<
+    string,
+    { windowViews: number; bestPostViews: number; postId: string }
+  >();
 
   for (const post of pending) {
     const metrics = await fetchPostAnalytics(post.requestId, post.platform);
@@ -558,9 +564,11 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
       );
       const entry = payable.get(post.assignment.id) ?? {
         windowViews: 0,
+        bestPostViews: 0,
         postId: post.postId,
       };
       entry.windowViews += windowViews;
+      entry.bestPostViews = Math.max(entry.bestPostViews, windowViews);
       payable.set(post.assignment.id, entry);
     }
 
@@ -619,10 +627,10 @@ async function pollCompany(admin: SupabaseClient, companyId: string): Promise<{
   // 30-day count grows. Before the milestone pushes, so they can quote it.
   const viewLine = payable.size > 0 ? await viewPayLine(admin, companyId) : '';
   const viewsEarned = new Map<string, { cents: number; posts: number; assignmentId: string }>();
-  for (const [assignmentId, { windowViews, postId }] of payable) {
+  for (const [assignmentId, { windowViews, bestPostViews, postId }] of payable) {
     const assignment = assignmentById.get(assignmentId);
     if (!assignment) continue;
-    const result = await payAssignment(admin, assignmentId, windowViews, postId);
+    const result = await payAssignment(admin, assignmentId, windowViews, bestPostViews, postId);
     const paidBase = result.paid_base_cents ?? 0;
     const paidViews = result.paid_view_cents ?? 0;
     if (paidBase + paidViews > 0) {

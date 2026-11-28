@@ -4,9 +4,9 @@ import { DEFAULT_TERMS, type CreatorCampaign, type CreatorResume, type FeedListi
 const CONTRACT = `1. The work. The Creator makes short videos and posts for the Company from the briefs in Noni and posts them on the Creator's own accounts. The target is 2 to 3 posts a day. The first post is due within 3 days of signing.
 
 2. Pay. Noni tracks views and pays the Creator on the Company's behalf.
-Video: $10 once it is live and has 500 views
-Slideshow: $5 once it is live and has 500 views
-Views: $1 for every 1,000 views in the 30 days after posting, up to $300 a post
+Video: $10 once it is live and has 500 views on TikTok or Instagram
+Slideshow: $5 once it is live and has 500 views on TikTok or Instagram
+Views: $1 for every 1,000 views, TikTok and Instagram combined, in the 30 days after posting, up to $300 a post
 Payout: every Sunday to the Creator's bank
 Only posts approved in Noni are paid. Drafts and unpublished posts are not paid.
 
